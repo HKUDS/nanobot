@@ -102,6 +102,18 @@ function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boo
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
+function latestActiveTurnId(messages: UIMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.isStreaming && message.turnId) return message.turnId;
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user" && message.turnId) return message.turnId;
+  }
+  return null;
+}
+
 const FILE_PREVIEW_DEFAULT_WIDTH = 544;
 const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
@@ -444,8 +456,7 @@ export function ThreadShell({
   });
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
-  const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
-  const [scrollToLatestUserPromptSignal, setScrollToLatestUserPromptSignal] = useState(0);
+  const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
@@ -457,6 +468,7 @@ export function ThreadShell({
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
+  const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
@@ -465,18 +477,20 @@ export function ThreadShell({
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
-  const bottomScrolledChatIdRef = useRef<string | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
   const handleTurnEnd = useCallback(() => {
+    if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
+    setSubmittedViewportTurnId(null);
     setFallbackModelName(null);
     onTurnEnd?.();
-  }, [onTurnEnd]);
+  }, [chatId, onTurnEnd]);
   const {
     messages,
+    messagesReady,
     isStreaming,
     runStartedAt,
     goalState,
@@ -504,6 +518,7 @@ export function ThreadShell({
     setFilePreviewClosing(false);
     setFilePreviewPath(null);
     setQuotedContext(null);
+    setSubmittedViewportTurnId(null);
   }, [historyKey]);
 
   const handleQuoteSelection = useCallback((text: string) => {
@@ -520,6 +535,28 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  const currentRunStartedAt = messagesReady ? runStartedAt : null;
+  const currentGoalState = messagesReady ? goalState : undefined;
+  const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
+  const restoredViewportTurnId = useMemo(
+    () => turnActive ? latestActiveTurnId(displayMessages) : null,
+    [displayMessages, turnActive],
+  );
+  const rememberedViewportTurnId = chatId
+    ? activeViewportTurnByChatIdRef.current.get(chatId) ?? null
+    : null;
+  const viewportTurnId = messagesReady && turnActive
+    ? rememberedViewportTurnId ?? restoredViewportTurnId
+    : null;
+  const activeTurnStartedHere =
+    viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
+  useEffect(() => {
+    if (!chatId || !messagesReady || turnActive) return;
+    activeViewportTurnByChatIdRef.current.delete(chatId);
+    setSubmittedViewportTurnId((current) =>
+      current === rememberedViewportTurnId ? null : current,
+    );
+  }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
     [historyKey, token],
@@ -695,21 +732,13 @@ export function ThreadShell({
     return client.onSessionUpdate((updatedChatId, scope) => {
       if (updatedChatId !== chatId) return;
       if (scope === "metadata") return;
-      viewportRef.current?.cancelAutoScroll();
+      // A turn-end thread refresh can arrive while the viewport is easing the
+      // final layout change. User-driven scrolling already disables following,
+      // so keep an active programmatic follow alive across canonical hydration.
       pendingCanonicalHydrateRef.current.add(chatId);
       refreshHistory();
     });
   }, [chatId, client, refreshHistory]);
-
-  useEffect(() => {
-    if (!chatId) {
-      bottomScrolledChatIdRef.current = null;
-      return;
-    }
-    if (loading || bottomScrolledChatIdRef.current === chatId) return;
-    bottomScrolledChatIdRef.current = chatId;
-    setScrollToBottomSignal((value) => value + 1);
-  }, [chatId, loading]);
 
   useEffect(() => {
     if (chatId) return;
@@ -765,8 +794,11 @@ export function ThreadShell({
     }
     pendingFirstRef.current = null;
     setPendingFirstTargetChatId(null);
-    setScrollToLatestUserPromptSignal((value) => value + 1);
-    send(pending.content, pending.images, pending.options);
+    const submitted = send(pending.content, pending.images, pending.options);
+    if (submitted && !submitted.sideChannel) {
+      activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
+      setSubmittedViewportTurnId(submitted.turnId);
+    }
     setBooting(false);
   }, [chatId, pendingFirstTargetChatId, send]);
 
@@ -809,10 +841,13 @@ export function ThreadShell({
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
       setFallbackModelName(null);
-      setScrollToLatestUserPromptSignal((value) => value + 1);
-      send(content, images, withWorkspaceScope(options));
+      const submitted = send(content, images, withWorkspaceScope(options));
+      if (chatId && submitted && !submitted.sideChannel) {
+        activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
+        setSubmittedViewportTurnId(submitted.turnId);
+      }
     },
-    [send, withWorkspaceScope],
+    [chatId, send, withWorkspaceScope],
   );
 
   const handleOpenFilePreview = useCallback((path: string) => {
@@ -927,7 +962,7 @@ export function ThreadShell({
         <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
-          isStreaming={isStreaming}
+          isStreaming={turnActive}
           placeholder={
             showHeroComposer
               ? t("thread.composer.placeholderHero")
@@ -950,8 +985,8 @@ export function ThreadShell({
           skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
-          runStartedAt={runStartedAt}
-          goalState={goalState}
+          runStartedAt={currentRunStartedAt}
+          goalState={currentGoalState}
           workspaceScope={workspaceScope}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
@@ -969,7 +1004,7 @@ export function ThreadShell({
         <ThreadComposer
           onSend={handleWelcomeSend}
           disabled={booting}
-          isStreaming={isStreaming}
+          isStreaming={turnActive}
           placeholder={
             booting
               ? t("thread.composer.placeholderOpening")
@@ -990,9 +1025,9 @@ export function ThreadShell({
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           skills={skills}
-          runStartedAt={runStartedAt}
+          runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
-          goalState={goalState}
+          goalState={currentGoalState}
           workspaceScope={workspaceScope}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
@@ -1048,12 +1083,13 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
-            isStreaming={isStreaming}
+            isStreaming={turnActive}
             emptyState={emptyState}
             composer={composer}
-            scrollToBottomSignal={scrollToBottomSignal}
-            scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
+            activeTurnId={viewportTurnId}
+            activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
+            conversationReady={messagesReady}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}

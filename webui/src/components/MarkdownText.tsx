@@ -13,6 +13,7 @@ interface MarkdownTextProps {
   children: string;
   className?: string;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -74,11 +75,13 @@ export function MarkdownText({
   children,
   className,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextProps) {
   const renderedSource = children;
   const renderPhase = streaming ? "streaming" : "complete";
   const highlightCode = !streaming;
+  const renderWithStreamingLayout = streaming || preserveStreamingLayout;
 
   useEffect(() => {
     if (streaming) void preloadMarkdownText();
@@ -103,7 +106,7 @@ export function MarkdownText({
           source={renderedSource}
           className={className}
           highlightCode={highlightCode}
-          streaming={streaming}
+          streaming={renderWithStreamingLayout}
           onOpenFilePreview={onOpenFilePreview}
         />
       </Suspense>

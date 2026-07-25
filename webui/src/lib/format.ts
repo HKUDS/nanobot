@@ -71,6 +71,7 @@ const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
 
 const relativeTimeFormatters = new Map<string, Intl.RelativeTimeFormat>();
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+const clockTimeFormatters = new Map<string, Intl.DateTimeFormat>();
 
 function activeLocale(locale?: string): string {
   return locale || i18n.resolvedLanguage || i18n.language || currentLocale();
@@ -93,6 +94,25 @@ function dateTimeFormatter(locale: string): Intl.DateTimeFormat {
   });
   dateTimeFormatters.set(locale, formatter);
   return formatter;
+}
+
+function clockTimeFormatter(locale: string): Intl.DateTimeFormat {
+  const existing = clockTimeFormatters.get(locale);
+  if (existing) return existing;
+  const formatter = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  clockTimeFormatters.set(locale, formatter);
+  return formatter;
+}
+
+function isSameLocalCalendarDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  );
 }
 
 export function relativeTime(
@@ -118,6 +138,22 @@ export function fmtDateTime(
 ): string {
   const date = parseDate(value);
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
+}
+
+/**
+ * Format a completion timestamp in the browser's local timezone.
+ * Today's messages stay compact; older messages include their date for orientation.
+ */
+export function formatMessageEndTime(
+  value: number | null | undefined,
+  locale?: string,
+): string {
+  const date = parseDate(value);
+  if (!date) return "";
+  const loc = activeLocale(locale);
+  return isSameLocalCalendarDay(date, new Date())
+    ? clockTimeFormatter(loc).format(date)
+    : dateTimeFormatter(loc).format(date);
 }
 
 /** Human-readable turn duration (wall-clock), locale-aware via ``Intl`` (seconds/minutes). */

@@ -1073,11 +1073,57 @@ describe("ThreadComposer", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/Running/);
     expect(status).toHaveTextContent(/2:05/);
-    expect(status.parentElement).toHaveClass("composer-status-strip");
-    expect(status.parentElement).toHaveAttribute("data-state", "enter");
+    expect(status).toHaveClass("composer-status-drawer-content");
+    expect(status.closest("[data-composer-status-drawer]")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
     expect(status.querySelector(".run-pulse-icon")).not.toBeNull();
 
     vi.useRealTimers();
+  });
+
+  it("opens and closes the run timer through one persistent drawer", () => {
+    const { container, rerender } = render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={null}
+      />,
+    );
+
+    const drawer = container.querySelector("[data-composer-status-drawer]");
+    expect(drawer).not.toBeNull();
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+
+    rerender(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={Math.floor(Date.now() / 1000)}
+      />,
+    );
+
+    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("aria-hidden");
+    const status = screen.getByRole("status");
+    expect(status).toHaveClass("composer-status-drawer-content");
+
+    rerender(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={null}
+      />,
+    );
+
+    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(drawer?.querySelector('[role="status"]')).toBe(status);
   });
 
   it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {

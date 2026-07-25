@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
+import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -18,6 +19,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const runStartedAtByChatId = new Map<string, number>();
   const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
   return {
     status: "open" as const,
@@ -31,7 +33,7 @@ function makeClient() {
         runtimeModelHandlers.delete(handler);
       };
     },
-    getRunStartedAt: () => null,
+    getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
@@ -60,6 +62,18 @@ function makeClient() {
       for (const h of errorHandlers) h(err);
     },
     _emitChat(chatId: string, ev: import("@/lib/types").InboundEvent) {
+      if (
+        ev.event === "goal_status"
+        && ev.status === "running"
+        && typeof ev.started_at === "number"
+      ) {
+        runStartedAtByChatId.set(chatId, ev.started_at);
+      } else if (
+        (ev.event === "goal_status" && ev.status === "idle")
+        || ev.event === "turn_end"
+      ) {
+        runStartedAtByChatId.delete(chatId);
+      }
       if (ev.event === "goal_state") {
         goalStateByChatId.set(chatId, ev.goal_state);
       }
@@ -139,6 +153,36 @@ function httpJson(body: unknown) {
     ok: true,
     status: 200,
     json: async () => body,
+  };
+}
+
+interface ThreadResizeObserverInstance {
+  elements: Element[];
+  callback: ResizeObserverCallback;
+}
+
+function stubThreadResizeObserver() {
+  const original = globalThis.ResizeObserver;
+  const observers: ThreadResizeObserverInstance[] = [];
+  class MockResizeObserver {
+    elements: Element[] = [];
+    callback: ResizeObserverCallback;
+
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+      observers.push(this);
+    }
+
+    observe(element: Element) {
+      this.elements.push(element);
+    }
+
+    disconnect() {}
+  }
+  vi.stubGlobal("ResizeObserver", MockResizeObserver);
+  return {
+    observers,
+    restore: () => vi.stubGlobal("ResizeObserver", original),
   };
 }
 
@@ -1351,6 +1395,40 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.getByText("live assistant reply")).toBeInTheDocument());
   });
 
+  it("restores the stop control when returning to a running chat", async () => {
+    const client = makeClient();
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Chat ${chatId}`}
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+    );
+    const { rerender } = render(view("chat-a"));
+
+    await act(async () => {
+      client._emitChat("chat-a", {
+        event: "goal_status",
+        chat_id: "chat-a",
+        status: "running",
+        started_at: Date.now() / 1000,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(view("chat-b"));
+    });
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      rerender(view("chat-a"));
+    });
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+  });
+
   it("keeps live fork replies when a canonical refresh is missing an earlier assistant answer", async () => {
     const client = makeClient();
     let historyCalls = 0;
@@ -1526,9 +1604,7 @@ describe("ThreadShell", () => {
 
   it("does not scroll again when canonical history refreshes after a session update", async () => {
     const client = makeClient();
-    const scrollTo = vi.fn();
-    const originalScrollTo = HTMLElement.prototype.scrollTo;
-    HTMLElement.prototype.scrollTo = scrollTo;
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     let historyCalls = 0;
     vi.stubGlobal(
       "fetch",
@@ -1569,13 +1645,13 @@ describe("ThreadShell", () => {
       );
 
       await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
-      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+      await waitFor(() => expect(jumpTo).toHaveBeenCalled());
       await act(async () => {
         for (let i = 0; i < 8; i += 1) {
           await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         }
       });
-      scrollTo.mockClear();
+      jumpTo.mockClear();
 
       await act(async () => {
         client._emitSessionUpdate("chat-a");
@@ -1583,9 +1659,112 @@ describe("ThreadShell", () => {
 
       await waitFor(() => expect(historyCalls).toBe(2));
       await waitFor(() => expect(screen.getByText("canonical answer")).toBeInTheDocument());
-      expect(scrollTo).not.toHaveBeenCalled();
+      expect(jumpTo).not.toHaveBeenCalled();
     } finally {
-      HTMLElement.prototype.scrollTo = originalScrollTo;
+      jumpTo.mockRestore();
+    }
+  });
+
+  it("keeps an active completion follow alive while canonical history refreshes", async () => {
+    const resizeObserver = stubThreadResizeObserver();
+    const client = makeClient();
+    let historyCalls = 0;
+    const pendingRefresh = new Promise<ReturnType<typeof httpJson>>(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-follow/webui-thread")) {
+          historyCalls += 1;
+          if (historyCalls > 1) return pendingRefresh;
+          return httpJson(
+            transcriptFromSimpleMessages([
+              { role: "user", content: "old question" },
+              { role: "assistant", content: "old answer" },
+            ]),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame");
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame");
+    try {
+      const { container } = render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-follow")}
+            title="Chat follow"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByText("old answer")).toBeInTheDocument());
+      const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2_000 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 1_500 },
+        scrollTo: {
+          configurable: true,
+          value: ({ top }: ScrollToOptions) => {
+            if (typeof top === "number") scroller.scrollTop = top;
+          },
+        },
+      });
+
+      fireEvent.change(screen.getByLabelText("Message input"), {
+        target: { value: "new question" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      await waitFor(() => expect(screen.getByText("new question")).toBeInTheDocument());
+
+      await act(async () => {
+        client._emitChat("chat-follow", {
+          event: "delta",
+          chat_id: "chat-follow",
+          text: "new answer",
+        });
+      });
+      await waitFor(() => expect(screen.getByText("new answer")).toBeInTheDocument());
+
+      requestFrame.mockImplementation(() => 9_001);
+      cancelFrame.mockImplementation(() => undefined);
+      cancelFrame.mockClear();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 2_120,
+      });
+      const messageContent = screen.getByTestId("thread-message-region").firstElementChild;
+      const contentObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(messageContent!),
+      );
+      expect(contentObserver).toBeDefined();
+
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      expect(requestFrame).toHaveBeenCalled();
+      cancelFrame.mockClear();
+
+      act(() => {
+        client._emitSessionUpdate("chat-follow", "thread");
+      });
+
+      expect(cancelFrame).not.toHaveBeenCalledWith(9_001);
+      expect(historyCalls).toBe(2);
+    } finally {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+      resizeObserver.restore();
     }
   });
 
@@ -1649,12 +1828,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1800,
-        behavior: "auto",
-      }),
-    );
+    await waitFor(() => expect(scroller.scrollTop).toBe(1800));
   });
 
   it("opens slash commands on the blank welcome page", async () => {

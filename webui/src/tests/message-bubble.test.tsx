@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
   McpPresetInfo,
@@ -298,6 +299,53 @@ describe("MessageBubble", () => {
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the assistant completion time in the former latency slot", () => {
+    const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-completed-at",
+          role: "assistant",
+          content: "Finished answer",
+          latencyMs: 13_000,
+          completedAt,
+          createdAt: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    const time = container.querySelector("[data-assistant-completed-at]");
+    expect(time).toHaveTextContent(formatMessageEndTime(completedAt));
+    expect(time).toHaveAttribute("dateTime", new Date(completedAt).toISOString());
+    expect(time).toHaveAttribute("title", fmtDateTime(completedAt));
+    expect(time).toHaveClass(
+      "text-[11px]",
+      "leading-none",
+      "text-muted-foreground/70",
+      "tabular-nums",
+    );
+  });
+
+  it("approximates replayed completion time from existing message timing", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 0);
+    const latencyMs = 13_000;
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-replayed-completion",
+          role: "assistant",
+          content: "Replayed answer",
+          latencyMs,
+          createdAt,
+        }}
+      />,
+    );
+
+    expect(container.querySelector("[data-assistant-completed-at]"))
+      .toHaveTextContent(formatMessageEndTime(createdAt + latencyMs));
+  });
+
   it("renders installed CLI app mentions inside sent user messages", () => {
     const message: UIMessage = {
       id: "u-cli",
@@ -480,6 +528,37 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
 
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+  });
+
+  it("keeps assistant footer geometry mounted across stream completion", () => {
+    const streaming: UIMessage = {
+      id: "a-footer-stable",
+      role: "assistant",
+      content: "Stable answer",
+      isStreaming: true,
+      createdAt: Date.now(),
+    };
+    const { container, rerender } = render(<MessageBubble message={streaming} />);
+
+    const reservedFooter = container.querySelector("[data-assistant-footer]");
+    expect(reservedFooter).not.toBeNull();
+    expect(reservedFooter).toHaveAttribute("data-state", "reserved");
+    expect(reservedFooter).toHaveClass("mt-2", "min-h-8", "opacity-0");
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...streaming,
+          isStreaming: false,
+          completedAt: Date.now(),
+        }}
+      />,
+    );
+
+    const visibleFooter = container.querySelector("[data-assistant-footer]");
+    expect(visibleFooter).toBe(reservedFooter);
+    expect(visibleFooter).toHaveAttribute("data-state", "visible");
+    expect(visibleFooter).toHaveClass("mt-2", "min-h-8", "opacity-100");
   });
 
   it("does not show copy when showCopyAction is false", () => {

@@ -29,6 +29,7 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
       <div
         data-testid="markdown-renderer"
         data-highlight-code={String(highlightCode)}
+        data-streaming-layout={String(streaming)}
       >
         {children}
       </div>
@@ -104,6 +105,33 @@ describe("MarkdownText", () => {
     rerender(<MarkdownText>hello world</MarkdownText>);
 
     expect(rendererMountSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("can complete without replacing the streaming renderer layout", async () => {
+    const source = "A layout-stable answer";
+    const { rerender } = render(
+      <MarkdownText streaming preserveStreamingLayout>{source}</MarkdownText>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-streaming-layout",
+      "true",
+    );
+
+    rerender(<MarkdownText preserveStreamingLayout>{source}</MarkdownText>);
+
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-streaming-layout",
+      "true",
+    );
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-highlight-code",
+      "true",
+    );
   });
 
   it("defers syntax highlighting until the final render", async () => {

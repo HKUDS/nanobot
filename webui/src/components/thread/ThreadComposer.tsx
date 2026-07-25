@@ -584,8 +584,6 @@ function RunElapsedStrip({
   const stripLabel = goalStateStripPreview(goalState, t);
   const showGoal = !!stripLabel?.trim();
   const active = showTimer || showGoal;
-  const [renderStrip, setRenderStrip] = useState(active);
-  const [leaving, setLeaving] = useState(false);
   const [, setTick] = useState(0);
   const stripWrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -602,20 +600,8 @@ function RunElapsedStrip({
   }
 
   useEffect(() => {
-    if (active) {
-      setRenderStrip(true);
-      setLeaving(false);
-      return;
-    }
-    setGoalPanelOpen(false);
-    if (!renderStrip) return;
-    setLeaving(true);
-    const id = window.setTimeout(() => {
-      setRenderStrip(false);
-      setLeaving(false);
-    }, 180);
-    return () => window.clearTimeout(id);
-  }, [active, renderStrip]);
+    if (!active) setGoalPanelOpen(false);
+  }, [active]);
 
   useEffect(() => {
     if (startedAt == null || !pageVisible) return;
@@ -699,8 +685,6 @@ function RunElapsedStrip({
     };
   }, [goalPanelOpen]);
 
-  if (!renderStrip || !display) return null;
-
   const elapsed =
     displayStartedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - displayStartedAt)) : 0;
   const m = Math.floor(elapsed / 60);
@@ -716,8 +700,10 @@ function RunElapsedStrip({
   return (
     <div
       ref={stripWrapperRef}
-      className="composer-status-strip relative z-30"
-      data-state={leaving ? "exit" : "enter"}
+      className="composer-status-drawer relative z-30"
+      data-composer-status-drawer=""
+      data-state={active ? "open" : "closed"}
+      aria-hidden={active ? undefined : true}
     >
       {goalPanelOpen && canExpandGoal && markdownBody ? (
         <div
@@ -764,50 +750,54 @@ function RunElapsedStrip({
           </div>
         </div>
       ) : null}
-      <div
-        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
-        role="status"
-        aria-label={ariaLabel}
-      >
-        {displayShowTimer ? (
-          <RunPulseIcon />
-        ) : (
-          <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-        )}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-          {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
-          {timerTitle && displayShowGoal ? (
-            <span className="shrink-0 text-muted-foreground/45" aria-hidden>
-              ·
-            </span>
-          ) : null}
-          {displayShowGoal ? (
-            <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
-            </span>
-          ) : null}
-        </span>
-        {canExpandGoal ? (
-          <button
-            ref={expandToggleRef}
-            type="button"
-            className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-              "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-            aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
-            aria-label={t("thread.composer.goalStateExpandAria")}
-            title={t("thread.composer.goalStateExpandAria")}
-            onClick={() => setGoalPanelOpen((o) => !o)}
+      <div className="composer-status-drawer-clip">
+        {display ? (
+          <div
+            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+            role="status"
+            aria-label={ariaLabel}
           >
-            {goalPanelOpen ? (
-              <ChevronDown className="h-4 w-4" aria-hidden />
+            {displayShowTimer ? (
+              <RunPulseIcon />
             ) : (
-              <ChevronUp className="h-4 w-4" aria-hidden />
+              <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
             )}
-          </button>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+              {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
+              {timerTitle && displayShowGoal ? (
+                <span className="shrink-0 text-muted-foreground/45" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              {displayShowGoal ? (
+                <span className="truncate">
+                  {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
+                </span>
+              ) : null}
+            </span>
+            {canExpandGoal ? (
+              <button
+                ref={expandToggleRef}
+                type="button"
+                className={cn(
+                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                  "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                aria-expanded={goalPanelOpen}
+                aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
+                aria-label={t("thread.composer.goalStateExpandAria")}
+                title={t("thread.composer.goalStateExpandAria")}
+                onClick={() => setGoalPanelOpen((o) => !o)}
+              >
+                {goalPanelOpen ? (
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                ) : (
+                  <ChevronUp className="h-4 w-4" aria-hidden />
+                )}
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

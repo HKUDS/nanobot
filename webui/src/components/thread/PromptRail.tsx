@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
   findPromptElement,
-  jumpToPrompt,
   type PromptAnchor,
   promptTop,
   userPromptAnchors,
@@ -13,6 +12,7 @@ import {
 interface PromptRailProps {
   bottomOffset: number;
   messages: UIMessage[];
+  onJumpToPrompt: (promptId: string) => void;
   scrollRef: RefObject<HTMLDivElement>;
 }
 
@@ -46,6 +46,7 @@ const HOVER_MARKER_WIDTHS_PX = [28, 22, 16, 11];
 export function PromptRail({
   bottomOffset,
   messages,
+  onJumpToPrompt,
   scrollRef,
 }: PromptRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
@@ -159,7 +160,7 @@ export function PromptRail({
             key={marker.ids.join("|")}
             type="button"
             aria-label={`Jump to prompt: ${marker.label}`}
-            onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
+            onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
             onBlur={() => setFocusedMarkerIndex(null)}
             onFocus={() => setFocusedMarkerIndex(index)}
             onPointerEnter={() => setFocusedMarkerIndex(index)}

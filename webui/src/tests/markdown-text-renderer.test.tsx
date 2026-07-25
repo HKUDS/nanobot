@@ -424,31 +424,28 @@ describe("MarkdownTextRenderer", () => {
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });
 
-  it("uses Streamdown's incremental reveal while content is streaming", () => {
+  it("keeps streaming parsing without a competing reveal animation", () => {
     const { container } = render(
       <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
     );
 
-    expect(container.firstElementChild).toHaveClass(
+    expect(container).toHaveTextContent("春天");
+    expect(container.firstElementChild).not.toHaveClass(
       "[&>*:last-child]:after:content-[var(--streamdown-caret)]",
     );
-    const animatedUnits = container.querySelectorAll<HTMLElement>("[data-sd-animate]");
-    expect(animatedUnits).toHaveLength(1);
-    expect(animatedUnits[0]).toHaveTextContent("春天");
-    expect(animatedUnits[0].getAttribute("style")).toContain("--sd-duration: 180ms");
+    expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
   });
 
-  it("removes animation markup when a streamed response completes", async () => {
+  it("does not add animation markup when a streamed response completes", () => {
     const { container, rerender } = render(
       <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
     );
-    expect(container.querySelector("[data-sd-animate]")).toBeInTheDocument();
+    expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
 
     rerender(<MarkdownTextRenderer>春天</MarkdownTextRenderer>);
 
-    await waitFor(() => {
-      expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
-    });
+    expect(container).toHaveTextContent("春天");
+    expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
   });
 
   it("does not create one DOM node per CJK character for long responses", () => {
@@ -456,7 +453,7 @@ describe("MarkdownTextRenderer", () => {
       <MarkdownTextRenderer streaming>{"长".repeat(6_001)}</MarkdownTextRenderer>,
     );
 
-    expect(container.querySelectorAll("[data-sd-animate]")).toHaveLength(1);
+    expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
     expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
   });
 

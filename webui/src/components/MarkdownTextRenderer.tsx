@@ -248,13 +248,6 @@ const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKate
 
 const DIRECT_LINKS = { enabled: false } as const;
 const SAFE_MARKDOWN_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
-const STREAMING_ANIMATION = {
-  animation: "fadeIn",
-  duration: 180,
-  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-  sep: "word",
-  stagger: 18,
-} as const;
 
 /** Preserve react-markdown's URL policy when rendering through Streamdown. */
 const safeMarkdownUrl: NonNullable<StreamdownProps["urlTransform"]> = (url) => {
@@ -727,9 +720,8 @@ export default function MarkdownTextRenderer({
     <Streamdown
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
-      isAnimating={streaming}
-      animated={streaming ? STREAMING_ANIMATION : false}
-      caret={streaming ? "block" : undefined}
+      isAnimating={false}
+      animated={false}
       linkSafety={DIRECT_LINKS}
       urlTransform={safeMarkdownUrl}
       remarkPlugins={remarkPlugins}

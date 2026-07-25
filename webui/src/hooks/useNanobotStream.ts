@@ -227,9 +227,9 @@ function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
   });
 }
 
-function stampLastAssistantLatency(
+function stampLastAssistantCompletion(
   prev: UIMessage[],
-  latencyMs: number,
+  completion: Pick<UIMessage, "latencyMs" | "completedAt">,
   turnId?: string,
 ): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
@@ -239,7 +239,7 @@ function stampLastAssistantLatency(
       && m.kind !== "trace"
       && (!turnId || !m.turnId || m.turnId === turnId)
     ) {
-      const merged: UIMessage = { ...m, latencyMs, isStreaming: false };
+      const merged: UIMessage = { ...m, ...completion, isStreaming: false };
       return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
     }
   }
@@ -488,6 +488,12 @@ export interface SendOptions {
   continueActiveTurn?: boolean;
 }
 
+export interface SubmittedTurn {
+  turnId: string;
+  userMessageId: string;
+  sideChannel: boolean;
+}
+
 function eventExtendsModelActivity(ev: InboundEvent): boolean {
   if (
     ev.event === "delta"
@@ -520,12 +526,18 @@ export function useNanobotStream(
   onTurnEnd?: () => void,
 ): {
   messages: UIMessage[];
+  /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
+  messagesReady: boolean;
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
-  send: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
+  send: (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+  ) => SubmittedTurn | null;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
@@ -537,12 +549,16 @@ export function useNanobotStream(
   dismissStreamError: () => void;
 } {
   const { client } = useClient();
+  const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
+  const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
   const initialStreaming = hasPendingAgentActivity(initialMessages);
-  const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
+  const [isStreaming, setIsStreaming] = useState(
+    initialStreaming || hasPendingToolCalls || initialRunStartedAt !== null,
+  );
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
-  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(initialRunStartedAt);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
@@ -826,12 +842,16 @@ export function useNanobotStream(
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
   useEffect(() => {
+    const restoredRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
     setMessages(initialMessages);
+    setMessageOwnerChatId(chatId);
     setIsStreaming(
-      hasPendingAgentActivity(initialMessages) || hasPendingToolCalls,
+      hasPendingAgentActivity(initialMessages)
+      || hasPendingToolCalls
+      || restoredRunStartedAt !== null,
     );
     setStreamError(null);
-    setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
+    setRunStartedAt(restoredRunStartedAt);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     buffer.current = null;
     activeAssistantRef.current = null;
@@ -929,8 +949,10 @@ export function useNanobotStream(
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
           setRunStartedAt(ev.started_at);
+          setIsStreaming(true);
         } else {
           setRunStartedAt(null);
+          setIsStreaming(false);
         }
         return;
       }
@@ -944,16 +966,22 @@ export function useNanobotStream(
         // pending debounce timer and stop the loading indicator immediately.
         cancelStreamEndTimer();
         setIsStreaming(false);
+        const completedAt = Date.now();
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
           finalized = pruneReasoningOnlyPlaceholders(finalized);
-          if (typeof ev.latency_ms === "number" && ev.latency_ms >= 0) {
-            finalized = stampLastAssistantLatency(
-              finalized,
-              Math.round(ev.latency_ms),
-              ev.turn_id,
-            );
-          }
+          const latencyMs =
+            typeof ev.latency_ms === "number" && ev.latency_ms >= 0
+              ? Math.round(ev.latency_ms)
+              : undefined;
+          finalized = stampLastAssistantCompletion(
+            finalized,
+            {
+              ...(latencyMs !== undefined ? { latencyMs } : {}),
+              completedAt,
+            },
+            ev.turn_id,
+          );
           buffer.current = null;
           activeAssistantRef.current = null;
           clearActivitySegment();
@@ -1176,11 +1204,11 @@ export function useNanobotStream(
 
   const send = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      if (!chatId) return;
+      if (!chatId) return null;
       const hasAttachments = !!images && images.length > 0;
       // Text is optional when files are attached — the agent will still see
       // them via ``media`` paths.
-      if (!hasAttachments && !content.trim()) return;
+      if (!hasAttachments && !content.trim()) return null;
 
       const sideChannel = options?.sideChannel === true;
       const finalizeActiveTurn = options?.finalizeActiveTurn === true;
@@ -1194,6 +1222,7 @@ export function useNanobotStream(
         setIsStreaming(false);
       }
       const turnId = crypto.randomUUID();
+      const userMessageId = crypto.randomUUID();
       if (sideChannel) sideChannelTurnIdsRef.current.add(turnId);
       const previews = hasAttachments ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
@@ -1213,7 +1242,7 @@ export function useNanobotStream(
         return [
           ...(sideChannel || continueActiveTurn ? base : pruneReasoningOnlyPlaceholders(base)),
           {
-            id: crypto.randomUUID(),
+            id: userMessageId,
             role: "user",
             content: outboundContent,
             turnId,
@@ -1234,6 +1263,7 @@ export function useNanobotStream(
       delete wireOptions.finalizeActiveTurn;
       delete wireOptions.continueActiveTurn;
       client.sendMessage(chatId, outboundContent, wireMedia, wireOptions);
+      return { turnId, userMessageId, sideChannel };
     },
     [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
@@ -1261,6 +1291,7 @@ export function useNanobotStream(
 
   return {
     messages,
+    messagesReady: messageOwnerChatId === chatId,
     isStreaming,
     runStartedAt,
     goalState,

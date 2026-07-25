@@ -1,6 +1,6 @@
-import { useRef } from "react";
+import { createRef, useRef } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import {
@@ -10,6 +10,7 @@ import {
   type ThreadViewportHandle,
   windowMessages,
 } from "@/components/thread/ThreadViewport";
+import { ThreadCameraController } from "@/components/thread/thread-camera";
 import type { UIMessage } from "@/lib/types";
 
 const messages: UIMessage[] = [
@@ -23,8 +24,23 @@ const messages: UIMessage[] = [
 
 const emptyMessages: UIMessage[] = [];
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+async function flushAnimationFrame(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  });
+}
+
+function dispatchUserScroll(scroller: HTMLElement): void {
+  fireEvent.pointerDown(scroller, { button: 0 });
+  scroller.dispatchEvent(new Event("scroll"));
+}
+
 interface ResizeObserverInstance {
-  element?: Element;
+  elements: Element[];
   callback: ResizeObserverCallback;
   disconnect: ReturnType<typeof vi.fn>;
 }
@@ -86,7 +102,7 @@ function stubResizeObserver() {
   const original = globalThis.ResizeObserver;
   const observers: ResizeObserverInstance[] = [];
   class MockResizeObserver {
-    element?: Element;
+    elements: Element[] = [];
     callback: ResizeObserverCallback;
     disconnect = vi.fn();
 
@@ -96,7 +112,7 @@ function stubResizeObserver() {
     }
 
     observe(element: Element) {
-      this.element = element;
+      this.elements.push(element);
     }
   }
   vi.stubGlobal("ResizeObserver", MockResizeObserver);
@@ -222,11 +238,12 @@ describe("ThreadViewport", () => {
     expect(screen.getByTestId("thread-composer-dock")).not.toHaveClass("mt-auto");
   });
 
-  it("anchors the latest user prompt after sending instead of scrolling to the bottom", async () => {
+  it("pins a waiting prompt to the exact lower scroll boundary", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const threaded: UIMessage[] = [
-      { id: "u1", role: "user", content: "old question", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "old answer", createdAt: 2 },
-      { id: "u2", role: "user", content: "new question", createdAt: 3 },
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
     ];
     const scrollTo = vi.fn();
     const { container, rerender } = render(
@@ -234,7 +251,6 @@ describe("ThreadViewport", () => {
         messages={threaded}
         isStreaming
         composer={<div>composer</div>}
-        scrollToLatestUserPromptSignal={0}
       />,
     );
 
@@ -252,6 +268,7 @@ describe("ThreadViewport", () => {
       value: 420,
     });
     scrollTo.mockClear();
+    jumpTo.mockClear();
 
     await act(async () => {
       rerender(
@@ -259,46 +276,36 @@ describe("ThreadViewport", () => {
           messages={threaded}
           isStreaming
           composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={1}
+          activeTurnId="turn-2"
+          activeTurnStartedHere
         />,
       );
     });
+    await flushAnimationFrame();
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 404,
-      behavior: "auto",
-    });
+    expect(jumpTo).toHaveBeenCalledWith(700);
     expect(screen.getByTestId("thread-message-region")).toHaveClass("justify-start");
   });
 
-  it("keeps following active agent output after anchoring the sent prompt", async () => {
+  it("keeps automatic ownership when layout emits a scroll before its measurement frame", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const threaded: UIMessage[] = [
-      { id: "u1", role: "user", content: "old question", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "old answer", createdAt: 2 },
-      { id: "u2", role: "user", content: "new question", createdAt: 3 },
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
     ];
-    const answer: UIMessage = {
-      id: "a2",
-      role: "assistant",
-      content: "streaming answer",
-      createdAt: 4,
-    };
-    const scrollTo = vi.fn();
     const { container, rerender } = render(
       <ThreadViewport
         messages={threaded}
         isStreaming
         composer={<div>composer</div>}
-        scrollToLatestUserPromptSignal={0}
       />,
     );
-
     const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
     Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1200 },
+      scrollHeight: { configurable: true, value: 1_200 },
       clientHeight: { configurable: true, value: 500 },
       scrollTop: { configurable: true, writable: true, value: 700 },
-      scrollTo: { configurable: true, value: scrollTo },
     });
     const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
     expect(prompt).not.toBeNull();
@@ -306,6 +313,7 @@ describe("ThreadViewport", () => {
       configurable: true,
       value: 420,
     });
+    jumpTo.mockClear();
 
     await act(async () => {
       rerender(
@@ -313,66 +321,38 @@ describe("ThreadViewport", () => {
           messages={threaded}
           isStreaming
           composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={1}
+          activeTurnId="turn-2"
+          activeTurnStartedHere
         />,
       );
     });
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 404,
-      behavior: "auto",
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1_280,
     });
-
     act(() => {
       scroller.dispatchEvent(new Event("scroll"));
     });
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1800,
-    });
-    scrollTo.mockClear();
 
-    await act(async () => {
-      rerender(
-        <ThreadViewport
-          messages={[...threaded, answer]}
-          isStreaming
-          composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={1}
-        />,
-      );
-    });
-
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1300,
-        behavior: "auto",
-      }),
-    );
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+    await flushAnimationFrame();
+    expect(jumpTo).toHaveBeenCalledWith(780);
+    expect(scroller.scrollTop).toBe(780);
   });
 
-  it("does not follow active agent output after the user manually scrolls away", async () => {
-    const threaded: UIMessage[] = [
-      { id: "u1", role: "user", content: "old question", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "old answer", createdAt: 2 },
-      { id: "u2", role: "user", content: "new question", createdAt: 3 },
-    ];
-    const answer: UIMessage = {
-      id: "a2",
-      role: "assistant",
-      content: "streaming answer",
-      createdAt: 4,
-    };
+  it("lets the first prompt supersede a pending empty-conversation camera command", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const scrollTo = vi.fn();
     const { container, rerender } = render(
       <ThreadViewport
-        messages={threaded}
-        isStreaming
+        messages={emptyMessages}
+        isStreaming={false}
         composer={<div>composer</div>}
-        scrollToLatestUserPromptSignal={0}
+        conversationKey={null}
       />,
     );
-
     const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 1200 },
@@ -380,52 +360,341 @@ describe("ThreadViewport", () => {
       scrollTop: { configurable: true, writable: true, value: 700 },
       scrollTo: { configurable: true, value: scrollTo },
     });
+    scrollTo.mockClear();
+    jumpTo.mockClear();
+
+    await act(async () => {
+      rerender(
+        <ThreadViewport
+          messages={[
+            {
+              id: "u-first",
+              role: "user",
+              content: "first question",
+              turnId: "turn-first",
+              createdAt: 1,
+            },
+          ]}
+          isStreaming
+          composer={<div>composer</div>}
+          conversationKey="chat-a"
+          activeTurnId="turn-first"
+          activeTurnStartedHere
+        />,
+      );
+    });
+    await flushAnimationFrame();
+
+    expect(jumpTo).toHaveBeenCalledTimes(1);
+    expect(jumpTo).toHaveBeenCalledWith(700);
+  });
+
+  it("anchors the latest user prompt even when assistant output is already present", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
+      { id: "a2", role: "assistant", content: "fast answer", turnId: "turn-2", createdAt: 4 },
+    ];
+    const viewportRef = createRef<ThreadViewportHandle>();
+    const scrollTo = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport
+        ref={viewportRef}
+        messages={threaded}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1904 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 1404 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
     const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
     expect(prompt).not.toBeNull();
     Object.defineProperty(prompt, "offsetTop", {
       configurable: true,
-      value: 420,
+      value: 1420,
     });
+    viewportRef.current?.cancelAutoScroll();
+    scrollTo.mockClear();
+    jumpTo.mockClear();
 
     await act(async () => {
       rerender(
+        <ThreadViewport
+          ref={viewportRef}
+          messages={threaded}
+          isStreaming
+          composer={<div>composer</div>}
+          activeTurnId="turn-2"
+          activeTurnStartedHere
+        />,
+      );
+    });
+    await flushAnimationFrame();
+
+    expect(jumpTo).toHaveBeenCalledWith(1404);
+  });
+
+  it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
+    const resizeObserver = stubResizeObserver();
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+
+    try {
+      const optimistic: UIMessage[] = [
+        {
+          id: "optimistic-user",
+          role: "user",
+          content: "new question",
+          turnId: "turn-stable",
+          createdAt: 1,
+        },
+        {
+          id: "optimistic-answer",
+          role: "assistant",
+          content: "answer",
+          turnId: "turn-stable",
+          isStreaming: true,
+          createdAt: 2,
+        },
+      ];
+      const { container, rerender } = render(
+        <ThreadViewport
+          messages={optimistic}
+          isStreaming
+          composer={<div>composer</div>}
+        />,
+      );
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2_000 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 1_500 },
+        scrollTo: {
+          configurable: true,
+          value: ({ top }: ScrollToOptions) => {
+            if (typeof top === "number") scroller.scrollTop = top;
+          },
+        },
+      });
+      const optimisticPrompt = container.querySelector<HTMLElement>(
+        '[data-user-prompt-id="optimistic-user"]',
+      );
+      expect(optimisticPrompt).not.toBeNull();
+      Object.defineProperty(optimisticPrompt, "offsetTop", {
+        configurable: true,
+        value: 1_420,
+      });
+
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={optimistic}
+            isStreaming
+            composer={<div>composer</div>}
+            activeTurnId="turn-stable"
+          />,
+        );
+      });
+      followTo.mockClear();
+
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={[
+              {
+                ...optimistic[0],
+                id: "canonical-user",
+              },
+              {
+                ...optimistic[1],
+                id: "canonical-answer",
+                content: "canonical answer",
+              },
+            ]}
+            isStreaming
+            composer={<div>composer</div>}
+            activeTurnId="turn-stable"
+          />,
+        );
+      });
+      await flushAnimationFrame();
+      // Streaming React commits only invalidate geometry. The next display
+      // frame measures once and issues the follow command.
+      expect(followTo).toHaveBeenCalledWith(1_500);
+
+      followTo.mockClear();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 2_120,
+      });
+      const messageContent = screen.getByTestId("thread-message-region").firstElementChild;
+      const contentObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(messageContent!),
+      );
+      expect(contentObserver).toBeDefined();
+
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      await flushAnimationFrame();
+
+      // ResizeObserver remains the asynchronous reflow fallback.
+      expect(followTo).toHaveBeenCalledWith(1_620);
+    } finally {
+      followTo.mockRestore();
+      resizeObserver.restore();
+    }
+  });
+
+  it("coalesces streamed layout growth into frame-driven camera targets", async () => {
+    const resizeObserver = stubResizeObserver();
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+
+    try {
+      const threaded: UIMessage[] = [
+        { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+        { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
+      ];
+      const answer: UIMessage = {
+        id: "a2",
+        role: "assistant",
+        content: "streaming answer",
+        turnId: "turn-2",
+        isStreaming: true,
+        createdAt: 4,
+      };
+      const { container, rerender } = render(
         <ThreadViewport
           messages={threaded}
           isStreaming
           composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={1}
         />,
       );
-    });
-    await act(async () => {
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-    });
 
-    scroller.scrollTop = 100;
-    act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
-    });
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1800,
-    });
-    scrollTo.mockClear();
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1904 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 1404 },
+      });
+      const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
+      expect(prompt).not.toBeNull();
+      Object.defineProperty(prompt, "offsetTop", {
+        configurable: true,
+        value: 1420,
+      });
 
-    await act(async () => {
-      rerender(
-        <ThreadViewport
-          messages={[...threaded, answer]}
-          isStreaming
-          composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={1}
-        />,
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={threaded}
+            isStreaming
+            composer={<div>composer</div>}
+            activeTurnId="turn-2"
+            activeTurnStartedHere
+          />,
+        );
+      });
+      await flushAnimationFrame();
+      followTo.mockClear();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1932,
+      });
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={[...threaded, answer]}
+            isStreaming
+            composer={<div>composer</div>}
+            activeTurnId="turn-2"
+          />,
+        );
+      });
+      await flushAnimationFrame();
+      expect(followTo).toHaveBeenCalledTimes(1);
+      expect(followTo).toHaveBeenLastCalledWith(1432);
+      followTo.mockClear();
+
+      const messageRegion = screen.getByTestId("thread-message-region");
+      const messageContent = messageRegion.firstElementChild;
+      expect(messageContent).not.toBeNull();
+      const contentObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(messageContent!),
       );
-    });
+      expect(contentObserver).toBeDefined();
 
-    expect(scrollTo).not.toHaveBeenCalled();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1948,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      expect(followTo).not.toHaveBeenCalled();
+      await flushAnimationFrame();
+      expect(followTo).toHaveBeenCalledTimes(1);
+      expect(followTo).toHaveBeenLastCalledWith(1448);
+      followTo.mockClear();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 2548,
+      });
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={[
+              ...threaded,
+              {
+                ...answer,
+                content: "final answer received as one large batch",
+                isStreaming: false,
+              },
+            ]}
+            isStreaming={false}
+            composer={<div>composer</div>}
+            activeTurnId="turn-2"
+          />,
+        );
+      });
+      await flushAnimationFrame();
+      expect(followTo).toHaveBeenLastCalledWith(2048);
+      followTo.mockClear();
+
+      scroller.scrollTop = 100;
+      act(() => {
+        dispatchUserScroll(scroller);
+      });
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 2560,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      await flushAnimationFrame();
+      expect(followTo).not.toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(100);
+    } finally {
+      followTo.mockRestore();
+      resizeObserver.restore();
+    }
   });
 
-  it("keeps the scroll-to-bottom button above a growing composer", () => {
+  it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 
     try {
@@ -444,7 +713,7 @@ describe("ThreadViewport", () => {
       });
 
       act(() => {
-        scroller.dispatchEvent(new Event("scroll"));
+        dispatchUserScroll(scroller);
       });
 
       const button = screen.getByRole("button", { name: "Scroll to bottom" });
@@ -467,13 +736,14 @@ describe("ThreadViewport", () => {
         }) as DOMRect;
 
       const composerObserver = resizeObserver.observers.find(
-        (observer) => observer.element === composerDock,
+        (observer) => observer.elements.includes(composerDock),
       );
       expect(composerObserver).toBeDefined();
 
       act(() => {
         composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
+      await flushAnimationFrame();
 
       expect(buttonPositioner).toHaveStyle({ bottom: "256px" });
     } finally {
@@ -481,14 +751,15 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("keeps the active prompt visible when the composer grows", async () => {
+  it("pins the waiting boundary across composer and grid-track growth", async () => {
     const resizeObserver = stubResizeObserver();
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
 
     try {
       const threaded: UIMessage[] = [
-        { id: "u1", role: "user", content: "old question", createdAt: 1 },
-        { id: "a1", role: "assistant", content: "old answer", createdAt: 2 },
-        { id: "u2", role: "user", content: "new question", createdAt: 3 },
+        { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+        { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
       ];
       const scrollTo = vi.fn();
       const { container, rerender } = render(
@@ -496,7 +767,6 @@ describe("ThreadViewport", () => {
           messages={threaded}
           isStreaming
           composer={<div>composer</div>}
-          scrollToLatestUserPromptSignal={0}
         />,
       );
 
@@ -520,12 +790,14 @@ describe("ThreadViewport", () => {
             messages={threaded}
             isStreaming
             composer={<div>composer</div>}
-            scrollToLatestUserPromptSignal={1}
+            activeTurnId="turn-2"
           />,
         );
       });
+      await flushAnimationFrame();
 
       scrollTo.mockClear();
+      jumpTo.mockClear();
       const composerDock = screen.getByTestId("thread-composer-dock");
       composerDock.getBoundingClientRect = () =>
         ({
@@ -540,20 +812,35 @@ describe("ThreadViewport", () => {
           toJSON: () => ({}),
         }) as DOMRect;
       const composerObserver = resizeObserver.observers.find(
-        (observer) => observer.element === composerDock,
+        (observer) => observer.elements.includes(composerDock),
       );
       expect(composerObserver).toBeDefined();
+      expect(composerObserver!.elements).toContain(
+        screen.getByTestId("thread-message-region"),
+      );
 
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1228,
+      });
       act(() => {
         composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
+      await flushAnimationFrame();
 
-      await waitFor(() =>
-        expect(scrollTo).toHaveBeenCalledWith({
-          top: 404,
-          behavior: "auto",
-        }),
-      );
+      expect(jumpTo).toHaveBeenCalledWith(728);
+
+      jumpTo.mockClear();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1268,
+      });
+      act(() => {
+        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
+      });
+      await flushAnimationFrame();
+
+      expect(jumpTo).toHaveBeenCalledWith(768);
     } finally {
       resizeObserver.restore();
     }
@@ -577,7 +864,7 @@ describe("ThreadViewport", () => {
       });
 
       act(() => {
-        scroller.dispatchEvent(new Event("scroll"));
+        dispatchUserScroll(scroller);
       });
 
       const input = screen.getByLabelText("Message input");
@@ -624,6 +911,47 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("keeps one composer instance while the landing layout docks into a thread", () => {
+    const { rerender } = render(
+      <ThreadViewport
+        messages={emptyMessages}
+        isStreaming={false}
+        composer={(
+          <input
+            data-testid="persistent-composer"
+            defaultValue="draft"
+          />
+        )}
+        emptyState={<div>welcome</div>}
+      />,
+    );
+
+    const initialComposer = screen.getByTestId("persistent-composer");
+    fireEvent.change(initialComposer, { target: { value: "kept draft" } });
+
+    rerender(
+      <ThreadViewport
+        messages={messages}
+        isStreaming
+        composer={(
+          <input
+            data-testid="persistent-composer"
+            defaultValue="draft"
+          />
+        )}
+        emptyState={<div>welcome</div>}
+      />,
+    );
+
+    const dockedComposer = screen.getByTestId("persistent-composer");
+    expect(dockedComposer).toBe(initialComposer);
+    expect(dockedComposer).toHaveValue("kept draft");
+    expect(dockedComposer.closest(".thread-layout")).toHaveAttribute(
+      "data-layout",
+      "thread",
+    );
+  });
+
   it("separates the mobile welcome copy and composer into responsive rows", () => {
     render(
       <ThreadViewport
@@ -635,14 +963,16 @@ describe("ThreadViewport", () => {
     );
 
     const layout = screen.getByTestId("thread-welcome-layout");
-    expect(layout).toHaveClass(
-      "grid",
-      "gap-8",
-      "grid-rows-[minmax(min-content,1fr)_auto]",
+    expect(layout).toHaveClass("thread-layout", "grid");
+    expect(layout).toHaveAttribute("data-layout", "hero");
+    expect(screen.getByText("welcome").parentElement).toHaveClass(
+      "min-h-0",
+      "items-center",
+      "sm:items-end",
+      "sm:pb-8",
     );
-    expect(screen.getByText("welcome").parentElement).toHaveClass("min-h-0");
-    expect(screen.getByText("welcome").parentElement?.className).toContain(
-      "sm:bottom-[calc(100%+2rem)]",
+    expect(screen.getByTestId("thread-composer-motion")).toContainElement(
+      screen.getByText("composer"),
     );
   });
 
@@ -687,7 +1017,7 @@ describe("ThreadViewport", () => {
     });
 
     act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
+      dispatchUserScroll(scroller);
     });
     scrollTo.mockClear();
 
@@ -697,12 +1027,7 @@ describe("ThreadViewport", () => {
       fireEvent.focusIn(input);
     });
 
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1800,
-        behavior: "auto",
-      }),
-    );
+    await waitFor(() => expect(scroller.scrollTop).toBe(1800));
   });
 
   it("scrolls recent messages into view when the focused composer resizes the visual viewport without an inset", async () => {
@@ -735,12 +1060,7 @@ describe("ThreadViewport", () => {
         visualViewport.viewport.dispatchEvent(new Event("resize"));
       });
 
-      await waitFor(() =>
-        expect(scrollTo).toHaveBeenCalledWith({
-          top: 1800,
-          behavior: "auto",
-        }),
-      );
+      await waitFor(() => expect(scroller.scrollTop).toBe(1800));
       expect(scroller).not.toHaveStyle({ bottom: "320px" });
     } finally {
       Reflect.deleteProperty(document, "activeElement");
@@ -766,7 +1086,7 @@ describe("ThreadViewport", () => {
     });
 
     act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
+      dispatchUserScroll(scroller);
     });
 
     expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
@@ -808,7 +1128,7 @@ describe("ThreadViewport", () => {
     });
 
     act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
+      dispatchUserScroll(scroller);
     });
 
     const firstVisible =
@@ -842,13 +1162,15 @@ describe("ThreadViewport", () => {
     });
 
     act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
+      dispatchUserScroll(scroller);
     });
 
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
     const scrollTo = vi.fn();
     const { promptEls } = await renderPromptRailViewport({ scrollTo });
 
@@ -883,13 +1205,12 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(targetPrompt);
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 1064,
-      behavior: "smooth",
-    });
+    expect(navigateTo).toHaveBeenCalledWith(1064);
   });
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
     const promptMessages = makeLongMessages(5);
     const { container } = render(<ViewportWithPromptNavigator messages={promptMessages} />);
 
@@ -924,10 +1245,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 4" }));
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 1424,
-      behavior: "smooth",
-    });
+    expect(navigateTo).toHaveBeenCalledWith(1200);
   });
 
   it("expands the history window before jumping to an older prompt from the navigator", async () => {
@@ -980,6 +1298,8 @@ describe("ThreadViewport", () => {
   });
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
     const promptMessages = makeLongMessages(100);
     const { container } = render(
       <ThreadViewport
@@ -1025,10 +1345,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(promptMarkers[promptMarkers.length - 1]);
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 8894,
-      behavior: "smooth",
-    });
+    expect(navigateTo).toHaveBeenCalledWith(8894);
   });
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {
@@ -1084,7 +1401,7 @@ describe("ThreadViewport", () => {
       scrollTo: { configurable: true, value: scrollTo },
     });
     act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
+      dispatchUserScroll(scroller);
     });
     scrollTo.mockClear();
 
@@ -1097,15 +1414,90 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1800,
-        behavior: "auto",
-      }),
+    await waitFor(() => expect(scroller.scrollTop).toBe(1800));
+  });
+
+  it("waits for the next conversation's transcript before restoring its bottom", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+    const oldMessages: UIMessage[] = [
+      {
+        id: "old-user",
+        role: "user",
+        content: "old question",
+        turnId: "old-turn",
+        createdAt: 1,
+      },
+    ];
+    const nextMessages: UIMessage[] = [
+      {
+        id: "next-user",
+        role: "user",
+        content: "next question",
+        turnId: "next-turn",
+        createdAt: 2,
+      },
+      {
+        id: "next-answer",
+        role: "assistant",
+        content: "next answer",
+        turnId: "next-turn",
+        createdAt: 3,
+      },
+    ];
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={oldMessages}
+        isStreaming
+        composer={<div />}
+        conversationKey="chat-a"
+        activeTurnId="old-turn"
+      />,
     );
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 300 },
+    });
+    jumpTo.mockClear();
+
+    rerender(
+      <ThreadViewport
+        messages={oldMessages}
+        isStreaming
+        composer={<div />}
+        conversationKey="chat-b"
+        activeTurnId="old-turn"
+        conversationReady={false}
+      />,
+    );
+    expect(scroller.scrollTop).toBe(300);
+    expect(jumpTo).not.toHaveBeenCalled();
+
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 3000,
+    });
+    rerender(
+      <ThreadViewport
+        messages={nextMessages}
+        isStreaming
+        composer={<div />}
+        conversationKey="chat-b"
+        activeTurnId="next-turn"
+        conversationReady
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(2400));
+    await flushAnimationFrame();
+    expect(jumpTo.mock.calls).toEqual([[2400]]);
+    expect(followTo).toHaveBeenCalledWith(2400);
   });
 
   it("waits for hydrated messages before fulfilling open-chat bottom scroll", async () => {
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const scrollTo = vi.fn();
     const { container, rerender } = render(
       <ThreadViewport
@@ -1123,6 +1515,7 @@ describe("ThreadViewport", () => {
       scrollTo: { configurable: true, value: scrollTo },
     });
     scrollTo.mockClear();
+    jumpTo.mockClear();
 
     rerender(
       <ThreadViewport
@@ -1132,16 +1525,14 @@ describe("ThreadViewport", () => {
         conversationKey="chat-a"
       />,
     );
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 0,
-      behavior: "auto",
-    });
+    expect(jumpTo).toHaveBeenCalledWith(0);
 
     Object.defineProperty(scroller, "scrollHeight", {
       configurable: true,
       value: 2400,
     });
     scrollTo.mockClear();
+    jumpTo.mockClear();
 
     rerender(
       <ThreadViewport
@@ -1152,12 +1543,8 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1800,
-        behavior: "auto",
-      }),
-    );
+    await waitFor(() => expect(scroller.scrollTop).toBe(1800));
+    expect(jumpTo).toHaveBeenCalledWith(1800);
   });
 
   it("scrolls to the bottom when explicitly signalled after send", async () => {
@@ -1188,11 +1575,6 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        top: 1800,
-        behavior: "auto",
-      }),
-    );
+    await waitFor(() => expect(scroller.scrollTop).toBe(1800));
   });
 });

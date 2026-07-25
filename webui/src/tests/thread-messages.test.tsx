@@ -7,6 +7,7 @@ import {
   ThreadMessages,
   unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import type { UIMessage } from "@/lib/types";
 
 afterEach(() => {
@@ -15,6 +16,118 @@ afterEach(() => {
 });
 
 describe("ThreadMessages", () => {
+  it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
+    const completed: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "latest answer", createdAt: 2 },
+    ];
+    const { rerender } = render(
+      <ThreadMessages messages={completed} isStreaming={false} />,
+    );
+
+    expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          ...completed,
+          { id: "u2", role: "user", content: "next question", createdAt: 3 },
+        ]}
+        isStreaming
+      />,
+    );
+
+    expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
+  });
+
+  it("still defers historical non-tail answers on their initial render", () => {
+    render(
+      <ThreadMessages
+        messages={[
+          { id: "u1", role: "user", content: "old question", createdAt: 1 },
+          { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
+          { id: "u2", role: "user", content: "latest question", createdAt: 3 },
+        ]}
+        isStreaming={false}
+      />,
+    );
+
+    expect(screen.getByText("historical answer").closest(".thread-render-unit")).not.toBeNull();
+  });
+
+  it("preserves an answer's markdown tree across completion and the next prompt", async () => {
+    await preloadMarkdownText();
+    const turnId = "turn-1";
+    const streaming: UIMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "question",
+        createdAt: 1,
+        turnId,
+        turnPhase: "prompt",
+      },
+      {
+        id: "live-answer",
+        role: "assistant",
+        content: "stable final answer",
+        createdAt: 2,
+        isStreaming: true,
+        turnId,
+        turnPhase: "answer",
+      },
+    ];
+    const { container, rerender } = render(
+      <ThreadMessages messages={streaming} isStreaming />,
+    );
+    await waitFor(
+      () => expect(container.querySelector(".markdown-content")).not.toBeNull(),
+      { timeout: 3_000 },
+    );
+    const paragraph = screen.getByText("stable final answer").closest("p");
+    expect(paragraph).not.toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          streaming[0],
+          {
+            ...streaming[1],
+            id: "canonical-answer",
+            isStreaming: false,
+          },
+        ]}
+        isStreaming={false}
+      />,
+    );
+
+    expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          streaming[0],
+          {
+            ...streaming[1],
+            id: "canonical-answer",
+            isStreaming: false,
+          },
+          {
+            id: "u2",
+            role: "user",
+            content: "next question",
+            createdAt: 3,
+            turnId: "turn-2",
+            turnPhase: "prompt",
+          },
+        ]}
+        isStreaming
+      />,
+    );
+
+    expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+  });
+
   it("offers a follow-up action for text selected within one completed answer", async () => {
     const onQuoteSelection = vi.fn();
     render(

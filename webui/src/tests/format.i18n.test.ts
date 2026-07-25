@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAppLanguage } from "@/i18n";
-import { fmtDateTime, formatTurnLatency, relativeTime } from "@/lib/format";
+import {
+  fmtDateTime,
+  formatMessageEndTime,
+  formatTurnLatency,
+  relativeTime,
+} from "@/lib/format";
 
 describe("localized format helpers", () => {
   beforeEach(() => {
@@ -60,6 +65,34 @@ describe("localized format helpers", () => {
       }).format(date),
     );
     expect(english).not.toBe(french);
+  });
+
+  it("shows only the local clock time for messages completed today", async () => {
+    const value = Date.parse("2026-04-18T08:34:56Z");
+    const date = new Date(value);
+
+    await setAppLanguage("zh-CN");
+
+    expect(formatMessageEndTime(value)).toBe(
+      new Intl.DateTimeFormat("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date),
+    );
+  });
+
+  it("adds the local date for messages completed before today", async () => {
+    const value = Date.parse("2026-04-16T08:34:56Z");
+    const date = new Date(value);
+
+    await setAppLanguage("zh-CN");
+
+    expect(formatMessageEndTime(value)).toBe(
+      new Intl.DateTimeFormat("zh-CN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date),
+    );
   });
 
   it("formats turn latency with locale-aware units", async () => {
