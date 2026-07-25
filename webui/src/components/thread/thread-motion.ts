@@ -7,7 +7,53 @@ export type ThreadMotionMode =
   | "idle"
   | "anchor-prompt"
   | "follow-output"
-  | "user-controlled";
+  | "navigating-history"
+  | "browsing-history";
+
+type AutomaticThreadMotionMode =
+  | "idle"
+  | "anchor-prompt"
+  | "follow-output";
+
+type ThreadMotionEvent =
+  | "navigate-history"
+  | "navigation-settled"
+  | "user-scroll"
+  | "boundary-scroll"
+  | "resume-follow";
+
+type ThreadMotionTransition = ThreadMotionMode | "current-automatic-mode";
+
+const THREAD_MOTION_TRANSITIONS: Readonly<
+  Record<
+    ThreadMotionMode,
+    Readonly<Partial<Record<ThreadMotionEvent, ThreadMotionTransition>>>
+  >
+> = {
+  idle: {
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+  },
+  "anchor-prompt": {
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+  },
+  "follow-output": {
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+  },
+  "navigating-history": {
+    "navigate-history": "navigating-history",
+    "navigation-settled": "browsing-history",
+    "user-scroll": "browsing-history",
+    "boundary-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
+  },
+  "browsing-history": {
+    "navigate-history": "navigating-history",
+    "resume-follow": "current-automatic-mode",
+  },
+};
 
 export interface ThreadMotionGeometry {
   scrollTop: number;
@@ -43,6 +89,7 @@ type ThreadMotionCamera = Pick<
   | "cancel"
   | "dispose"
   | "followTo"
+  | "isFollowing"
   | "jumpTo"
   | "navigateTo"
 >;
@@ -57,7 +104,7 @@ interface ThreadMotionCoordinatorOptions {
 
 const GEOMETRY_EPSILON_PX = 0.5;
 
-export type ThreadScrollOwner = "automatic" | "user";
+export type ThreadScrollOwner = "automatic" | "navigation" | "user";
 
 function defaultScheduler(): ThreadMotionScheduler {
   return {
@@ -120,7 +167,7 @@ export class ThreadMotionCoordinator {
       this.mode = this.promptPositioned && turn.hasOutput
         ? "follow-output"
         : "anchor-prompt";
-    } else if (this.mode !== "user-controlled" && this.promptPositioned) {
+    } else if (!this.isHistoryMode() && this.promptPositioned) {
       this.mode = turn.hasOutput ? "follow-output" : "anchor-prompt";
     }
     this.invalidateGeometry();
@@ -133,17 +180,18 @@ export class ThreadMotionCoordinator {
   }
 
   takeUserControl(): void {
+    this.handleUserScrollIntent(true);
+  }
+
+  handleUserScrollIntent(canScroll: boolean): void {
+    const event = canScroll ? "user-scroll" : "boundary-scroll";
+    if (!this.transition(event)) return;
     this.camera.cancel();
-    this.mode = "user-controlled";
   }
 
   resumeAutoFollow(): void {
-    if (this.mode !== "user-controlled") return;
-    this.mode = this.turn.id
-      ? this.promptPositioned && this.turn.hasOutput
-        ? "follow-output"
-        : "anchor-prompt"
-      : "idle";
+    if (!this.transition("resume-follow")) return;
+    this.camera.cancel();
     this.invalidateGeometry();
   }
 
@@ -155,8 +203,22 @@ export class ThreadMotionCoordinator {
     return this.camera.navigateTo(top);
   }
 
-  isUserControlled(): boolean {
-    return this.mode === "user-controlled";
+  navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
+    this.camera.cancel();
+    this.transition("navigate-history");
+    const result = this.camera.navigateTo(top);
+    if (!result || result.kind === "settled") {
+      this.transition("navigation-settled");
+    }
+    return result;
+  }
+
+  isAutoFollowPaused(): boolean {
+    return this.isHistoryMode();
+  }
+
+  isBrowsingHistory(): boolean {
+    return this.mode === "browsing-history";
   }
 
   /**
@@ -166,13 +228,21 @@ export class ThreadMotionCoordinator {
    * when the browser emits an intermediate scroll event for them.
    */
   observeScroll(nearBottom: boolean): ThreadScrollOwner {
-    if (this.mode !== "user-controlled") {
-      if (!nearBottom) this.invalidateGeometry();
-      return "automatic";
+    switch (this.mode) {
+      case "navigating-history":
+        if (!this.camera.isFollowing()) {
+          this.transition("navigation-settled");
+          if (nearBottom) this.resumeAutoFollow();
+        }
+        return "navigation";
+      case "browsing-history":
+        if (!nearBottom) return "user";
+        this.resumeAutoFollow();
+        return "automatic";
+      default:
+        if (!nearBottom) this.invalidateGeometry();
+        return "automatic";
     }
-    if (!nearBottom) return "user";
-    this.resumeAutoFollow();
-    return "automatic";
   }
 
   reset(): void {
@@ -194,10 +264,39 @@ export class ThreadMotionCoordinator {
 
   private clearTurn(): void {
     const hadActiveTurn = this.turn.id !== null;
-    if (hadActiveTurn) this.camera.cancel();
+    if (hadActiveTurn) {
+      this.camera.cancel();
+      this.transition("navigation-settled");
+    }
     this.turn = { id: null, promptId: null, hasOutput: false };
-    if (this.mode !== "user-controlled") this.mode = "idle";
+    if (!this.isHistoryMode()) this.mode = "idle";
     this.promptPositioned = false;
+  }
+
+  private isHistoryMode(): boolean {
+    return (
+      this.mode === "navigating-history"
+      || this.mode === "browsing-history"
+    );
+  }
+
+  private automaticMode(): AutomaticThreadMotionMode {
+    if (!this.turn.id) return "idle";
+    return this.promptPositioned && this.turn.hasOutput
+      ? "follow-output"
+      : "anchor-prompt";
+  }
+
+  private transition(event: ThreadMotionEvent): boolean {
+    const transition = THREAD_MOTION_TRANSITIONS[this.mode][event];
+    if (!transition) return false;
+    const nextMode =
+      transition === "current-automatic-mode"
+        ? this.automaticMode()
+        : transition;
+    if (nextMode === this.mode) return false;
+    this.mode = nextMode;
+    return true;
   }
 
   private readonly flushGeometry = (): void => {
@@ -206,14 +305,14 @@ export class ThreadMotionCoordinator {
     this.geometryDirty = false;
 
     const needsPromptGeometry =
-      this.mode !== "user-controlled"
+      !this.isHistoryMode()
       && this.turn.id !== null
       && !this.promptPositioned;
     const geometry = this.measure(needsPromptGeometry ? this.turn.promptId : null);
     if (!geometry) return;
     this.onGeometry?.(geometry);
 
-    if (this.mode === "user-controlled" || !this.turn.id) return;
+    if (this.isHistoryMode() || !this.turn.id) return;
     if (!this.turn.promptId && this.turn.entry !== "restored") {
       this.mode = "anchor-prompt";
       return;

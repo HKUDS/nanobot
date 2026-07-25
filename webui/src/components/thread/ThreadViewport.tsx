@@ -97,6 +97,49 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
   ].includes(element.type);
 }
 
+type ThreadScrollDirection = "backward" | "forward";
+
+const KEYBOARD_SCROLL_DIRECTIONS: Readonly<
+  Partial<Record<string, ThreadScrollDirection>>
+> = {
+  ArrowUp: "backward",
+  PageUp: "backward",
+  Home: "backward",
+  ArrowDown: "forward",
+  PageDown: "forward",
+  End: "forward",
+};
+
+function directionFromDelta(deltaY: number): ThreadScrollDirection | null {
+  return deltaY < 0 ? "backward" : deltaY > 0 ? "forward" : null;
+}
+
+function keyboardScrollDirection(
+  event: KeyboardEvent,
+): ThreadScrollDirection | null {
+  if (event.key === " ") {
+    return event.shiftKey ? "backward" : "forward";
+  }
+  return KEYBOARD_SCROLL_DIRECTIONS[event.key] ?? null;
+}
+
+function canScrollInDirection(
+  element: HTMLElement,
+  direction: ThreadScrollDirection | null,
+): boolean {
+  switch (direction) {
+    case "backward":
+      return element.scrollTop > 0;
+    case "forward":
+      return (
+        element.scrollTop
+        < Math.max(0, element.scrollHeight - element.clientHeight)
+      );
+    default:
+      return false;
+  }
+}
+
 function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
   const viewport = window.visualViewport;
   if (!viewport) return 0;
@@ -239,7 +282,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const scrollToBottom = useCallback(
     (smooth = false, options?: { force?: boolean }) => {
       const force = options?.force ?? false;
-      if (!force && threadMotionRef.current?.isUserControlled()) return;
+      if (!force && threadMotionRef.current?.isAutoFollowPaused()) return;
       threadMotionRef.current?.resumeAutoFollow();
       scrollToBottomNow(smooth);
     },
@@ -271,7 +314,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const maybeLoadEarlierFromScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || !hasMessages || pendingConversationScrollRef.current) return;
-    if (!threadMotionRef.current?.isUserControlled()) return;
+    if (!threadMotionRef.current?.isBrowsingHistory()) return;
     if (el.scrollTop > NEAR_TOP_PX) return;
     if (hiddenMessageCount <= 0 && !hasMoreBefore) return;
     loadEarlierMessages();
@@ -281,10 +324,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const scrollEl = scrollRef.current;
     const prompt = scrollEl ? findPromptElement(scrollEl, promptId) : null;
     if (!scrollEl || !prompt) return false;
-    threadMotionRef.current?.takeUserControl();
     setAtBottom(false);
     const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-    threadMotionRef.current?.animateTo(
+    threadMotionRef.current?.navigateHistoryTo(
       Math.min(
         maxScrollTop,
         Math.max(0, promptTop(scrollEl, prompt) - 16),
@@ -509,6 +551,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
     onScroll(false);
     const handleScroll = () => onScroll(true);
+    const handleDirectionalInput = (
+      direction: ThreadScrollDirection | null,
+    ) => {
+      if (!direction) return;
+      threadMotionRef.current?.handleUserScrollIntent(
+        canScrollInDirection(el, direction),
+      );
+    };
     const handleWheel = (event: WheelEvent) => {
       if (
         event.defaultPrevented
@@ -517,7 +567,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       ) {
         return;
       }
-      if (event.deltaY < 0 && el.scrollTop > 0) yieldCameraToUser();
+      handleDirectionalInput(directionFromDelta(event.deltaY));
     };
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button === 0 && event.target === el) yieldCameraToUser();
@@ -528,14 +578,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
     const handleTouchMove = (event: TouchEvent) => {
       const currentY = event.touches[0]?.clientY;
-      if (
-        touchStartY !== null
-        && currentY !== undefined
-        && currentY > touchStartY
-        && el.scrollTop > 0
-      ) {
-        yieldCameraToUser();
-      }
+      const scrollDeltaY =
+        touchStartY !== null && currentY !== undefined
+          ? touchStartY - currentY
+          : 0;
+      handleDirectionalInput(directionFromDelta(scrollDeltaY));
     };
     const handleTouchEnd = () => {
       touchStartY = null;
@@ -550,12 +597,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       ) {
         return;
       }
-      const movesAwayFromBottom =
-        ["ArrowUp", "PageUp", "Home"].includes(event.key)
-        || (event.key === " " && event.shiftKey);
-      if (movesAwayFromBottom && el.scrollTop > 0) {
-        yieldCameraToUser();
-      }
+      handleDirectionalInput(keyboardScrollDirection(event));
     };
     el.addEventListener("scroll", handleScroll, { passive: true });
     el.addEventListener("wheel", handleWheel, { passive: true });

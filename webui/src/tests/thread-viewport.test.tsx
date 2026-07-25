@@ -166,7 +166,7 @@ async function renderPromptRailViewport({
   Object.defineProperties(scroller, {
     scrollHeight: { configurable: true, value: 1800 },
     clientHeight: { configurable: true, value: 600 },
-    scrollTop: { configurable: true, value: 0 },
+    scrollTop: { configurable: true, writable: true, value: 0 },
     ...(scrollTo ? { scrollTo: { configurable: true, value: scrollTo } } : {}),
   });
 
@@ -185,7 +185,7 @@ async function renderPromptRailViewport({
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
   });
 
-  return { promptEls };
+  return { promptEls, scroller };
 }
 
 function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
@@ -1210,6 +1210,45 @@ describe("ThreadViewport", () => {
     fireEvent.click(targetPrompt);
 
     expect(navigateTo).toHaveBeenCalledWith(1064);
+  });
+
+  it("lets direct paging input interrupt prompt rail navigation", async () => {
+    vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+    const cancel = vi.spyOn(ThreadCameraController.prototype, "cancel");
+    const { scroller } = await renderPromptRailViewport();
+    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    const restartNavigation = () => {
+      fireEvent.click(targetPrompt);
+      cancel.mockClear();
+    };
+
+    scroller.scrollTop = 500;
+    restartNavigation();
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    restartNavigation();
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    restartNavigation();
+    fireEvent.keyDown(scroller, { key: "PageDown" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    restartNavigation();
+    fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientY: 200 }] });
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    restartNavigation();
+    scroller.scrollTop = 1200;
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    cancel.mockClear();
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {

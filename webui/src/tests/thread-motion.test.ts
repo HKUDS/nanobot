@@ -8,6 +8,7 @@ import {
 
 function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
   let nextFrameId = 1;
+  let cameraFollowing = false;
   const frames = new Map<number, FrameRequestCallback>();
   let geometry: ThreadMotionGeometry = {
     scrollTop: 400,
@@ -30,7 +31,9 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     }),
   };
   const camera = {
-    cancel: vi.fn(),
+    cancel: vi.fn(() => {
+      cameraFollowing = false;
+    }),
     dispose: vi.fn(),
     jumpTo: vi.fn(),
     followTo: vi.fn((target: number) => ({
@@ -38,11 +41,15 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
       from: geometry.scrollTop,
       target,
     })),
-    navigateTo: vi.fn((target: number) => ({
-      kind: "started" as const,
-      from: geometry.scrollTop,
-      target,
-    })),
+    isFollowing: vi.fn(() => cameraFollowing),
+    navigateTo: vi.fn((target: number) => {
+      cameraFollowing = true;
+      return {
+        kind: "started" as const,
+        from: geometry.scrollTop,
+        target,
+      };
+    }),
   };
   const onGeometry = vi.fn();
   const onAutoFollow = vi.fn();
@@ -67,6 +74,9 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
         ?? Math.max(0, updated.scrollHeight - updated.clientHeight),
     };
   };
+  const setCameraFollowing = (following: boolean) => {
+    cameraFollowing = following;
+  };
 
   return {
     camera,
@@ -77,6 +87,7 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     onGeometry,
     scheduler,
     advanceFrame,
+    setCameraFollowing,
     setGeometry,
   };
 }
@@ -200,7 +211,7 @@ describe("ThreadMotionCoordinator", () => {
     });
   });
 
-  it("continues measuring while user-controlled but does not steal the viewport", () => {
+  it("continues measuring while browsing history but does not steal the viewport", () => {
     const {
       camera,
       coordinator,
@@ -224,7 +235,7 @@ describe("ThreadMotionCoordinator", () => {
 
     expect(onGeometry).toHaveBeenCalledTimes(1);
     expect(camera.followTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("user-controlled");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
 
     coordinator.resumeAutoFollow();
     advanceFrame();
@@ -262,13 +273,13 @@ describe("ThreadMotionCoordinator", () => {
 
     coordinator.takeUserControl();
     expect(coordinator.observeScroll(false)).toBe("user");
-    expect(coordinator.snapshot().mode).toBe("user-controlled");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
 
     expect(coordinator.observeScroll(true)).toBe("automatic");
     expect(coordinator.snapshot().mode).toBe("anchor-prompt");
   });
 
-  it("preserves user control when an active turn is cleared", () => {
+  it("preserves history browsing when an active turn is cleared", () => {
     const {
       camera,
       coordinator,
@@ -290,8 +301,68 @@ describe("ThreadMotionCoordinator", () => {
     });
     advanceFrame();
 
-    expect(coordinator.snapshot().mode).toBe("user-controlled");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
     expect(camera.followTo).not.toHaveBeenCalled();
+  });
+
+  it("settles history navigation when clearing its active turn cancels the camera", () => {
+    const {
+      coordinator,
+      advanceFrame,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    coordinator.navigateHistoryTo(900);
+
+    coordinator.updateTurn({
+      id: null,
+      promptId: null,
+      hasOutput: false,
+    });
+
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+  });
+
+  it("moves from rail navigation to history browsing on user intent", () => {
+    const {
+      camera,
+      coordinator,
+      setCameraFollowing,
+    } = motionHarness();
+
+    coordinator.handleUserScrollIntent(false);
+    expect(coordinator.snapshot().mode).toBe("idle");
+    expect(camera.cancel).not.toHaveBeenCalled();
+
+    coordinator.navigateHistoryTo(900);
+    expect(camera.navigateTo).toHaveBeenCalledWith(900);
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
+    expect(coordinator.observeScroll(false)).toBe("navigation");
+
+    camera.cancel.mockClear();
+    coordinator.handleUserScrollIntent(false);
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+    expect(coordinator.observeScroll(false)).toBe("user");
+
+    coordinator.navigateHistoryTo(700);
+    camera.cancel.mockClear();
+    coordinator.takeUserControl();
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+
+    camera.cancel.mockClear();
+    coordinator.takeUserControl();
+    expect(camera.cancel).not.toHaveBeenCalled();
+
+    coordinator.navigateHistoryTo(600);
+    setCameraFollowing(false);
+    expect(coordinator.observeScroll(false)).toBe("navigation");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
   });
 
   it("pins a waiting prompt to the exact lower boundary across all layout changes", () => {
