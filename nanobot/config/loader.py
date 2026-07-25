@@ -209,7 +209,7 @@ def _migrate_config(data: dict) -> dict:
         defaults.pop("maxMessages", None)
         defaults.pop("max_messages", None)
         if had_legacy_max_messages:
-            # TODO(v0.2.4): Remove this legacy cleanup branch. v0.2.3 is the
+            # TODO(v0.3.1): Remove this legacy cleanup branch. v0.3.0 is the
             # final release that warns before the schema silently ignores the field.
             logger.warning(
                 "agents.defaults.maxMessages/max_messages is legacy and ignored; "

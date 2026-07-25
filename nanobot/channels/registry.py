@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 @cache
 def _warn_legacy_channel_entry_points() -> None:
-    # TODO(v0.2.4): Remove this detection and warning. v0.2.3 is the final
+    # TODO(v0.3.1): Remove this detection and warning. v0.3.0 is the final
     # migration window for installed legacy channel entry points.
     names = sorted({entry_point.name for entry_point in entry_points(group="nanobot.channels")})
     if not names:
