@@ -617,3 +617,21 @@ def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
         }
     )
     assert trigger_null.last_run_at_ms is None
+
+
+def test_local_trigger_from_dict_accepts_null_run_history() -> None:
+    """Null runHistory must load as empty, matching CronJobState.from_store_dict."""
+    trigger = LocalTrigger.from_dict(
+        {
+            "id": "t1",
+            "name": "n",
+            "enabled": True,
+            "channel": "websocket",
+            "chatId": "c1",
+            "sessionKey": "websocket:c1",
+            "runHistory": None,
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+        }
+    )
+    assert trigger.run_history == []

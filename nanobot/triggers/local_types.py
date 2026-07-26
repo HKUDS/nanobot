@@ -68,9 +68,10 @@ class LocalTrigger:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LocalTrigger":
+        raw_history = data.get("runHistory", data.get("run_history", [])) or []
         history = [
             record if isinstance(record, TriggerRunRecord) else TriggerRunRecord.from_dict(record)
-            for record in data.get("runHistory", data.get("run_history", []))
+            for record in raw_history
             if isinstance(record, (dict, TriggerRunRecord))
         ]
         return cls(
