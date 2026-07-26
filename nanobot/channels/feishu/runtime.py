@@ -356,7 +356,8 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
         if not isinstance(block, dict) or not isinstance(block.get("content"), list):
             return None, []
         texts, images = [], []
-        if title := block.get("title"):
+        title = block.get("title")
+        if isinstance(title, str) and title:
             texts.append(title)
         for row in block["content"]:
             if not isinstance(row, list):
@@ -366,12 +367,19 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     continue
                 tag = el.get("tag")
                 if tag in ("text", "a"):
-                    texts.append(el.get("text", ""))
+                    text = el.get("text", "")
+                    if isinstance(text, str):
+                        texts.append(text)
                 elif tag == "at":
-                    texts.append(f"@{el.get('user_name', 'user')}")
+                    user = el.get("user_name", "user")
+                    texts.append(f"@{user if isinstance(user, str) and user else 'user'}")
                 elif tag == "code_block":
                     lang = el.get("language", "")
                     code_text = el.get("text", "")
+                    if not isinstance(lang, str):
+                        lang = ""
+                    if not isinstance(code_text, str):
+                        code_text = ""
                     texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)

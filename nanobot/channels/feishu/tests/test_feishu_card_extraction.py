@@ -37,3 +37,24 @@ def test_extract_interactive_card_reads_table_rows() -> None:
     }
 
     assert _extract_share_card_content(content, "interactive") == "Name | Score\nAlice | 98"
+
+
+from nanobot.channels.feishu.runtime import _extract_post_content
+
+
+def test_extract_post_content_tolerates_null_text_fields() -> None:
+    text, images = _extract_post_content(
+        {
+            "title": "T",
+            "content": [
+                [
+                    {"tag": "text", "text": None},
+                    {"tag": "a", "text": None},
+                    {"tag": "text", "text": "ok"},
+                    {"tag": "code_block", "language": None, "text": None},
+                ]
+            ],
+        }
+    )
+    assert "ok" in text
+    assert images == []
