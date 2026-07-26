@@ -1,9 +1,11 @@
 # Extensions
 
-Extensions add capabilities to nanobot without modifying the agent loop. One
-extension package can contribute tools, commands, hooks, skills, channels,
-providers, MCP servers, or WebUI surfaces. nanobot also recognizes compatible
-Pi packages and OpenClaw plugins, with capability-by-capability diagnostics.
+Extensions add capabilities to nanobot without modifying the agent loop. A
+package can declare tools, commands, hooks, skills, channels, providers, MCP
+servers, or WebUI surfaces in one governable manifest. Extension API v1
+executes native Python tools, commands, and hooks plus the compatible Pi and
+OpenClaw surfaces listed below; other contribution kinds are catalog metadata
+until their owning nanobot subsystem provides an activation adapter.
 
 Use this page to install and manage extensions. To publish one, read
 [Extension Authoring](./extension-authoring.md). For the internal design, read
@@ -23,7 +25,7 @@ local extension store. The safe lifecycle is:
 
 Installation does not grant trust. An installed package remains visible but
 inactive until it is enabled, trusted, has all requested permissions, and
-passes dependency checks.
+passes integrity and dependency checks.
 
 ### WebUI
 
@@ -81,10 +83,12 @@ Extensions can come from three scopes:
 | User | `~/.nanobot/extensions/` | Installed and governed through the WebUI or CLI |
 | Workspace | `<workspace>/.nanobot/extensions/` | Project-local code; controlled by workspace trust policy |
 
-When the same extension ID exists in multiple scopes, the nearest scope wins:
-workspace over user, user over built in. A contribution cannot silently replace
-another extension's contribution. Explicit replacement metadata and sufficient
-scope are required.
+When the same extension ID exists in multiple scopes, the nearest eligible copy
+wins: workspace over user, user over built in. An untrusted, disabled, denied,
+or invalid copy does not hide a usable lower-scope copy. A contribution cannot
+silently replace another extension's contribution. Disable one owner before
+activating the other; extension API v1 does not let packages replace core or
+third-party registrations.
 
 ## Pi and OpenClaw Packages
 
@@ -92,6 +96,8 @@ nanobot reads native Pi and OpenClaw package metadata and runs supported
 JavaScript or TypeScript entries in a Node.js sidecar. Compatibility is not
 all-or-nothing:
 
+- Adapted packages always request `runtime.node`, making process-level code
+  execution explicit before trust and activation.
 - Tools, slash commands, and supported lifecycle observation hooks can run.
 - Provider-like registrations and several host-specific capabilities may be
   cataloged but not executable.
@@ -110,15 +116,22 @@ dependency.
 
 - **Enabled** says the extension may activate.
 - **Trusted** says you approve executing its code.
-- **Granted permissions** are exact host capabilities approved for that
-  extension.
-- **Dependencies** must be present before activation.
+- **Granted permissions** record the exact capabilities you reviewed and
+  approved.
+- **Dependencies** must themselves be active before activation.
 
-Permissions are host policy, not an operating-system sandbox. A trusted native
-Python extension executes in the nanobot process. A Pi or OpenClaw extension
-executes in a separate Node.js process, which improves failure isolation but is
-not a strong OS security boundary. Use containers or another OS sandbox for
-untrusted third-party code.
+Permissions are consent and activation gates, not runtime capability
+enforcement or an operating-system sandbox. Direct extension code may access
+anything available to its process. A trusted native Python extension executes
+inside nanobot. A Pi or OpenClaw extension executes in a separate Node.js
+process, which improves failure isolation but is not a strong security
+boundary. Their generated manifests therefore request `runtime.node`; granting
+it acknowledges this execution model but does not confine the process. Use
+containers or another OS sandbox for untrusted third-party code.
+
+nanobot records a package content hash at installation. If files change later,
+the package cannot activate, even if configuration marks it trusted; reinstall
+it so the new contents can be reviewed.
 
 npm installation uses lifecycle scripts disabled. This prevents package
 `preinstall` and `postinstall` scripts from running during installation, but the
@@ -152,7 +165,9 @@ deployments can also define extension policy in `~/.nanobot/config.json`:
 ```
 
 Config entries do not rewrite the installation registry. See
-[Configuration](./configuration.md#extensions) for exact fields.
+[Configuration](./configuration.md#extensions) for exact fields. Actions from
+the Extensions WebUI or CLI reload the extension host. Direct edits to advanced
+`extensions` config fields are applied on the next process start.
 
 ## Diagnose an Inactive Extension
 
@@ -170,8 +185,9 @@ Common causes:
 | Untrusted | Review the package, then use `trust` |
 | Requested permission pending | Grant the exact requested permission set |
 | Disabled | Use `enable` or remove it from `extensions.deny` |
-| Missing dependency | Install the named package, executable, environment variable, or extension |
-| Contribution conflict | Disable one owner or use an explicit replacement from an appropriate scope |
+| Integrity mismatch | Reinstall and review the changed package |
+| Missing dependency | Install and activate the named package, executable, environment variable, or extension |
+| Contribution conflict | Disable one owner before activating the other |
 | Compatibility notice | Read which upstream API was translated, degraded, or unsupported |
 | Activation failed | Check the package entry, runtime dependency, and gateway logs |
 

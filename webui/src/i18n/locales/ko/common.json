@@ -1288,7 +1288,14 @@
     "permissionPending": "허용되지 않음",
     "revokePermissions": "권한 취소",
     "grantPermissions": "권한 허용",
-    "noPermissions": "요청한 호스트 권한이 없습니다.",
+  "noPermissions": "요청한 호스트 권한이 없습니다.",
+  "configManaged": "설정에서 관리됩니다.",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Node.js 런타임",
+        "reason": "타사 JavaScript 또는 TypeScript를 Node.js 프로세스에서 실행합니다."
+      }
+    },
     "revokeTrust": "신뢰 취소",
     "trust": "신뢰",
     "disable": "비활성화",

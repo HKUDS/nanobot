@@ -11,6 +11,7 @@ class _Agent:
     def __init__(self) -> None:
         self.tools = ToolRegistry()
         self.commands = CommandRouter()
+        self.context = type("Context", (), {"skills": None})()
         self._hook_factories = []
 
 

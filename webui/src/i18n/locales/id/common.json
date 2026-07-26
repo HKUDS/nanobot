@@ -1288,7 +1288,14 @@
     "permissionPending": "Belum diberikan",
     "revokePermissions": "Cabut izin",
     "grantPermissions": "Berikan izin",
-    "noPermissions": "Tidak meminta izin host.",
+  "noPermissions": "Tidak meminta izin host.",
+  "configManaged": "Dikelola melalui konfigurasi.",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Runtime Node.js",
+        "reason": "Jalankan JavaScript atau TypeScript pihak ketiga dalam proses Node.js."
+      }
+    },
     "revokeTrust": "Cabut kepercayaan",
     "trust": "Percayai",
     "disable": "Nonaktifkan",

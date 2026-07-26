@@ -1302,7 +1302,14 @@
     "permissionPending": "未授予",
     "revokePermissions": "撤销权限",
     "grantPermissions": "授予权限",
-    "noPermissions": "未请求宿主权限。",
+  "noPermissions": "未请求宿主权限。",
+  "configManaged": "由配置管理。",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Node.js 运行时",
+        "reason": "允许扩展在 Node.js 进程中运行第三方 JavaScript 或 TypeScript。"
+      }
+    },
     "revokeTrust": "撤销信任",
     "trust": "信任",
     "disable": "停用",

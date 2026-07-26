@@ -334,6 +334,7 @@ class Nanobot:
             return
         async with self._extensions_lock:
             if not self._extensions_started:
+                await self._loop._connect_mcp()
                 await self._extensions.reload()
                 self._extensions_started = True
 

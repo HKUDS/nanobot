@@ -31,8 +31,7 @@ package / workspace directory / compatibility package
         +----------------+----------------+
                          |
                          v
-       tools / skills / channels / providers / MCP /
-               hooks / commands / WebUI
+      executable native adapters + inspectable metadata
 ```
 
 `ExtensionManifest` is dependency-free metadata. Discovery can inspect it
@@ -59,10 +58,12 @@ scopes:
 2. `user`
 3. `workspace`
 
-The nearest scope wins for the same extension ID. Different extensions may not
-silently take over the same contribution name. Replacing another extension's
-contribution must be explicit and may only come from an equal or higher scope.
+The nearest policy-eligible scope wins for the same extension ID. A disabled,
+untrusted, denied, or invalid higher-scope copy does not shadow an eligible
+lower copy. Different extensions may not take over the same contribution name.
 Conflicts become diagnostics instead of crashing unrelated extensions.
+Extension API v1 deliberately has no override mechanism because runtime
+replacement must be both transactional and reversible.
 
 ## Compatibility runtimes
 
@@ -84,6 +85,9 @@ Compatibility is capability-based rather than all-or-nothing:
 The compatibility sidecar is a failure-isolation boundary, not a security
 sandbox. The exact executable and metadata-only surfaces are listed in the
 [compatibility matrix](./extension-authoring.md#compatibility-matrix).
+Generated Pi and OpenClaw manifests always request `runtime.node`, so process
+execution is visible and requires explicit consent even though that permission
+is not an OS-level confinement mechanism.
 
 ## Security model
 
@@ -93,9 +97,12 @@ permissions, dependency state, and trust scope before executing code.
 
 Project-local extensions require workspace trust. Contribution conflicts never
 grant an implicit override. Secrets remain in nanobot provider or host config
-and are exposed only through declared host interfaces. Existing workspace,
-network, SSRF, and shell restrictions continue to apply to host-provided
-operations.
+unless the operator explicitly passes values through extension config. Native
+Python code and compatible Node processes are trusted code and may still
+inspect their process environment or filesystem directly; permission
+declarations are review and activation gates, not technical confinement.
+Existing workspace, network, SSRF, and shell restrictions apply only when an
+extension uses host-provided operations.
 
 Untrusted packages remain visible in the catalog with an inactive state. They
 do not own active contributions and their runtime is not imported. Built-in
@@ -110,7 +117,8 @@ and activation does not rewrite `config.json` behind the user's back.
 The activation gates are deliberately independent:
 
 ```text
-installed -> dependencies ready -> permissions granted -> trusted + enabled
+installed -> integrity verified -> active dependencies ready
+          -> permissions granted -> trusted + enabled
 ```
 
 Only candidates that pass every gate own active contributions. Reload first
@@ -119,12 +127,12 @@ snapshot. A failed activation is converted into a diagnostic.
 
 ## Market boundary
 
-The market is an index, not a runtime. It describes packages available from
-PyPI, npm, Git, ClawHub, Pi catalogs, or local sources using the same manifest
-shape. Installing a listing still goes through the local installer, policy,
-dependency checks, and trust flow. This keeps discovery independent from code
-execution and allows multiple catalogs without coupling the agent to one
-store.
+The market is an index, not a runtime. Extension API v1 searches npm for
+nanobot, Pi, and OpenClaw package keywords. Git and local directories are
+install sources but are not searchable catalogs. Installing a listing still
+goes through the local installer, integrity record, policy, dependency checks,
+and trust flow. The boundary permits more catalog adapters later without
+coupling package discovery to execution.
 
 ## Ownership boundaries
 

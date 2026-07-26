@@ -39,8 +39,14 @@ class ExtensionService:
             candidates = catalog.candidates
             diagnostics = catalog.diagnostics
             active_ids = {
-                candidate.manifest.id for candidate in catalog.snapshot.extensions
+                active.candidate.manifest.id
+                for active in self.host.snapshot.activation.extensions
             }
+            active_ids.update(
+                candidate.manifest.id
+                for candidate in catalog.snapshot.extensions
+                if candidate.location is None
+            )
             if self.host and self.host.snapshot:
                 diagnostics += self.host.snapshot.activation.diagnostics
         records = self.store.records()
@@ -163,6 +169,7 @@ def _candidate_payload(
         "source_ref": record.source_ref if record else "",
         "integrity": record.integrity if record else "",
         "installed_at": record.installed_at if record else "",
+        "managed_by_store": record is not None,
     }
 
 

@@ -1437,6 +1437,17 @@ def test_make_provider_rejects_auto_dynamic_custom_prefix_without_api_base():
         make_provider(config)
 
 
+class _FakeExtensionHost:
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def reload(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""
@@ -1450,9 +1461,11 @@ def mock_agent_runtime(tmp_path):
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
          patch("nanobot.cron.service.CronService"), \
+         patch("nanobot.extensions.ExtensionHost", _FakeExtensionHost), \
          patch("nanobot.cli.commands.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
         agent_loop.channels_config = None
+        agent_loop._connect_mcp = AsyncMock(return_value=None)
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
@@ -1534,10 +1547,14 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1575,11 +1592,15 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1625,11 +1646,15 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -1681,11 +1706,15 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr(
         "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -1836,6 +1865,7 @@ def _patch_cli_command_runtime(
 ) -> None:
     provider_factory = make_provider or (lambda _config: _fake_provider())
 
+    monkeypatch.setattr("nanobot.extensions.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         set_config_path or (lambda _path: None),
@@ -1931,6 +1961,9 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
 
         async def process_direct(self, *_args, **_kwargs):
             return SimpleNamespace(content="")
+
+        async def _connect_mcp(self) -> None:
+            return None
 
         async def close_mcp(self) -> None:
             return None
@@ -2592,6 +2625,9 @@ def test_gateway_unbound_agent_cron_is_skipped(
         async def submit_cron_turn(self, _msg: InboundMessage):
             raise AssertionError("unbound cron job must not run as a bound cron turn")
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
@@ -2709,6 +2745,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
                 chat_id=msg.chat_id,
                 content="Checked the repo.",
             )
+
+        async def _connect_mcp(self) -> None:
+            return None
 
         async def close_mcp(self) -> None:
             return None
@@ -2929,6 +2968,9 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         async def run(self) -> None:
             self.runtime_resolver.invalidate.assert_called_once_with()
             await asyncio.Event().wait()
+
+        async def _connect_mcp(self) -> None:
+            return None
 
         async def close_mcp(self) -> None:
             return None
@@ -3174,6 +3216,9 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def run(self) -> None:
             await asyncio.Event().wait()
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             return None
 
@@ -3371,6 +3416,9 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
             finally:
                 seen["agent_task_cleaned_up"] = True
 
+        async def _connect_mcp(self) -> None:
+            return None
+
         async def close_mcp(self) -> None:
             raise AssertionError("gateway must not close MCP from the outer task")
 
@@ -3469,6 +3517,9 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
                 await asyncio.Event().wait()
             finally:
                 seen["agent_task_cleaned_up"] = True
+
+        async def _connect_mcp(self) -> None:
+            return None
 
         async def close_mcp(self) -> None:
             raise AssertionError("gateway must not close MCP from the outer task")

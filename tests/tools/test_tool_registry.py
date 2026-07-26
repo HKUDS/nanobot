@@ -322,6 +322,19 @@ def test_register_invalidates_cache() -> None:
     assert len(second) == 2
 
 
+def test_register_if_absent_preserves_existing_tool_and_owner() -> None:
+    registry = ToolRegistry()
+    existing = _FakeTool("read_file")
+    registry.register(existing, owner="extension.example")
+
+    assert not registry.register_if_absent(
+        _FakeTool("read_file"),
+        owner="nanobot.mcp.example",
+    )
+    assert registry.get("read_file") is existing
+    assert registry.owner("read_file") == "extension.example"
+
+
 def test_unregister_invalidates_cache() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))

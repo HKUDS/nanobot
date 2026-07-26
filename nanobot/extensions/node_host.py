@@ -1,4 +1,4 @@
-"""Async process boundary for untrusted-compatible JavaScript extension APIs."""
+"""Async process boundary for compatible JavaScript extension APIs."""
 
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ from nanobot.extensions.protocol import (
     NodeProtocolError,
 )
 
+_MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+
 
 class NodeSidecar:
-    """One isolated Node process hosting one extension module."""
+    """One failure-isolated Node process hosting one trusted extension."""
 
     def __init__(
         self,
@@ -55,10 +57,15 @@ class NodeSidecar:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=_MAX_MESSAGE_BYTES + 1,
         )
         self._reader = asyncio.create_task(self._read_stdout())
         self._stderr_reader = asyncio.create_task(self._read_stderr())
-        hello = await self.request("hello", {})
+        try:
+            hello = await self.request("hello", {})
+        except Exception:
+            await self.close()
+            raise
         if hello.get("protocol") != NODE_PROTOCOL_VERSION:
             await self.close()
             raise NodeProtocolError(
@@ -123,11 +130,26 @@ class NodeSidecar:
             },
             separators=(",", ":"),
         ).encode()
+        if len(message) > _MAX_MESSAGE_BYTES:
+            self._pending.pop(request_id, None)
+            raise NodeProtocolError("sidecar request exceeds the 16 MB protocol limit")
         try:
             async with self._write_lock:
                 process.stdin.write(message + b"\n")
                 await process.stdin.drain()
             result = await asyncio.wait_for(future, timeout or self._timeout)
+        except asyncio.TimeoutError as exc:
+            self._pending.pop(request_id, None)
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise NodeProtocolError(
+                f"sidecar method {method!r} timed out"
+            ) from exc
+        except asyncio.CancelledError:
+            self._pending.pop(request_id, None)
+            future.cancel()
+            raise
         except Exception:
             self._pending.pop(request_id, None)
             raise
@@ -161,21 +183,28 @@ class NodeSidecar:
         assert self._process and self._process.stdout
         try:
             while line := await self._process.stdout.readline():
-                try:
-                    message = json.loads(line)
-                    request_id = message["id"]
-                    future = self._pending.pop(request_id)
-                    if error := message.get("error"):
-                        future.set_exception(
-                            NodeProtocolError(
-                                f"{error.get('code', 'sidecar_error')}: "
-                                f"{error.get('message', 'unknown sidecar error')}"
-                            )
+                if len(line) > _MAX_MESSAGE_BYTES:
+                    raise NodeProtocolError(
+                        "sidecar response exceeds the 16 MB protocol limit"
+                    )
+                message = json.loads(line)
+                request_id = message["id"]
+                future = self._pending.pop(request_id, None)
+                if future is None or future.done():
+                    continue
+                if error := message.get("error"):
+                    future.set_exception(
+                        NodeProtocolError(
+                            f"{error.get('code', 'sidecar_error')}: "
+                            f"{error.get('message', 'unknown sidecar error')}"
                         )
-                    else:
-                        future.set_result(message.get("result", {}))
-                except Exception as exc:
-                    self._fail_pending(NodeProtocolError(f"invalid sidecar response: {exc}"))
+                    )
+                else:
+                    future.set_result(message.get("result", {}))
+        except Exception as exc:
+            self._fail_pending(NodeProtocolError(f"invalid sidecar response: {exc}"))
+            if self._process and self._process.returncode is None:
+                self._process.kill()
         finally:
             if self._process and self._process.returncode is None:
                 await self._process.wait()

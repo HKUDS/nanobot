@@ -77,7 +77,10 @@ def _npm_search(query: str, *, limit: int) -> list[dict[str, Any]]:
     except subprocess.CalledProcessError as exc:
         message = (exc.stderr or exc.stdout).strip()
         raise RuntimeError(message or "extension marketplace search failed") from exc
-    value = json.loads(result.stdout)
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("npm returned an invalid marketplace response") from exc
     if not isinstance(value, list):
         raise RuntimeError("npm returned an invalid marketplace response")
     return [row for row in value if isinstance(row, dict)]

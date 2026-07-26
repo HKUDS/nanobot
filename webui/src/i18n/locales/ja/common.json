@@ -1288,7 +1288,14 @@
     "permissionPending": "未許可",
     "revokePermissions": "権限を取り消す",
     "grantPermissions": "権限を許可",
-    "noPermissions": "ホスト権限の要求はありません。",
+  "noPermissions": "ホスト権限の要求はありません。",
+  "configManaged": "設定で管理されています。",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Node.js ランタイム",
+        "reason": "サードパーティーの JavaScript または TypeScript を Node.js プロセスで実行します。"
+      }
+    },
     "revokeTrust": "信頼を取り消す",
     "trust": "信頼する",
     "disable": "無効化",

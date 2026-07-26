@@ -48,7 +48,9 @@ def discover_manifest_root(
         sorted(
             path / MANIFEST_FILENAME
             for path in root.iterdir()
-            if path.is_dir() and (path / MANIFEST_FILENAME).is_file()
+            if not path.name.startswith(".")
+            and path.is_dir()
+            and (path / MANIFEST_FILENAME).is_file()
         )
     )
 

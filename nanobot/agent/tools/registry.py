@@ -34,6 +34,13 @@ class ToolRegistry:
         self._owners[tool.name] = owner
         self._cached_definitions = None
 
+    def register_if_absent(self, tool: Tool, *, owner: str = "nanobot.core") -> bool:
+        """Register a tool without replacing an existing capability."""
+        if tool.name in self._tools:
+            return False
+        self.register(tool, owner=owner)
+        return True
+
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)

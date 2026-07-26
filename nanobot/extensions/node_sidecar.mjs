@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import readline from "node:readline";
 
@@ -86,7 +87,7 @@ function addTool(tool, flavor, options = {}) {
       runtimeConfig: state.config,
       getRuntimeConfig: () => state.config,
       workspaceDir: state.workspace,
-      sandboxed: true,
+      sandboxed: false,
     });
     for (const item of Array.isArray(resolved) ? resolved : [resolved]) {
       if (item) addTool(item, flavor, options);
@@ -95,6 +96,9 @@ function addTool(tool, flavor, options = {}) {
   }
   if (!tool || typeof tool !== "object" || typeof tool.name !== "string") {
     throw new Error("registered tool must define a name");
+  }
+  if (state.tools.has(tool.name)) {
+    throw new Error(`tool '${tool.name}' is already registered by this extension`);
   }
   state.tools.set(tool.name, { tool, flavor });
   addRegistration("tool", tool.name, {
@@ -113,6 +117,15 @@ function invocationOutput(value) {
   if (context) context.outputs.push(value);
 }
 
+function addCommand(name, command, flavor) {
+  const normalized = String(name);
+  if (state.commands.has(normalized)) {
+    throw new Error(`command '${normalized}' is already registered by this extension`);
+  }
+  state.commands.set(normalized, { command, flavor });
+  addRegistration("command", normalized, { description: command?.description });
+}
+
 function eventBus() {
   return {
     on: (name, handler) => addHook(`event:${name}`, handler, "pi-event"),
@@ -124,10 +137,7 @@ function piApi() {
   const api = {
     on: (name, handler) => addHook(name, handler, "pi"),
     registerTool: (tool) => addTool(tool, "pi"),
-    registerCommand: (name, options) => {
-      state.commands.set(String(name), { command: options, flavor: "pi" });
-      addRegistration("command", name, { description: options?.description });
-    },
+    registerCommand: (name, options) => addCommand(name, options, "pi"),
     registerProvider: (nameOrProvider, config) => {
       const provider =
         typeof nameOrProvider === "string"
@@ -188,10 +198,7 @@ function openClawApi() {
       error: writeError,
     },
     registerTool: (tool, options) => addTool(tool, "openclaw", options),
-    registerCommand: (command) => {
-      state.commands.set(command.name, { command, flavor: "openclaw" });
-      addRegistration("command", command.name, { description: command.description });
-    },
+    registerCommand: (command) => addCommand(command.name, command, "openclaw"),
     registerHook: (names, handler) => addHook(names, handler, "openclaw"),
     on: (name, handler) => addHook(name, handler, "openclaw"),
     registerProvider: (provider) =>
@@ -247,8 +254,8 @@ async function importModule(entry) {
   } catch (error) {
     if (![".ts", ".tsx", ".cts", ".mts"].some((suffix) => entry.endsWith(suffix))) throw error;
     try {
-      const imported = await import("jiti");
-      const createJiti = imported.createJiti || imported.default;
+      const imported = createRequire(pathToFileURL(entry))("jiti");
+      const createJiti = imported.createJiti || imported.default || imported;
       return await createJiti(import.meta.url, { interopDefault: true }).import(entry);
     } catch (jitiError) {
       throw new Error(

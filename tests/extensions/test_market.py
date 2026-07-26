@@ -57,3 +57,14 @@ def test_market_ignores_fuzzy_npm_results(monkeypatch) -> None:
     )
 
     assert ExtensionMarketplace().search(ecosystem="pi") == ()
+
+
+def test_market_rejects_invalid_npm_json(monkeypatch) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "not json", ""),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid marketplace response"):
+        ExtensionMarketplace().search(ecosystem="pi")

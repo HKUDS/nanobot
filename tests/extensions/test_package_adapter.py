@@ -27,6 +27,10 @@ def test_adapts_pi_package_metadata(tmp_path: Path) -> None:
     assert result.manifest.id == "pi.acme.pi-tools"
     assert result.manifest.runtime is ExtensionRuntime.PI
     assert result.manifest.activation_entries == ("./index.ts", "./review.ts")
+    assert len(result.manifest.dependencies) == 1
+    assert result.manifest.dependencies[0].name == "jiti"
+    assert result.manifest.dependencies[0].specifier == "^2.4.2"
+    assert result.manifest.permissions[0].name == "runtime.node"
 
 
 def test_adapts_openclaw_contracts_without_loading_code(tmp_path: Path) -> None:
@@ -70,3 +74,4 @@ def test_adapts_openclaw_contracts_without_loading_code(tmp_path: Path) -> None:
         (ContributionKind.WEB_SEARCH_PROVIDER, "private-search"),
     }
     assert "speechProviders" in result.diagnostics[0]
+    assert result.manifest.permissions[0].name == "runtime.node"

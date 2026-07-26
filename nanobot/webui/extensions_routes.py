@@ -81,7 +81,7 @@ class WebUIExtensionsRouter:
                 return None
             if _method(request) != "POST":
                 return self._error_response(405, "Method not allowed")
-            if not self._mutation_allowed(connection, request):
+            if not self._mutation_allowed(action, connection, request):
                 return self._error_response(
                     403,
                     "Extension changes require a local WebUI connection",
@@ -153,10 +153,14 @@ class WebUIExtensionsRouter:
             raise ValueError("Extension request must be a JSON object")
         return value
 
-    def _mutation_allowed(self, connection: Any, request: WsRequest) -> bool:
-        return self._allow_remote_package_install or is_local_browser_request(
-            connection,
-            request.headers,
+    def _mutation_allowed(
+        self,
+        action: str,
+        connection: Any,
+        request: WsRequest,
+    ) -> bool:
+        return is_local_browser_request(connection, request.headers) or (
+            action == "install" and self._allow_remote_package_install
         )
 
 

@@ -830,6 +830,23 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 return "\n".join(parts) or "(no output)"
 
 
+def _register_mcp_capability(
+    registry: ToolRegistry,
+    capability: Tool,
+    server_name: str,
+) -> bool:
+    owner = f"nanobot.mcp.{server_name}"
+    if registry.register_if_absent(capability, owner=owner):
+        return True
+    logger.warning(
+        "MCP: skipping capability '{}' from server '{}' because it is already registered by '{}'",
+        capability.name,
+        server_name,
+        registry.owner(capability.name),
+    )
+    return False
+
+
 async def connect_mcp_servers(
     mcp_servers: dict, registry: ToolRegistry
 ) -> dict[str, MCPConnection]:
@@ -963,7 +980,8 @@ async def connect_mcp_servers(
                     )
                     continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
-                registry.register(wrapper, owner=f"nanobot.mcp.{name}")
+                if not _register_mcp_capability(registry, wrapper, name):
+                    continue
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
                 if enabled_tools:
@@ -1000,7 +1018,8 @@ async def connect_mcp_servers(
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
-                        registry.register(wrapper, owner=f"nanobot.mcp.{name}")
+                        if not _register_mcp_capability(registry, wrapper, name):
+                            continue
                         registered_count += 1
                         logger.debug(
                             "MCP: registered resource '{}' from server '{}'",
@@ -1018,7 +1037,8 @@ async def connect_mcp_servers(
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
-                        registry.register(wrapper, owner=f"nanobot.mcp.{name}")
+                        if not _register_mcp_capability(registry, wrapper, name):
+                            continue
                         registered_count += 1
                         logger.debug(
                             "MCP: registered prompt '{}' from server '{}'",

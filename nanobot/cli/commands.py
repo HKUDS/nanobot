@@ -1389,8 +1389,8 @@ def serve(
     extension_host = ExtensionHost(agent_loop, lambda: runtime_config)
 
     async def on_startup(_app):
-        await extension_host.reload()
         await agent_loop._connect_mcp()
+        await extension_host.reload()
 
     async def on_cleanup(_app):
         try:
@@ -2139,6 +2139,7 @@ def _run_gateway(
             console.print,
         )
         try:
+            await agent._connect_mcp()
             await extension_host.reload()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
@@ -2330,6 +2331,7 @@ def agent(
         # Single message mode — direct call, no bus needed
         async def run_once():
             try:
+                await agent_loop._connect_mcp()
                 await extension_host.reload()
                 renderer = StreamRenderer(
                     render_markdown=markdown,
@@ -2391,6 +2393,7 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
+            await agent_loop._connect_mcp()
             await extension_host.reload()
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()

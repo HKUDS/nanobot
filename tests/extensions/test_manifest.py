@@ -2,7 +2,9 @@ import pytest
 
 from nanobot.extensions import (
     ContributionKind,
+    DependencyKind,
     ExtensionContribution,
+    ExtensionDependency,
     ExtensionManifest,
     ExtensionPermission,
     ExtensionRuntime,
@@ -58,4 +60,29 @@ def test_manifest_rejects_duplicate_contributions() -> None:
             version="1.0.0",
             runtime=ExtensionRuntime.DECLARATIVE,
             contributions=(contribution, contribution),
+        )
+
+
+def test_manifest_rejects_duplicate_dependencies() -> None:
+    dependency = ExtensionDependency(
+        kind=DependencyKind.EXTENSION,
+        name="acme.base",
+    )
+
+    with pytest.raises(ValueError, match="duplicate dependencies"):
+        ExtensionManifest(
+            id="duplicate",
+            name="Duplicate",
+            version="1.0.0",
+            runtime=ExtensionRuntime.DECLARATIVE,
+            dependencies=(dependency, dependency),
+        )
+
+
+def test_dependency_optional_must_be_boolean() -> None:
+    with pytest.raises(TypeError, match="optional must be a boolean"):
+        ExtensionDependency(
+            kind=DependencyKind.EXTENSION,
+            name="acme.base",
+            optional="false",  # type: ignore[arg-type]
         )

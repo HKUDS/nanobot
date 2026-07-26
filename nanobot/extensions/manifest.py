@@ -65,6 +65,8 @@ class ExtensionDependency:
             _require_identifier(self.name, "extension dependency name")
         if not isinstance(self.specifier, str):
             raise TypeError("extension dependency specifier must be a string")
+        if not isinstance(self.optional, bool):
+            raise TypeError("extension dependency optional must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +93,6 @@ class ExtensionContribution:
     name: str
     target: str = ""
     description: str = ""
-    replaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ContributionKind):
@@ -101,12 +102,6 @@ class ExtensionContribution:
             raise TypeError("extension contribution target must be a string")
         if not isinstance(self.description, str):
             raise TypeError("extension contribution description must be a string")
-        if not isinstance(self.replaces, tuple):
-            raise TypeError("extension contribution replaces must be a tuple")
-        for extension_id in self.replaces:
-            _require_identifier(extension_id, "replaced extension id")
-        if len(set(self.replaces)) != len(self.replaces):
-            raise ValueError("extension contribution replaces contains duplicates")
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +176,11 @@ class ExtensionManifest:
         ]
         if len(set(contribution_keys)) != len(contribution_keys):
             raise ValueError("extension manifest contains duplicate contributions")
+        dependency_keys = [
+            (dependency.kind, dependency.name) for dependency in self.dependencies
+        ]
+        if len(set(dependency_keys)) != len(dependency_keys):
+            raise ValueError("extension manifest contains duplicate dependencies")
         permission_names = [permission.name for permission in self.permissions]
         if len(set(permission_names)) != len(permission_names):
             raise ValueError("extension manifest contains duplicate permissions")
@@ -204,6 +204,11 @@ def _require_identifier(value: object, label: str) -> str:
             f"{label} must use lowercase letters, digits, dots, underscores, or hyphens"
         )
     return text
+
+
+def validate_extension_id(value: object) -> str:
+    """Validate and return one portable extension identifier."""
+    return _require_identifier(value, "extension id")
 
 
 def _require_tuple_of(value: object, item_type: type, label: str) -> None:

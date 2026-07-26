@@ -1288,7 +1288,14 @@
     "permissionPending": "Non accordée",
     "revokePermissions": "Révoquer les autorisations",
     "grantPermissions": "Accorder les autorisations",
-    "noPermissions": "Aucune autorisation hôte demandée.",
+  "noPermissions": "Aucune autorisation hôte demandée.",
+  "configManaged": "Gérée par la configuration.",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Environnement Node.js",
+        "reason": "Exécute du JavaScript ou TypeScript tiers dans un processus Node.js."
+      }
+    },
     "revokeTrust": "Révoquer la confiance",
     "trust": "Faire confiance",
     "disable": "Désactiver",

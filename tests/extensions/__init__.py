@@ -1,0 +1,1 @@
+"""Extension platform tests."""

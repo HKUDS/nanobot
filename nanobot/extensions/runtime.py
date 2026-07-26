@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.command.router import CommandRouter, Handler
 from nanobot.config.schema import Config
 from nanobot.extensions.compatibility import CompatibleExtension
+from nanobot.extensions.manifest import DependencyKind
 from nanobot.extensions.node_host import NodeSidecar
 from nanobot.extensions.registry import (
     ExtensionCandidate,
@@ -57,7 +59,11 @@ class PythonExtensionApi:
         self._hook_factories = hook_factories
 
     def register_tool(self, tool: Tool) -> None:
-        self._tools.register(tool, owner=self.owner)
+        if not self._tools.register_if_absent(tool, owner=self.owner):
+            existing = self._tools.owner(tool.name) or "unknown"
+            raise ValueError(
+                f"tool '{tool.name}' is already registered by '{existing}'"
+            )
 
     def register_command(
         self,
@@ -66,11 +72,19 @@ class PythonExtensionApi:
         *,
         prefix: bool = False,
     ) -> None:
+        command = f"/{command.lstrip('/')}"
+        if prefix:
+            command = f"{command} "
         register = self._commands.prefix if prefix else self._commands.exact
+        tier = "prefix" if prefix else "exact"
+        if existing := self._commands.owner(tier, command):
+            raise ValueError(
+                f"command '{command}' is already registered by '{existing}'"
+            )
         register(command, handler, owner=self.owner)
 
     def register_hook_factory(self, factory: AgentTurnHookFactory) -> None:
-        self._hook_factories.append(factory)
+        self._hook_factories.append(_owned_hook_factory(factory, self.owner))
 
 
 class ExtensionRuntimeManager:
@@ -92,13 +106,38 @@ class ExtensionRuntimeManager:
 
     async def activate(self, snapshot: ExtensionSnapshot) -> ActivationResult:
         diagnostics: list[ExtensionDiagnostic] = []
+        activated_ids = {
+            candidate.manifest.id
+            for candidate in snapshot.extensions
+            if candidate.location is None
+        }
         for candidate in snapshot.extensions:
             if candidate.location is None:
+                continue
+            missing = [
+                dependency.name
+                for dependency in candidate.manifest.dependencies
+                if not dependency.optional
+                and dependency.kind is DependencyKind.EXTENSION
+                and dependency.name not in activated_ids
+            ]
+            if missing:
+                diagnostics.append(
+                    ExtensionDiagnostic(
+                        code="dependency_activation_failed",
+                        extension_id=candidate.manifest.id,
+                        message=(
+                            "Required extensions did not activate: "
+                            + ", ".join(sorted(missing))
+                        ),
+                    )
+                )
                 continue
             try:
                 active = await self._activate_candidate(candidate)
                 if active is not None:
                     self._active.append(active)
+                    activated_ids.add(candidate.manifest.id)
                     diagnostics.extend(active.diagnostics)
             except Exception as exc:
                 await self._rollback_owner(candidate.manifest.id)
@@ -119,7 +158,6 @@ class ExtensionRuntimeManager:
         for active in reversed(self._active):
             await self._rollback_owner(active.candidate.manifest.id, active)
         self._active.clear()
-        self._hook_factories.clear()
 
     async def _activate_candidate(
         self,
@@ -183,14 +221,26 @@ class ExtensionRuntimeManager:
     def _activate_python(self, candidate: ExtensionCandidate) -> None:
         if len(candidate.manifest.activation_entries) != 1:
             raise ValueError("Python extensions must declare exactly one entry")
-        module_name, separator, attribute = candidate.manifest.entry.partition(":")
+        raw_entry = candidate.manifest.activation_entries[0]
+        module_name, separator, attribute = raw_entry.partition(":")
         if not separator:
-            module_name = candidate.manifest.entry
+            module_name = raw_entry
             attribute = "register"
         assert candidate.location is not None
+        importlib.invalidate_caches()
+        _unload_modules_under(candidate.location)
+        _reject_module_collision(module_name, candidate.location)
         sys.path.insert(0, str(candidate.location))
         try:
-            register = getattr(importlib.import_module(module_name), attribute)
+            module = importlib.import_module(module_name)
+            module_path = getattr(module, "__file__", None)
+            if not module_path or not Path(module_path).resolve().is_relative_to(
+                candidate.location.resolve()
+            ):
+                raise ValueError(
+                    f"Python extension entry resolves outside its package: {module_name}"
+                )
+            register = getattr(module, attribute)
             api = PythonExtensionApi(
                 owner=candidate.manifest.id,
                 tools=self._tools,
@@ -200,6 +250,9 @@ class ExtensionRuntimeManager:
             result = register(api)
             if result is not None:
                 raise TypeError("Python extension register function must return None")
+        except Exception:
+            _unload_modules_under(candidate.location)
+            raise
         finally:
             sys.path.remove(str(candidate.location))
 
@@ -210,12 +263,11 @@ class ExtensionRuntimeManager:
     ) -> None:
         owner = candidate.manifest.id
         for tool in compatible.tools:
-            existing = self._tools.owner(tool.name)
-            if existing and existing != owner:
+            if not self._tools.register_if_absent(tool, owner=owner):
+                existing = self._tools.owner(tool.name) or "unknown"
                 raise ValueError(
                     f"tool '{tool.name}' is already registered by '{existing}'"
                 )
-            self._tools.register(tool, owner=owner)
         compatible.register_commands(self._commands)
         if hook := compatible.hook:
             self._hook_factories.append(_constant_hook_factory(hook, owner))
@@ -227,13 +279,19 @@ class ExtensionRuntimeManager:
     ) -> None:
         self._tools.unregister_owner(owner)
         self._commands.unregister_owner(owner)
-        self._hook_factories = [
+        self._hook_factories[:] = [
             factory
             for factory in self._hook_factories
             if getattr(factory, "__nanobot_extension_owner__", None) != owner
         ]
         if active and active.compatible:
             await active.compatible.close()
+        if (
+            active
+            and active.candidate.manifest.runtime.value == "python"
+            and active.candidate.location
+        ):
+            _unload_modules_under(active.candidate.location)
 
 
 def _resolve_entries(candidate: ExtensionCandidate) -> tuple[Path, ...]:
@@ -263,3 +321,48 @@ def _constant_hook_factory(hook: AgentHook, owner: str) -> AgentTurnHookFactory:
 
     setattr(factory, "__nanobot_extension_owner__", owner)
     return factory
+
+
+def _owned_hook_factory(
+    factory: AgentTurnHookFactory,
+    owner: str,
+) -> AgentTurnHookFactory:
+    def owned(context: Any) -> AgentHook | None:
+        return factory(context)
+
+    setattr(owned, "__nanobot_extension_owner__", owner)
+    return owned
+
+
+def _modules_under(root: Path) -> tuple[str, ...]:
+    package_root = root.resolve()
+    return tuple(
+        name
+        for name, module in tuple(sys.modules.items())
+        if (raw_path := getattr(module, "__file__", None))
+        and Path(raw_path).resolve().is_relative_to(package_root)
+    )
+
+
+def _unload_modules_under(root: Path) -> None:
+    package_root = root.resolve()
+    for module_name in _modules_under(package_root):
+        sys.modules.pop(module_name, None)
+    for cache in package_root.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+
+
+def _reject_module_collision(module_name: str, root: Path) -> None:
+    package_root = root.resolve()
+    parts = module_name.split(".")
+    for index in range(1, len(parts) + 1):
+        loaded = sys.modules.get(".".join(parts[:index]))
+        loaded_path = getattr(loaded, "__file__", None)
+        if loaded is not None and (
+            not loaded_path
+            or not Path(loaded_path).resolve().is_relative_to(package_root)
+        ):
+            raise ValueError(
+                f"Python extension entry conflicts with loaded module: "
+                f"{'.'.join(parts[:index])}"
+            )

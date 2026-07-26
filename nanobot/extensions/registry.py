@@ -8,9 +8,11 @@ from pathlib import Path
 
 from nanobot.extensions.manifest import (
     ContributionKind,
+    DependencyKind,
     ExtensionContribution,
     ExtensionManifest,
 )
+from nanobot.extensions.versioning import dependency_version_failure
 
 
 class ExtensionScope(IntEnum):
@@ -30,6 +32,7 @@ class ExtensionCandidate:
     location: Path | None = None
     enabled: bool = True
     trusted: bool = False
+    integrity_valid: bool = True
     granted_permissions: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
@@ -39,6 +42,8 @@ class ExtensionCandidate:
             raise TypeError("extension candidate scope must be an ExtensionScope")
         if self.location is not None and not isinstance(self.location, Path):
             raise TypeError("extension candidate location must be a Path or None")
+        if not isinstance(self.integrity_valid, bool):
+            raise TypeError("extension integrity state must be a boolean")
         if not isinstance(self.granted_permissions, frozenset):
             raise TypeError("extension granted permissions must be a frozenset")
 
@@ -68,6 +73,7 @@ class ExtensionPolicy:
         }
         return (
             candidate.enabled
+            and candidate.integrity_valid
             and (
                 candidate.scope is ExtensionScope.BUILTIN
                 or (
@@ -95,6 +101,7 @@ class ExtensionDiagnostic:
     code: str
     extension_id: str
     message: str
+    severity: str = "warning"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,9 +143,10 @@ class ExtensionRegistry:
 
     def snapshot(self) -> ExtensionSnapshot:
         active, selection_diagnostics = self._select_active_extensions()
+        active, dependency_diagnostics = self._resolve_extension_dependencies(active)
         resolved, resolution_diagnostics = self._resolve_contributions(active)
         return ExtensionSnapshot(
-            extensions=tuple(sorted(active.values(), key=lambda item: item.manifest.id)),
+            extensions=self._activation_order(active),
             contributions=tuple(
                 sorted(
                     resolved.values(),
@@ -148,7 +156,11 @@ class ExtensionRegistry:
                     ),
                 )
             ),
-            diagnostics=tuple(selection_diagnostics + resolution_diagnostics),
+            diagnostics=tuple(
+                selection_diagnostics
+                + dependency_diagnostics
+                + resolution_diagnostics
+            ),
         )
 
     def _select_active_extensions(
@@ -186,6 +198,119 @@ class ExtensionRegistry:
                     )
         return active, diagnostics
 
+    def _resolve_extension_dependencies(
+        self,
+        active: dict[str, ExtensionCandidate],
+    ) -> tuple[dict[str, ExtensionCandidate], list[ExtensionDiagnostic]]:
+        active = dict(active)
+        diagnostics: list[ExtensionDiagnostic] = []
+        while active:
+            failed: dict[str, list[str]] = {}
+            for extension_id, candidate in active.items():
+                for dependency in candidate.manifest.dependencies:
+                    if (
+                        dependency.optional
+                        or dependency.kind is not DependencyKind.EXTENSION
+                    ):
+                        continue
+                    required = active.get(dependency.name)
+                    if required is None:
+                        failed.setdefault(extension_id, []).append(
+                            f"Required extension is not active: {dependency.name}"
+                        )
+                        continue
+                    if message := dependency_version_failure(
+                        dependency,
+                        required.manifest.version,
+                        "extension",
+                    ):
+                        failed.setdefault(extension_id, []).append(message)
+            if failed:
+                for extension_id, messages in sorted(failed.items()):
+                    active.pop(extension_id, None)
+                    diagnostics.extend(
+                        ExtensionDiagnostic(
+                            code="dependency_missing",
+                            extension_id=extension_id,
+                            message=message,
+                        )
+                        for message in messages
+                    )
+                continue
+
+            cycle = self._dependency_cycle(active)
+            if not cycle:
+                break
+            for extension_id in sorted(cycle):
+                active.pop(extension_id, None)
+                diagnostics.append(
+                    ExtensionDiagnostic(
+                        code="dependency_cycle",
+                        extension_id=extension_id,
+                        message=(
+                            "Extension dependency cycle contains: "
+                            + ", ".join(sorted(cycle))
+                        ),
+                    )
+                )
+        return active, diagnostics
+
+    @staticmethod
+    def _dependency_cycle(
+        active: dict[str, ExtensionCandidate],
+    ) -> set[str]:
+        state: dict[str, int] = {}
+        stack: list[str] = []
+        cycle: set[str] = set()
+
+        def visit(extension_id: str) -> None:
+            state[extension_id] = 1
+            stack.append(extension_id)
+            dependencies = (
+                dependency.name
+                for dependency in active[extension_id].manifest.dependencies
+                if not dependency.optional
+                and dependency.kind is DependencyKind.EXTENSION
+                and dependency.name in active
+            )
+            for dependency_id in sorted(dependencies):
+                if state.get(dependency_id, 0) == 0:
+                    visit(dependency_id)
+                elif state.get(dependency_id) == 1:
+                    cycle.update(stack[stack.index(dependency_id) :])
+            stack.pop()
+            state[extension_id] = 2
+
+        for extension_id in sorted(active):
+            if state.get(extension_id, 0) == 0:
+                visit(extension_id)
+        return cycle
+
+    @staticmethod
+    def _activation_order(
+        active: dict[str, ExtensionCandidate],
+    ) -> tuple[ExtensionCandidate, ...]:
+        ordered: list[ExtensionCandidate] = []
+        visited: set[str] = set()
+
+        def visit(extension_id: str) -> None:
+            if extension_id in visited:
+                return
+            visited.add(extension_id)
+            dependencies = (
+                dependency.name
+                for dependency in active[extension_id].manifest.dependencies
+                if dependency.kind is DependencyKind.EXTENSION
+                and dependency.name in active
+            )
+            for dependency_id in sorted(dependencies):
+                visit(dependency_id)
+            ordered.append(active[extension_id])
+
+        for extension_id in sorted(active):
+            visit(extension_id)
+        return tuple(ordered)
+
     def _resolve_contributions(
         self,
         active: dict[str, ExtensionCandidate],
@@ -209,20 +334,14 @@ class ExtensionRegistry:
                     resolved[key] = ResolvedContribution(contribution, candidate)
                     continue
                 existing_id = existing.owner.manifest.id
-                if (
-                    existing_id in contribution.replaces
-                    and candidate.scope >= existing.owner.scope
-                ):
-                    resolved[key] = ResolvedContribution(contribution, candidate)
-                    continue
                 diagnostics.append(
                     ExtensionDiagnostic(
                         code="contribution_conflict",
                         extension_id=candidate.manifest.id,
                         message=(
                             f"{contribution.kind.value} '{contribution.name}' is already "
-                            f"owned by extension '{existing_id}'; declare an explicit "
-                            "replacement from an equal or higher scope to override it"
+                            f"owned by extension '{existing_id}'; disable one owner "
+                            "before activating the other"
                         ),
                     )
                 )

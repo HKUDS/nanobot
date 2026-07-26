@@ -15,6 +15,7 @@ from nanobot.extensions.manifest import (
     ExtensionContribution,
     ExtensionDependency,
     ExtensionManifest,
+    ExtensionPermission,
     ExtensionRuntime,
 )
 
@@ -25,6 +26,16 @@ _OPENCLAW_CONTRACT_KINDS = {
     "imageGenerationProviders": ContributionKind.IMAGE_GENERATION_PROVIDER,
     "webSearchProviders": ContributionKind.WEB_SEARCH_PROVIDER,
 }
+_TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".cts", ".mts")
+_JITI_DEPENDENCY = ExtensionDependency(
+    kind=DependencyKind.NPM,
+    name="jiti",
+    specifier="^2.4.2",
+)
+_NODE_RUNTIME_PERMISSION = ExtensionPermission(
+    name="runtime.node",
+    reason="Run third-party JavaScript or TypeScript in a Node.js process.",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +75,8 @@ def _adapt_pi(package: dict[str, Any]) -> AdaptedPackage:
             version=str(package.get("version") or "0.0.0"),
             runtime=ExtensionRuntime.PI,
             entries=tuple(entries),
+            dependencies=(_JITI_DEPENDENCY,) if _has_typescript(entries) else (),
+            permissions=(_NODE_RUNTIME_PERMISSION,),
             description=str(package.get("description") or ""),
             homepage=_homepage(package),
             license=str(package.get("license") or ""),
@@ -103,6 +116,7 @@ def _adapt_openclaw(root: Path, package: dict[str, Any]) -> AdaptedPackage:
             entries=tuple(entries),
             contributions=contributions,
             dependencies=_openclaw_dependencies(package, openclaw),
+            permissions=(_NODE_RUNTIME_PERMISSION,),
             description=str(
                 plugin.get("description") or package.get("description") or ""
             ),
@@ -202,3 +216,7 @@ def _homepage(package: dict[str, Any]) -> str:
     if isinstance(repository, dict) and isinstance(repository.get("url"), str):
         return repository["url"]
     return ""
+
+
+def _has_typescript(entries: list[str]) -> bool:
+    return any(entry.lower().endswith(_TYPESCRIPT_SUFFIXES) for entry in entries)

@@ -1288,7 +1288,14 @@
     "permissionPending": "未授予",
     "revokePermissions": "撤銷權限",
     "grantPermissions": "授予權限",
-    "noPermissions": "未要求主機權限。",
+  "noPermissions": "未要求主機權限。",
+  "configManaged": "由設定管理。",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Node.js 執行環境",
+        "reason": "允許擴充套件在 Node.js 行程中執行第三方 JavaScript 或 TypeScript。"
+      }
+    },
     "revokeTrust": "撤銷信任",
     "trust": "信任",
     "disable": "停用",

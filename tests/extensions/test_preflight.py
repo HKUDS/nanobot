@@ -65,3 +65,22 @@ def test_installed_npm_dependency_satisfies_preflight(tmp_path: Path) -> None:
 
     assert candidates[0].enabled
     assert diagnostics == ()
+
+
+def test_npm_dist_tag_is_left_to_npm_resolution(tmp_path: Path) -> None:
+    package = tmp_path / "node_modules" / "openclaw"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text('{"version":"2026.7.1"}')
+    candidate = _candidate(
+        ExtensionDependency(
+            kind=DependencyKind.NPM,
+            name="openclaw",
+            specifier="latest",
+        ),
+        location=tmp_path,
+    )
+
+    candidates, diagnostics = evaluate_dependencies((candidate,))
+
+    assert candidates[0].enabled
+    assert diagnostics == ()

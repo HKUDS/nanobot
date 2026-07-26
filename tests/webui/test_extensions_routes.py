@@ -27,6 +27,10 @@ class _Service:
         self.calls.append(("install", (source, kind, ref, trusted)))
         return {"record": {"id": "sample"}}
 
+    async def set_trusted(self, extension_id, trusted):
+        self.calls.append(("trust", (extension_id, trusted)))
+        return {"record": {"id": extension_id}}
+
 
 def _router(
     service: _Service,
@@ -163,3 +167,21 @@ async def test_remote_install_policy_never_exposes_server_local_paths() -> None:
     assert service.calls == [
         ("install", ("pi-example", "npm", "", False)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_remote_install_policy_does_not_grant_remote_trust() -> None:
+    service = _Service()
+
+    response = await _router(service, allow_remote=True).dispatch(
+        _REMOTE,
+        _request(
+            "/api/extensions/trust",
+            method="POST",
+            values={"id": "sample"},
+        ),
+        "/api/extensions/trust",
+    )
+
+    assert response is not None and response.status_code == 403
+    assert service.calls == []

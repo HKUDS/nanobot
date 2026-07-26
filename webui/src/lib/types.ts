@@ -771,6 +771,7 @@ export interface ExtensionInfo {
   source_ref: string;
   integrity: string;
   installed_at: string;
+  managed_by_store: boolean;
   contributions: ExtensionContributionInfo[];
   dependencies: ExtensionDependencyInfo[];
   permissions: ExtensionPermissionInfo[];

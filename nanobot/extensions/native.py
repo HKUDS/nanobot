@@ -230,17 +230,19 @@ def _tool_candidates(tools: ToolRegistry) -> list[ExtensionCandidate]:
 
 
 def _command_candidates(commands: CommandRouter) -> list[ExtensionCandidate]:
-    grouped: dict[str, list[ExtensionContribution]] = defaultdict(list)
+    grouped: dict[str, dict[str, ExtensionContribution]] = defaultdict(dict)
     for _tier, command, owner in commands.registrations():
-        grouped[owner].append(
+        name = _identifier(command.lstrip("/").rstrip())
+        grouped[owner].setdefault(
+            name,
             ExtensionContribution(
                 kind=ContributionKind.COMMAND,
-                name=_identifier(command.lstrip("/").rstrip()),
+                name=name,
                 target=command,
-            )
+            ),
         )
     return [
-        _candidate(owner, owner, contributions)
+        _candidate(owner, owner, contributions.values())
         for owner, contributions in sorted(grouped.items())
     ]
 
@@ -259,7 +261,7 @@ def _candidate(
             id=_identifier(extension_id),
             name=name,
             version=__version__,
-            runtime=ExtensionRuntime.PYTHON,
+            runtime=ExtensionRuntime.DECLARATIVE,
             contributions=tuple(contributions),
             dependencies=dependencies,
         ),
@@ -276,17 +278,13 @@ def _python_dependencies(
     dependencies = []
     for raw in requirements:
         requirement = Requirement(raw)
-        name = requirement.name
-        if requirement.extras:
-            name += f"[{','.join(sorted(requirement.extras))}]"
-        specifier = str(requirement.specifier)
-        if requirement.marker:
-            specifier += f"; {requirement.marker}"
+        if requirement.marker and not requirement.marker.evaluate():
+            continue
         dependencies.append(
             ExtensionDependency(
                 kind=DependencyKind.PYTHON,
-                name=name,
-                specifier=specifier,
+                name=requirement.name,
+                specifier=str(requirement.specifier),
             )
         )
     return tuple(dependencies)
@@ -325,6 +323,9 @@ def _merge_candidates(
             location=existing.location or candidate.location,
             enabled=existing.enabled and candidate.enabled,
             trusted=existing.trusted and candidate.trusted,
+            integrity_valid=(
+                existing.integrity_valid and candidate.integrity_valid
+            ),
         )
     return tuple(
         sorted(

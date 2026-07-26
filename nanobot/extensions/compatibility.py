@@ -50,7 +50,8 @@ class RemoteTool(Tool):
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return self._registration.schema or {"type": "object", "properties": {}}
+        schema = self._registration.schema or {}
+        return {"type": "object", "properties": {}, **schema}
 
     @property
     def read_only(self) -> bool:

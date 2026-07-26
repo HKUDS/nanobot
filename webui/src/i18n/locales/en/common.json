@@ -1302,7 +1302,14 @@
     "permissionPending": "Not granted",
     "revokePermissions": "Revoke permissions",
     "grantPermissions": "Grant permissions",
-    "noPermissions": "No host permissions requested.",
+  "noPermissions": "No host permissions requested.",
+  "configManaged": "Managed by configuration.",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Node.js runtime",
+        "reason": "Run third-party JavaScript or TypeScript in a Node.js process."
+      }
+    },
     "revokeTrust": "Revoke trust",
     "trust": "Trust",
     "disable": "Disable",

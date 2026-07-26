@@ -285,9 +285,9 @@ The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
 form.
 
 Remote WebUI clients with a valid token can view and use Apps. Actions that
-install missing nanobot support packages, such as adding a channel dependency,
-are blocked by default. To let trusted remote administrators change the Python
-environment through the WebUI, opt in explicitly:
+install missing nanobot support packages or first-class extension packages are
+blocked by default. To let trusted remote administrators place packages into
+this nanobot installation through the WebUI, opt in explicitly:
 
 ```json
 {
@@ -298,12 +298,14 @@ environment through the WebUI, opt in explicitly:
 ```
 
 Use this only for a private deployment where every authenticated WebUI user is
-trusted to change the Python environment that nanobot runs in. If you publish
-the WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it
-as remote access and leave package installs disabled unless that is intentional.
+trusted to change the nanobot installation. A remotely installed extension
+remains untrusted and inactive: trust, permission grants, activation, disabling,
+and removal stay restricted to a browser on the nanobot host. If you publish the
+WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it as
+remote access and leave package installs disabled unless that is intentional.
 
 Optional feature installs use pip's configured package index, including
-`PIP_INDEX_URL`.
+`PIP_INDEX_URL`. Extension packages use their declared Git or npm source.
 
 Leave remote package installs disabled when the WebUI is exposed beyond a
 private, trusted network.

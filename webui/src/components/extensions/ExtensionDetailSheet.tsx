@@ -52,7 +52,8 @@ export function ExtensionDetailSheet({
   const [uninstallOpen, setUninstallOpen] = useState(false);
   if (!extension) return null;
 
-  const external = extension.scope !== "builtin";
+  const configManaged =
+    extension.scope !== "builtin" && !extension.managed_by_store;
   const requested = new Set(extension.requested_permissions);
   const granted = new Set(extension.granted_permissions);
   const allGranted = [...requested].every((permission) => granted.has(permission));
@@ -137,11 +138,15 @@ export function ExtensionDetailSheet({
                       >
                         <div className="min-w-0">
                           <div className="text-[13px] font-medium text-foreground">
-                            {permission.name}
+                            {permission.name === "runtime.node"
+                              ? t("extensions.knownPermissions.runtimeNode.label")
+                              : permission.name}
                           </div>
                           {permission.reason ? (
                             <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                              {permission.reason}
+                              {permission.name === "runtime.node"
+                                ? t("extensions.knownPermissions.runtimeNode.reason")
+                                : permission.reason}
                             </p>
                           ) : null}
                         </div>
@@ -159,7 +164,7 @@ export function ExtensionDetailSheet({
                         </span>
                       </div>
                     ))}
-                    {external ? (
+                    {extension.managed_by_store ? (
                       <Button
                         variant="outline"
                         size="sm"
@@ -207,7 +212,7 @@ export function ExtensionDetailSheet({
             </div>
           </div>
 
-          {external ? (
+          {extension.managed_by_store ? (
             <div className="flex flex-wrap items-center gap-2 border-t border-border/45 bg-background/95 px-5 py-4">
               <Button
                 size="sm"
@@ -251,6 +256,10 @@ export function ExtensionDetailSheet({
               >
                 <Trash2 className="h-4 w-4" aria-hidden />
               </Button>
+            </div>
+          ) : configManaged ? (
+            <div className="border-t border-border/45 bg-background/95 px-5 py-4 text-[12px] text-muted-foreground">
+              {t("extensions.configManaged")}
             </div>
           ) : null}
         </SheetContent>

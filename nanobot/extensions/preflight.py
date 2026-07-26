@@ -9,21 +9,15 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.version import InvalidVersion, Version
-
 from nanobot.extensions.manifest import DependencyKind, ExtensionDependency
 from nanobot.extensions.registry import ExtensionCandidate, ExtensionDiagnostic
+from nanobot.extensions.versioning import dependency_version_failure
 
 
 def evaluate_dependencies(
     candidates: tuple[ExtensionCandidate, ...],
 ) -> tuple[tuple[ExtensionCandidate, ...], tuple[ExtensionDiagnostic, ...]]:
     """Disable candidates with missing hard dependencies and explain why."""
-    available = {
-        candidate.manifest.id: candidate.manifest.version
-        for candidate in candidates
-    }
     checked: list[ExtensionCandidate] = []
     diagnostics: list[ExtensionDiagnostic] = []
     for candidate in candidates:
@@ -35,7 +29,6 @@ def evaluate_dependencies(
                 message := _dependency_failure(
                     dependency,
                     location=candidate.location,
-                    extensions=available,
                 )
             )
         ]
@@ -57,7 +50,6 @@ def _dependency_failure(
     dependency: ExtensionDependency,
     *,
     location: Path | None,
-    extensions: dict[str, str],
 ) -> str:
     if dependency.kind is DependencyKind.EXECUTABLE:
         if shutil.which(dependency.name) is None:
@@ -72,17 +64,19 @@ def _dependency_failure(
             version = importlib.metadata.version(dependency.name)
         except importlib.metadata.PackageNotFoundError:
             return f"Required Python package is not installed: {dependency.name}"
-        return _version_failure(dependency, version, "Python package")
+        return dependency_version_failure(dependency, version, "Python package")
     if dependency.kind is DependencyKind.NPM:
         version = _npm_version(location, dependency.name)
         if version is None:
             return f"Required npm package is not installed: {dependency.name}"
-        return _version_failure(dependency, version, "npm package")
+        # npm resolved the declared range while installing the package. Re-parsing
+        # npm semver here with Python's PEP 440 rules rejects valid ranges such as
+        # "latest", "^1.0.0", and "~2.3".
+        return ""
     if dependency.kind is DependencyKind.EXTENSION:
-        version = extensions.get(dependency.name)
-        if version is None:
-            return f"Required extension is not installed: {dependency.name}"
-        return _version_failure(dependency, version, "extension")
+        # Extension dependencies are evaluated after policy selection so an
+        # installed but inactive package cannot satisfy an activation prerequisite.
+        return ""
     return f"Unsupported dependency kind: {dependency.kind.value}"
 
 
@@ -96,25 +90,3 @@ def _npm_version(location: Path | None, name: str) -> str | None:
         return None
     version = value.get("version") if isinstance(value, dict) else None
     return version if isinstance(version, str) else None
-
-
-def _version_failure(
-    dependency: ExtensionDependency,
-    version: str,
-    label: str,
-) -> str:
-    if not dependency.specifier:
-        return ""
-    try:
-        matches = Version(version) in SpecifierSet(dependency.specifier)
-    except (InvalidSpecifier, InvalidVersion):
-        return (
-            f"{label} {dependency.name} has an unsupported version constraint: "
-            f"{dependency.specifier}"
-        )
-    if matches:
-        return ""
-    return (
-        f"{label} {dependency.name} {version} does not satisfy "
-        f"{dependency.specifier}"
-    )

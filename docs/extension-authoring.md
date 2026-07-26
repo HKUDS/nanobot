@@ -105,9 +105,10 @@ command
 webui
 ```
 
-Each contribution has a stable `name`, optional runtime `target`, optional
-`description`, and optional `replaces` list. `replaces` contains extension IDs,
-not contribution names. Replacement is still checked against scope precedence.
+Each contribution has a stable `name`, optional runtime `target`, and optional
+`description`. Two active extensions cannot own the same contribution name.
+Disable one owner before activating the other; v1 deliberately does not allow
+extensions to replace core or third-party registrations.
 
 The manifest declares ownership. It does not create an implementation by
 itself. A runtime must register the corresponding native capability.
@@ -120,7 +121,7 @@ itself. A runtime must register the corresponding native capability.
 | `npm` | Package under the extension's `node_modules` | npm installation constraint |
 | `executable` | Command on `PATH` | No version probe |
 | `environment` | Environment variable | Must be non-empty |
-| `extension` | Another extension ID | Installed extension version |
+| `extension` | Another extension ID | Active extension version |
 
 Set `optional: true` when the extension can activate without the dependency.
 Do not put API keys in the manifest.
@@ -132,8 +133,9 @@ Permission names are lowercase namespaced identifiers such as
 reason the user can evaluate. Activation requires every requested permission to
 be granted.
 
-Permissions describe host policy; they are not an OS sandbox. Keep the request
-set minimal and use native host operations when one exists.
+Permissions are review and activation gates; they do not constrain direct
+Python or Node process access and are not an OS sandbox. Keep the request set
+minimal and use native host operations when one exists.
 
 ## Native Python Runtime
 
@@ -201,6 +203,10 @@ Compatibility packages use their upstream metadata and keyword:
 - OpenClaw: `openclaw-plugin` plus `openclaw.extensions` or
   `openclaw.runtimeExtensions`
 
+The adapter adds the `runtime.node` permission to both generated manifests.
+Users must explicitly grant it before any third-party JavaScript or TypeScript
+entry runs.
+
 Native Python packages can be installed from a local directory or Git source.
 The market is an index; installation always passes through local validation,
 dependency checks, permission review, trust, and activation.
@@ -240,6 +246,9 @@ upstream API.
 The sidecar supports `registerTool`, `registerCommand`, and selected `on(...)`
 lifecycle handlers. TypeScript uses Node's native type stripping when
 available, with `jiti` as a fallback installed with the package runtime.
+Required `peerDependencies` are installed into that runtime as well; peers
+marked optional in `peerDependenciesMeta` remain optional.
+The generated manifest requests `runtime.node`.
 
 ### OpenClaw package shape
 
@@ -257,6 +266,7 @@ available, with `jiti` as a fallback installed with the package runtime.
 If present, `openclaw.plugin.json` supplies catalog identity, contribution
 contracts, command aliases, and compatibility diagnostics. The OpenClaw
 `register` function must complete synchronously during load.
+The generated manifest requests `runtime.node`.
 
 ## Test an Extension
 
@@ -274,7 +284,9 @@ nanobot agent -m "Use review_code on README.md"
 Also test:
 
 - install while untrusted does not execute code;
+- package changes after installation revoke effective trust;
 - missing hard dependencies leave the package inactive;
+- extension dependencies activate before their dependents and reject cycles;
 - denied or missing permissions prevent activation;
 - duplicate contribution names become diagnostics;
 - disable, untrust, reload, and uninstall remove runtime registrations;

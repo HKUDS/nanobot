@@ -1288,7 +1288,14 @@
     "permissionPending": "Chưa cấp",
     "revokePermissions": "Thu hồi quyền",
     "grantPermissions": "Cấp quyền",
-    "noPermissions": "Không yêu cầu quyền máy chủ.",
+  "noPermissions": "Không yêu cầu quyền máy chủ.",
+  "configManaged": "Được quản lý bằng cấu hình.",
+    "knownPermissions": {
+      "runtimeNode": {
+        "label": "Môi trường chạy Node.js",
+        "reason": "Chạy JavaScript hoặc TypeScript của bên thứ ba trong tiến trình Node.js."
+      }
+    },
     "revokeTrust": "Thu hồi tin cậy",
     "trust": "Tin cậy",
     "disable": "Tắt",

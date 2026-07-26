@@ -37,9 +37,7 @@ _MANIFEST_KEYS = frozenset(
         "license",
     }
 )
-_CONTRIBUTION_KEYS = frozenset(
-    {"kind", "name", "target", "description", "replaces"}
-)
+_CONTRIBUTION_KEYS = frozenset({"kind", "name", "target", "description"})
 _DEPENDENCY_KEYS = frozenset({"kind", "name", "specifier", "optional"})
 _PERMISSION_KEYS = frozenset({"name", "reason"})
 
@@ -122,7 +120,6 @@ def manifest_to_mapping(manifest: ExtensionManifest) -> dict[str, Any]:
                 "name": item.name,
                 "target": item.target,
                 "description": item.description,
-                "replaces": list(item.replaces),
             }
             for item in manifest.contributions
         ],
@@ -151,9 +148,6 @@ def _contribution_from_mapping(data: object) -> ExtensionContribution:
             name=mapping["name"],
             target=mapping.get("target", ""),
             description=mapping.get("description", ""),
-            replaces=tuple(
-                _sequence(mapping.get("replaces", ()), "contribution replaces")
-            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ManifestFormatError(f"invalid extension contribution: {exc}") from exc
