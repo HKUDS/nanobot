@@ -16,6 +16,13 @@ def _int_or_zero(value: Any) -> int:
     return 0 if value is None or value == "" else int(value)
 
 
+def _optional_int(value: Any) -> int | None:
+    """Coerce a stored JSON numeric; null/blank stays None."""
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
 @dataclass
 class TriggerRunRecord:
     """A single local trigger delivery record."""
@@ -77,7 +84,7 @@ class LocalTrigger:
             origin_metadata=dict(_get(data, "originMetadata", "origin_metadata", {}) or {}),
             created_at_ms=_int_or_zero(_get(data, "createdAtMs", "created_at_ms", 0)),
             updated_at_ms=_int_or_zero(_get(data, "updatedAtMs", "updated_at_ms", 0)),
-            last_run_at_ms=_get(data, "lastRunAtMs", "last_run_at_ms"),
+            last_run_at_ms=_optional_int(_get(data, "lastRunAtMs", "last_run_at_ms")),
             last_status=_get(data, "lastStatus", "last_status"),  # type: ignore[arg-type]
             last_error=_get(data, "lastError", "last_error"),
             run_history=history,
