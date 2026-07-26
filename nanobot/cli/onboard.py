@@ -1612,6 +1612,13 @@ def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderI
     return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
 
 
+def _quick_start_codex_proxy(config: Config) -> str | None:
+    """Resolve only the Codex proxy without validating unrelated provider secrets."""
+    proxy_config = Config()
+    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
+    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+
+
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
     """Authenticate an OAuth provider supported by Quick Start."""
     if provider_name != "openai_codex":
@@ -1625,7 +1632,7 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
         return False
 
     try:
-        proxy = resolve_config_env_vars(config).providers.openai_codex.proxy or None
+        proxy = _quick_start_codex_proxy(config)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         return False
@@ -1662,7 +1669,7 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
     try:
         from oauth_cli_kit import get_token
 
-        proxy = resolve_config_env_vars(config).providers.openai_codex.proxy or None
+        proxy = _quick_start_codex_proxy(config)
         token = get_token(proxy=proxy)
     except Exception:
         return False

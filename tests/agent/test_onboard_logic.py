@@ -1066,10 +1066,19 @@ class TestMainMenuUpdate:
         import oauth_cli_kit
 
         config = Config()
+        config.providers.openai.api_key = "${UNRELATED_MISSING_KEY}"
+        config.providers.openai_codex.proxy = "${CODEX_PROXY}"
         token = SimpleNamespace(access="existing-token", account_id="account-123")
+        token_proxies: list[str | None] = []
         login_calls: list[object] = []
 
-        monkeypatch.setattr(oauth_cli_kit, "get_token", lambda **kwargs: token)
+        monkeypatch.setenv("CODEX_PROXY", "http://127.0.0.1:8080")
+        monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
+        monkeypatch.setattr(
+            oauth_cli_kit,
+            "get_token",
+            lambda **kwargs: token_proxies.append(kwargs.get("proxy")) or token,
+        )
         monkeypatch.setattr(
             oauth_cli_kit,
             "login_oauth_interactive",
@@ -1078,7 +1087,28 @@ class TestMainMenuUpdate:
         monkeypatch.setattr(onboard_wizard.console, "print", lambda *args, **kwargs: None)
 
         assert onboard_wizard._quick_start_oauth_login(config, "openai_codex") is True
+        assert token_proxies == ["http://127.0.0.1:8080"]
         assert login_calls == []
+        assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
+        assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
+
+    def test_quick_start_codex_auth_check_ignores_unrelated_missing_env(self, monkeypatch):
+        """OAuth readiness should depend only on the Codex proxy and token."""
+        import oauth_cli_kit
+
+        config = Config()
+        config.providers.anthropic.api_key = "${UNRELATED_MISSING_KEY}"
+        monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
+        monkeypatch.setattr(
+            oauth_cli_kit,
+            "get_token",
+            lambda **kwargs: SimpleNamespace(access="existing-token"),
+        )
+
+        assert (
+            onboard_wizard._quick_start_oauth_is_authenticated(config, "openai_codex")
+            is True
+        )
 
     def test_quick_start_summary_reports_missing_codex_oauth(self, monkeypatch):
         """The review step should distinguish OAuth from an API-key setup."""
