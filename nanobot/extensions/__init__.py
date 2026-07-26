@@ -20,6 +20,13 @@ from nanobot.extensions.manifest import (
     ExtensionRuntime,
 )
 from nanobot.extensions.native import discover_native_extensions
+from nanobot.extensions.node_host import NodeSidecar
+from nanobot.extensions.protocol import (
+    NODE_PROTOCOL_VERSION,
+    NodeLoadResult,
+    NodeProtocolError,
+    NodeRegistration,
+)
 from nanobot.extensions.registry import (
     ExtensionCandidate,
     ExtensionDiagnostic,
@@ -48,6 +55,11 @@ __all__ = [
     "ExtensionSnapshot",
     "MANIFEST_FILENAME",
     "ManifestFormatError",
+    "NODE_PROTOCOL_VERSION",
+    "NodeLoadResult",
+    "NodeProtocolError",
+    "NodeRegistration",
+    "NodeSidecar",
     "ResolvedContribution",
     "build_extension_catalog",
     "dump_manifest",
