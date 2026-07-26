@@ -142,6 +142,9 @@ async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) 
     call = fake.calls[0]
     assert call["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert call["headers"]["Authorization"] == "Bearer sk-or-test"
+    assert call["headers"]["HTTP-Referer"] == "https://nanobot.wiki"
+    assert call["headers"]["X-OpenRouter-Title"] == "nanobot"
+    assert call["headers"]["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert call["headers"]["X-Test"] == "1"
     body = call["json"]
     assert body["modalities"] == ["image", "text"]

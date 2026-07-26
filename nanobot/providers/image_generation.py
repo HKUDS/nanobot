@@ -14,14 +14,10 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from nanobot.providers.openrouter_attribution import OPENROUTER_ATTRIBUTION_HEADERS
 from nanobot.providers.registry import find_by_name
 from nanobot.utils.helpers import detect_image_mime
 
-_OPENROUTER_ATTRIBUTION_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
-    "X-OpenRouter-Title": "nanobot",
-    "X-OpenRouter-Categories": "cli-agent,personal-agent",
-}
 _DEFAULT_TIMEOUT_S = 120.0
 _AIHUBMIX_TIMEOUT_S = 300.0
 _AIHUBMIX_ASPECT_RATIO_SIZES = {
@@ -305,7 +301,7 @@ class OpenRouterImageGenerationClient(ImageGenerationProvider):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            **_OPENROUTER_ATTRIBUTION_HEADERS,
+            **OPENROUTER_ATTRIBUTION_HEADERS,
             **self.extra_headers,
         }
         url = f"{self.api_base}/chat/completions"
