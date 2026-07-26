@@ -148,6 +148,7 @@ def test_blocks_sampled_addresses_from_internal_networks():
         "169.254.0.0/16",
         "172.16.0.0/12",
         "192.168.0.0/16",
+        "::/128",
         "::1/128",
         "fc00::/7",
         "fe80::/10",
