@@ -1290,18 +1290,25 @@ describe("ThreadViewport", () => {
         isStreaming={false}
         composer={<div>composer</div>}
         emptyState={<div>welcome</div>}
+        emptyStateBackground={<div data-testid="welcome-background" />}
       />,
     );
 
     const layout = screen.getByTestId("thread-welcome-layout");
     expect(layout).toHaveClass("thread-layout", "grid");
     expect(layout).toHaveAttribute("data-layout", "hero");
+    expect(screen.getByTestId("welcome-background").parentElement).toHaveClass(
+      "z-20",
+    );
     expect(screen.getByText("welcome").parentElement).toHaveClass(
       "min-h-0",
       "items-center",
+      "pointer-events-none",
       "sm:items-end",
       "sm:pb-8",
+      "z-30",
     );
+    expect(screen.getByTestId("thread-composer-dock")).toHaveClass("z-30");
     expect(screen.getByTestId("thread-composer-motion")).toContainElement(
       screen.getByText("composer"),
     );
