@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -538,3 +539,33 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+def test_history_skips_non_dict_jsonl_lines(tmp_path: Path) -> None:
+    """Null/list/bool history lines must not crash reads or appends."""
+    memory = MemoryStore(tmp_path)
+    memory.history_file.parent.mkdir(parents=True, exist_ok=True)
+    memory.history_file.write_text(
+        "\n".join([
+            "null",
+            "[1, 2]",
+            "true",
+            json.dumps({
+                "cursor": 1,
+                "timestamp": "2026-01-01T00:00:00",
+                "content": "kept",
+                "session_key": "cli:t",
+            }),
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    entries = memory.read_unprocessed_history(since_cursor=0)
+    assert entries == [{
+        "cursor": 1,
+        "timestamp": "2026-01-01T00:00:00",
+        "content": "kept",
+        "session_key": "cli:t",
+    }]
+    next_cursor = memory.append_history("next", session_key="cli:t")
+    assert next_cursor == 2
