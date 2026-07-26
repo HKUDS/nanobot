@@ -180,10 +180,10 @@ class TestSessionTTLConfig:
         assert data["idleCompactAfterMinutes"] == 30
         assert "sessionTtlMinutes" not in data
 
-    def test_idle_scan_interval_defaults_to_zero(self):
-        """The default should preserve a scan on every idle tick."""
+    def test_idle_scan_interval_defaults_to_sixty_seconds(self):
+        """The config default should avoid scanning all sessions every idle tick."""
         defaults = AgentDefaults()
-        assert defaults.idle_compact_check_interval_seconds == 0
+        assert defaults.idle_compact_check_interval_seconds == 60
 
     def test_idle_scan_interval_uses_camel_case_config_key(self):
         """The JSON config should use the standard camelCase alias."""
@@ -226,8 +226,8 @@ class TestIdleScanThrottling:
 
         assert loop.auto_compact.check_expired.call_count == 2
 
-    def test_default_idle_scan_interval_checks_every_tick(self, tmp_path, monkeypatch):
-        """The zero default should leave each idle tick eligible to scan."""
+    def test_zero_idle_scan_interval_checks_every_tick(self, tmp_path, monkeypatch):
+        """An explicit zero should leave each idle tick eligible to scan."""
         monkeypatch.setattr("nanobot.agent.loop.time.monotonic", lambda: 1_000.0)
         loop = _make_loop(tmp_path)
         loop.auto_compact.check_expired = MagicMock()
