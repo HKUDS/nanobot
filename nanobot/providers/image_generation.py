@@ -161,7 +161,10 @@ async def _download_image_data_url(
             current_url = url
             for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
                 if proxy:
-                    ok, error, _ = resolve_url_target(current_url)
+                    ok, error, _ = resolve_url_target(
+                        current_url,
+                        trust_remote_dns=True,
+                    )
                     if not ok:
                         raise ImageGenerationError(
                             f"blocked unsafe generated image URL: {error}"

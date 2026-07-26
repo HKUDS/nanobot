@@ -139,13 +139,13 @@ class _StreamContext:
 
 
 @pytest.mark.asyncio
-async def test_generated_image_download_uses_explicit_provider_proxy(
+async def test_generated_image_download_delegates_unresolved_host_to_provider_proxy(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        "nanobot.security.network.socket.getaddrinfo",
-        _resolve_public,
-    )
+    def fail_local_dns(host: str, port: int | None, *args, **kwargs):
+        raise socket.gaierror(f"cannot resolve {host}")
+
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", fail_local_dns)
     captured: dict[str, object] = {}
 
     class FakeAsyncClient:
@@ -167,12 +167,12 @@ async def test_generated_image_download_uses_explicit_provider_proxy(
     proxy = "http://127.0.0.1:23458"
 
     result = await _download_image_data_url(
-        "https://cdn.example/image.png",
+        "https://proxy-only.example/image.png",
         proxy=proxy,
     )
 
     assert result.startswith("data:image/png;base64,")
-    assert captured["request"] == ("GET", "https://cdn.example/image.png")
+    assert captured["request"] == ("GET", "https://proxy-only.example/image.png")
     assert captured["kwargs"] == {
         "follow_redirects": False,
         "timeout": image_generation._DEFAULT_TIMEOUT_S,
