@@ -24,6 +24,17 @@ from nanobot.security.network import validate_resolved_url, validate_url_target
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
+_DINGTALK_MARKDOWN_INLINE_SPECIALS = frozenset(r"\`*_{}[]()<>#+-.!|~")
+_DINGTALK_SENDER_NAME_MAX_CHARS = 80
+
+
+def _escape_markdown_sender_name(value: str) -> str:
+    """Render an untrusted display name as one bounded Markdown-safe line."""
+    normalized = " ".join(value.split())[:_DINGTALK_SENDER_NAME_MAX_CHARS]
+    return "".join(
+        f"\\{char}" if char in _DINGTALK_MARKDOWN_INLINE_SPECIALS else char
+        for char in normalized
+    )
 
 try:
     from dingtalk_stream import (
@@ -719,8 +730,13 @@ class DingTalkChannel(BaseChannel):
             # sender so the addressed user can spot the reply. Visual only —
             # DingTalk's markdown robot messages do not push real @ notifications.
             sender_name = msg.metadata.get("sender_name") if msg.metadata else None
-            if msg.chat_id.startswith("group:") and sender_name:
-                content = f"# @{sender_name}\n\n{content}"
+            safe_sender_name = (
+                _escape_markdown_sender_name(sender_name)
+                if isinstance(sender_name, str)
+                else ""
+            )
+            if msg.chat_id.startswith("group:") and safe_sender_name:
+                content = f"# @{safe_sender_name}\n\n{content}"
             if not await self._send_markdown_text(token, msg.chat_id, content):
                 raise RuntimeError("DingTalk text message was not delivered")
 
@@ -741,7 +757,7 @@ class DingTalkChannel(BaseChannel):
     async def _on_message(
         self,
         content: str,
-        sender_id: str,
+        sender_id: str | None,
         sender_name: str,
         conversation_type: str | None = None,
         conversation_id: str | None = None,
@@ -753,6 +769,9 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             self.logger.info("inbound: {} from {}", content, sender_name)
+            if not sender_id:
+                self.logger.warning("dropping DingTalk message without a sender ID")
+                return
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
             session_key = None
@@ -768,7 +787,7 @@ class DingTalkChannel(BaseChannel):
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
-                        chat_id=str(chat_id),  # str() guards a None sender_id
+                        chat_id=chat_id,
                         content="该机器人未开启私聊，请在群聊中与我对话。",
                     )
                 )
