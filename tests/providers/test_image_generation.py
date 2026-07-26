@@ -102,6 +102,22 @@ class CodexStreamingCompleteThenErrorResponse(FakeResponse):
         )
 
 
+@pytest.fixture(autouse=True)
+def generated_image_downloads(monkeypatch) -> list[str]:
+    """Keep provider response parsing tests independent from outbound HTTP."""
+    urls: list[str] = []
+
+    async def download(url: str) -> str:
+        urls.append(url)
+        return PNG_DATA_URL
+
+    monkeypatch.setattr(
+        "nanobot.providers.image_generation._download_image_data_url",
+        download,
+    )
+    return urls
+
+
 @pytest.mark.asyncio
 async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) -> None:
     ref = tmp_path / "ref.png"
@@ -277,7 +293,9 @@ async def test_aihubmix_image_edit_payload_uses_reference_images(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_aihubmix_image_generation_downloads_url_response() -> None:
+async def test_aihubmix_image_generation_downloads_url_response(
+    generated_image_downloads: list[str],
+) -> None:
     fake = FakeClient(FakeResponse({"data": [{"url": "https://cdn.example/image.png"}]}))
     fake.get_response = FakeResponse({}, content=PNG_BYTES)
     client = AIHubMixImageGenerationClient(
@@ -288,7 +306,7 @@ async def test_aihubmix_image_generation_downloads_url_response() -> None:
     response = await client.generate(prompt="draw", model="gpt-image-2-free")
 
     assert response.images[0].startswith("data:image/png;base64,")
-    assert fake.get_calls[0]["url"] == "https://cdn.example/image.png"
+    assert generated_image_downloads == ["https://cdn.example/image.png"]
 
 
 @pytest.mark.asyncio
@@ -818,7 +836,7 @@ async def test_openai_b64_json_response_uses_detected_mime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_url_download_fallback() -> None:
+async def test_openai_url_download_fallback(generated_image_downloads: list[str]) -> None:
     fake = FakeClient(FakeResponse({"data": [{"url": "https://cdn.example/image.png"}]}))
     fake.get_response = FakeResponse({}, content=PNG_BYTES)
     client = OpenAIImageGenerationClient(
@@ -829,7 +847,7 @@ async def test_openai_url_download_fallback() -> None:
     response = await client.generate(prompt="draw", model="dall-e-3")
 
     assert response.images[0].startswith("data:image/png;base64,")
-    assert fake.get_calls[0]["url"] == "https://cdn.example/image.png"
+    assert generated_image_downloads == ["https://cdn.example/image.png"]
 
 
 @pytest.mark.asyncio
@@ -1192,7 +1210,9 @@ async def test_custom_generate_maps_one_k_to_openai_dimension() -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_generate_extra_body_can_override_defaults() -> None:
+async def test_custom_generate_extra_body_can_override_defaults(
+    generated_image_downloads: list[str],
+) -> None:
     fake = FakeClient(FakeResponse({"data": [{"url": "https://images.example/cat.png"}]}))
     fake.get_response = FakeResponse({}, content=PNG_BYTES)
     client = CustomImageGenerationClient(
@@ -1208,9 +1228,8 @@ async def test_custom_generate_extra_body_can_override_defaults() -> None:
         image_size="1K",
     )
 
-    expected_data_url = f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('ascii')}"
-    assert response.images == [expected_data_url]
-    assert fake.get_calls[0]["url"] == "https://images.example/cat.png"
+    assert response.images == [PNG_DATA_URL]
+    assert generated_image_downloads == ["https://images.example/cat.png"]
     body = fake.calls[0]["json"]
     assert body["response_format"] == "url"
     assert body["size"] == "2K"
@@ -1616,7 +1635,9 @@ async def test_zhipu_image_generation_with_explicit_size() -> None:
 
 
 @pytest.mark.asyncio
-async def test_zhipu_image_generation_downloads_url_response() -> None:
+async def test_zhipu_image_generation_downloads_url_response(
+    generated_image_downloads: list[str],
+) -> None:
     fake = FakeClient(FakeResponse({"data": [{"url": "https://cdn.example/image.png"}]}))
     fake.get_response = FakeResponse({}, content=PNG_BYTES)
     client = ZhipuImageGenerationClient(
@@ -1627,7 +1648,7 @@ async def test_zhipu_image_generation_downloads_url_response() -> None:
     response = await client.generate(prompt="draw", model="glm-image")
 
     assert response.images[0].startswith("data:image/png;base64,")
-    assert fake.get_calls[0]["url"] == "https://cdn.example/image.png"
+    assert generated_image_downloads == ["https://cdn.example/image.png"]
 
 
 @pytest.mark.asyncio
