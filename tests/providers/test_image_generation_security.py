@@ -28,8 +28,13 @@ def _resolve_public(host: str, port: int | None, *args, **kwargs):
     ]
 
 
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1/admin", "http://[::]/admin"],
+    ids=["ipv4-loopback", "ipv6-unspecified"],
+)
 @pytest.mark.asyncio
-async def test_generated_image_download_blocks_private_target() -> None:
+async def test_generated_image_download_blocks_unsafe_target(url: str) -> None:
     requested = False
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -39,7 +44,7 @@ async def test_generated_image_download_blocks_private_target() -> None:
 
     with pytest.raises(ImageGenerationError, match="blocked unsafe generated image URL"):
         await _download_image_data_url(
-            "http://127.0.0.1/admin",
+            url,
             transport=httpx.MockTransport(handler),
         )
 
