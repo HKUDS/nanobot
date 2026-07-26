@@ -166,6 +166,13 @@ class CompatibleExtension:
         for item in self.result.registrations:
             if item.kind != "command":
                 continue
+            command = f"/{item.name}"
+            for tier, value in (("exact", command), ("prefix", f"{command} ")):
+                existing = router.owner(tier, value)
+                if existing and existing != self.owner:
+                    raise ValueError(
+                        f"command '{command}' is already registered by '{existing}'"
+                    )
 
             async def handler(ctx: CommandContext, name: str = item.name) -> OutboundMessage | None:
                 result = await self.host.request(
@@ -192,7 +199,6 @@ class CompatibleExtension:
                     content=text,
                 )
 
-            command = f"/{item.name}"
             router.exact(command, handler, owner=self.owner)
             router.prefix(f"{command} ", handler, owner=self.owner)
 

@@ -104,6 +104,25 @@ class CommandRouter:
             for (tier, command), owner in sorted(self._owners.items())
         )
 
+    def owner(self, tier: str, command: str) -> str | None:
+        """Return the extension that owns one command registration."""
+        return self._owners.get((tier, command))
+
+    def unregister_owner(self, owner: str) -> None:
+        """Remove all command tiers registered by one extension."""
+        for (tier, command), registered_owner in list(self._owners.items()):
+            if registered_owner != owner:
+                continue
+            if tier == "priority":
+                self._priority.pop(command, None)
+            elif tier == "exact":
+                self._exact.pop(command, None)
+            else:
+                self._prefix = [
+                    item for item in self._prefix if item[0] != command
+                ]
+            self._owners.pop((tier, command), None)
+
     def is_priority(self, text: str) -> bool:
         return normalize_command_text(text).lower() in self._priority
 

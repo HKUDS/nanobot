@@ -40,6 +40,14 @@ class ToolRegistry:
         self._owners.pop(name, None)
         self._cached_definitions = None
 
+    def unregister_owner(self, owner: str) -> None:
+        """Remove all tools registered by one extension."""
+        for name in [
+            name for name, registered_owner in self._owners.items()
+            if registered_owner == owner
+        ]:
+            self.unregister(name)
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)

@@ -36,6 +36,12 @@ from nanobot.extensions.registry import (
     ExtensionSnapshot,
     ResolvedContribution,
 )
+from nanobot.extensions.runtime import (
+    ActivatedExtension,
+    ActivationResult,
+    ExtensionRuntimeManager,
+    PythonExtensionApi,
+)
 
 __all__ = [
     "EXTENSION_API_VERSION",
@@ -51,6 +57,7 @@ __all__ = [
     "ExtensionPolicy",
     "ExtensionRegistry",
     "ExtensionRuntime",
+    "ExtensionRuntimeManager",
     "ExtensionScope",
     "ExtensionSnapshot",
     "MANIFEST_FILENAME",
@@ -60,6 +67,9 @@ __all__ = [
     "NodeProtocolError",
     "NodeRegistration",
     "NodeSidecar",
+    "ActivatedExtension",
+    "ActivationResult",
+    "PythonExtensionApi",
     "ResolvedContribution",
     "build_extension_catalog",
     "dump_manifest",

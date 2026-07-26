@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 EXTENSION_API_VERSION = 1
 
@@ -116,6 +117,7 @@ class ExtensionManifest:
     name: str
     version: str
     runtime: ExtensionRuntime
+    entry: str = ""
     contributions: tuple[ExtensionContribution, ...] = ()
     description: str = ""
     dependencies: tuple[ExtensionDependency, ...] = ()
@@ -130,6 +132,12 @@ class ExtensionManifest:
         _require_text(self.version, "extension version")
         if not isinstance(self.runtime, ExtensionRuntime):
             raise TypeError("extension runtime must be an ExtensionRuntime")
+        if not isinstance(self.entry, str):
+            raise TypeError("extension entry must be a string")
+        if self.entry and Path(self.entry).is_absolute():
+            raise ValueError("extension entry must be relative to the package root")
+        if self.entry and ".." in Path(self.entry).parts:
+            raise ValueError("extension entry cannot escape the package root")
         if self.api_version != EXTENSION_API_VERSION:
             raise ValueError(
                 f"unsupported extension API version {self.api_version}; "
