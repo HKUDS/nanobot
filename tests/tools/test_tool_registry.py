@@ -108,6 +108,16 @@ def test_suggest_name_updates_after_register_and_unregister() -> None:
     assert registry._suggest_name("read-file") == "readFile"
 
 
+def test_registry_tracks_and_removes_tool_owner() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("custom"), owner="acme.tools")
+
+    assert registry.owner("custom") == "acme.tools"
+
+    registry.unregister("custom")
+    assert registry.owner("custom") is None
+
+
 def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))

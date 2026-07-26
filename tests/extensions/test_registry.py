@@ -16,6 +16,7 @@ def _candidate(
     scope: ExtensionScope,
     contribution_name: str = "",
     replaces: tuple[str, ...] = (),
+    trusted: bool = True,
 ) -> ExtensionCandidate:
     contributions = (
         ExtensionContribution(
@@ -33,6 +34,7 @@ def _candidate(
             contributions=contributions,
         ),
         scope=scope,
+        trusted=trusted,
     )
 
 
@@ -73,6 +75,23 @@ def test_policy_filters_extensions_before_contribution_resolution() -> None:
     assert [
         contribution.contribution.name for contribution in snapshot.contributions
     ] == ["allowed_tool"]
+
+
+def test_untrusted_external_extension_is_visible_to_discovery_but_not_active() -> None:
+    registry = ExtensionRegistry()
+    registry.register(
+        _candidate(
+            "untrusted",
+            scope=ExtensionScope.USER,
+            contribution_name="unsafe_tool",
+            trusted=False,
+        )
+    )
+
+    snapshot = registry.snapshot()
+
+    assert snapshot.extensions == ()
+    assert snapshot.contributions == ()
 
 
 def test_conflicting_contribution_does_not_silently_replace_owner() -> None:

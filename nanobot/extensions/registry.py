@@ -62,6 +62,7 @@ class ExtensionPolicy:
         extension_id = candidate.manifest.id
         return (
             candidate.enabled
+            and (candidate.scope is ExtensionScope.BUILTIN or candidate.trusted)
             and extension_id not in self.deny
             and (not self.allow or extension_id in self.allow)
         )

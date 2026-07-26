@@ -64,16 +64,45 @@ class CommandRouter:
         self._priority: dict[str, Handler] = {}
         self._exact: dict[str, Handler] = {}
         self._prefix: list[tuple[str, Handler]] = []
+        self._owners: dict[tuple[str, str], str] = {}
 
-    def priority(self, cmd: str, handler: Handler) -> None:
+    def priority(
+        self,
+        cmd: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._priority[cmd] = handler
+        self._owners[("priority", cmd)] = owner
 
-    def exact(self, cmd: str, handler: Handler) -> None:
+    def exact(
+        self,
+        cmd: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._exact[cmd] = handler
+        self._owners[("exact", cmd)] = owner
 
-    def prefix(self, pfx: str, handler: Handler) -> None:
+    def prefix(
+        self,
+        pfx: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._prefix.append((pfx, handler))
         self._prefix.sort(key=lambda p: len(p[0]), reverse=True)
+        self._owners[("prefix", pfx)] = owner
+
+    def registrations(self) -> tuple[tuple[str, str, str], ...]:
+        """Return ``(tier, command, owner)`` rows for extension inspection."""
+        return tuple(
+            (tier, command, owner)
+            for (tier, command), owner in sorted(self._owners.items())
+        )
 
     def is_priority(self, text: str) -> bool:
         return normalize_command_text(text).lower() in self._priority

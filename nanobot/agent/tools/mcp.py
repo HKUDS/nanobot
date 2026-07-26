@@ -963,7 +963,7 @@ async def connect_mcp_servers(
                     )
                     continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
-                registry.register(wrapper)
+                registry.register(wrapper, owner=f"nanobot.mcp.{name}")
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
                 if enabled_tools:
@@ -1000,7 +1000,7 @@ async def connect_mcp_servers(
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
-                        registry.register(wrapper)
+                        registry.register(wrapper, owner=f"nanobot.mcp.{name}")
                         registered_count += 1
                         logger.debug(
                             "MCP: registered resource '{}' from server '{}'",
@@ -1018,7 +1018,7 @@ async def connect_mcp_servers(
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
-                        registry.register(wrapper)
+                        registry.register(wrapper, owner=f"nanobot.mcp.{name}")
                         registered_count += 1
                         logger.debug(
                             "MCP: registered prompt '{}' from server '{}'",

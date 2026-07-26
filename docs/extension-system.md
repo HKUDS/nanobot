@@ -89,6 +89,11 @@ and are exposed only through declared host interfaces. Existing workspace,
 network, SSRF, and shell restrictions continue to apply to host-provided
 operations.
 
+Untrusted packages remain visible in the catalog with an inactive state. They
+do not own active contributions and their runtime is not imported. Built-in
+capabilities are trusted by construction; installed and workspace packages
+need an explicit trusted entry or an allowed workspace trust policy.
+
 The root `extensions` config controls explicit search paths, allow/deny policy,
 per-extension enablement, package-owned config, and workspace trust. Discovery
 does not import extension code. Installation does not imply workspace trust,

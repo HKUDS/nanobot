@@ -86,9 +86,21 @@ class ToolLoader:
     def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
         registered: list[str] = []
         builtin_names: set[str] = set()
-        sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
+        sources = [
+            (
+                (("nanobot.core", tool_cls) for tool_cls in self.discover()),
+                False,
+            ),
+            (
+                (
+                    (f"legacy.tool.{entry_point_name}", tool_cls)
+                    for entry_point_name, tool_cls in self._discover_plugins().items()
+                ),
+                True,
+            ),
+        ]
         for source, is_plugin_source in sources:
-            for tool_cls in source:
+            for owner, tool_cls in source:
                 cls_label = tool_cls.__name__
                 try:
                     if scope not in getattr(tool_cls, "_scopes", {"core"}):
@@ -109,7 +121,7 @@ class ToolLoader:
                             "Tool name collision: %s from %s overwrites existing",
                             tool.name, cls_label,
                         )
-                    registry.register(tool)
+                    registry.register(tool, owner=owner)
                     registered.append(tool.name)
                     if not is_plugin_source:
                         builtin_names.add(tool.name)
