@@ -1658,7 +1658,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
   });
 
-  it("keeps repeated successful edits but hides failures superseded on the same path", () => {
+  it("keeps repeated edits for the same path as separate actions", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -1728,9 +1728,13 @@ describe("AgentActivityCluster", () => {
       );
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
-      expect(fileRefs).toHaveLength(2);
+      expect(fileRefs).toHaveLength(3);
       expect(fileRefs.every((ref) => ref.textContent?.includes("minecraft-fps/index.html"))).toBe(true);
-      expect(screen.queryByText("Could not edit")).not.toBeInTheDocument();
+      const failedRow = screen.getByText("Could not edit").closest(
+        '[data-testid="activity-step"]',
+      );
+      expect(failedRow).toBeInTheDocument();
+      expect(failedRow).not.toHaveAttribute("title");
       expect(screen.queryByText("patch failed")).not.toBeInTheDocument();
       expect(screen.getAllByTestId("file-edit-diff")).toHaveLength(2);
       expect(screen.getByText("<canvas />")).toBeInTheDocument();

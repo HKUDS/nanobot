@@ -1010,25 +1010,8 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
 }
 
-function hideSupersededFileEditErrors(edits: UIFileEdit[]): UIFileEdit[] {
-  const successfulPaths = new Set<string>();
-  const visible: UIFileEdit[] = [];
-
-  for (let index = edits.length - 1; index >= 0; index -= 1) {
-    const edit = edits[index];
-    const path = edit.absolute_path || edit.path;
-    if (edit.status === "error" && path && successfulPaths.has(path)) continue;
-
-    visible.push(edit);
-    if (edit.status === "done" && path) successfulPaths.add(path);
-  }
-
-  return visible.reverse();
-}
-
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
-  const visibleEdits = hideSupersededFileEditErrors(latestFileEditEvents(edits));
-  return visibleEdits.flatMap((edit) => {
+  return latestFileEditEvents(edits).flatMap((edit) => {
     const editing = active && edit.status === "editing";
     const failed = edit.status === "error";
     if (!edit.path && edit.pending && !editing) return [];
