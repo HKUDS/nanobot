@@ -1,6 +1,9 @@
 import json
 
-from nanobot.channels.feishu.runtime import _extract_share_card_content
+from nanobot.channels.feishu.runtime import (
+    _extract_post_content,
+    _extract_share_card_content,
+)
 
 
 def test_extract_interactive_card_reads_user_dsl_body_elements() -> None:
@@ -37,9 +40,6 @@ def test_extract_interactive_card_reads_table_rows() -> None:
     }
 
     assert _extract_share_card_content(content, "interactive") == "Name | Score\nAlice | 98"
-
-
-from nanobot.channels.feishu.runtime import _extract_post_content
 
 
 def test_extract_post_content_tolerates_null_text_fields() -> None:
