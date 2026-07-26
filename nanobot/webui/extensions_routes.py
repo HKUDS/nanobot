@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import unquote
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -145,7 +146,7 @@ class WebUIExtensionsRouter:
         if len(raw.encode("utf-8")) > _VALUES_MAX_BYTES:
             raise ValueError("Extension request is too large")
         try:
-            value = json.loads(raw)
+            value = json.loads(unquote(raw))
         except json.JSONDecodeError as exc:
             raise ValueError("Invalid extension request") from exc
         if not isinstance(value, dict):

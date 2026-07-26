@@ -58,7 +58,8 @@
     "automations": "自動タスク",
     "skills": {
       "title": "スキル"
-    }
+    },
+    "extensions": "拡張機能"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -1247,5 +1248,62 @@
       "usePath": "パスを使用",
       "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
+  },
+  "extensions": {
+    "backToChat": "チャットに戻る",
+    "title": "拡張機能",
+    "tabs": {
+      "label": "拡張機能ビュー",
+      "installed": "インストール済み",
+      "discover": "探す",
+      "builtin": "組み込み"
+    },
+    "ecosystem": {
+      "all": "すべて",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "拡張パッケージを検索",
+    "searchInstalled": "拡張機能を検索",
+    "empty": {
+      "installed": "外部拡張機能はありません。",
+      "discover": "一致する拡張パッケージはありません。",
+      "builtin": "組み込み機能が見つかりません。"
+    },
+    "installed": "インストール済み",
+    "install": "{{name}} をインストール",
+    "details": {
+      "identity": "識別情報",
+      "source": "ソース",
+      "scope": "スコープ",
+      "license": "ライセンス",
+      "homepage": "ホームページ",
+      "contributions": "提供機能",
+      "dependencies": "依存関係",
+      "permissions": "権限",
+      "diagnostics": "診断"
+    },
+    "permissionGranted": "許可済み",
+    "permissionPending": "未許可",
+    "revokePermissions": "権限を取り消す",
+    "grantPermissions": "権限を許可",
+    "noPermissions": "ホスト権限の要求はありません。",
+    "revokeTrust": "信頼を取り消す",
+    "trust": "信頼する",
+    "disable": "無効化",
+    "enable": "有効化",
+    "uninstall": "アンインストール",
+    "uninstallTitle": "拡張機能をアンインストールしますか？",
+    "uninstallDescription": "{{name}} とインストール済みファイルを nanobot から削除します。",
+    "cancel": "キャンセル",
+    "status": {
+      "active": "実行中",
+      "disabled": "無効",
+      "untrusted": "未信頼",
+      "inactive": "停止中"
+    },
+    "none": "なし",
+    "loading": "拡張機能を読み込み中…"
   }
 }

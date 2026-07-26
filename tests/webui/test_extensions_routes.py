@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 from websockets.datastructures import Headers
@@ -54,10 +54,12 @@ def _request(
     method: str = "GET",
     values: dict[str, object] | None = None,
     host: str = "127.0.0.1:8765",
+    encode_values: bool = False,
 ):
     headers = Headers([("Host", host)])
     if values is not None:
-        headers["X-Nanobot-Extension-Values"] = json.dumps(values)
+        payload = json.dumps(values)
+        headers["X-Nanobot-Extension-Values"] = quote(payload) if encode_values else payload
     return SimpleNamespace(path=path, method=method, headers=headers)
 
 
@@ -112,14 +114,15 @@ async def test_extension_install_is_local_and_untrusted() -> None:
         _request(
             "/api/extensions/install",
             method="POST",
-            values={"source": "pi-example", "kind": "npm"},
+            values={"source": "中文扩展", "kind": "npm"},
+            encode_values=True,
         ),
         "/api/extensions/install",
     )
 
     assert response is not None and response.status_code == 200
     assert service.calls == [
-        ("install", ("pi-example", "npm", "", False)),
+        ("install", ("中文扩展", "npm", "", False)),
     ]
 
 

@@ -734,6 +734,76 @@ export interface CliAppsPayload {
   };
 }
 
+export interface ExtensionContributionInfo {
+  kind: string;
+  name: string;
+  description: string;
+}
+
+export interface ExtensionDependencyInfo {
+  kind: string;
+  name: string;
+  specifier: string;
+  optional: boolean;
+}
+
+export interface ExtensionPermissionInfo {
+  name: string;
+  reason: string;
+}
+
+export interface ExtensionInfo {
+  id: string;
+  name: string;
+  version: string;
+  runtime: "python" | "pi" | "openclaw" | "declarative" | string;
+  description: string;
+  homepage: string;
+  license: string;
+  scope: "builtin" | "user" | "workspace" | string;
+  location: string | null;
+  enabled: boolean;
+  trusted: boolean;
+  active: boolean;
+  requested_permissions: string[];
+  granted_permissions: string[];
+  source: string;
+  source_ref: string;
+  integrity: string;
+  installed_at: string;
+  contributions: ExtensionContributionInfo[];
+  dependencies: ExtensionDependencyInfo[];
+  permissions: ExtensionPermissionInfo[];
+}
+
+export interface ExtensionDiagnosticInfo {
+  extension_id: string;
+  code: string;
+  message: string;
+  severity: string;
+}
+
+export interface ExtensionsPayload {
+  extensions: ExtensionInfo[];
+  diagnostics: ExtensionDiagnosticInfo[];
+}
+
+export interface ExtensionMarketPackage {
+  name: string;
+  version: string;
+  description: string;
+  ecosystem: "nanobot" | "pi" | "openclaw" | string;
+  publisher: string;
+  license: string;
+  homepage: string;
+  repository: string;
+  published_at: string;
+}
+
+export interface ExtensionMarketPayload {
+  packages: ExtensionMarketPackage[];
+}
+
 export interface NanobotFeatureInfo {
   name: string;
   display_name: string;

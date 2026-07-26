@@ -58,7 +58,8 @@
     "automations": "Automatisations",
     "skills": {
       "title": "Compétences"
-    }
+    },
+    "extensions": "Extensions"
   },
   "settings": {
     "backToChat": "Retour au chat",
@@ -1247,5 +1248,62 @@
       "usePath": "Utiliser le chemin",
       "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine."
     }
+  },
+  "extensions": {
+    "backToChat": "Retour au chat",
+    "title": "Extensions",
+    "tabs": {
+      "label": "Vues des extensions",
+      "installed": "Installées",
+      "discover": "Découvrir",
+      "builtin": "Intégrées"
+    },
+    "ecosystem": {
+      "all": "Toutes",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "Rechercher des paquets d’extension",
+    "searchInstalled": "Rechercher des extensions",
+    "empty": {
+      "installed": "Aucune extension externe installée.",
+      "discover": "Aucun paquet d’extension correspondant.",
+      "builtin": "Aucune capacité intégrée trouvée."
+    },
+    "installed": "Installée",
+    "install": "Installer {{name}}",
+    "details": {
+      "identity": "Identité",
+      "source": "Source",
+      "scope": "Portée",
+      "license": "Licence",
+      "homepage": "Site web",
+      "contributions": "Contributions",
+      "dependencies": "Dépendances",
+      "permissions": "Autorisations",
+      "diagnostics": "Diagnostic"
+    },
+    "permissionGranted": "Accordée",
+    "permissionPending": "Non accordée",
+    "revokePermissions": "Révoquer les autorisations",
+    "grantPermissions": "Accorder les autorisations",
+    "noPermissions": "Aucune autorisation hôte demandée.",
+    "revokeTrust": "Révoquer la confiance",
+    "trust": "Faire confiance",
+    "disable": "Désactiver",
+    "enable": "Activer",
+    "uninstall": "Désinstaller",
+    "uninstallTitle": "Désinstaller l’extension ?",
+    "uninstallDescription": "Cette action supprime {{name}} et ses fichiers installés de nanobot.",
+    "cancel": "Annuler",
+    "status": {
+      "active": "Active",
+      "disabled": "Désactivée",
+      "untrusted": "Non approuvée",
+      "inactive": "Inactive"
+    },
+    "none": "Aucune",
+    "loading": "Chargement des extensions…"
   }
 }

@@ -58,7 +58,8 @@
     "automations": "Automations",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "extensions": "Extensions"
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -1261,5 +1262,62 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "extensions": {
+    "backToChat": "Back to chat",
+    "title": "Extensions",
+    "tabs": {
+      "label": "Extension views",
+      "installed": "Installed",
+      "discover": "Discover",
+      "builtin": "Built in"
+    },
+    "ecosystem": {
+      "all": "All",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "Search extension packages",
+    "searchInstalled": "Search extensions",
+    "empty": {
+      "installed": "No external extensions installed.",
+      "discover": "No matching extension packages.",
+      "builtin": "No built-in capabilities found."
+    },
+    "installed": "Installed",
+    "install": "Install {{name}}",
+    "details": {
+      "identity": "Identity",
+      "source": "Source",
+      "scope": "Scope",
+      "license": "License",
+      "homepage": "Homepage",
+      "contributions": "Contributions",
+      "dependencies": "Dependencies",
+      "permissions": "Permissions",
+      "diagnostics": "Diagnostics"
+    },
+    "permissionGranted": "Granted",
+    "permissionPending": "Not granted",
+    "revokePermissions": "Revoke permissions",
+    "grantPermissions": "Grant permissions",
+    "noPermissions": "No host permissions requested.",
+    "revokeTrust": "Revoke trust",
+    "trust": "Trust",
+    "disable": "Disable",
+    "enable": "Enable",
+    "uninstall": "Uninstall",
+    "uninstallTitle": "Uninstall extension?",
+    "uninstallDescription": "This removes {{name}} and its installed files from nanobot.",
+    "cancel": "Cancel",
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "untrusted": "Untrusted",
+      "inactive": "Inactive"
+    },
+    "none": "None",
+    "loading": "Loading extensions…"
   }
 }

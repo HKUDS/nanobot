@@ -58,7 +58,8 @@
     "automations": "自動任務",
     "skills": {
       "title": "技能"
-    }
+    },
+    "extensions": "擴充套件"
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -1247,5 +1248,62 @@
       "usePath": "使用路徑",
       "absolutePathRequired": "請輸入這台機器上的絕對資料夾路徑。"
     }
+  },
+  "extensions": {
+    "backToChat": "返回聊天",
+    "title": "擴充套件",
+    "tabs": {
+      "label": "擴充套件檢視",
+      "installed": "已安裝",
+      "discover": "探索",
+      "builtin": "內建"
+    },
+    "ecosystem": {
+      "all": "全部",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "搜尋擴充套件",
+    "searchInstalled": "搜尋擴充套件",
+    "empty": {
+      "installed": "尚未安裝外部擴充套件。",
+      "discover": "沒有相符的擴充套件。",
+      "builtin": "找不到內建能力。"
+    },
+    "installed": "已安裝",
+    "install": "安裝 {{name}}",
+    "details": {
+      "identity": "識別資訊",
+      "source": "來源",
+      "scope": "範圍",
+      "license": "授權條款",
+      "homepage": "首頁",
+      "contributions": "提供的能力",
+      "dependencies": "相依項目",
+      "permissions": "權限",
+      "diagnostics": "診斷"
+    },
+    "permissionGranted": "已授予",
+    "permissionPending": "未授予",
+    "revokePermissions": "撤銷權限",
+    "grantPermissions": "授予權限",
+    "noPermissions": "未要求主機權限。",
+    "revokeTrust": "撤銷信任",
+    "trust": "信任",
+    "disable": "停用",
+    "enable": "啟用",
+    "uninstall": "解除安裝",
+    "uninstallTitle": "解除安裝擴充套件？",
+    "uninstallDescription": "這會從 nanobot 移除 {{name}} 及其已安裝檔案。",
+    "cancel": "取消",
+    "status": {
+      "active": "執行中",
+      "disabled": "已停用",
+      "untrusted": "未信任",
+      "inactive": "未執行"
+    },
+    "none": "無",
+    "loading": "正在載入擴充套件…"
   }
 }

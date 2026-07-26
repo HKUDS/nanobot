@@ -58,7 +58,8 @@
     "automations": "Automações",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "extensions": "Extensões"
   },
   "settings": {
     "backToChat": "Voltar para a conversa",
@@ -1261,5 +1262,62 @@
       "usePath": "Usar caminho",
       "absolutePathRequired": "Informe um caminho absoluto de pasta nesta máquina."
     }
+  },
+  "extensions": {
+    "backToChat": "Voltar ao chat",
+    "title": "Extensões",
+    "tabs": {
+      "label": "Visualizações de extensões",
+      "installed": "Instaladas",
+      "discover": "Descobrir",
+      "builtin": "Integradas"
+    },
+    "ecosystem": {
+      "all": "Todas",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "Buscar pacotes de extensão",
+    "searchInstalled": "Buscar extensões",
+    "empty": {
+      "installed": "Nenhuma extensão externa instalada.",
+      "discover": "Nenhum pacote de extensão correspondente.",
+      "builtin": "Nenhum recurso integrado encontrado."
+    },
+    "installed": "Instalada",
+    "install": "Instalar {{name}}",
+    "details": {
+      "identity": "Identidade",
+      "source": "Origem",
+      "scope": "Escopo",
+      "license": "Licença",
+      "homepage": "Página inicial",
+      "contributions": "Contribuições",
+      "dependencies": "Dependências",
+      "permissions": "Permissões",
+      "diagnostics": "Diagnóstico"
+    },
+    "permissionGranted": "Concedida",
+    "permissionPending": "Não concedida",
+    "revokePermissions": "Revogar permissões",
+    "grantPermissions": "Conceder permissões",
+    "noPermissions": "Nenhuma permissão do host solicitada.",
+    "revokeTrust": "Revogar confiança",
+    "trust": "Confiar",
+    "disable": "Desativar",
+    "enable": "Ativar",
+    "uninstall": "Desinstalar",
+    "uninstallTitle": "Desinstalar a extensão?",
+    "uninstallDescription": "Isso remove {{name}} e seus arquivos instalados do nanobot.",
+    "cancel": "Cancelar",
+    "status": {
+      "active": "Ativa",
+      "disabled": "Desativada",
+      "untrusted": "Não confiável",
+      "inactive": "Inativa"
+    },
+    "none": "Nenhuma",
+    "loading": "Carregando extensões…"
   }
 }

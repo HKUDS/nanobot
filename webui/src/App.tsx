@@ -90,7 +90,13 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+type ShellView =
+  | "chat"
+  | "settings"
+  | "apps"
+  | "automations"
+  | "skills"
+  | "extensions";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -101,6 +107,10 @@ const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
   const module = await loadSettingsView();
   return { default: module.SettingsView };
+});
+const ExtensionsView = lazy(async () => {
+  const module = await import("@/components/ExtensionsView");
+  return { default: module.ExtensionsView };
 });
 const SessionSearchDialog = lazy(async () => {
   const module = await import("@/components/SessionSearchDialog");
@@ -224,6 +234,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
+  }
+  if (path === "/extensions") {
+    return { view: "extensions", activeKey, settingsSection: "overview" };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -1653,6 +1666,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenExtensions = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "extensions", activeKey, settingsSection: "overview" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
@@ -1880,6 +1899,12 @@ function Shell({
       });
       return;
     }
+    if (view === "extensions") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("extensions.title", { defaultValue: "Extensions" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1902,9 +1927,16 @@ function Shell({
     onOpenApps,
     onOpenAutomations,
     onOpenSkills,
+    onOpenExtensions,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
+    activeUtility:
+      view === "apps"
+      || view === "automations"
+      || view === "skills"
+      || view === "extensions"
+        ? view
+        : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -2097,24 +2129,31 @@ function Shell({
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
                 <Suspense fallback={<SurfaceLoadingFallback />}>
-                  <SettingsView
-                    theme={theme}
-                    initialSection={settingsInitialSection}
-                    initialSettings={settingsSnapshot}
-                    showSidebar={view === "settings"}
-                    onToggleTheme={toggle}
-                    onBackToChat={onBackToChat}
-                    onModelNameChange={onModelNameChange}
-                    onSettingsChange={setSettingsSnapshot}
-                    skills={skills}
-                    onWorkspaceSettingsChange={refreshWorkspaces}
-                    onSectionChange={onSettingsSectionChange}
-                    onLogout={onLogout}
-                    onRestart={onRestart}
-                    onNativeEngineRestart={onNativeEngineRestart}
-                    isRestarting={isRestarting}
-                    hostChromeInset={showHostChrome}
-                  />
+                  {view === "extensions" ? (
+                    <ExtensionsView
+                      onBackToChat={onBackToChat}
+                      hostChromeInset={showHostChrome}
+                    />
+                  ) : (
+                    <SettingsView
+                      theme={theme}
+                      initialSection={settingsInitialSection}
+                      initialSettings={settingsSnapshot}
+                      showSidebar={view === "settings"}
+                      onToggleTheme={toggle}
+                      onBackToChat={onBackToChat}
+                      onModelNameChange={onModelNameChange}
+                      onSettingsChange={setSettingsSnapshot}
+                      skills={skills}
+                      onWorkspaceSettingsChange={refreshWorkspaces}
+                      onSectionChange={onSettingsSectionChange}
+                      onLogout={onLogout}
+                      onRestart={onRestart}
+                      onNativeEngineRestart={onNativeEngineRestart}
+                      isRestarting={isRestarting}
+                      hostChromeInset={showHostChrome}
+                    />
+                  )}
                 </Suspense>
               </div>
             )}

@@ -1,0 +1,148 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ExtensionsView } from "@/components/ExtensionsView";
+import type { NanobotClient } from "@/lib/nanobot-client";
+import type { ExtensionInfo } from "@/lib/types";
+import { ClientProvider } from "@/providers/ClientProvider";
+
+function response(body: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => "application/json" },
+    json: async () => body,
+    text: async () => "",
+  } as unknown as Response;
+}
+
+function extension(overrides: Partial<ExtensionInfo> = {}): ExtensionInfo {
+  return {
+    id: "sample.pi",
+    name: "Sample Pi",
+    version: "1.0.0",
+    runtime: "pi",
+    description: "A compatible Pi extension.",
+    homepage: "",
+    license: "MIT",
+    scope: "user",
+    location: "/tmp/extensions/sample.pi",
+    enabled: true,
+    trusted: false,
+    active: false,
+    requested_permissions: ["process.spawn"],
+    granted_permissions: [],
+    source: "npm",
+    source_ref: "@sample/pi-extension",
+    integrity: "sha512-example",
+    installed_at: "2026-07-26T00:00:00Z",
+    contributions: [{ kind: "tool", name: "sample", description: "" }],
+    dependencies: [],
+    permissions: [{ name: "process.spawn", reason: "Runs the extension host." }],
+    ...overrides,
+  };
+}
+
+function renderView() {
+  return render(
+    <ClientProvider client={{} as NanobotClient} token="tok">
+      <ExtensionsView onBackToChat={() => {}} />
+    </ClientProvider>,
+  );
+}
+
+describe("ExtensionsView", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("requires permission grants before an extension can be trusted", async () => {
+    let current = extension();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "/api/extensions/permissions") {
+        current = extension({ granted_permissions: ["process.spawn"] });
+      }
+      if (url === "/api/extensions/trust") {
+        current = extension({
+          granted_permissions: ["process.spawn"],
+          trusted: true,
+          active: true,
+        });
+      }
+      return url === "/api/extensions"
+        ? response({ extensions: [current], diagnostics: [] })
+        : response({});
+    }));
+
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: /Sample Pi/ }));
+
+    const trust = screen.getByRole("button", { name: "Trust" });
+    expect(trust).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Grant permissions" }));
+
+    await waitFor(() => expect(trust).toBeEnabled());
+    fireEvent.click(trust);
+
+    await waitFor(() => {
+      expect(requests.some(({ url }) => url === "/api/extensions/trust")).toBe(true);
+    });
+    const permissionRequest = requests.find(
+      ({ url }) => url === "/api/extensions/permissions",
+    );
+    const encoded = new Headers(permissionRequest?.init?.headers).get(
+      "X-Nanobot-Extension-Values",
+    );
+    expect(JSON.parse(decodeURIComponent(encoded ?? ""))).toEqual({
+      id: "sample.pi",
+      permissions: ["process.spawn"],
+    });
+  });
+
+  it("discovers and installs a package without granting trust", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url.startsWith("/api/extensions/market?")) {
+        return response({
+          packages: [{
+            name: "@sample/pi-extension",
+            version: "1.0.0",
+            description: "A compatible Pi extension.",
+            ecosystem: "pi",
+            publisher: "sample",
+            license: "MIT",
+            homepage: "",
+            repository: "",
+            published_at: "",
+          }],
+        });
+      }
+      return url === "/api/extensions"
+        ? response({ extensions: [], diagnostics: [] })
+        : response({});
+    }));
+
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Discover" }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Install @sample/pi-extension",
+    }));
+
+    await waitFor(() => {
+      expect(requests.some(({ url }) => url === "/api/extensions/install")).toBe(true);
+    });
+    const installRequest = requests.find(({ url }) => url === "/api/extensions/install");
+    const encoded = new Headers(installRequest?.init?.headers).get(
+      "X-Nanobot-Extension-Values",
+    );
+    expect(JSON.parse(decodeURIComponent(encoded ?? ""))).toEqual({
+      source: "@sample/pi-extension",
+      kind: "npm",
+    });
+  });
+});

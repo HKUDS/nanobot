@@ -58,7 +58,8 @@
     "automations": "Otomasi",
     "skills": {
       "title": "Skill"
-    }
+    },
+    "extensions": "Ekstensi"
   },
   "settings": {
     "backToChat": "Kembali ke chat",
@@ -1247,5 +1248,62 @@
       "usePath": "Gunakan path",
       "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
+  },
+  "extensions": {
+    "backToChat": "Kembali ke obrolan",
+    "title": "Ekstensi",
+    "tabs": {
+      "label": "Tampilan ekstensi",
+      "installed": "Terpasang",
+      "discover": "Temukan",
+      "builtin": "Bawaan"
+    },
+    "ecosystem": {
+      "all": "Semua",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "Cari paket ekstensi",
+    "searchInstalled": "Cari ekstensi",
+    "empty": {
+      "installed": "Belum ada ekstensi eksternal terpasang.",
+      "discover": "Tidak ada paket ekstensi yang cocok.",
+      "builtin": "Kemampuan bawaan tidak ditemukan."
+    },
+    "installed": "Terpasang",
+    "install": "Pasang {{name}}",
+    "details": {
+      "identity": "Identitas",
+      "source": "Sumber",
+      "scope": "Cakupan",
+      "license": "Lisensi",
+      "homepage": "Beranda",
+      "contributions": "Kontribusi",
+      "dependencies": "Dependensi",
+      "permissions": "Izin",
+      "diagnostics": "Diagnostik"
+    },
+    "permissionGranted": "Diberikan",
+    "permissionPending": "Belum diberikan",
+    "revokePermissions": "Cabut izin",
+    "grantPermissions": "Berikan izin",
+    "noPermissions": "Tidak meminta izin host.",
+    "revokeTrust": "Cabut kepercayaan",
+    "trust": "Percayai",
+    "disable": "Nonaktifkan",
+    "enable": "Aktifkan",
+    "uninstall": "Copot",
+    "uninstallTitle": "Copot ekstensi?",
+    "uninstallDescription": "Tindakan ini menghapus {{name}} dan berkas terpasangnya dari nanobot.",
+    "cancel": "Batal",
+    "status": {
+      "active": "Aktif",
+      "disabled": "Dinonaktifkan",
+      "untrusted": "Belum dipercaya",
+      "inactive": "Tidak aktif"
+    },
+    "none": "Tidak ada",
+    "loading": "Memuat ekstensi…"
   }
 }

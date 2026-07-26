@@ -58,7 +58,8 @@
     "automations": "자동화",
     "skills": {
       "title": "스킬"
-    }
+    },
+    "extensions": "확장 기능"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -1247,5 +1248,62 @@
       "usePath": "경로 사용",
       "absolutePathRequired": "이 머신의 절대 폴더 경로를 입력하세요."
     }
+  },
+  "extensions": {
+    "backToChat": "채팅으로 돌아가기",
+    "title": "확장 기능",
+    "tabs": {
+      "label": "확장 기능 보기",
+      "installed": "설치됨",
+      "discover": "찾기",
+      "builtin": "내장"
+    },
+    "ecosystem": {
+      "all": "전체",
+      "nanobot": "nanobot",
+      "pi": "Pi",
+      "openclaw": "OpenClaw"
+    },
+    "searchMarket": "확장 패키지 검색",
+    "searchInstalled": "확장 기능 검색",
+    "empty": {
+      "installed": "설치된 외부 확장 기능이 없습니다.",
+      "discover": "일치하는 확장 패키지가 없습니다.",
+      "builtin": "내장 기능을 찾지 못했습니다."
+    },
+    "installed": "설치됨",
+    "install": "{{name}} 설치",
+    "details": {
+      "identity": "식별 정보",
+      "source": "소스",
+      "scope": "범위",
+      "license": "라이선스",
+      "homepage": "홈페이지",
+      "contributions": "제공 기능",
+      "dependencies": "종속성",
+      "permissions": "권한",
+      "diagnostics": "진단"
+    },
+    "permissionGranted": "허용됨",
+    "permissionPending": "허용되지 않음",
+    "revokePermissions": "권한 취소",
+    "grantPermissions": "권한 허용",
+    "noPermissions": "요청한 호스트 권한이 없습니다.",
+    "revokeTrust": "신뢰 취소",
+    "trust": "신뢰",
+    "disable": "비활성화",
+    "enable": "활성화",
+    "uninstall": "제거",
+    "uninstallTitle": "확장 기능을 제거할까요?",
+    "uninstallDescription": "nanobot에서 {{name}} 및 설치된 파일을 제거합니다.",
+    "cancel": "취소",
+    "status": {
+      "active": "실행 중",
+      "disabled": "비활성",
+      "untrusted": "신뢰 안 함",
+      "inactive": "중지됨"
+    },
+    "none": "없음",
+    "loading": "확장 기능을 불러오는 중…"
   }
 }
