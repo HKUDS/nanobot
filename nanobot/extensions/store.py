@@ -52,6 +52,11 @@ class InstalledExtension:
     def from_mapping(cls, value: object) -> InstalledExtension:
         if not isinstance(value, dict):
             raise ValueError("extension registry record must be an object")
+        permissions = value.get("granted_permissions", ())
+        if not isinstance(permissions, (list, tuple)) or not all(
+            isinstance(permission, str) for permission in permissions
+        ):
+            raise ValueError("extension granted permissions must be an array of strings")
         return cls(
             id=str(value["id"]),
             version=str(value["version"]),
@@ -61,7 +66,7 @@ class InstalledExtension:
             installed_at=str(value["installed_at"]),
             enabled=bool(value.get("enabled", True)),
             trusted=bool(value.get("trusted", False)),
-            granted_permissions=tuple(value.get("granted_permissions", ())),
+            granted_permissions=tuple(permissions),
         )
 
 

@@ -1336,6 +1336,7 @@ def serve(
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
+    from nanobot.extensions import ExtensionHost
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
@@ -1384,12 +1385,17 @@ def serve(
         agent_loop, model_name=model_name, request_timeout=timeout,
         api_key=api_key,
     )
+    extension_host = ExtensionHost(agent_loop, lambda: runtime_config)
 
     async def on_startup(_app):
+        await extension_host.reload()
         await agent_loop._connect_mcp()
 
     async def on_cleanup(_app):
-        await agent_loop.close_mcp()
+        try:
+            await extension_host.close()
+        finally:
+            await agent_loop.close_mcp()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
@@ -1633,6 +1639,7 @@ def _run_gateway(
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
+    from nanobot.extensions import ExtensionHost, ExtensionService
     from nanobot.providers.factory import (
         build_provider_snapshot,
         build_unconfigured_provider_snapshot,
@@ -1752,6 +1759,8 @@ def _run_gateway(
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
     )
+    extension_host = ExtensionHost(agent, lambda: config)
+    extension_service = ExtensionService(host=extension_host)
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
@@ -1979,6 +1988,7 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
+        webui_extension_service=extension_service,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
@@ -2128,6 +2138,7 @@ def _run_gateway(
             console.print,
         )
         try:
+            await extension_host.reload()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
@@ -2207,7 +2218,10 @@ def _run_gateway(
                 if flushed:
                     logger.info("Shutdown: flushed {} session(s) to disk", flushed)
             finally:
-                restore_shutdown_handlers()
+                try:
+                    await extension_host.close()
+                finally:
+                    restore_shutdown_handlers()
 
     asyncio.run(run())
 
@@ -2244,6 +2258,7 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
+    from nanobot.extensions import ExtensionHost
     from nanobot.providers.image_generation import image_gen_provider_configs
 
     config = _load_runtime_config(config, workspace)
@@ -2271,6 +2286,7 @@ def agent(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
+    extension_host = ExtensionHost(agent_loop, lambda: config)
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
@@ -2312,29 +2328,36 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            renderer = StreamRenderer(
-                render_markdown=markdown,
-                bot_name=config.agents.defaults.bot_name,
-                bot_icon=config.agents.defaults.bot_icon,
-            )
-            response = await agent_loop.process_direct(
-                message, session_id,
-                on_progress=_make_progress(renderer),
-                on_stream=renderer.on_delta,
-                on_stream_end=renderer.on_end,
-            )
-            if not renderer.streamed:
-                await renderer.close()
-                print_kwargs: dict[str, Any] = {}
-                if renderer.header_printed:
-                    print_kwargs["show_header"] = False
-                _print_agent_response(
-                    response.content if response else "",
+            try:
+                await extension_host.reload()
+                renderer = StreamRenderer(
                     render_markdown=markdown,
-                    metadata=response.metadata if response else None,
-                    **print_kwargs,
+                    bot_name=config.agents.defaults.bot_name,
+                    bot_icon=config.agents.defaults.bot_icon,
                 )
-            await agent_loop.close_mcp()
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    on_progress=_make_progress(renderer),
+                    on_stream=renderer.on_delta,
+                    on_stream_end=renderer.on_end,
+                )
+                if not renderer.streamed:
+                    await renderer.close()
+                    print_kwargs: dict[str, Any] = {}
+                    if renderer.header_printed:
+                        print_kwargs["show_header"] = False
+                    _print_agent_response(
+                        response.content if response else "",
+                        render_markdown=markdown,
+                        metadata=response.metadata if response else None,
+                        **print_kwargs,
+                    )
+            finally:
+                try:
+                    await agent_loop.close_mcp()
+                finally:
+                    await extension_host.close()
 
         asyncio.run(run_once())
     else:
@@ -2367,6 +2390,7 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
+            await extension_host.reload()
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
@@ -2498,7 +2522,10 @@ def agent(
                 agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
+                try:
+                    await agent_loop.close_mcp()
+                finally:
+                    await extension_host.close()
 
         asyncio.run(run_interactive())
 

@@ -82,12 +82,13 @@ class ExtensionRuntimeManager:
         tools: ToolRegistry,
         commands: CommandRouter,
         config: Config,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
     ) -> None:
         self._tools = tools
         self._commands = commands
         self._config = config
         self._active: list[ActivatedExtension] = []
-        self._hook_factories: list[AgentTurnHookFactory] = []
+        self._hook_factories = hook_factories if hook_factories is not None else []
 
     async def activate(self, snapshot: ExtensionSnapshot) -> ActivationResult:
         diagnostics: list[ExtensionDiagnostic] = []

@@ -51,6 +51,8 @@ def build_gateway_services(
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    extension_service: Any | None = None,
+    allow_remote_package_install: bool = False,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -94,6 +96,8 @@ def build_gateway_services(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
+        extension_service=extension_service,
+        allow_remote_package_install=allow_remote_package_install,
         log=logger,
     )
     return GatewayServices(

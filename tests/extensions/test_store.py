@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from nanobot.extensions import (
     DependencyKind,
     ExtensionDependency,
@@ -9,6 +11,7 @@ from nanobot.extensions import (
     ExtensionRuntime,
     ExtensionSourceKind,
     ExtensionStore,
+    InstalledExtension,
     dump_manifest,
 )
 
@@ -48,6 +51,21 @@ def test_store_installs_and_applies_trust_state(tmp_path: Path) -> None:
     assert candidate.granted_permissions == frozenset(
         {"network", "filesystem.read"}
     )
+
+
+def test_registry_permissions_must_be_a_string_array() -> None:
+    with pytest.raises(ValueError, match="array of strings"):
+        InstalledExtension.from_mapping(
+            {
+                "id": "sample",
+                "version": "1.0.0",
+                "source": "npm",
+                "source_ref": "sample",
+                "integrity": "sha256:test",
+                "installed_at": "2026-01-01T00:00:00Z",
+                "granted_permissions": "network",
+            }
+        )
 
 
 def test_store_updates_and_uninstalls_atomically(tmp_path: Path) -> None:

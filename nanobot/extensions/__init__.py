@@ -9,6 +9,7 @@ from nanobot.extensions.codec import (
     manifest_from_mapping,
     manifest_to_mapping,
 )
+from nanobot.extensions.host import ExtensionHost, ExtensionHostSnapshot
 from nanobot.extensions.manifest import (
     EXTENSION_API_VERSION,
     ContributionKind,
@@ -19,6 +20,7 @@ from nanobot.extensions.manifest import (
     ExtensionPermission,
     ExtensionRuntime,
 )
+from nanobot.extensions.market import ExtensionMarketplace, MarketplacePackage
 from nanobot.extensions.native import discover_native_extensions
 from nanobot.extensions.node_host import NodeSidecar
 from nanobot.extensions.package_adapter import AdaptedPackage, adapt_package
@@ -43,6 +45,7 @@ from nanobot.extensions.runtime import (
     ExtensionRuntimeManager,
     PythonExtensionApi,
 )
+from nanobot.extensions.service import ExtensionService
 from nanobot.extensions.store import (
     ExtensionSourceKind,
     ExtensionStore,
@@ -56,6 +59,9 @@ __all__ = [
     "DependencyKind",
     "ExtensionCandidate",
     "ExtensionCatalog",
+    "ExtensionHost",
+    "ExtensionHostSnapshot",
+    "ExtensionMarketplace",
     "ExtensionContribution",
     "ExtensionDependency",
     "ExtensionDiagnostic",
@@ -69,6 +75,7 @@ __all__ = [
     "ExtensionSnapshot",
     "ExtensionSourceKind",
     "ExtensionStore",
+    "ExtensionService",
     "MANIFEST_FILENAME",
     "ManifestFormatError",
     "NODE_PROTOCOL_VERSION",
@@ -82,6 +89,7 @@ __all__ = [
     "PythonExtensionApi",
     "InstalledExtension",
     "InstallResult",
+    "MarketplacePackage",
     "ResolvedContribution",
     "build_extension_catalog",
     "adapt_package",
