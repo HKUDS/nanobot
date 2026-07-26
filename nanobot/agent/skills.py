@@ -154,11 +154,21 @@ class SkillsLoader:
             sections.append("\n".join(lines))
         return "\n\n".join(sections)
 
+    @staticmethod
+    def _requirement_lists(skill_meta: dict) -> tuple[list[str], list[str]]:
+        """Return (bins, env) lists from skill metadata, tolerating null/wrong shapes."""
+        requires = skill_meta.get("requires") or {}
+        if not isinstance(requires, dict):
+            return [], []
+        bins_raw = requires.get("bins") or []
+        env_raw = requires.get("env") or []
+        bins = [str(v) for v in bins_raw if isinstance(v, str) and v.strip()] if isinstance(bins_raw, list) else []
+        env = [str(v) for v in env_raw if isinstance(v, str) and v.strip()] if isinstance(env_raw, list) else []
+        return bins, env
+
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
+        required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return ", ".join(
             [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
             + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
@@ -172,9 +182,7 @@ class SkillsLoader:
 
     def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
         """Return explicit command/env requirements and currently missing entries."""
-        requires = self._get_skill_meta(name).get("requires", {})
-        bins = [str(value) for value in requires.get("bins", [])]
-        env = [str(value) for value in requires.get("env", [])]
+        bins, env = self._requirement_lists(self._get_skill_meta(name))
         return {
             "bins": bins,
             "env": env,
@@ -219,9 +227,7 @@ class SkillsLoader:
 
     def _check_requirements(self, skill_meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
+        required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return all(shutil.which(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
         )
