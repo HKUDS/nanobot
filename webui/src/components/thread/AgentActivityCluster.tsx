@@ -40,6 +40,7 @@ import {
   isAgentActivityMember,
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
+import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
@@ -144,6 +145,7 @@ export function AgentActivityCluster({
   onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
+  const fileEditDisplayMode = useFileEditDisplayMode();
   const pageVisible = usePageVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
   const fileEdits = useMemo(
@@ -305,6 +307,7 @@ export function AgentActivityCluster({
       <div className={cn("w-full", hasBodyBelow && "mb-2")}>
         <FileEditGroup
           edits={fileEdits}
+          displayMode={fileEditDisplayMode}
           onOpenFilePreview={onOpenFilePreview}
         />
       </div>
@@ -331,6 +334,7 @@ export function AgentActivityCluster({
         {fileEdits.length ? (
           <FileEditGroup
             edits={fileEdits}
+            displayMode={fileEditDisplayMode}
             onOpenFilePreview={onOpenFilePreview}
           />
         ) : null}
@@ -1006,8 +1010,25 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
 }
 
+function hideSupersededFileEditErrors(edits: UIFileEdit[]): UIFileEdit[] {
+  const successfulPaths = new Set<string>();
+  const visible: UIFileEdit[] = [];
+
+  for (let index = edits.length - 1; index >= 0; index -= 1) {
+    const edit = edits[index];
+    const path = edit.absolute_path || edit.path;
+    if (edit.status === "error" && path && successfulPaths.has(path)) continue;
+
+    visible.push(edit);
+    if (edit.status === "done" && path) successfulPaths.add(path);
+  }
+
+  return visible.reverse();
+}
+
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
-  return latestFileEditEvents(edits).flatMap((edit) => {
+  const visibleEdits = hideSupersededFileEditErrors(latestFileEditEvents(edits));
+  return visibleEdits.flatMap((edit) => {
     const editing = active && edit.status === "editing";
     const failed = edit.status === "error";
     if (!edit.path && edit.pending && !editing) return [];
@@ -1031,6 +1052,7 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
       operation: edit.operation,
       pending: !!edit.pending && !edit.path,
       error: edit.error,
+      diff: edit.diff,
     }];
   });
 }

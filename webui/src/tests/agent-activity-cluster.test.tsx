@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 const BLENDER_CLI_APP: CliAppInfo = {
@@ -448,7 +449,7 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("keeps file edits flat even when the legacy diff preference is enabled", () => {
+  it("renders file edit diffs and responds to preference changes", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -488,17 +489,27 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
-      expect(screen.queryByText("return <Old />;")).not.toBeInTheDocument();
-      expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      expect(screen.getByText("return <Old />;")).toBeInTheDocument();
+      expect(screen.getByText("return <New />;")).toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
       expect(screen.getAllByTestId("activity-diff-pair")).toHaveLength(1);
+
+      act(() => {
+        writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "summary" });
+      });
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+
+      act(() => {
+        writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "diff" });
+      });
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
-  it("does not render diff hunks inside the activity list", () => {
+  it("renders folded separators between separated file edit hunks", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -544,16 +555,18 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.queryByTestId("file-edit-diff-hunk-gap")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-hunk-gap")).toHaveTextContent(
+        "21 unchanged lines hidden",
+      );
       expect(screen.queryByText("@@ -25,3 +25,3 @@")).not.toBeInTheDocument();
-      expect(screen.queryByText("return newSecond;")).not.toBeInTheDocument();
+      expect(screen.getByText("return newSecond;")).toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
-  it("summarizes long file edit diffs without an expansion control", () => {
+  it("keeps long file edit diffs collapsed until opened", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -592,16 +605,46 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.queryByTestId("file-edit-diff-toggle")).not.toBeInTheDocument();
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("View large diff");
+      expect(toggle).toHaveTextContent("165 lines");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("line-1")).not.toBeInTheDocument();
-      expect(screen.getByText("+165")).toBeInTheDocument();
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("line-160")).toBeInTheDocument();
+      expect(screen.queryByText("line-161")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-expand-lines")).toHaveTextContent(
+        "Show 5 more lines",
+      );
+
+      fireEvent.click(screen.getByTestId("file-edit-diff-expand-lines"));
+
+      expect(screen.getByText("line-165")).toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-collapse-lines")).toHaveTextContent(
+        "Show fewer lines",
+      );
+
+      fireEvent.click(screen.getByTestId("file-edit-diff-collapse-lines"));
+
+      expect(screen.queryByText("line-165")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-expand-lines")).toHaveTextContent(
+        "Show 5 more lines",
+      );
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
-  it("ignores the legacy collapsed diff mode in the activity list", () => {
+  it("does not mount collapsed file edit diffs until opened", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "collapsed_diff" }),
@@ -641,16 +684,24 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.queryByTestId("file-edit-diff-toggle")).not.toBeInTheDocument();
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("View diff");
+      expect(toggle).toHaveTextContent("3 lines");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
-      expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      expect(screen.getByText("return <New />;")).toBeInTheDocument();
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
-  it("opens the edited file directly instead of expanding a truncated diff", () => {
+  it("offers the file preview entry point when a diff payload is truncated", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -691,9 +742,15 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.queryByTestId("file-edit-diff-toggle")).not.toBeInTheDocument();
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("View large diff");
       expect(screen.queryByTestId("file-edit-diff-truncated")).not.toBeInTheDocument();
-      fireEvent.click(screen.getByTestId("activity-file-reference"));
+
+      fireEvent.click(toggle);
+
+      expect(screen.getByTestId("file-edit-diff-truncated")).toHaveTextContent("Diff truncated");
+      fireEvent.click(screen.getByTestId("file-edit-diff-open-file"));
 
       expect(onOpenFilePreview).toHaveBeenCalledWith("/repo/src/app.tsx");
     } finally {
@@ -1601,7 +1658,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
   });
 
-  it("renders repeated edits for the same path as separate actions", () => {
+  it("keeps repeated successful edits but hides failures superseded on the same path", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -1671,17 +1728,13 @@ describe("AgentActivityCluster", () => {
       );
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
-      expect(fileRefs).toHaveLength(3);
+      expect(fileRefs).toHaveLength(2);
       expect(fileRefs.every((ref) => ref.textContent?.includes("minecraft-fps/index.html"))).toBe(true);
-      const failedRow = screen.getByText("Could not edit").closest(
-        '[data-testid="activity-step"]',
-      );
-      expect(failedRow).toBeInTheDocument();
-      expect(failedRow).not.toHaveAttribute("title");
+      expect(screen.queryByText("Could not edit")).not.toBeInTheDocument();
       expect(screen.queryByText("patch failed")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
-      expect(screen.queryByText("<canvas />")).not.toBeInTheDocument();
-      expect(screen.queryByText("const fps = 60;")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("file-edit-diff")).toHaveLength(2);
+      expect(screen.getByText("<canvas />")).toBeInTheDocument();
+      expect(screen.getByText("const fps = 60;")).toBeInTheDocument();
       expect(screen.getAllByText("+2").length).toBeGreaterThan(0);
       expect(screen.getAllByText("-1").length).toBeGreaterThan(0);
       expect(screen.getAllByText("+6").length).toBeGreaterThan(0);
@@ -1689,6 +1742,50 @@ describe("AgentActivityCluster", () => {
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
+  });
+
+  it("keeps the latest failed attempt visible after an earlier edit succeeded", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "edit_file()",
+          traces: ["edit_file()"],
+          fileEdits: [
+            {
+              call_id: "call-edit-1",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+            },
+            {
+              call_id: "call-edit-2",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "error",
+              added: 0,
+              deleted: 0,
+              approximate: false,
+              status: "error",
+              error: "patch failed",
+            },
+          ],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByText("Could not edit")).toBeInTheDocument();
+    expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(2);
   });
 
   it("keeps tool event embeds out of the flat activity list", () => {
