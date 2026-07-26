@@ -27,6 +27,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Configure model fallback | [`guides/configure-model-fallback.md`](./guides/configure-model-fallback.md) |
 | Add an OpenAI-compatible provider | [`guides/configure-openai-compatible-provider.md`](./guides/configure-openai-compatible-provider.md) |
 | Add Langfuse observability | [`guides/configure-langfuse-observability.md`](./guides/configure-langfuse-observability.md) |
+| Install and govern extensions | [`extensions.md`](./extensions.md) |
 | Secure a local AI agent | [`guides/secure-local-ai-agent.md`](./guides/secure-local-ai-agent.md) |
 | Deploy the gateway | [`guides/deploy-nanobot-gateway.md`](./guides/deploy-nanobot-gateway.md) |
 
@@ -45,6 +46,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Configure web search and fetch | [Web Tools](#web-tools) |
 | Enable image generation | [Image Generation](#image-generation) |
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
+| Configure extension discovery and policy | [Extensions](#extensions) |
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
 | Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
@@ -64,6 +66,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
+| Discover and govern extension packages | `extensions.*` | `nanobot extensions list`, then inspect the package | [Extensions](#extensions), [Extension guide](./extensions.md) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Use the same explicit paths with `nanobot status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
@@ -2227,6 +2230,53 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 | Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+
+## Extensions
+
+Use the WebUI **Extensions** page or `nanobot extensions` commands for normal
+installation and trust decisions. The top-level `extensions` object is for
+advanced discovery and policy:
+
+```json
+{
+  "extensions": {
+    "enabled": true,
+    "paths": ["/opt/nanobot/extensions"],
+    "allow": [],
+    "deny": ["acme.blocked"],
+    "workspaceTrust": "ask",
+    "entries": {
+      "acme.review": {
+        "enabled": true,
+        "trusted": true,
+        "permissions": ["workspace.read"],
+        "config": {
+          "mode": "strict"
+        }
+      }
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `extensions.enabled` | `true` | Enable external extension discovery and activation |
+| `extensions.paths` | `[]` | Additional manifest roots; each root may be one package or contain package directories |
+| `extensions.allow` | `[]` | Optional extension ID allowlist; empty allows all IDs not denied |
+| `extensions.deny` | `[]` | Extension IDs that must remain inactive |
+| `extensions.workspaceTrust` | `"ask"` | Workspace extension policy: `"ask"`, `"allow"`, or `"deny"` |
+| `extensions.entries.<id>.enabled` | `true` | Per-extension activation switch |
+| `extensions.entries.<id>.trusted` | `false` | Approve executing that extension's code |
+| `extensions.entries.<id>.permissions` | `[]` | Exact host permissions granted to the extension |
+| `extensions.entries.<id>.config` | `{}` | Package-owned configuration passed to its runtime |
+
+User-installed packages and their interactive trust state live under
+`~/.nanobot/extensions/`. Config policy is merged at discovery time; nanobot
+does not silently rewrite `config.json` when you install a package.
+
+See [Extensions](./extensions.md) for the safe install flow and
+[Extension Authoring](./extension-authoring.md) for the package contract.
 
 ## Disabled Skills
 

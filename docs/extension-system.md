@@ -1,5 +1,9 @@
 # Extension system
 
+This page documents the maintainer-facing architecture. For installation and
+operations, read [Extensions](./extensions.md). For the package contract, read
+[Extension Authoring](./extension-authoring.md).
+
 nanobot treats an extension as an installable, governable unit and a
 contribution as one capability supplied by that unit. This distinction keeps
 the agent core small without forcing tools, channels, providers, skills, MCP
@@ -77,6 +81,10 @@ Compatibility is capability-based rather than all-or-nothing:
 - Plugin failures are isolated from the agent process and produce actionable
   diagnostics.
 
+The compatibility sidecar is a failure-isolation boundary, not a security
+sandbox. The exact executable and metadata-only surfaces are listed in the
+[compatibility matrix](./extension-authoring.md#compatibility-matrix).
+
 ## Security model
 
 Extensions are trusted code, not prompts or static skills. Installation and
@@ -99,6 +107,16 @@ per-extension enablement, package-owned config, and workspace trust. Discovery
 does not import extension code. Installation does not imply workspace trust,
 and activation does not rewrite `config.json` behind the user's back.
 
+The activation gates are deliberately independent:
+
+```text
+installed -> dependencies ready -> permissions granted -> trusted + enabled
+```
+
+Only candidates that pass every gate own active contributions. Reload first
+rolls back registrations by extension owner and then activates the new
+snapshot. A failed activation is converted into a diagnostic.
+
 ## Market boundary
 
 The market is an index, not a runtime. It describes packages available from
@@ -107,3 +125,35 @@ shape. Installing a listing still goes through the local installer, policy,
 dependency checks, and trust flow. This keeps discovery independent from code
 execution and allows multiple catalogs without coupling the agent to one
 store.
+
+## Ownership boundaries
+
+The extension package owns identity, policy, and contribution declarations.
+Native subsystems continue to own execution:
+
+| Concern | Owner |
+|---|---|
+| Package identity, source, trust, permissions | `nanobot.extensions` |
+| Tool execution contract | `nanobot.agent.tools` |
+| Commands | `nanobot.command` |
+| Agent lifecycle hooks | `nanobot.agent.hook` |
+| Providers | `nanobot.providers` |
+| Channels | `nanobot.channels` |
+| Skills | `nanobot.skills` |
+| Browser management surface | `webui` |
+
+Do not add extension discovery or compatibility branching to `AgentLoop`.
+Runtime assembly creates an `ExtensionHost`, projects supported registrations
+through native APIs, and closes the host with the surrounding runtime.
+
+## Protocol boundary
+
+Pi and OpenClaw entries run behind a versioned NDJSON request/response protocol.
+The Python process sends load, call, lifecycle event, and close requests. The
+Node process returns registrations, results, outputs, and diagnostics. Protocol
+messages contain JSON-compatible values only.
+
+The adapter must reject malformed messages, time out stalled requests, and
+close the sidecar when activation fails. Unsupported upstream methods are
+either explicit no-ops with diagnostics or rejected; they must never be
+reported as executable contributions.
