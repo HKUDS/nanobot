@@ -33,8 +33,16 @@ def _resolve_public(host: str, port: int | None, *args, **kwargs):
     ["http://127.0.0.1/admin", "http://[::]/admin"],
     ids=["ipv4-loopback", "ipv6-unspecified"],
 )
+@pytest.mark.parametrize(
+    "proxy",
+    [None, "http://127.0.0.1:23458"],
+    ids=["direct", "explicit-proxy"],
+)
 @pytest.mark.asyncio
-async def test_generated_image_download_blocks_unsafe_target(url: str) -> None:
+async def test_generated_image_download_blocks_unsafe_target(
+    url: str,
+    proxy: str | None,
+) -> None:
     requested = False
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -45,6 +53,7 @@ async def test_generated_image_download_blocks_unsafe_target(url: str) -> None:
     with pytest.raises(ImageGenerationError, match="blocked unsafe generated image URL"):
         await _download_image_data_url(
             url,
+            proxy=proxy,
             transport=httpx.MockTransport(handler),
         )
 
@@ -116,3 +125,103 @@ async def test_generated_image_download_enforces_streaming_size_limit(monkeypatc
             "https://cdn.example/image.png",
             transport=httpx.MockTransport(handler),
         )
+
+
+class _StreamContext:
+    def __init__(self, response: httpx.Response) -> None:
+        self.response = response
+
+    async def __aenter__(self) -> httpx.Response:
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        await self.response.aclose()
+
+
+@pytest.mark.asyncio
+async def test_generated_image_download_uses_explicit_provider_proxy(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.security.network.socket.getaddrinfo",
+        _resolve_public,
+    )
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs) -> None:
+            captured["kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def stream(self, method: str, url: str) -> _StreamContext:
+            captured["request"] = (method, url)
+            request = httpx.Request(method, url)
+            return _StreamContext(httpx.Response(200, content=PNG_BYTES, request=request))
+
+    monkeypatch.setattr(image_generation.httpx, "AsyncClient", FakeAsyncClient)
+    proxy = "http://127.0.0.1:23458"
+
+    result = await _download_image_data_url(
+        "https://cdn.example/image.png",
+        proxy=proxy,
+    )
+
+    assert result.startswith("data:image/png;base64,")
+    assert captured["request"] == ("GET", "https://cdn.example/image.png")
+    assert captured["kwargs"] == {
+        "follow_redirects": False,
+        "timeout": image_generation._DEFAULT_TIMEOUT_S,
+        "trust_env": False,
+        "proxy": proxy,
+    }
+
+
+@pytest.mark.asyncio
+async def test_proxied_generated_image_download_revalidates_redirects(
+    monkeypatch,
+) -> None:
+    original_getaddrinfo = socket.getaddrinfo
+
+    def resolve_test_hosts(host: str, port: int | None, *args, **kwargs):
+        if host == "cdn.example":
+            return _resolve_public(host, port, *args, **kwargs)
+        return original_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", resolve_test_hosts)
+    requested: list[str] = []
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def stream(self, method: str, url: str) -> _StreamContext:
+            requested.append(url)
+            request = httpx.Request(method, url)
+            return _StreamContext(
+                httpx.Response(
+                    302,
+                    headers={"location": "http://169.254.169.254/latest"},
+                    request=request,
+                )
+            )
+
+    monkeypatch.setattr(image_generation.httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(ImageGenerationError, match="blocked unsafe generated image URL"):
+        await _download_image_data_url(
+            "https://cdn.example/image.png",
+            proxy="http://127.0.0.1:23458",
+        )
+
+    assert requested == ["https://cdn.example/image.png"]

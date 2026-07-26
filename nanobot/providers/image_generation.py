@@ -16,7 +16,11 @@ import httpx
 from loguru import logger
 
 from nanobot.providers.registry import find_by_name
-from nanobot.security.network import PinnedDNSAsyncTransport, UnsafeURLRequestError
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    UnsafeURLRequestError,
+    resolve_url_target,
+)
 from nanobot.utils.helpers import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
@@ -120,19 +124,31 @@ def _aihubmix_model_path(model: str) -> str:
 async def _download_image_data_url(
     url: str,
     *,
+    proxy: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> str:
     try:
-        safe_transport = PinnedDNSAsyncTransport(inner=transport)
-        # Proxies resolve the target independently and would defeat DNS pinning.
-        async with httpx.AsyncClient(
-            transport=safe_transport,
-            follow_redirects=False,
-            timeout=_DEFAULT_TIMEOUT_S,
-            trust_env=False,
-        ) as client:
+        client_kwargs: dict[str, Any] = {
+            "follow_redirects": False,
+            "timeout": _DEFAULT_TIMEOUT_S,
+            "trust_env": False,
+        }
+        if proxy:
+            # An explicit provider proxy is a user-selected trusted egress boundary.
+            # Validate each URL locally, while the proxy owns final DNS resolution.
+            client_kwargs["proxy"] = proxy
+        else:
+            client_kwargs["transport"] = PinnedDNSAsyncTransport(inner=transport)
+
+        async with httpx.AsyncClient(**client_kwargs) as client:
             current_url = url
             for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
+                if proxy:
+                    ok, error, _ = resolve_url_target(current_url)
+                    if not ok:
+                        raise ImageGenerationError(
+                            f"blocked unsafe generated image URL: {error}"
+                        )
                 async with client.stream("GET", current_url) as response:
                     if response.is_redirect:
                         location = response.headers.get("location")
@@ -285,6 +301,13 @@ class ImageGenerationProvider(ABC):
             raise ImageGenerationError(f"{label} returned no images: {provider_error}")
         raise ImageGenerationError(f"{label} returned no images for this request")
 
+    def _http_client_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"timeout": self.timeout}
+        if self.proxy:
+            kwargs["proxy"] = self.proxy
+            kwargs["trust_env"] = False
+        return kwargs
+
     async def _http_post(
         self,
         url: str,
@@ -297,11 +320,7 @@ class ImageGenerationProvider(ABC):
             return await client.post(url, headers=headers, json=body)
         if self._client is not None:
             return await self._client.post(url, headers=headers, json=body)
-        client_kwargs: dict[str, Any] = {"timeout": self.timeout}
-        if self.proxy:
-            client_kwargs["proxy"] = self.proxy
-            client_kwargs["trust_env"] = False
-        async with httpx.AsyncClient(**client_kwargs) as c:
+        async with httpx.AsyncClient(**self._http_client_kwargs()) as c:
             return await c.post(url, headers=headers, json=body)
 
 
@@ -429,7 +448,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
         }
         size = _aihubmix_size(aspect_ratio, image_size)
 
-        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             return await self._generate_with_client(
                 client,
@@ -489,7 +508,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(f"AIHubMix image generation failed: {detail}") from exc
 
         payload = response.json()
-        images = await _aihubmix_images_from_payload(payload)
+        images = await _aihubmix_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -804,6 +823,8 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
 
 async def _aihubmix_images_from_payload(
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     images: list[str] = []
     candidates: list[Any] = []
@@ -821,7 +842,7 @@ async def _aihubmix_images_from_payload(
             if value.startswith("data:image/"):
                 images.append(value)
             elif value.startswith(("http://", "https://")):
-                images.append(await _download_image_data_url(value))
+                images.append(await _download_image_data_url(value, proxy=proxy))
             return
         if not isinstance(value, dict):
             return
@@ -1022,7 +1043,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
         return model
 
     async def _parse_images_response(self, payload: dict[str, Any]) -> list[str]:
-        return await _openai_images_from_payload(payload)
+        return await _openai_images_from_payload(payload, proxy=self.proxy)
 
     async def _post_image_edit(
         self,
@@ -1052,7 +1073,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
                     data=body,
                     files=files,
                 )
-            async with httpx.AsyncClient(timeout=self.timeout) as c:
+            async with httpx.AsyncClient(**self._http_client_kwargs()) as c:
                 return await c.post(
                     f"{self.api_base}/images/edits",
                     headers=headers,
@@ -1233,7 +1254,7 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         logger.info("Custom Images API response ({}): {}", response.status_code,
                        {k: v for k, v in payload.items() if k != "data"})
 
-        images = await _openai_images_from_payload(payload)
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -1427,6 +1448,8 @@ def _openai_explicit_size_supported(
 
 async def _openai_images_from_payload(
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     """Extract images from OpenAI Images API response.
 
@@ -1442,7 +1465,7 @@ async def _openai_images_from_payload(
             continue
         url = item.get("url")
         if isinstance(url, str) and url:
-            images.append(await _download_image_data_url(url))
+            images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
 
@@ -1722,7 +1745,7 @@ class ZhipuImageGenerationClient(ImageGenerationProvider):
 
         url = f"{self.api_base}/images/generations"
 
-        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             return await self._generate_with_client(
                 client,
@@ -1756,7 +1779,7 @@ class ZhipuImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(f"Zhipu image generation failed: {detail}") from exc
 
         payload = response.json()
-        images = await _zhipu_images_from_payload(payload)
+        images = await _zhipu_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -1781,6 +1804,8 @@ def _zhipu_size(
 
 async def _zhipu_images_from_payload(
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     """Extract image data URLs from Zhipu API response.
 
@@ -1793,7 +1818,7 @@ async def _zhipu_images_from_payload(
             continue
         url = item.get("url")
         if isinstance(url, str) and url:
-            images.append(await _download_image_data_url(url))
+            images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
 
@@ -1879,7 +1904,7 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         body.update(self.extra_body)
 
         url = f"{self.api_base}/images/generations"
-        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             return await self._generate_with_client(
                 client,
@@ -1969,8 +1994,8 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
             f"{_MODELSCOPE_POLL_MAX_ATTEMPTS} polls"
         )
 
-    @staticmethod
     async def _collect_images(
+        self,
         data: dict[str, Any],
     ) -> list[str]:
         images: list[str] = []
@@ -1979,7 +2004,9 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
                 if url.startswith("data:image/"):
                     images.append(url)
                 else:
-                    images.append(await _download_image_data_url(url))
+                    images.append(
+                        await _download_image_data_url(url, proxy=self.proxy)
+                    )
         return images
 
 
