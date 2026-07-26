@@ -407,6 +407,34 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class ExtensionEntryConfig(Base):
+    """Activation and package-owned config for one installed extension."""
+
+    enabled: bool = True
+    trusted: bool = False
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtensionsConfig(Base):
+    """Discovery and trust policy for first-class extensions."""
+
+    enabled: bool = True
+    paths: list[str] = Field(default_factory=list)
+    allow: list[str] = Field(default_factory=list)
+    deny: list[str] = Field(default_factory=list)
+    entries: dict[str, ExtensionEntryConfig] = Field(default_factory=dict)
+    workspace_trust: Literal["ask", "allow", "deny"] = "ask"
+
+    @model_validator(mode="after")
+    def _validate_policy(self) -> "ExtensionsConfig":
+        overlap = set(self.allow) & set(self.deny)
+        if overlap:
+            raise ValueError(
+                f"extension IDs cannot appear in both allow and deny: {sorted(overlap)}"
+            )
+        return self
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -417,6 +445,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    extensions: ExtensionsConfig = Field(default_factory=ExtensionsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),

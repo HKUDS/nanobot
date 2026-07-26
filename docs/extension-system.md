@@ -37,6 +37,11 @@ selects the active installation, applies allow/deny policy, and resolves
 contribution ownership. Runtime adapters activate only the contributions the
 host supports.
 
+Packages expose this metadata as `nanobot.extension.json`. The same canonical
+JSON shape is used on disk, over the Node sidecar protocol, and in market
+indexes. Unknown fields are rejected so a misspelled permission or contribution
+cannot silently change behavior.
+
 The agent loop does not discover or execute plugins. Assembly code resolves
 extensions before constructing the runtime and passes native tools, hooks, and
 other contributions through the interfaces those subsystems already expose.
@@ -83,6 +88,11 @@ grant an implicit override. Secrets remain in nanobot provider or host config
 and are exposed only through declared host interfaces. Existing workspace,
 network, SSRF, and shell restrictions continue to apply to host-provided
 operations.
+
+The root `extensions` config controls explicit search paths, allow/deny policy,
+per-extension enablement, package-owned config, and workspace trust. Discovery
+does not import extension code. Installation does not imply workspace trust,
+and activation does not rewrite `config.json` behind the user's back.
 
 ## Market boundary
 

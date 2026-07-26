@@ -1,5 +1,13 @@
 """First-class extension metadata and discovery primitives."""
 
+from nanobot.extensions.codec import (
+    MANIFEST_FILENAME,
+    ManifestFormatError,
+    dump_manifest,
+    load_manifest,
+    manifest_from_mapping,
+    manifest_to_mapping,
+)
 from nanobot.extensions.manifest import (
     EXTENSION_API_VERSION,
     ContributionKind,
@@ -35,5 +43,11 @@ __all__ = [
     "ExtensionRuntime",
     "ExtensionScope",
     "ExtensionSnapshot",
+    "MANIFEST_FILENAME",
+    "ManifestFormatError",
     "ResolvedContribution",
+    "dump_manifest",
+    "load_manifest",
+    "manifest_from_mapping",
+    "manifest_to_mapping",
 ]
