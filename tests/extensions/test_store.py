@@ -40,10 +40,14 @@ def test_store_installs_and_applies_trust_state(tmp_path: Path) -> None:
 
     store.set_trusted(installed.record.id, True)
     store.set_enabled(installed.record.id, False)
+    store.set_permissions(installed.record.id, {"network", "filesystem.read"})
 
     candidate = store.discover().candidates[0]
     assert candidate.trusted
     assert not candidate.enabled
+    assert candidate.granted_permissions == frozenset(
+        {"network", "filesystem.read"}
+    )
 
 
 def test_store_updates_and_uninstalls_atomically(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ from nanobot.extensions.discovery import (
     discover_manifest_root,
 )
 from nanobot.extensions.native import discover_native_extensions
+from nanobot.extensions.preflight import evaluate_dependencies
 from nanobot.extensions.registry import (
     ExtensionCandidate,
     ExtensionDiagnostic,
@@ -65,6 +66,7 @@ def build_extension_catalog(
         for result in discoveries
         for candidate in result.candidates
     )
+    candidates, dependency_diagnostics = evaluate_dependencies(candidates)
     discovery_diagnostics = tuple(
         diagnostic
         for result in discoveries
@@ -91,6 +93,7 @@ def build_extension_catalog(
     snapshot = registry.snapshot()
     diagnostics = (
         discovery_diagnostics
+        + dependency_diagnostics
         + tuple(registry_diagnostics)
         + snapshot.diagnostics
     )
@@ -129,4 +132,7 @@ def _apply_entry_config(
         candidate,
         enabled=entry.enabled,
         trusted=candidate.trusted or entry.trusted,
+        granted_permissions=(
+            candidate.granted_permissions | frozenset(entry.permissions)
+        ),
     )

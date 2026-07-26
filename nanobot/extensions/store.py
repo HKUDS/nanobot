@@ -46,6 +46,7 @@ class InstalledExtension:
     installed_at: str
     enabled: bool = True
     trusted: bool = False
+    granted_permissions: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, value: object) -> InstalledExtension:
@@ -60,6 +61,7 @@ class InstalledExtension:
             installed_at=str(value["installed_at"]),
             enabled=bool(value.get("enabled", True)),
             trusted=bool(value.get("trusted", False)),
+            granted_permissions=tuple(value.get("granted_permissions", ())),
         )
 
 
@@ -101,6 +103,12 @@ class ExtensionStore:
                 candidate,
                 enabled=records.get(candidate.manifest.id, _DEFAULT_RECORD).enabled,
                 trusted=records.get(candidate.manifest.id, _DEFAULT_RECORD).trusted,
+                granted_permissions=frozenset(
+                    records.get(
+                        candidate.manifest.id,
+                        _DEFAULT_RECORD,
+                    ).granted_permissions
+                ),
             )
             for candidate in result.candidates
         )
@@ -180,6 +188,16 @@ class ExtensionStore:
     def set_trusted(self, extension_id: str, trusted: bool) -> InstalledExtension:
         return self._update_record(extension_id, trusted=trusted)
 
+    def set_permissions(
+        self,
+        extension_id: str,
+        permissions: set[str] | frozenset[str],
+    ) -> InstalledExtension:
+        return self._update_record(
+            extension_id,
+            granted_permissions=tuple(sorted(permissions)),
+        )
+
     def uninstall(self, extension_id: str) -> None:
         records = self.records()
         if extension_id not in records:
@@ -231,6 +249,9 @@ class ExtensionStore:
                 installed_at=datetime.now(UTC).isoformat(),
                 enabled=previous.enabled if previous else True,
                 trusted=trusted or bool(previous and previous.trusted),
+                granted_permissions=(
+                    previous.granted_permissions if previous else ()
+                ),
             )
             records[extension_id] = record
             self._write_records(records)
@@ -283,6 +304,7 @@ _DEFAULT_RECORD = InstalledExtension(
     installed_at="",
     enabled=True,
     trusted=False,
+    granted_permissions=(),
 )
 
 

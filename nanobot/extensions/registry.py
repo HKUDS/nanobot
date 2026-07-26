@@ -30,6 +30,7 @@ class ExtensionCandidate:
     location: Path | None = None
     enabled: bool = True
     trusted: bool = False
+    granted_permissions: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not isinstance(self.manifest, ExtensionManifest):
@@ -38,6 +39,8 @@ class ExtensionCandidate:
             raise TypeError("extension candidate scope must be an ExtensionScope")
         if self.location is not None and not isinstance(self.location, Path):
             raise TypeError("extension candidate location must be a Path or None")
+        if not isinstance(self.granted_permissions, frozenset):
+            raise TypeError("extension granted permissions must be a frozenset")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,9 +63,18 @@ class ExtensionPolicy:
 
     def permits(self, candidate: ExtensionCandidate) -> bool:
         extension_id = candidate.manifest.id
+        requested = {
+            permission.name for permission in candidate.manifest.permissions
+        }
         return (
             candidate.enabled
-            and (candidate.scope is ExtensionScope.BUILTIN or candidate.trusted)
+            and (
+                candidate.scope is ExtensionScope.BUILTIN
+                or (
+                    candidate.trusted
+                    and requested <= candidate.granted_permissions
+                )
+            )
             and extension_id not in self.deny
             and (not self.allow or extension_id in self.allow)
         )
@@ -123,8 +135,8 @@ class ExtensionRegistry:
         self._candidates[key] = candidate
 
     def snapshot(self) -> ExtensionSnapshot:
-        active = self._select_active_extensions()
-        resolved, diagnostics = self._resolve_contributions(active)
+        active, selection_diagnostics = self._select_active_extensions()
+        resolved, resolution_diagnostics = self._resolve_contributions(active)
         return ExtensionSnapshot(
             extensions=tuple(sorted(active.values(), key=lambda item: item.manifest.id)),
             contributions=tuple(
@@ -136,18 +148,43 @@ class ExtensionRegistry:
                     ),
                 )
             ),
-            diagnostics=tuple(diagnostics),
+            diagnostics=tuple(selection_diagnostics + resolution_diagnostics),
         )
 
-    def _select_active_extensions(self) -> dict[str, ExtensionCandidate]:
+    def _select_active_extensions(
+        self,
+    ) -> tuple[dict[str, ExtensionCandidate], list[ExtensionDiagnostic]]:
         active: dict[str, ExtensionCandidate] = {}
+        diagnostics: list[ExtensionDiagnostic] = []
         for candidate in sorted(
             self._candidates.values(),
             key=lambda item: (item.scope, item.manifest.id),
         ):
             if self._policy.permits(candidate):
                 active[candidate.manifest.id] = candidate
-        return active
+                continue
+            if (
+                candidate.enabled
+                and candidate.trusted
+                and candidate.scope is not ExtensionScope.BUILTIN
+            ):
+                requested = {
+                    permission.name
+                    for permission in candidate.manifest.permissions
+                }
+                missing = sorted(requested - candidate.granted_permissions)
+                if missing:
+                    diagnostics.append(
+                        ExtensionDiagnostic(
+                            code="permission_required",
+                            extension_id=candidate.manifest.id,
+                            message=(
+                                "Grant required extension permissions: "
+                                + ", ".join(missing)
+                            ),
+                        )
+                    )
+        return active, diagnostics
 
     def _resolve_contributions(
         self,

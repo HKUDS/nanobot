@@ -412,6 +412,7 @@ class ExtensionEntryConfig(Base):
 
     enabled: bool = True
     trusted: bool = False
+    permissions: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
 
 

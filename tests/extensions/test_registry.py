@@ -3,6 +3,7 @@ from nanobot.extensions import (
     ExtensionCandidate,
     ExtensionContribution,
     ExtensionManifest,
+    ExtensionPermission,
     ExtensionPolicy,
     ExtensionRegistry,
     ExtensionRuntime,
@@ -92,6 +93,35 @@ def test_untrusted_external_extension_is_visible_to_discovery_but_not_active() -
 
     assert snapshot.extensions == ()
     assert snapshot.contributions == ()
+
+
+def test_external_extension_requires_every_requested_permission() -> None:
+    candidate = ExtensionCandidate(
+        manifest=ExtensionManifest(
+            id="permission.test",
+            name="Permission test",
+            version="1.0.0",
+            runtime=ExtensionRuntime.DECLARATIVE,
+            permissions=(
+                ExtensionPermission(name="network", reason="Fetch data."),
+                ExtensionPermission(
+                    name="filesystem.read",
+                    reason="Read input.",
+                ),
+            ),
+        ),
+        scope=ExtensionScope.USER,
+        trusted=True,
+        granted_permissions=frozenset({"network"}),
+    )
+    registry = ExtensionRegistry()
+    registry.register(candidate)
+
+    snapshot = registry.snapshot()
+
+    assert snapshot.extensions == ()
+    assert snapshot.diagnostics[0].code == "permission_required"
+    assert "filesystem.read" in snapshot.diagnostics[0].message
 
 
 def test_conflicting_contribution_does_not_silently_replace_owner() -> None:
