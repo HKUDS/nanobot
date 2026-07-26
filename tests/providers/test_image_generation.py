@@ -481,9 +481,38 @@ async def test_gemini_flash_2_0_drops_image_size() -> None:
 
 
 @pytest.mark.parametrize(
+    ("model", "aspect_ratio", "expected"),
+    [
+        ("gemini-3.1-flash-image", "1:8", {"aspectRatio": "1:8"}),
+        ("gemini-3.1-flash-lite-image", "4:1", {"aspectRatio": "4:1"}),
+        ("gemini-3-pro-image", "1:8", None),
+        ("gemini-2.5-flash-image", "4:1", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gemini_flash_scopes_extreme_aspect_ratios_by_model(
+    model: str,
+    aspect_ratio: str,
+    expected: dict[str, str] | None,
+) -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw a cat",
+        model=model,
+        aspect_ratio=aspect_ratio,
+    )
+
+    response_format = fake.calls[0]["json"]["generationConfig"].get("responseFormat")
+    assert response_format == ({"image": expected} if expected else None)
+
+
+@pytest.mark.parametrize(
     ("model", "image_size", "expected"),
     [
         ("gemini-3-pro-image", "512", None),
+        ("gemini-3-pro", "2K", None),
         ("gemini-3.1-flash-lite-image", "2K", None),
         ("gemini-3.1-flash-lite-image", "1K", {"imageSize": "1K"}),
         ("gemini-3.1-flash-image", "512", {"imageSize": "512"}),

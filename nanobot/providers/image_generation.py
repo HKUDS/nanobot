@@ -33,12 +33,17 @@ _AIHUBMIX_ASPECT_RATIO_SIZES = {
 }
 _GEMINI_DEFAULT_TIMEOUT_S = 120.0
 _GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
-# Aspect ratios documented for every Gemini Flash image (generateContent) model.
-# The extreme ratios (1:4, 4:1, 1:8, 8:1) are only listed for the 3.1 Flash /
-# Flash Lite tables, so they are left out to avoid sending an unsupported value
-# to 2.5 Flash Image or 3.1 Pro Image.
-_GEMINI_FLASH_ASPECT_RATIOS = {
+# Aspect ratios documented for every Gemini image model using generateContent.
+_GEMINI_FLASH_COMMON_ASPECT_RATIOS = {
     "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
+}
+# Gemini 3.1 Flash and Flash Lite additionally accept extreme aspect ratios.
+_GEMINI_31_FLASH_ASPECT_RATIOS = {
+    *_GEMINI_FLASH_COMMON_ASPECT_RATIOS,
+    "1:4",
+    "4:1",
+    "1:8",
+    "8:1",
 }
 # Gemini 3 Pro image models accept these sizes. Gemini 3.1 Flash adds 512,
 # while Gemini 3.1 Flash Lite supports only 1K.
@@ -778,17 +783,31 @@ def _gemini_flash_image_config(
 ) -> dict[str, str]:
     """Build the ``responseFormat.image`` config for Gemini Flash image models.
 
-    Aspect ratio applies to all Flash image models; image size is only honored
-    by Gemini 3+ image models (``gemini-2.5-flash-image`` ignores it).
+    Capabilities are model-specific: Gemini 3.1 Flash variants support four
+    additional extreme ratios, while configurable image sizes are limited to
+    the documented Gemini 3 image model families.
     """
     config: dict[str, str] = {}
-    if aspect_ratio and aspect_ratio in _GEMINI_FLASH_ASPECT_RATIOS:
+    if aspect_ratio and aspect_ratio in _gemini_flash_supported_aspect_ratios(model):
         config["aspectRatio"] = aspect_ratio
     if image_size:
         normalized = image_size.strip().upper()
         if normalized in _gemini_flash_supported_image_sizes(model):
             config["imageSize"] = normalized
     return config
+
+
+def _gemini_flash_supported_aspect_ratios(model: str) -> set[str]:
+    """Return the documented aspect ratios for a generateContent image model."""
+    normalized = model.lower()
+    if (
+        "gemini-3.1-flash-lite-image" in normalized
+        or "gemini-3.1-flash-image" in normalized
+    ):
+        return _GEMINI_31_FLASH_ASPECT_RATIOS
+    if "gemini-" in normalized and "image" in normalized:
+        return _GEMINI_FLASH_COMMON_ASPECT_RATIOS
+    return set()
 
 
 def _gemini_flash_supported_image_sizes(model: str) -> set[str]:
@@ -802,7 +821,7 @@ def _gemini_flash_supported_image_sizes(model: str) -> set[str]:
         return _GEMINI_31_FLASH_LITE_IMAGE_SIZES
     if "gemini-3.1-flash-image" in normalized:
         return _GEMINI_31_FLASH_IMAGE_SIZES
-    if "gemini-3" in normalized:
+    if "gemini-3-pro-image" in normalized:
         return _GEMINI_3_IMAGE_SIZES
     return set()
 
