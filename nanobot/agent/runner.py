@@ -19,6 +19,11 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_MESSAGE_META,
+    detach_runtime_context,
+    reattach_runtime_context,
+)
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
@@ -137,10 +142,51 @@ class AgentRunner:
                 and not is_hidden_history_message(messages[-1])
             ):
                 merged = dict(messages[-1])
-                merged["content"] = cls._merge_message_content(
-                    merged.get("content"),
-                    injection.get("content"),
+                left_meta = merged.get("_meta")
+                right_meta = injection.get("_meta")
+                left_marker = (
+                    left_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if isinstance(left_meta, dict)
+                    else None
                 )
+                right_marker = (
+                    right_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if isinstance(right_meta, dict)
+                    else None
+                )
+                detached_left = (
+                    detach_runtime_context(merged.get("content"), left_marker)
+                    if isinstance(left_marker, dict)
+                    else (merged.get("content"), [], [])
+                )
+                detached_right = (
+                    detach_runtime_context(injection.get("content"), right_marker)
+                    if isinstance(right_marker, dict)
+                    else (injection.get("content"), [], [])
+                )
+                if detached_left is not None and detached_right is not None:
+                    left_content, left_sources, left_blocks = detached_left
+                    right_content, right_sources, right_blocks = detached_right
+                    merged_content = cls._merge_message_content(left_content, right_content)
+                    context_blocks = [*left_blocks, *right_blocks]
+                    if context_blocks:
+                        merged_content, marker = reattach_runtime_context(
+                            merged_content,
+                            [*left_sources, *right_sources],
+                            context_blocks,
+                        )
+                        internal_meta = dict(left_meta) if isinstance(left_meta, dict) else {}
+                        if isinstance(right_meta, dict):
+                            for key, value in right_meta.items():
+                                internal_meta.setdefault(key, value)
+                        internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
+                        merged["_meta"] = internal_meta
+                    merged["content"] = merged_content
+                else:
+                    merged["content"] = cls._merge_message_content(
+                        merged.get("content"),
+                        injection.get("content"),
+                    )
                 messages[-1] = merged
                 continue
             messages.append(injection)

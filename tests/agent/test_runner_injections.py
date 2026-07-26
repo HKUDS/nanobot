@@ -527,6 +527,17 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
             "thread_id": "topic-7",
         },
     ))
+    await pending_queue.put(InboundMessage(
+        channel="telegram",
+        sender_id="user-c",
+        chat_id="group-1",
+        content="another follow-up",
+        metadata={
+            "message_id": "message-3",
+            "sender_name": "Carol",
+            "thread_id": "topic-7",
+        },
+    ))
 
     _, _, all_messages, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "initial message from user A"}],
@@ -538,28 +549,48 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         pending_queue=pending_queue,
     )
 
-    assert seen_contexts == [(
-        "telegram",
-        "group-1",
-        "user-b",
-        "message-2",
-        session.key,
-        "follow-up from the second speaker",
-        "Bob",
-        "topic-7",
-    )]
+    assert seen_contexts == [
+        (
+            "telegram",
+            "group-1",
+            "user-b",
+            "message-2",
+            session.key,
+            "follow-up from the second speaker",
+            "Bob",
+            "topic-7",
+        ),
+        (
+            "telegram",
+            "group-1",
+            "user-c",
+            "message-3",
+            session.key,
+            "another follow-up",
+            "Carol",
+            "topic-7",
+        ),
+    ]
 
     injected = [message for message in all_messages if message.get("role") == "user"][-1]
     assert "follow-up from the second speaker" in str(injected["content"])
     model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
     assert "telegram | group-1 | user-b | message-2" in str(model_messages)
     assert "Bob | topic-7" in str(model_messages)
-    assert injected["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["identity"]
+    assert "telegram | group-1 | user-c | message-3" in str(model_messages)
+    assert "Carol | topic-7" in str(model_messages)
+    assert injected["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == [
+        "identity",
+        "identity",
+    ]
 
     loop._save_turn(session, all_messages, skip=1)
     persisted = [message for message in session.messages if message.get("role") == "user"][-1]
     assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
-    assert public_history_message(persisted)["content"] == "follow-up from the second speaker"
+    assert "telegram | group-1 | user-c | message-3" in str(persisted["content"])
+    assert public_history_message(persisted)["content"] == (
+        "follow-up from the second speaker\n\nanother follow-up"
+    )
 
 
 @pytest.mark.asyncio
@@ -686,6 +717,58 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
         for block in injected["content"]
         if isinstance(block, dict)
     )
+
+
+def test_runner_merge_preserves_runtime_markers_with_media() -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_HISTORY_META,
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        append_runtime_context,
+        public_history_message,
+    )
+
+    first_visible = [
+        {"type": "text", "text": "first"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]
+    first_content, first_marker = append_runtime_context(
+        first_visible,
+        [RuntimeContextBlock(source="first", content="private first")],
+    )
+    second_content, second_marker = append_runtime_context(
+        "second",
+        [RuntimeContextBlock(source="second", content="private second")],
+    )
+    messages: list[dict] = []
+
+    AgentRunner._append_injected_messages(messages, [
+        {
+            "role": "user",
+            "content": first_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: first_marker},
+        },
+        {
+            "role": "user",
+            "content": second_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: second_marker},
+        },
+    ])
+
+    assert len(messages) == 1
+    merged = messages[0]
+    assert "private first" in str(merged["content"])
+    assert "private second" in str(merged["content"])
+    persisted = {
+        "role": "user",
+        "content": merged["content"],
+        RUNTIME_CONTEXT_HISTORY_META: merged["_meta"][RUNTIME_CONTEXT_MESSAGE_META],
+    }
+    assert public_history_message(persisted)["content"] == [
+        *first_visible,
+        {"type": "text", "text": "second"},
+    ]
 
 
 @pytest.mark.asyncio
