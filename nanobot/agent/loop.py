@@ -1514,7 +1514,7 @@ class AgentLoop:
         self._remember_unified_session_route(
             ctx.session,
             msg,
-            is_user_turn=ctx.kind is TurnKind.USER,
+            is_user_turn=ctx.original_user_text is not None,
         )
         await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:

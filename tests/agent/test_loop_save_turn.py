@@ -708,6 +708,63 @@ async def test_process_message_persists_unified_session_delivery_route(tmp_path:
     assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
 
 
+@pytest.mark.parametrize(
+    ("msg", "is_user_turn"),
+    [
+        (
+            InboundMessage(
+                channel="cli",
+                sender_id="u1",
+                chat_id="direct",
+                content="cli input",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="system",
+                sender_id="system",
+                chat_id="discord:automation",
+                content="system event",
+            ),
+            False,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="subagent",
+                chat_id="subagent-result",
+                content="subagent result",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="u1",
+                chat_id="automation",
+                content="scheduled turn",
+                metadata={CRON_TRIGGER_META: {"job_id": "job-1"}},
+            ),
+            True,
+        ),
+    ],
+)
+def test_unified_session_route_ignores_non_user_destinations(
+    tmp_path: Path,
+    msg: InboundMessage,
+    is_user_turn: bool,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
+
+    loop._remember_unified_session_route(session, msg, is_user_turn=is_user_turn)
+
+    assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
+
+
 # 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
 # at the top of ``_process_message`` and filters ``msg.media`` down to
 # paths that magic-byte-sniff as images, so the test fixture needs real
