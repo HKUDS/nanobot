@@ -72,6 +72,7 @@ from nanobot.bus.outbound_events import (  # noqa: E402
     StreamEndEvent,
     outbound_event_from_message,
 )
+from nanobot.cli.extensions import create_extensions_app  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
@@ -2534,6 +2535,8 @@ def agent(
 # Channel Commands
 # ============================================================================
 
+
+app.add_typer(create_extensions_app(console=console), name="extensions")
 
 channels_app = typer.Typer(help="Manage channels")
 app.add_typer(channels_app, name="channels")
