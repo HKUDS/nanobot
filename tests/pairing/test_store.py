@@ -257,3 +257,27 @@ def test_load_treats_null_approved_channel_list_as_empty(tmp_path, monkeypatch):
     assert store.is_approved("telegram", "123") is False
     assert store.is_approved("discord", "456") is True
     assert store.get_approved("telegram") == []
+
+
+def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypatch):
+    """Top-level approved/pending null must not crash pairing load or list_pending."""
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": null, "pending": null}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.is_approved("telegram", "123") is False
+    assert store.list_pending() == []
+    assert store.get_approved("telegram") == []
+
+
+def test_list_pending_skips_null_pending_entries(tmp_path, monkeypatch):
+    """Null pending entry values must be dropped instead of crashing list_pending."""
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {}, "pending": {"ABCD-EFGH": null}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []

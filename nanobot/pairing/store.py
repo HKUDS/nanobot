@@ -44,8 +44,18 @@ def _load() -> dict[str, Any]:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
 
+    # JSON stores may contain null maps after partial edits; treat like {}.
+    approved = data.get("approved") or {}
+    if not isinstance(approved, dict):
+        approved = {}
+    data["approved"] = approved
+    pending = data.get("pending") or {}
+    if not isinstance(pending, dict):
+        pending = {}
+    data["pending"] = pending
+
     # Convert approved lists to str sets for O(1) lookup.
-    for channel, users in data.get("approved", {}).items():
+    for channel, users in approved.items():
         if not isinstance(users, list):
             users = []
         data["approved"][channel] = {str(u) for u in users}
@@ -56,9 +66,15 @@ def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Convert sets back to lists for JSON serialization
+    approved = data.get("approved") or {}
+    pending = data.get("pending") or {}
+    if not isinstance(approved, dict):
+        approved = {}
+    if not isinstance(pending, dict):
+        pending = {}
     payload = {
-        "approved": {ch: sorted(list(users)) for ch, users in data.get("approved", {}).items()},
-        "pending": dict(data.get("pending", {})),
+        "approved": {ch: sorted(list(users)) for ch, users in approved.items()},
+        "pending": dict(pending),
     }
     _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -66,10 +82,18 @@ def _save(data: dict[str, Any]) -> None:
 def _gc_pending(data: dict[str, Any]) -> None:
     """Remove expired pending entries in-place."""
     now = time.time()
-    pending: dict[str, Any] = data.get("pending", {})
-    expired = [code for code, info in pending.items() if info.get("expires_at", 0) < now]
+    pending: dict[str, Any] = data.get("pending") or {}
+    if not isinstance(pending, dict):
+        data["pending"] = {}
+        return
+    expired = [
+        code
+        for code, info in pending.items()
+        if not isinstance(info, dict) or info.get("expires_at", 0) < now
+    ]
     for code in expired:
         del pending[code]
+    data["pending"] = pending
 
 
 def generate_code(
@@ -152,6 +176,7 @@ def list_pending() -> list[dict[str, Any]]:
         return [
             {"code": code, **info}
             for code, info in data.get("pending", {}).items()
+            if isinstance(info, dict)
         ]
 
 
