@@ -387,6 +387,30 @@ def test_exec_bind_roots_do_not_widen_guard_without_bwrap(tmp_path):
     assert "path outside working dir" in blocked
 
 
+def test_exec_bwrap_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    secret = tmp_path / "config.json"
+    secret.write_text("secret")
+    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+        sandbox_ro_binds=[str(tmp_path)],
+    )
+
+    blocked = tool._guard_command(
+        f"cat {secret}",
+        str(workspace),
+        restrict_to_workspace=True,
+        workspace_root=str(workspace),
+    )
+
+    assert blocked is not None
+    assert "path outside working dir" in blocked
+
+
 # --- format command blocking -----------------------------------------------
 
 

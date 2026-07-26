@@ -201,6 +201,27 @@ class TestBwrapBackend:
         assert "relative/bin" not in tokens
         assert "relative/cache" not in tokens
 
+    def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
+        ws = tmp_path / "private" / "project"
+        parent = ws.parent.resolve(strict=False)
+
+        result = wrap_command(
+            "bwrap",
+            "cat ../config.json",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=[str(parent)],
+            sandbox_rw_binds=[str(parent)],
+        )
+        tokens = _parse(result)
+
+        ro_try_indices = [i for i, token in enumerate(tokens) if token == "--ro-bind-try"]
+        ro_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in ro_try_indices}
+        bind_try_indices = [i for i, token in enumerate(tokens) if token == "--bind-try"]
+        bind_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in bind_try_indices}
+        assert (str(parent), str(parent)) not in ro_try_pairs
+        assert (str(parent), str(parent)) not in bind_try_pairs
+
 
 class TestUnknownBackend:
     def test_raises_value_error(self, tmp_path):

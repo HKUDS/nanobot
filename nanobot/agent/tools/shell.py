@@ -809,7 +809,9 @@ class ExecTool(Tool):
                 if workspace_root
                 else None
             )
-            sandbox_bind_roots = self._active_sandbox_bind_roots()
+            sandbox_bind_roots = self._active_sandbox_bind_roots(
+                resolved_workspace or cwd_path
+            )
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -960,7 +962,17 @@ class ExecTool(Tool):
                 roots.append(resolved)
         return roots
 
-    def _active_sandbox_bind_roots(self) -> list[Path]:
+    def _active_sandbox_bind_roots(
+        self,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
         if self.sandbox != "bwrap" or _IS_WINDOWS:
             return []
-        return [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
+        roots = [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
+        if workspace_root is None:
+            return roots
+        return [
+            root
+            for root in roots
+            if not is_path_within(workspace_root, root)
+        ]

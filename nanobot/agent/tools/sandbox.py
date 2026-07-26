@@ -13,7 +13,11 @@ from typing import Iterable
 from nanobot.config.paths import get_media_dir
 
 
-def _normalize_bind_paths(paths: Iterable[str] | None) -> list[str]:
+def _normalize_bind_paths(
+    paths: Iterable[str] | None,
+    *,
+    workspace: Path | None = None,
+) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for raw in paths or []:
@@ -23,7 +27,17 @@ def _normalize_bind_paths(paths: Iterable[str] | None) -> list[str]:
         path = Path(os.path.expandvars(value)).expanduser()
         if not path.is_absolute():
             continue
-        resolved = str(path.resolve(strict=False))
+        resolved_path = path.resolve(strict=False)
+        if workspace is not None:
+            try:
+                workspace.relative_to(resolved_path)
+            except ValueError:
+                pass
+            else:
+                # A later bind of the workspace or one of its parents could
+                # cover the tmpfs that hides the config directory.
+                continue
+        resolved = str(resolved_path)
         if resolved in seen:
             continue
         seen.add(resolved)
@@ -79,9 +93,9 @@ def _bwrap(
         "--bind", str(ws), str(ws),
         "--ro-bind-try", str(media), str(media),  # read-only access to media
     ]
-    for p in _normalize_bind_paths(sandbox_ro_binds):
+    for p in _normalize_bind_paths(sandbox_ro_binds, workspace=ws):
         args += ["--ro-bind-try", p, p]
-    for p in _normalize_bind_paths(sandbox_rw_binds):
+    for p in _normalize_bind_paths(sandbox_rw_binds, workspace=ws):
         args += ["--bind-try", p, p]
     args += ["--chdir", sandbox_cwd, "--", "sh", "-c", command]
     return shlex.join(args)
