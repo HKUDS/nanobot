@@ -638,7 +638,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             <div
               ref={messageRegionRef}
               data-testid="thread-message-region"
-              className="row-start-1 flex min-h-0 flex-col justify-start px-3 pb-4 pt-4 sm:px-4"
+              className="row-start-1 flex min-h-0 min-w-0 flex-col justify-start px-3 pb-4 pt-4 sm:px-4"
             >
               <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
