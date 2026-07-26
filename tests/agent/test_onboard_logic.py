@@ -1092,6 +1092,55 @@ class TestMainMenuUpdate:
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
         assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
 
+    def test_quick_start_openai_codex_runs_interactive_login_for_bad_cached_token(
+        self, monkeypatch
+    ):
+        """A malformed cached token should fall back to the interactive OAuth flow."""
+        import oauth_cli_kit
+
+        config = Config()
+        config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
+        prompts: list[str] = []
+        printed: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        class FakePrompt:
+            def ask(self):
+                return "authorization-code"
+
+        def fake_login(**kwargs):
+            kwargs["print_fn"]("[bold]Open the browser[/bold]")
+            prompts.append(kwargs["prompt_fn"]("Paste the authorization code"))
+            assert kwargs["proxy"] == "http://127.0.0.1:8080"
+            return SimpleNamespace(
+                access="fresh-token",
+                account_id="[red]account-123[/red]",
+            )
+
+        monkeypatch.setattr(
+            oauth_cli_kit,
+            "get_token",
+            lambda **_kwargs: SimpleNamespace(account_id="missing-access"),
+        )
+        monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *_args, **_kwargs: FakePrompt()),
+        )
+        monkeypatch.setattr(
+            onboard_wizard.console,
+            "print",
+            lambda *args, **kwargs: printed.append((args, kwargs)),
+        )
+
+        assert onboard_wizard._quick_start_oauth_login(config, "openai_codex") is True
+        assert prompts == ["authorization-code"]
+        assert any(
+            args == ("[bold]Open the browser[/bold]",) and kwargs == {"markup": False}
+            for args, kwargs in printed
+        )
+        assert any(r"\[red]account-123\[/red]" in str(args[0]) for args, _kwargs in printed)
+
     def test_quick_start_codex_auth_check_ignores_unrelated_missing_env(self, monkeypatch):
         """OAuth readiness should depend only on the Codex proxy and token."""
         import oauth_cli_kit
@@ -1108,6 +1157,21 @@ class TestMainMenuUpdate:
         assert (
             onboard_wizard._quick_start_oauth_is_authenticated(config, "openai_codex")
             is True
+        )
+
+    def test_quick_start_codex_auth_check_rejects_malformed_token(self, monkeypatch):
+        """A malformed cached token should report not-ready instead of crashing."""
+        import oauth_cli_kit
+
+        monkeypatch.setattr(
+            oauth_cli_kit,
+            "get_token",
+            lambda **_kwargs: SimpleNamespace(account_id="missing-access"),
+        )
+
+        assert (
+            onboard_wizard._quick_start_oauth_is_authenticated(Config(), "openai_codex")
+            is False
         )
 
     def test_quick_start_summary_reports_missing_codex_oauth(self, monkeypatch):

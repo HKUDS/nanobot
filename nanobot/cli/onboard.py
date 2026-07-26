@@ -15,6 +15,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in environments with
 from loguru import logger
 from pydantic import BaseModel
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -1634,30 +1635,30 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
     try:
         proxy = _quick_start_codex_proxy(config)
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{escape(str(exc))}[/red]")
         return False
 
     token = None
     with suppress(Exception):
         token = get_token(proxy=proxy)
-    if not (token and token.access):
+    if not getattr(token, "access", None):
         console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
         try:
             token = login_oauth_interactive(
-                print_fn=lambda message: console.print(message),
+                print_fn=lambda message: console.print(message, markup=False),
                 prompt_fn=lambda prompt: _get_questionary().text(prompt).ask() or "",
                 proxy=proxy,
             )
         except Exception as exc:
-            console.print(f"[red]OAuth login failed: {exc}[/red]")
+            console.print(f"[red]OAuth login failed: {escape(str(exc))}[/red]")
             return False
 
-    if not (token and token.access):
+    if not getattr(token, "access", None):
         console.print("[red]OAuth login failed[/red]")
         return False
 
     account = getattr(token, "account_id", None)
-    suffix = f"  [dim]{account}[/dim]" if account else ""
+    suffix = f"  [dim]{escape(str(account))}[/dim]" if account else ""
     console.print(f"[green]Authenticated with OpenAI Codex[/green]{suffix}")
     return True
 
@@ -1673,7 +1674,7 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
         token = get_token(proxy=proxy)
     except Exception:
         return False
-    return bool(token and token.access)
+    return bool(getattr(token, "access", None))
 
 
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
