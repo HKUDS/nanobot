@@ -3,6 +3,7 @@ from pathlib import Path
 
 from nanobot.extensions import (
     ContributionKind,
+    DependencyKind,
     ExtensionRuntime,
     adapt_package,
 )
@@ -34,7 +35,11 @@ def test_adapts_openclaw_contracts_without_loading_code(tmp_path: Path) -> None:
             {
                 "name": "@openclaw/search-plugin",
                 "version": "2.0.0",
-                "openclaw": {"extensions": ["./index.ts"]},
+                "peerDependencies": {"openclaw": ">=2.0.0"},
+                "openclaw": {
+                    "extensions": ["./index.ts"],
+                    "runtimeExtensions": ["./dist/index.js"],
+                },
             }
         )
     )
@@ -55,6 +60,9 @@ def test_adapts_openclaw_contracts_without_loading_code(tmp_path: Path) -> None:
     result = adapt_package(tmp_path)
 
     assert result.manifest.id == "openclaw.search"
+    assert result.manifest.activation_entries == ("./dist/index.js",)
+    assert result.manifest.dependencies[0].kind is DependencyKind.NPM
+    assert result.manifest.dependencies[0].specifier == ">=2.0.0"
     assert {
         (item.kind, item.name) for item in result.manifest.contributions
     } == {

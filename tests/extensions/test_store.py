@@ -3,8 +3,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nanobot.extensions import (
+    DependencyKind,
+    ExtensionDependency,
+    ExtensionManifest,
+    ExtensionRuntime,
     ExtensionSourceKind,
     ExtensionStore,
+    dump_manifest,
 )
 
 
@@ -93,3 +98,35 @@ def test_store_restores_previous_package_when_registry_write_fails(
 
     restored = json.loads(installed_package.read_text())
     assert restored["version"] == "1.0.0"
+
+
+def test_store_installs_declared_npm_runtime_dependency(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "index.mjs").write_text("export default function () {}")
+    (source / "package.json").write_text("{}")
+    dump_manifest(
+        ExtensionManifest(
+            id="openclaw.test",
+            name="OpenClaw test",
+            version="1.0.0",
+            runtime=ExtensionRuntime.OPENCLAW,
+            entry="./index.mjs",
+            dependencies=(
+                ExtensionDependency(
+                    kind=DependencyKind.NPM,
+                    name="openclaw",
+                    specifier="2026.7.1",
+                ),
+            ),
+        ),
+        source / "nanobot.extension.json",
+    )
+    store = ExtensionStore(tmp_path / "extensions")
+
+    with patch("nanobot.extensions.store._run") as run:
+        store.install_local(source)
+
+    command = run.call_args.args[0]
+    assert "--save-prod" in command
+    assert "openclaw@2026.7.1" in command

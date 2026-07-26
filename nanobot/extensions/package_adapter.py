@@ -11,7 +11,9 @@ from typing import Any
 from nanobot.extensions.codec import MANIFEST_FILENAME, load_manifest
 from nanobot.extensions.manifest import (
     ContributionKind,
+    DependencyKind,
     ExtensionContribution,
+    ExtensionDependency,
     ExtensionManifest,
     ExtensionRuntime,
 )
@@ -72,7 +74,10 @@ def _adapt_pi(package: dict[str, Any]) -> AdaptedPackage:
 
 def _adapt_openclaw(root: Path, package: dict[str, Any]) -> AdaptedPackage:
     openclaw = package["openclaw"]
-    entries = _string_list(openclaw.get("extensions"), "openclaw.extensions")
+    entries = _optional_string_list(
+        openclaw.get("runtimeExtensions"),
+        "openclaw.runtimeExtensions",
+    ) or _string_list(openclaw.get("extensions"), "openclaw.extensions")
     plugin_path = root / "openclaw.plugin.json"
     plugin = _read_json(plugin_path, "openclaw.plugin.json") if plugin_path.is_file() else {}
     plugin_id = str(plugin.get("id") or package.get("name") or "openclaw-plugin")
@@ -97,6 +102,7 @@ def _adapt_openclaw(root: Path, package: dict[str, Any]) -> AdaptedPackage:
             runtime=ExtensionRuntime.OPENCLAW,
             entries=tuple(entries),
             contributions=contributions,
+            dependencies=_openclaw_dependencies(package, openclaw),
             description=str(
                 plugin.get("description") or package.get("description") or ""
             ),
@@ -105,6 +111,23 @@ def _adapt_openclaw(root: Path, package: dict[str, Any]) -> AdaptedPackage:
         ),
         diagnostics=tuple(diagnostics),
         generated=True,
+    )
+
+
+def _openclaw_dependencies(
+    package: dict[str, Any],
+    openclaw: dict[str, Any],
+) -> tuple[ExtensionDependency, ...]:
+    build = openclaw.get("build")
+    version = build.get("openclawVersion") if isinstance(build, dict) else None
+    peers = package.get("peerDependencies")
+    peer_version = peers.get("openclaw") if isinstance(peers, dict) else None
+    return (
+        ExtensionDependency(
+            kind=DependencyKind.NPM,
+            name="openclaw",
+            specifier=str(version or peer_version or "latest"),
+        ),
     )
 
 

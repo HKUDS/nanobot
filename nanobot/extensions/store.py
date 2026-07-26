@@ -21,6 +21,7 @@ from nanobot.extensions.discovery import (
     ExtensionDiscoveryResult,
     discover_manifest_root,
 )
+from nanobot.extensions.manifest import DependencyKind, ExtensionManifest
 from nanobot.extensions.package_adapter import AdaptedPackage, adapt_package
 from nanobot.extensions.registry import ExtensionScope
 
@@ -216,7 +217,7 @@ class ExtensionStore:
             )
             if package.generated:
                 dump_manifest(package.manifest, staging / MANIFEST_FILENAME)
-            _install_node_dependencies(staging)
+            _install_node_dependencies(staging, package.manifest)
             integrity = _tree_hash(staging)
             if target.exists():
                 target.rename(backup)
@@ -285,25 +286,46 @@ _DEFAULT_RECORD = InstalledExtension(
 )
 
 
-def _install_node_dependencies(root: Path) -> None:
+def _install_node_dependencies(root: Path, manifest: ExtensionManifest) -> None:
     package_path = root / "package.json"
     if not package_path.is_file():
         return
     package = json.loads(package_path.read_text(encoding="utf-8"))
     dependencies = package.get("dependencies") if isinstance(package, dict) else None
-    if not dependencies:
-        return
-    _run(
-        [
-            "npm",
-            "install",
-            "--omit=dev",
-            "--ignore-scripts",
-            "--no-audit",
-            "--no-fund",
-        ],
-        cwd=root,
-    )
+    if dependencies:
+        _run(
+            [
+                "npm",
+                "install",
+                "--omit=dev",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+            ],
+            cwd=root,
+        )
+    for dependency in manifest.dependencies:
+        if dependency.kind is not DependencyKind.NPM or dependency.optional:
+            continue
+        spec = (
+            f"{dependency.name}@{dependency.specifier}"
+            if dependency.specifier
+            else dependency.name
+        )
+        _run(
+            [
+                "npm",
+                "install",
+                "--save-prod",
+                "--save-exact",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+                "--",
+                spec,
+            ],
+            cwd=root,
+        )
 
 
 def _run(command: list[str], *, cwd: Path | None = None) -> str:
