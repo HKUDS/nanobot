@@ -72,7 +72,7 @@ Provider settings reuse normal provider config fields:
 | `providers.<name>.extraBody` | Extra JSON fields merged into provider request bodies |
 | `providers.<name>.proxy` | Explicit trusted HTTP proxy for provider requests and returned image URL downloads |
 
-For providers that return image URLs, direct downloads use DNS pinning. When an explicit provider `proxy` is configured, nanobot validates the initial URL and every redirect locally, then relies on that trusted proxy for final DNS resolution and network egress. Process-wide proxy environment variables are not used for these downloads.
+For providers that return image URLs, direct downloads use DNS pinning. When an explicit provider `proxy` is configured, nanobot rejects malformed URLs and locally identifiable private/internal targets on the initial URL and every redirect. Hostnames unavailable to local DNS are delegated to that trusted proxy, which owns final DNS resolution and network egress. Process-wide proxy environment variables are not used for these downloads.
 
 Both camelCase and snake_case config keys are accepted, but docs use camelCase to match `config.json`.
 

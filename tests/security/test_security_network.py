@@ -195,6 +195,47 @@ def test_resolve_url_target_returns_validated_public_ips():
     assert resolved_ips == ("93.184.216.34",)
 
 
+@pytest.mark.parametrize(
+    ("trust_remote_dns", "expected_ok"),
+    [(False, False), (True, True)],
+)
+def test_resolve_url_target_only_delegates_dns_to_trusted_proxy(
+    trust_remote_dns: bool,
+    expected_ok: bool,
+):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, err, resolved_ips = resolve_url_target(
+            "https://proxy-only.example/image.png",
+            trust_remote_dns=trust_remote_dns,
+        )
+
+    assert ok is expected_ok, err
+    assert resolved_ips == ()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/secret",
+        "http://service.localhost/secret",
+        "http://127.0.0.1/secret",
+        "http://169.254.169.254/latest",
+        "http://[::1]/secret",
+    ],
+)
+def test_resolve_url_target_does_not_delegate_local_targets(url: str):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, _, _ = resolve_url_target(url, trust_remote_dns=True)
+
+    assert not ok
+
+
 def test_pin_resolved_url_dns_prevents_second_resolution_rebind():
     def _rebinding_resolver(hostname, port, family=0, type_=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0))]
