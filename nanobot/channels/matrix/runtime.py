@@ -602,6 +602,10 @@ class MatrixChannel(BaseChannel):
     ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
 
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             stream_key = _matrix_stream_key(chat_id, stream_id)
             buf = self._stream_bufs.pop(stream_key, None)

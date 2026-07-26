@@ -676,6 +676,33 @@ async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> Non
 
 
 @pytest.mark.asyncio
+async def test_send_delta_merge_next_preserves_buffer() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="first-",
+        message_id=7,
+        last_edit=float("inf"),
+        stream_id="s:0",
+    )
+
+    await channel.send_delta(
+        "123",
+        "boundary",
+        stream_id="s:0",
+        stream_end=True,
+        merge_next=True,
+    )
+
+    assert channel._stream_bufs["123"].text == "first-boundary"
+    channel._app.bot.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
     from telegram.error import BadRequest
 

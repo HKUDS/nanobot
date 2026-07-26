@@ -1938,6 +1938,29 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_merge_next_preserves_buffer() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._stream_bufs["!room:matrix.org"] = matrix_module._StreamBuf(
+        text="first-",
+        event_id="event-1",
+        last_edit=100.0,
+    )
+    channel.monotonic_time = lambda: 100.1
+
+    await channel.send_delta(
+        "!room:matrix.org",
+        "boundary",
+        stream_end=True,
+        merge_next=True,
+    )
+
+    assert channel._stream_bufs["!room:matrix.org"].text == "first-boundary"
+    assert client.room_send_calls == []
+
+
+@pytest.mark.asyncio
 async def test_send_delta_keeps_same_room_stream_ids_independent(monkeypatch) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)

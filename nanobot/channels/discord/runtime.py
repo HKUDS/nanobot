@@ -497,6 +497,10 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("client not ready; dropping stream delta")
             return
 
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             buf = self._stream_bufs.get(chat_id)
             if not buf or buf.message is None or not buf.text:

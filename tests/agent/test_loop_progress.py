@@ -581,6 +581,53 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
+    async def test_length_recovery_streams_non_delta_terminal_segment(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "test-model"
+        call_count = 0
+
+        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                await on_content_delta("first-")
+                return LLMResponse(content="first-", finish_reason="length")
+            return LLMResponse(content="second", finish_reason="stop")
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="give a long answer",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        deltas = [m.event for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+        endings = [m.event for m in outbound if isinstance(m.event, StreamEndEvent)]
+        final = [m for m in outbound if m.content == "first-second"]
+
+        assert [event.content for event in deltas] == ["first-", "second"]
+        assert [event.merge_next for event in endings] == [True, False]
+        assert len(final) == 1
+        assert isinstance(final[0].event, StreamedResponseEvent)
+
+    @pytest.mark.asyncio
     async def test_length_recovery_at_max_iterations_streams_only_missing_tail(
         self,
         tmp_path: Path,

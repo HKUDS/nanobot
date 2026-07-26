@@ -613,6 +613,23 @@ class AgentRunner:
                     await hook.after_iteration(context)
                     continue
 
+            # Some streaming providers recover with a complete response but no
+            # content deltas. When an earlier length segment is already visible,
+            # emit this terminal segment into the same stream; otherwise the
+            # regular full response would duplicate the visible prefix.
+            if (
+                length_recovery_parts
+                and hook.wants_streaming()
+                and not context.streamed_content
+                and response.finish_reason != "error"
+                and not is_blank_text(clean)
+            ):
+                await hook.on_stream(
+                    context,
+                    _restore_outer_whitespace(clean, original_content),
+                )
+                context.streamed_content = True
+
             assistant_message: dict[str, Any] | None = None
             if response.finish_reason != "error" and not is_blank_text(clean):
                 assistant_message = build_assistant_message(

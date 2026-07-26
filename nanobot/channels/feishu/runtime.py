@@ -2232,6 +2232,10 @@ class FeishuChannel(BaseChannel):
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             message_id = meta.get("message_id")
             # Only finalize the OnIt -> DONE reaction transition on the truly
