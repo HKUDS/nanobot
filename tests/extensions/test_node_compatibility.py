@@ -44,7 +44,8 @@ async def test_pi_extension_loads_tools_commands_and_events(tmp_path: Path) -> N
     try:
         result = await host.load(
             runtime="pi",
-            entry=entry,
+            entries=(entry,),
+            root=tmp_path,
             extension_id="test.pi",
             name="Pi test",
             version="1.0.0",
@@ -101,7 +102,8 @@ async def test_openclaw_definition_loads_and_invokes_tool(tmp_path: Path) -> Non
     try:
         result = await host.load(
             runtime="openclaw",
-            entry=entry,
+            entries=(entry,),
+            root=tmp_path,
             extension_id="test.openclaw",
             name="OpenClaw test",
             version="1.0.0",
@@ -119,5 +121,41 @@ async def test_openclaw_definition_loads_and_invokes_tool(tmp_path: Path) -> Non
             "status",
             "agent_end",
         }
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_pi_package_loads_every_declared_entry(tmp_path: Path) -> None:
+    first = _write(
+        tmp_path / "first.mjs",
+        """
+        export default function (pi) {
+          pi.registerCommand("first", { handler: async () => "first" });
+        }
+        """,
+    )
+    second = _write(
+        tmp_path / "second.mjs",
+        """
+        export default function (pi) {
+          pi.registerCommand("second", { handler: async () => "second" });
+        }
+        """,
+    )
+    host = NodeSidecar()
+    try:
+        result = await host.load(
+            runtime="pi",
+            entries=(first, second),
+            root=tmp_path,
+            extension_id="test.multi",
+            name="Pi multi-entry test",
+            version="1.0.0",
+            workspace=tmp_path,
+        )
+        assert {
+            item.name for item in result.registrations if item.kind == "command"
+        } == {"first", "second"}
     finally:
         await host.close()

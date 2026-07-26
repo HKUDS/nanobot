@@ -19,6 +19,7 @@ from nanobot.extensions.registry import (
     ExtensionScope,
     ExtensionSnapshot,
 )
+from nanobot.extensions.store import ExtensionStore
 
 if TYPE_CHECKING:
     from nanobot.agent.skills import SkillsLoader
@@ -53,11 +54,10 @@ def build_extension_catalog(
     )
     discoveries = [native]
     if config.extensions.enabled:
+        external_root = user_root or Path.home() / ".nanobot" / "extensions"
+        discoveries.append(ExtensionStore(external_root).discover())
         discoveries.extend(
-            _external_discoveries(
-                config,
-                user_root=user_root or Path.home() / ".nanobot" / "extensions",
-            )
+            _external_discoveries(config, user_root=external_root)
         )
 
     candidates = tuple(
@@ -102,10 +102,6 @@ def _external_discoveries(
     *,
     user_root: Path,
 ) -> Iterable[ExtensionDiscoveryResult]:
-    yield discover_manifest_root(
-        user_root,
-        scope=ExtensionScope.USER,
-    )
     for raw_path in config.extensions.paths:
         yield discover_manifest_root(
             Path(raw_path).expanduser(),

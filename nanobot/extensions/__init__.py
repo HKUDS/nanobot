@@ -21,6 +21,7 @@ from nanobot.extensions.manifest import (
 )
 from nanobot.extensions.native import discover_native_extensions
 from nanobot.extensions.node_host import NodeSidecar
+from nanobot.extensions.package_adapter import AdaptedPackage, adapt_package
 from nanobot.extensions.protocol import (
     NODE_PROTOCOL_VERSION,
     NodeLoadResult,
@@ -42,6 +43,12 @@ from nanobot.extensions.runtime import (
     ExtensionRuntimeManager,
     PythonExtensionApi,
 )
+from nanobot.extensions.store import (
+    ExtensionSourceKind,
+    ExtensionStore,
+    InstalledExtension,
+    InstallResult,
+)
 
 __all__ = [
     "EXTENSION_API_VERSION",
@@ -60,6 +67,8 @@ __all__ = [
     "ExtensionRuntimeManager",
     "ExtensionScope",
     "ExtensionSnapshot",
+    "ExtensionSourceKind",
+    "ExtensionStore",
     "MANIFEST_FILENAME",
     "ManifestFormatError",
     "NODE_PROTOCOL_VERSION",
@@ -68,10 +77,14 @@ __all__ = [
     "NodeRegistration",
     "NodeSidecar",
     "ActivatedExtension",
+    "AdaptedPackage",
     "ActivationResult",
     "PythonExtensionApi",
+    "InstalledExtension",
+    "InstallResult",
     "ResolvedContribution",
     "build_extension_catalog",
+    "adapt_package",
     "dump_manifest",
     "discover_native_extensions",
     "load_manifest",

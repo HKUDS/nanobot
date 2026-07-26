@@ -69,7 +69,8 @@ class NodeSidecar:
         self,
         *,
         runtime: str,
-        entry: Path,
+        entries: tuple[Path, ...],
+        root: Path,
         extension_id: str,
         name: str,
         version: str,
@@ -81,7 +82,10 @@ class NodeSidecar:
             "extension.load",
             {
                 "runtime": runtime,
-                "entry": str(entry.expanduser().resolve()),
+                "entries": [
+                    str(entry.expanduser().resolve()) for entry in entries
+                ],
+                "root": str(root.expanduser().resolve()),
                 "identity": {
                     "id": extension_id,
                     "name": name,

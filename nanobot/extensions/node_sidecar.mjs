@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import readline from "node:readline";
 
 const PROTOCOL = 1;
@@ -175,7 +175,7 @@ function openClawApi() {
     id: identity.id,
     name: identity.name,
     version: identity.version,
-    source: state.entry,
+    source: state.entries[0],
     rootDir: state.rootDir,
     registrationMode: "activate",
     config: state.config,
@@ -267,25 +267,29 @@ async function loadExtension(params) {
   state.identity = params.identity;
   state.workspace = params.workspace;
   state.config = params.config || {};
-  state.entry = params.entry;
-  state.rootDir = fileURLToPath(new URL(".", pathToFileURL(params.entry)));
+  state.entries = params.entries;
+  state.rootDir = params.root;
   state.tools.clear();
   state.commands.clear();
   state.hooks.clear();
   state.registrations.length = 0;
   state.diagnostics.length = 0;
 
-  const loaded = unwrapModule(await importModule(params.entry));
-  const factory =
-    params.runtime === "openclaw" && typeof loaded?.register === "function"
-      ? loaded.register
-      : loaded;
-  if (typeof factory !== "function") throw new Error("extension entry does not export a factory");
-  const result = factory(params.runtime === "pi" ? piApi() : openClawApi());
-  if (params.runtime === "openclaw" && result?.then) {
-    throw new Error("OpenClaw plugin register must be synchronous");
+  for (const entry of params.entries) {
+    const loaded = unwrapModule(await importModule(entry));
+    const factory =
+      params.runtime === "openclaw" && typeof loaded?.register === "function"
+        ? loaded.register
+        : loaded;
+    if (typeof factory !== "function") {
+      throw new Error(`extension entry does not export a factory: ${entry}`);
+    }
+    const result = factory(params.runtime === "pi" ? piApi() : openClawApi());
+    if (params.runtime === "openclaw" && result?.then) {
+      throw new Error("OpenClaw plugin register must be synchronous");
+    }
+    if (params.runtime === "pi") await result;
   }
-  if (params.runtime === "pi") await result;
   return {
     registrations: state.registrations,
     diagnostics: state.diagnostics,

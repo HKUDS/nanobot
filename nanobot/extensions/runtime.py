@@ -127,9 +127,9 @@ class ExtensionRuntimeManager:
         runtime = candidate.manifest.runtime.value
         if runtime == "declarative":
             return ActivatedExtension(candidate)
-        entry = _resolve_entry(candidate)
+        entries = _resolve_entries(candidate)
         if runtime == "python":
-            self._activate_python(candidate, entry)
+            self._activate_python(candidate)
             return ActivatedExtension(candidate)
         if runtime not in {"pi", "openclaw"}:
             raise ValueError(f"unsupported extension runtime: {runtime}")
@@ -139,7 +139,8 @@ class ExtensionRuntimeManager:
             entry_config = self._config.extensions.entries.get(candidate.manifest.id)
             result = await host.load(
                 runtime=runtime,
-                entry=entry,
+                entries=entries,
+                root=candidate.location,
                 extension_id=candidate.manifest.id,
                 name=candidate.manifest.name,
                 version=candidate.manifest.version,
@@ -178,7 +179,9 @@ class ExtensionRuntimeManager:
             await host.close()
             raise
 
-    def _activate_python(self, candidate: ExtensionCandidate, entry: Path) -> None:
+    def _activate_python(self, candidate: ExtensionCandidate) -> None:
+        if len(candidate.manifest.activation_entries) != 1:
+            raise ValueError("Python extensions must declare exactly one entry")
         module_name, separator, attribute = candidate.manifest.entry.partition(":")
         if not separator:
             module_name = candidate.manifest.entry
@@ -232,19 +235,25 @@ class ExtensionRuntimeManager:
             await active.compatible.close()
 
 
-def _resolve_entry(candidate: ExtensionCandidate) -> Path:
+def _resolve_entries(candidate: ExtensionCandidate) -> tuple[Path, ...]:
     manifest = candidate.manifest
     location = candidate.location
-    if location is None or not manifest.entry:
-        raise ValueError(f"extension '{manifest.id}' does not declare an entry")
+    entries = manifest.activation_entries
+    if location is None or not entries:
+        raise ValueError(f"extension '{manifest.id}' does not declare any entries")
     if manifest.runtime.value == "python":
-        return location
-    entry = (location / manifest.entry).resolve()
-    if not entry.is_relative_to(location.resolve()):
-        raise ValueError(f"extension '{manifest.id}' entry escapes its package")
-    if not entry.is_file():
-        raise ValueError(f"extension '{manifest.id}' entry does not exist: {entry}")
-    return entry
+        return (location,)
+    resolved: list[Path] = []
+    for raw_entry in entries:
+        entry = (location / raw_entry).resolve()
+        if not entry.is_relative_to(location.resolve()):
+            raise ValueError(f"extension '{manifest.id}' entry escapes its package")
+        if not entry.is_file():
+            raise ValueError(
+                f"extension '{manifest.id}' entry does not exist: {entry}"
+            )
+        resolved.append(entry)
+    return tuple(resolved)
 
 
 def _constant_hook_factory(hook: AgentHook, owner: str) -> AgentTurnHookFactory:

@@ -118,6 +118,7 @@ class ExtensionManifest:
     version: str
     runtime: ExtensionRuntime
     entry: str = ""
+    entries: tuple[str, ...] = ()
     contributions: tuple[ExtensionContribution, ...] = ()
     description: str = ""
     dependencies: tuple[ExtensionDependency, ...] = ()
@@ -134,10 +135,18 @@ class ExtensionManifest:
             raise TypeError("extension runtime must be an ExtensionRuntime")
         if not isinstance(self.entry, str):
             raise TypeError("extension entry must be a string")
-        if self.entry and Path(self.entry).is_absolute():
-            raise ValueError("extension entry must be relative to the package root")
-        if self.entry and ".." in Path(self.entry).parts:
-            raise ValueError("extension entry cannot escape the package root")
+        if not isinstance(self.entries, tuple) or not all(
+            isinstance(entry, str) and entry for entry in self.entries
+        ):
+            raise TypeError("extension entries must be a tuple of non-empty strings")
+        activation_entries = self.activation_entries
+        if len(set(activation_entries)) != len(activation_entries):
+            raise ValueError("extension entries contains duplicates")
+        for entry in activation_entries:
+            if Path(entry).is_absolute():
+                raise ValueError("extension entry must be relative to the package root")
+            if ".." in Path(entry).parts:
+                raise ValueError("extension entry cannot escape the package root")
         if self.api_version != EXTENSION_API_VERSION:
             raise ValueError(
                 f"unsupported extension API version {self.api_version}; "
@@ -175,6 +184,11 @@ class ExtensionManifest:
         permission_names = [permission.name for permission in self.permissions]
         if len(set(permission_names)) != len(permission_names):
             raise ValueError("extension manifest contains duplicate permissions")
+
+    @property
+    def activation_entries(self) -> tuple[str, ...]:
+        """Return every runtime entry while preserving the v1 single-entry form."""
+        return self.entries or ((self.entry,) if self.entry else ())
 
 
 def _require_text(value: object, label: str) -> str:
