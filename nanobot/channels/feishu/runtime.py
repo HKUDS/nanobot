@@ -269,7 +269,7 @@ def _extract_element_content(element: dict) -> list[str]:
                 parts.append(text_content)
         elif isinstance(text, str):
             parts.append(text)
-        for field in element.get("fields", []):
+        for field in element.get("fields") or []:
             if isinstance(field, dict):
                 field_text = field.get("text", {})
                 if isinstance(field_text, dict):
@@ -291,7 +291,10 @@ def _extract_element_content(element: dict) -> list[str]:
             c = text.get("content", "")
             if c:
                 parts.append(c)
-        url = element.get("url", "") or element.get("multi_url", {}).get("url", "")
+        multi_url = element.get("multi_url") or {}
+        url = element.get("url", "") or (
+            multi_url.get("url", "") if isinstance(multi_url, dict) else ""
+        )
         if url:
             parts.append(f"link: {url}")
 
@@ -300,12 +303,14 @@ def _extract_element_content(element: dict) -> list[str]:
         parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
 
     elif tag == "note":
-        for ne in element.get("elements", []):
+        for ne in element.get("elements") or []:
             parts.extend(_extract_element_content(ne))
 
     elif tag == "column_set":
-        for col in element.get("columns", []):
-            for ce in col.get("elements", []):
+        for col in element.get("columns") or []:
+            if not isinstance(col, dict):
+                continue
+            for ce in col.get("elements") or []:
                 parts.extend(_extract_element_content(ce))
 
     elif tag == "plain_text":
@@ -319,7 +324,7 @@ def _extract_element_content(element: dict) -> list[str]:
             for column in (element.get("columns") or [])
             if isinstance(column, dict) and column.get("name")
         ]
-        rows = element.get("rows", [])
+        rows = element.get("rows") or []
         if columns:
             parts.append(" | ".join(header for _, header in columns))
         if isinstance(rows, list):
@@ -337,7 +342,7 @@ def _extract_element_content(element: dict) -> list[str]:
                     parts.append(row_text)
 
     else:
-        for ne in element.get("elements", []):
+        for ne in element.get("elements") or []:
             parts.extend(_extract_element_content(ne))
 
     return parts
