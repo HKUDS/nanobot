@@ -40,9 +40,11 @@ _GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
 _GEMINI_FLASH_ASPECT_RATIOS = {
     "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
 }
-# Image-size tokens accepted by Gemini 3+ image models (earlier Flash image
-# models expose only a single fixed resolution).
-_GEMINI_FLASH_IMAGE_SIZES = {"512", "1K", "2K", "4K"}
+# Gemini 3 Pro image models accept these sizes. Gemini 3.1 Flash adds 512,
+# while Gemini 3.1 Flash Lite supports only 1K.
+_GEMINI_3_IMAGE_SIZES = {"1K", "2K", "4K"}
+_GEMINI_31_FLASH_IMAGE_SIZES = {"512", *_GEMINI_3_IMAGE_SIZES}
+_GEMINI_31_FLASH_LITE_IMAGE_SIZES = {"1K"}
 _OLLAMA_DEFAULT_SIDE = 1024
 _OLLAMA_SIZE_PRESETS = {
     "1K": 1024,
@@ -782,21 +784,27 @@ def _gemini_flash_image_config(
     config: dict[str, str] = {}
     if aspect_ratio and aspect_ratio in _GEMINI_FLASH_ASPECT_RATIOS:
         config["aspectRatio"] = aspect_ratio
-    if image_size and _gemini_flash_supports_image_size(model):
+    if image_size:
         normalized = image_size.strip().upper()
-        if normalized in _GEMINI_FLASH_IMAGE_SIZES:
+        if normalized in _gemini_flash_supported_image_sizes(model):
             config["imageSize"] = normalized
     return config
 
 
-def _gemini_flash_supports_image_size(model: str) -> bool:
-    """Return whether the model honors ``imageSize``.
+def _gemini_flash_supported_image_sizes(model: str) -> set[str]:
+    """Return the ``imageSize`` values documented for a Flash-path model.
 
-    Only Gemini 3+ image models expose a configurable image size; earlier Flash
-    image models (2.0, 2.5) generate at a single fixed resolution, so ``imageSize``
-    is identified positively rather than by excluding a single version.
+    Earlier Flash image models (2.0, 2.5) expose no configurable size. Gemini
+    3.1 Flash Lite is intentionally checked before the broader Flash match.
     """
-    return "gemini-3" in model.lower()
+    normalized = model.lower()
+    if "gemini-3.1-flash-lite-image" in normalized:
+        return _GEMINI_31_FLASH_LITE_IMAGE_SIZES
+    if "gemini-3.1-flash-image" in normalized:
+        return _GEMINI_31_FLASH_IMAGE_SIZES
+    if "gemini-3" in normalized:
+        return _GEMINI_3_IMAGE_SIZES
+    return set()
 
 
 async def _aihubmix_images_from_payload(

@@ -480,6 +480,34 @@ async def test_gemini_flash_2_0_drops_image_size() -> None:
     assert image_config == {"aspectRatio": "16:9"}
 
 
+@pytest.mark.parametrize(
+    ("model", "image_size", "expected"),
+    [
+        ("gemini-3-pro-image", "512", None),
+        ("gemini-3.1-flash-lite-image", "2K", None),
+        ("gemini-3.1-flash-lite-image", "1K", {"imageSize": "1K"}),
+        ("gemini-3.1-flash-image", "512", {"imageSize": "512"}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gemini_flash_scopes_image_size_by_model(
+    model: str,
+    image_size: str,
+    expected: dict[str, str] | None,
+) -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw a cat",
+        model=model,
+        image_size=image_size,
+    )
+
+    response_format = fake.calls[0]["json"]["generationConfig"].get("responseFormat")
+    assert response_format == ({"image": expected} if expected else None)
+
+
 @pytest.mark.asyncio
 async def test_gemini_flash_ignores_unsupported_hints() -> None:
     fake = FakeClient(_gemini_flash_image_response())
