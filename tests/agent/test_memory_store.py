@@ -235,10 +235,22 @@ class TestHistoryWithCursor:
         store.append_history("event 3")
         store.append_history("event 4")
         store.append_history("event 5")
+        store.set_last_dream_cursor(5)
         store.compact_history()
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
+
+    def test_compact_history_preserves_entries_after_dream_cursor(self, tmp_path):
+        store = MemoryStore(tmp_path, max_history_entries=50)
+        for index in range(1, 101):
+            store.append_history(f"event {index}")
+        store.set_last_dream_cursor(20)
+
+        store.compact_history()
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
     def test_write_entries_uses_atomic_write(self, tmp_path):
         """_write_entries uses temp file + os.replace for atomicity."""
