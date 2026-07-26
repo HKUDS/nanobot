@@ -192,6 +192,7 @@ def _build_runnable_dream(
     initialized: bool,
     content_diff: str,
     stop_reason: str = "completed",
+    tool_error: bool = False,
 ) -> tuple[CommandContext, _FakeStore]:
     """Build a /dream ctx whose run is driven by a canned stop reason + diff."""
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
@@ -203,6 +204,15 @@ def _build_runnable_dream(
     )
 
     async def process_direct(*args, **kwargs):
+        if tool_error:
+            await kwargs["on_progress"](
+                "",
+                tool_events=[{
+                    "phase": "error",
+                    "name": "edit_file",
+                    "error": "edit failed",
+                }],
+            )
         return OutboundMessage(
             channel="cli",
             chat_id="direct",
@@ -250,6 +260,21 @@ async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
         initialized=True,
         content_diff="SOUL.md: +1 -0",
         stop_reason="length",
+    )
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 5
+    assert "did not complete" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_keeps_cursor_when_completed_after_tool_error(tmp_path) -> None:
+    """A soft tool failure must not masquerade as a verified no-op."""
+    ctx, store = _build_runnable_dream(
+        tmp_path,
+        initialized=True,
+        content_diff="",
+        tool_error=True,
     )
     await cmd_dream(ctx)
     await asyncio.sleep(0)

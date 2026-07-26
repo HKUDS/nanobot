@@ -43,6 +43,26 @@ if TYPE_CHECKING:
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
 
+
+class DreamRunProgress:
+    """Track tool failures that make a nominally completed Dream run unsafe to advance."""
+
+    def __init__(self) -> None:
+        self.had_tool_errors = False
+
+    async def __call__(
+        self,
+        *_args: Any,
+        tool_events: list[dict[str, Any]] | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        if any(
+            isinstance(event, dict) and event.get("phase") == "error"
+            for event in tool_events or ()
+        ):
+            self.had_tool_errors = True
+
+
 class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
@@ -635,10 +655,18 @@ class MemoryStore:
         return tools
 
     @staticmethod
-    def dream_run_completed(resp: object | None) -> bool:
-        """Return True only when an ephemeral Dream agent turn completed cleanly."""
+    def dream_run_completed(
+        resp: object | None,
+        *,
+        had_tool_errors: bool = False,
+    ) -> bool:
+        """Return True only when a Dream turn completed without tool failures."""
         metadata = getattr(resp, "metadata", None)
-        return isinstance(metadata, dict) and metadata.get("_stop_reason") == "completed"
+        return (
+            not had_tool_errors
+            and isinstance(metadata, dict)
+            and metadata.get("_stop_reason") == "completed"
+        )
 
     # -- message formatting utility ------------------------------------------
 

@@ -404,16 +404,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        async def _silent(*_args, **_kwargs):
-            pass
-
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.agent.memory import DreamRunProgress, MemoryStore
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
+        progress = DreamRunProgress()
         content = ""
         resp = None
         diff_body = ""
@@ -434,13 +432,16 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=_silent,
+                on_progress=progress,
             )
             elapsed = time.monotonic() - t0
             # The real file delta grounds the audit record; clean completion
             # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(resp)
+            completed = MemoryStore.dream_run_completed(
+                resp,
+                had_tool_errors=progress.had_tool_errors,
+            )
             if completed:
                 store.set_last_dream_cursor(last_cursor)
                 if diff_body:

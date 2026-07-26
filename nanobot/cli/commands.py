@@ -1824,12 +1824,13 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from nanobot.agent.memory import DreamRunProgress, MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
+            progress = DreamRunProgress()
             resp = None
             diff_body = ""
             try:
@@ -1844,12 +1845,15 @@ def _run_gateway(
                     session_key=key,
                     ephemeral=True,
                     tools=store.build_dream_tools(),
-                    on_progress=_silent,
+                    on_progress=progress,
                 )
                 # The real file delta grounds the audit record; clean completion
                 # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(resp)
+                completed = MemoryStore.dream_run_completed(
+                    resp,
+                    had_tool_errors=progress.had_tool_errors,
+                )
                 if completed:
                     store.set_last_dream_cursor(last_cursor)
                     if diff_body:
