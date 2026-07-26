@@ -4,8 +4,8 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("XiaoZhi Hub")
 
-# URL нашего шлюза (через Docker DNS)
-GATEWAY_URL = "http://voice_gateway:18792"
+# URL нашего шлюза (поменяй IP, если запускаешь MCP на другой машине)
+GATEWAY_URL = "http://127.0.0.1:18792"
 
 @mcp.tool()
 async def list_xiaozhi_devices() -> str:
@@ -55,20 +55,6 @@ async def call_xiaozhi_tool(session_id: str, tool_name: str, arguments: str) -> 
             return json.dumps(resp.json(), indent=2, ensure_ascii=False)
     except Exception as e:
         return f'{{"error": "{e}"}}'
-
-@mcp.tool()
-async def send_tts_alert(session_id: str, text: str) -> str:
-    """Send a TTS voice alert to a connected XiaoZhi/ESP32 device. Use session_id="latest" for the most recently connected device."""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{GATEWAY_URL}/api/tts",
-                json={"session_id": session_id, "text": text},
-            )
-            return json.dumps(resp.json(), indent=2, ensure_ascii=False)
-    except Exception as e:
-        return f'{{"error": "TTS delivery failed: {e}"}}'
-
 
 if __name__ == "__main__":
     mcp.run(transport='stdio')
