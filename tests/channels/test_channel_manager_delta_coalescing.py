@@ -74,7 +74,7 @@ def bus():
 @pytest.fixture
 def manager(config, bus):
     manager = ChannelManager(config, bus)
-    manager.channels["mock"] = MockChannel({}, bus)
+    manager.channels["mock"] = manager._build_channel("mock", MockChannel, {})
     return manager
 
 
@@ -284,14 +284,17 @@ class TestProgressFiltering:
 
     def test_progress_visibility_uses_global_defaults(self, manager):
         assert manager._should_send_progress("mock", tool_hint=False) is True
-        assert manager._should_send_progress("mock", tool_hint=True) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
 
-    def test_progress_visibility_uses_channel_overrides(self, manager):
-        manager.channels["mock"].send_progress = False
-        manager.channels["mock"].send_tool_hints = True
+    def test_progress_visibility_uses_channel_overrides(self, manager, bus):
+        manager.channels["mock"] = manager._build_channel(
+            "mock",
+            MockChannel,
+            {"sendProgress": False, "sendToolHints": False},
+        )
 
         assert manager._should_send_progress("mock", tool_hint=False) is False
-        assert manager._should_send_progress("mock", tool_hint=True) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
 
     def test_progress_visibility_returns_false_for_missing_channel(self, manager):
         assert manager._should_send_progress("nonexistent", tool_hint=False) is False

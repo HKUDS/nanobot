@@ -56,7 +56,7 @@ class MattermostConfig(Base):
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
     send_progress: bool = True
-    send_tool_hints: bool = False
+    send_tool_hints: bool = True
     dm: MattermostDMConfig = Field(default_factory=MattermostDMConfig)
 
 

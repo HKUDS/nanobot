@@ -119,6 +119,7 @@ def test_config_defaults():
     assert config.token == ""
     assert config.streaming is True
     assert config.streaming_max_chars == 16000
+    assert config.send_tool_hints is True
     assert config.dm.enabled is True
     assert config.dm.policy == "open"
     assert config.reply_in_thread is True
@@ -131,6 +132,7 @@ def test_config_camelcase_aliases():
         "allowFromMatchMode": "username",
         "streamingMaxChars": 8000,
         "replyInThread": False,
+        "sendToolHints": False,
     }
     config = MattermostConfig.model_validate(raw)
     assert config.server_url == "https://mm.example.com"
@@ -138,11 +140,13 @@ def test_config_camelcase_aliases():
     assert config.allow_from_match_mode == "username"
     assert config.streaming_max_chars == 8000
     assert config.reply_in_thread is False
+    assert config.send_tool_hints is False
 
 
 def test_config_default_config_classmethod():
     d = MattermostChannel.default_config()
     assert d["enabled"] is False
+    assert d["sendToolHints"] is True
     assert d["serverUrl"] == ""
     assert d["token"] == ""
 

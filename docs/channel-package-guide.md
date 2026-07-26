@@ -618,7 +618,7 @@ async def send(self, msg: OutboundMessage) -> None:
     await self._send_message(msg.chat_id, msg.content, media=msg.media)
 ```
 
-Tool hints are off by default for most channels. Users can enable them globally or per channel:
+Tool hints are on by default. Users can disable them globally or per channel:
 
 ```json
 {
@@ -626,7 +626,7 @@ Tool hints are off by default for most channels. Users can enable them globally 
     "sendToolHints": true,
     "webhook": {
       "enabled": true,
-      "sendToolHints": true
+      "sendToolHints": false
     }
   }
 }
