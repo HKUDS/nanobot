@@ -43,6 +43,9 @@ def _load() -> dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
+    if not isinstance(data, dict):
+        logger.warning("Corrupted pairing store, resetting")
+        return {"approved": {}, "pending": {}}
 
     # JSON stores may contain null maps after partial edits; treat like {}.
     approved = data.get("approved") or {}
@@ -89,7 +92,15 @@ def _gc_pending(data: dict[str, Any]) -> None:
     expired = [
         code
         for code, info in pending.items()
-        if not isinstance(info, dict) or info.get("expires_at", 0) < now
+        if (
+            not isinstance(info, dict)
+            or not isinstance(info.get("channel"), str)
+            or not info.get("channel")
+            or info.get("sender_id") is None
+            or isinstance(info.get("expires_at"), bool)
+            or not isinstance(info.get("expires_at"), (int, float))
+            or info["expires_at"] < now
+        )
     ]
     for code in expired:
         del pending[code]
@@ -220,6 +231,7 @@ def clear_channel(channel: str) -> dict[str, int]:
     """Remove approved senders and pending requests for *channel*."""
     with _LOCK:
         data = _load()
+        _gc_pending(data)
         approved: dict[str, set[str]] = data.get("approved", {})
         approved_users = approved.pop(channel, set())
 

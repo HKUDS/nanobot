@@ -272,11 +272,34 @@ def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypat
     assert store.get_approved("telegram") == []
 
 
+@pytest.mark.parametrize("payload", ["null", "[]", "true"])
+def test_load_treats_non_object_store_as_empty(tmp_path, monkeypatch, payload):
+    path = tmp_path / "pairing.json"
+    path.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []
+    assert store.is_approved("telegram", "123") is False
+
+
 def test_list_pending_skips_null_pending_entries(tmp_path, monkeypatch):
     """Null pending entry values must be dropped instead of crashing list_pending."""
     path = tmp_path / "pairing.json"
     path.write_text(
         '{"approved": {}, "pending": {"ABCD-EFGH": null}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []
+    assert store.clear_channel("telegram") == {"approved": 0, "pending": 0}
+
+
+def test_pending_gc_drops_malformed_entries(tmp_path, monkeypatch):
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {}, "pending": {'
+        '"bad-expiry": {"channel": "telegram", "sender_id": "123", "expires_at": null},'
+        '"missing-sender": {"channel": "telegram", "expires_at": 9999999999}'
+        "}}",
         encoding="utf-8",
     )
     monkeypatch.setattr(store, "_store_path", lambda: path)
