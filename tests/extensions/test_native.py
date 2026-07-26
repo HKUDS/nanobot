@@ -1,3 +1,4 @@
+import sys
 from unittest.mock import patch
 
 from nanobot.agent.skills import SkillsLoader
@@ -137,12 +138,14 @@ def test_python_dependencies_project_distribution_identity_and_active_markers() 
     dependencies = _python_dependencies(
         (
             "httpx[http2]>=0.27",
-            "win32-setctime>=1; sys_platform == 'win32'",
+            f"platform-package>=1; sys_platform == '{sys.platform}'",
+            "inactive-package>=1; sys_platform == '__never__'",
             "packaging>=24; python_version >= '3.11'",
         )
     )
 
     assert [(item.name, item.specifier) for item in dependencies] == [
         ("httpx", ">=0.27"),
+        ("platform-package", ">=1"),
         ("packaging", ">=24"),
     ]
