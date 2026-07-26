@@ -317,13 +317,17 @@ def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None
 
 def _resolve_local_schema_ref(root: dict[str, Any], ref: str) -> Any:
     """Resolve a local JSON Pointer without accepting remote references."""
-    if ref == "#":
+    if not ref.startswith("#"):
+        raise ValueError("not a local JSON Pointer")
+
+    pointer = urllib.parse.unquote(ref[1:], errors="strict")
+    if not pointer:
         return root
-    if not ref.startswith("#/"):
+    if not pointer.startswith("/"):
         raise ValueError("not a local JSON Pointer")
 
     current: Any = root
-    for raw_part in ref[2:].split("/"):
+    for raw_part in pointer[1:].split("/"):
         part = raw_part.replace("~1", "/").replace("~0", "~")
         if isinstance(current, dict):
             current = current[part]
@@ -347,15 +351,22 @@ def _rewrite_local_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
         rewritten = dict(value)
         ref = rewritten.get("$ref")
-        is_rewritable_ref = isinstance(ref, str) and (
-            ref == "#" or (ref.startswith("#/") and not ref.startswith("#/$defs/"))
-        )
+        is_rewritable_ref = False
+        if isinstance(ref, str) and not ref.startswith("#/$defs/"):
+            try:
+                pointer = urllib.parse.unquote(ref[1:], errors="strict")
+            except (UnicodeDecodeError, ValueError):
+                pass
+            else:
+                is_rewritable_ref = ref.startswith("#") and (
+                    not pointer or pointer.startswith("/")
+                )
         if is_rewritable_ref:
             name = rewritten_refs.get(ref)
             if name is None:
                 try:
                     target = _resolve_local_schema_ref(schema, ref)
-                except (KeyError, IndexError, TypeError, ValueError):
+                except (KeyError, IndexError, TypeError, UnicodeDecodeError, ValueError):
                     logger.warning("MCP tool schema contains an unresolved local $ref: {}", ref)
                 else:
                     assert isinstance(ref, str)

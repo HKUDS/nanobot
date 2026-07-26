@@ -309,6 +309,27 @@ def test_wrapper_preserves_existing_defs_refs() -> None:
     assert wrapper.parameters["$defs"]["value"]["type"] == "string"
 
 
+def test_wrapper_resolves_uri_encoded_json_pointer() -> None:
+    tool_def = SimpleNamespace(
+        name="demo",
+        description="demo tool",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "space name/value": {"type": "string"},
+                "alias": {"$ref": "#/properties/space%20name~1value"},
+            },
+        },
+    )
+
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "test", tool_def)
+
+    generated_ref = wrapper.parameters["properties"]["alias"]["$ref"]
+    assert generated_ref.startswith("#/$defs/ref_")
+    generated_name = generated_ref.removeprefix("#/$defs/")
+    assert wrapper.parameters["$defs"][generated_name] == {"type": "string"}
+
+
 def test_normalize_windows_stdio_command_is_noop_off_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
