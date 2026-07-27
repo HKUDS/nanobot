@@ -367,6 +367,29 @@ def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     return f"[image: {path}]" if path else empty
 
 
+def content_with_media_breadcrumbs(
+    role: str | None,
+    content: Any,
+    media: Any,
+) -> Any:
+    """Append ``[image: path]`` breadcrumbs synthesized from a persisted ``media`` list.
+
+    This is the single rule shared by the two renderers of a stored message —
+    ``Session.get_history`` (LLM replay) and ``MemoryStore._format_messages``
+    (consolidation summarizer input) — so they cannot disagree about paths that
+    live only in the structured ``media`` field.
+
+    """
+    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
+        return content
+    breadcrumbs = "\n".join(
+        image_placeholder_text(p) for p in media if isinstance(p, str) and p
+    )
+    if not breadcrumbs:
+        return content
+    return f"{content}\n{breadcrumbs}" if content else breadcrumbs
+
+
 def truncate_text(text: str, max_chars: int) -> str:
     """Truncate text with a stable suffix."""
     if max_chars <= 0 or len(text) <= max_chars:

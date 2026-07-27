@@ -19,6 +19,7 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -674,11 +675,14 @@ class MemoryStore:
     def _format_messages(messages: list[dict]) -> str:
         lines = []
         for message in messages:
-            if not message.get("content"):
+            content = content_with_media_breadcrumbs(
+                message.get("role"), message.get("content") or "", message.get("media")
+            )
+            if not content:
                 continue
             tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {content}"
             )
         return "\n".join(lines)
 
