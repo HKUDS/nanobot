@@ -256,16 +256,25 @@ function SkillCatalogRow({
       })}
       onClick={() => onSelect(skill)}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left transition-colors",
-        "hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left",
+        "transition-[background-color,box-shadow] duration-150",
+        "hover:bg-muted/70 hover:shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]",
+        "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
     >
+      <span
+        className={cn(
+          "h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-colors duration-150",
+          "group-hover:bg-foreground/55 group-focus-visible:bg-foreground/55",
+        )}
+        aria-hidden
+      />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
           {skill.name}
         </h3>
-        <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-muted-foreground">
+        <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-muted-foreground transition-colors duration-150 group-hover:text-foreground/65">
           {skill.description}
         </p>
       </div>
