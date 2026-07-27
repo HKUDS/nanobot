@@ -32,6 +32,9 @@ _LAZY_EXPORTS = {
     "Nanobot": ".nanobot",
     "RunStream": ".nanobot",
     "RunResult": ".nanobot",
+    "RequestContext": ".agent.tools.context",
+    "RuntimeContextBlock": ".runtime_context",
+    "RuntimeContextProvider": ".runtime_context",
     "SessionInfo": ".nanobot",
     "SessionSnapshot": ".nanobot",
     "STREAM_EVENT_REASONING_COMPLETED": ".nanobot",
@@ -47,6 +50,7 @@ _LAZY_EXPORTS = {
     "STREAM_EVENT_TYPES": ".nanobot",
     "StreamEvent": ".nanobot",
     "StreamEventType": ".nanobot",
+    "SessionTurnPersisted": ".bus.runtime_events",
 }
 
 
@@ -64,6 +68,9 @@ def __getattr__(name: str):
 __all__ = [
     "Nanobot",
     "RunResult",
+    "RequestContext",
+    "RuntimeContextBlock",
+    "RuntimeContextProvider",
     "RunStream",
     "SessionInfo",
     "SessionSnapshot",
@@ -80,4 +87,5 @@ __all__ = [
     "STREAM_EVENT_TYPES",
     "StreamEvent",
     "StreamEventType",
+    "SessionTurnPersisted",
 ]

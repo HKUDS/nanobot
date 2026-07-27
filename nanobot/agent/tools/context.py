@@ -26,6 +26,7 @@ class RequestContext:
     original_user_text: str | None = None
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
     sender_id: str | None = None
     turn_id: str | None = None
     workspace: Path | None = None

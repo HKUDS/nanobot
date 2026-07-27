@@ -27,6 +27,7 @@ class RuntimeEventContext:
     chat_id: str
     session_key: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,15 @@ class TurnCompleted:
 
 
 @dataclass(frozen=True)
+class SessionTurnPersisted:
+    """A completed turn has been written to local session storage."""
+
+    context: RuntimeEventContext
+    turn_id: str
+    sender_id: str
+
+
+@dataclass(frozen=True)
 class GoalStateChanged:
     """A session's sustained-goal state changed."""
 
@@ -72,6 +82,7 @@ class RuntimeModelChanged:
 
 RuntimeEvent = (
     SessionTurnStarted
+    | SessionTurnPersisted
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
@@ -79,6 +90,7 @@ RuntimeEvent = (
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
+    | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
@@ -152,12 +164,14 @@ class RuntimeEventPublisher:
         chat_id: str,
         session_key: str,
         metadata: dict[str, Any] | None,
+        attributes: dict[str, Any] | None = None,
     ) -> RuntimeEventContext:
         return RuntimeEventContext(
             channel=channel,
             chat_id=chat_id,
             session_key=session_key,
             metadata=dict(metadata or {}),
+            attributes=dict(attributes or {}),
         )
 
     def record_turn_runtime(self, session_key: str, runtime: Any) -> None:
@@ -205,6 +219,28 @@ class RuntimeEventPublisher:
                 ),
                 status=status,
                 started_at=started_at,
+            )
+        )
+
+    async def session_turn_persisted(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        *,
+        turn_id: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        await self.bus.publish(
+            SessionTurnPersisted(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                    attributes=attributes,
+                ),
+                turn_id=turn_id,
+                sender_id=msg.sender_id,
             )
         )
 

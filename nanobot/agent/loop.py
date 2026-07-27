@@ -126,6 +126,7 @@ class TurnContext:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
     final_content: str | None = None
     all_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -616,10 +617,17 @@ class AgentLoop:
     def register_runtime_context_provider(
         self,
         provider: RuntimeContextProvider,
-    ) -> None:
-        """Register a provider resolved once before each inbound model turn."""
-        if provider not in self._runtime_context_providers:
-            self._runtime_context_providers.append(provider)
+    ) -> Callable[[], None]:
+        """Register a per-turn context provider and return an unsubscribe callback."""
+        if provider in self._runtime_context_providers:
+            return lambda: None
+        self._runtime_context_providers.append(provider)
+
+        def _unsubscribe() -> None:
+            with suppress(ValueError):
+                self._runtime_context_providers.remove(provider)
+
+        return _unsubscribe
 
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)
@@ -711,6 +719,7 @@ class AgentLoop:
             original_user_text=ctx.original_user_text,
             runtime=ctx.runtime,
             metadata=dict(ctx.msg.metadata or {}),
+            attributes=dict(ctx.attributes),
             sender_id=ctx.msg.sender_id,
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
@@ -883,6 +892,7 @@ class AgentLoop:
                         original_user_text=pending_msg.content,
                         runtime=runtime,
                         metadata=dict(metadata),
+                        attributes=dict(request_ctx.attributes),
                         sender_id=pending_msg.sender_id,
                         turn_id=request_ctx.turn_id,
                         workspace=scope.project_path,
@@ -982,6 +992,7 @@ class AgentLoop:
                 chat_id=chat_id,
                 message_id=message_id,
                 metadata=metadata,
+                attributes=dict(request_ctx.attributes),
                 session_key=active_session_key,
                 workspace=effective_scope.project_path,
                 tool_hint_max_length=self.tool_hint_max_length,
@@ -1326,6 +1337,7 @@ class AgentLoop:
         runtime: LLMRuntime | None = None,
         delivery: TurnDelivery | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         kind = TurnKind.SYSTEM if msg.channel == "system" else TurnKind.USER
@@ -1373,6 +1385,7 @@ class AgentLoop:
             hooks=list(hooks or []),
             hook_factories=list(hook_factories or []),
             tools=tools,
+            attributes=dict(attributes or {}),
         )
         # A streaming callback may be present even when the final text comes from a
         # non-streaming recovery. Only the last completed segment can suppress the
@@ -1572,8 +1585,15 @@ class AgentLoop:
                 ctx.session.add_message(
                     "assistant", result.content, _command=True
                 )
-                self.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
+                self.sessions.save(ctx.session)
+                if not ctx.ephemeral:
+                    await self._runtime_events().session_turn_persisted(
+                        ctx.msg,
+                        ctx.session_key,
+                        turn_id=ctx.turn_id,
+                        attributes=ctx.attributes,
+                    )
             return True
         return False
 
@@ -1715,6 +1735,13 @@ class AgentLoop:
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
+        if not ctx.ephemeral:
+            await self._runtime_events().session_turn_persisted(
+                ctx.msg,
+                ctx.session_key,
+                turn_id=ctx.turn_id,
+                attributes=ctx.attributes,
+            )
 
     async def _prepare_outbound(self, ctx: TurnContext) -> None:
         if ctx.suppress_response:
@@ -1996,6 +2023,7 @@ class AgentLoop:
         persist_user_message: bool = True,
         runtime: LLMRuntime | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
@@ -2031,6 +2059,8 @@ class AgentLoop:
                     kwargs["runtime"] = runtime
                 if on_runtime_admitted is not None:
                     kwargs["on_runtime_admitted"] = on_runtime_admitted
+                if attributes is not None:
+                    kwargs["attributes"] = dict(attributes)
                 return await self._process_message(
                     msg,
                     **kwargs,

@@ -264,10 +264,157 @@ async def test_run_custom_session_key(tmp_path):
     )
 
 
+@pytest.mark.asyncio
+async def test_run_exposes_attributes_to_context_provider_without_persisting_them(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.context import RequestContext
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[RequestContext] = []
+
+    async def provide_context(context: RequestContext):
+        seen.append(context)
+        return None
+
+    unsubscribe = bot.runtime.add_context_provider(provide_context)
+    result = await bot.run(
+        "hi",
+        session_key="sdk:attributes",
+        attributes={"tenant": "acme"},
+    )
+
+    assert result.content == "done"
+    assert seen[0].attributes == {"tenant": "acme"}
+    assert seen[0].metadata == {}
+    snapshot = bot.sessions.export("sdk:attributes")
+    assert snapshot is not None
+    assert all("attributes" not in message for message in snapshot.messages)
+
+    unsubscribe()
+    await bot.run(
+        "again",
+        session_key="sdk:attributes",
+        attributes={"tenant": "other"},
+    )
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_subscription_observes_saved_session_and_can_unsubscribe(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="saved reply",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[tuple[SessionTurnPersisted, SessionSnapshot | None]] = []
+
+    def on_persisted(event: SessionTurnPersisted) -> None:
+        seen.append((event, bot.sessions.export(event.context.session_key)))
+
+    unsubscribe = bot.runtime.subscribe(SessionTurnPersisted, on_persisted)
+    await bot.run(
+        "hi",
+        session_key="sdk:persisted",
+        sender_id="alice",
+        attributes={"tenant": "acme"},
+    )
+
+    assert len(seen) == 1
+    event, snapshot = seen[0]
+    assert event.sender_id == "alice"
+    assert event.context.attributes == {"tenant": "acme"}
+    assert snapshot is not None
+    assert snapshot.messages[-1]["role"] == "assistant"
+    assert snapshot.messages[-1]["content"] == "saved reply"
+
+    unsubscribe()
+    await bot.run("again", session_key="sdk:persisted")
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_subscription_observes_saved_command_turn(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=_fake_provider("test-model"),
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[SessionTurnPersisted] = []
+    bot.runtime.subscribe(SessionTurnPersisted, seen.append)
+
+    await bot.run("/skill", session_key="sdk:command")
+
+    assert len(seen) == 1
+    snapshot = bot.sessions.export("sdk:command")
+    assert snapshot is not None
+    assert [message["role"] for message in snapshot.messages[-2:]] == [
+        "user",
+        "assistant",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_run_does_not_publish_session_persisted_event(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="temporary",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[SessionTurnPersisted] = []
+    bot.runtime.subscribe(SessionTurnPersisted, seen.append)
+
+    await bot.run("hi", session_key="sdk:ephemeral", ephemeral=True)
+
+    assert seen == []
+
+
 def test_import_from_top_level():
     import nanobot
 
     assert nanobot.Nanobot is Nanobot
+    assert nanobot.RequestContext.__name__ == "RequestContext"
+    assert nanobot.RuntimeContextBlock.__name__ == "RuntimeContextBlock"
+    assert nanobot.RuntimeContextProvider is not None
+    assert nanobot.SessionTurnPersisted.__name__ == "SessionTurnPersisted"
     assert nanobot.RunResult is RunResult
     assert nanobot.RunStream is RunStream
     assert nanobot.SessionInfo is SessionInfo
@@ -920,6 +1067,7 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
         sender_id="alice",
         media=["/tmp/image.png"],
         ephemeral=True,
+        attributes={"tenant": "acme"},
     )
     await run.wait()
 
@@ -932,6 +1080,7 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
     assert kwargs["sender_id"] == "alice"
     assert kwargs["media"] == ["/tmp/image.png"]
     assert kwargs["ephemeral"] is True
+    assert kwargs["attributes"] == {"tenant": "acme"}
     assert callable(kwargs["on_stream"])
     assert callable(kwargs["on_stream_end"])
     assert kwargs["hooks"]

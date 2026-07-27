@@ -29,6 +29,7 @@ class AgentTurnHookSpec:
     chat_id: str = "direct"
     message_id: str | None = None
     metadata: dict[str, Any] | None = None
+    attributes: dict[str, Any] | None = None
     session_key: str | None = None
     workspace: Path | None = None
     tool_hint_max_length: int = 40
@@ -62,6 +63,7 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         message_id=spec.message_id,
         session_key=spec.session_key,
         metadata=dict(spec.metadata or {}),
+        attributes=dict(spec.attributes or {}),
         ephemeral=spec.ephemeral,
     )
     hook_chain: list[AgentHook] = [progress_hook]

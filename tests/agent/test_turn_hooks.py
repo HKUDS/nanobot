@@ -65,6 +65,7 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
         session_key="websocket:chat-1",
         workspace=tmp_path,
         metadata={"source": "test"},
+        attributes={"tenant": "acme"},
         registered_hook_factories=[factory("registered_factory")],
         registered_hooks=[RecordingHook(events, "registered")],
         turn_hook_factories=[factory("turn_factory")],
@@ -91,6 +92,10 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
     assert [context.metadata for context in captured] == [
         {"source": "test"},
         {"source": "test"},
+    ]
+    assert [context.attributes for context in captured] == [
+        {"tenant": "acme"},
+        {"tenant": "acme"},
     ]
 
 
