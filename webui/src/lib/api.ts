@@ -26,7 +26,12 @@ import type {
   SettingsUpdate,
   SidebarStatePayload,
   SkillDetail,
+  SkillActionPayload,
+  SkillInstallPayload,
   SkillsPayload,
+  SkillsSearchPayload,
+  SkillsTrendsPayload,
+  SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
   TranscriptionSettingsUpdate,
@@ -307,6 +312,87 @@ export async function fetchSkillDetail(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateSkillEnabled(
+  token: string,
+  name: string,
+  enabled: boolean,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name, enabled: String(enabled) });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/update?${params}`,
+    token,
+  );
+}
+
+export async function deleteSkill(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/delete?${params}`,
+    token,
+  );
+}
+
+export async function searchMarketplaceSkills(
+  token: string,
+  query: string,
+  base: string = "",
+): Promise<SkillsSearchPayload> {
+  const params = new URLSearchParams({ q: query });
+  return request<SkillsSearchPayload>(
+    `${base}/api/webui/skills/search?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchTrendingMarketplaceSkills(
+  token: string,
+  base: string = "",
+): Promise<SkillsTrendingPayload> {
+  return request<SkillsTrendingPayload>(
+    `${base}/api/webui/skills/trending`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchMarketplaceSkillTrends(
+  token: string,
+  skillIds: string[],
+  base: string = "",
+): Promise<SkillsTrendsPayload> {
+  const params = new URLSearchParams();
+  skillIds.forEach((id) => params.append("id", id));
+  return request<SkillsTrendsPayload>(
+    `${base}/api/webui/skills/trends?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function installMarketplaceSkill(
+  token: string,
+  source: string,
+  skill: string,
+  base: string = "",
+): Promise<SkillInstallPayload> {
+  const params = new URLSearchParams({ source, skill });
+  return request<SkillInstallPayload>(
+    `${base}/api/webui/skills/install?${params}`,
+    token,
+    undefined,
+    150_000,
   );
 }
 

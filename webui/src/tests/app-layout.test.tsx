@@ -384,13 +384,30 @@ describe("App layout", () => {
       "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
       "/api/webui/skills": {
         skills: [
-          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+          {
+            name: "cron",
+            description: "Schedule reminders.",
+            source: "builtin",
+            enabled: true,
+            deletable: false,
+            available: true,
+          },
           {
             name: "github",
             description: "Work with GitHub.",
             source: "builtin",
+            enabled: true,
+            deletable: false,
             available: false,
             unavailable_reason: "CLI: gh",
+          },
+          {
+            name: "custom-skill",
+            description: "A workspace skill.",
+            source: "workspace",
+            enabled: true,
+            deletable: true,
+            available: true,
           },
         ],
       },
@@ -398,6 +415,8 @@ describe("App layout", () => {
         name: "github",
         description: "Work with GitHub.",
         source: "builtin",
+        enabled: true,
+        deletable: false,
         available: false,
         unavailable_reason: "CLI: gh",
         requirements: {
@@ -406,7 +425,47 @@ describe("App layout", () => {
           missing_bins: ["gh"],
           missing_env: [],
         },
+        install_options: [{
+          id: "brew",
+          kind: "brew",
+          label: "Install GitHub CLI (brew)",
+          command: "brew install gh",
+        }],
         raw_markdown: "---\nname: github\n---\nUse GitHub CLI.",
+      },
+      "/api/webui/skills/update?name=github&enabled=false": {
+        skills: [
+          {
+            name: "cron",
+            description: "Schedule reminders.",
+            source: "builtin",
+            enabled: true,
+            deletable: false,
+            available: true,
+          },
+          {
+            name: "github",
+            description: "Work with GitHub.",
+            source: "builtin",
+            enabled: false,
+            deletable: false,
+            available: false,
+            unavailable_reason: "CLI: gh",
+          },
+          {
+            name: "custom-skill",
+            description: "A workspace skill.",
+            source: "workspace",
+            enabled: true,
+            deletable: true,
+            available: true,
+          },
+        ],
+        last_action: {
+          name: "github",
+          enabled: false,
+          deleted: false,
+        },
       },
     });
 
@@ -419,9 +478,12 @@ describe("App layout", () => {
     fireEvent.click(skillsButton);
 
     expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Custom" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Built-in" })).toBeInTheDocument();
     expect(screen.getByText("cron")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
-    expect(screen.getByText("Missing: CLI: gh")).toBeInTheDocument();
+    expect(screen.getByText("Needs setup")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
@@ -439,11 +501,186 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
 
     expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
-    expect(screen.getByText("Unavailable reason")).toBeInTheDocument();
-    expect(screen.getAllByText("CLI: gh").length).toBeGreaterThan(0);
-    expect(screen.getByText("Missing CLI")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Raw SKILL.md"));
+    expect(screen.getByText("Setup required")).toBeInTheDocument();
+    expect(screen.getByText("brew install gh")).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable reason")).not.toBeInTheDocument();
+    expect(screen.queryByText("Missing CLI")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Skill instructions"));
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
+    const enabledSwitch = screen.getByRole("switch", { name: "Disable github" });
+    expect(enabledSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(enabledSwitch);
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: "Enable github" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+    });
+  });
+
+  it("deletes a custom skill from its detail sheet", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": {
+        skills: [
+          {
+            name: "custom-skill",
+            description: "A workspace skill.",
+            source: "workspace",
+            enabled: true,
+            deletable: true,
+            available: true,
+          },
+        ],
+      },
+      "/api/webui/skills/custom-skill": {
+        name: "custom-skill",
+        description: "A workspace skill.",
+        source: "workspace",
+        enabled: true,
+        deletable: true,
+        available: true,
+        requirements: {
+          bins: [],
+          env: [],
+          missing_bins: [],
+          missing_env: [],
+        },
+        raw_markdown: "---\nname: custom-skill\n---\nWorkspace instructions.",
+      },
+      "/api/webui/skills/delete?name=custom-skill": {
+        skills: [],
+        last_action: {
+          name: "custom-skill",
+          enabled: false,
+          deleted: true,
+        },
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open details for custom-skill" }),
+    );
+    expect(await screen.findByRole("heading", { name: "custom-skill" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("heading", { name: "Delete custom-skill?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Open details for custom-skill" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("No matching skills.")).toBeInTheDocument();
+  });
+
+  it("discovers and installs a skill from skills.sh", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": {
+        skills: [
+          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+        ],
+      },
+      "/api/webui/skills/trending": {
+        period: "24h",
+        install_supported: true,
+        skills: [{
+          id: "vercel-labs/skills/find-skills",
+          skill_id: "find-skills",
+          name: "find-skills",
+          source: "vercel-labs/skills",
+          installs: 14_481,
+          url: "https://skills.sh/vercel-labs/skills/find-skills",
+          installed: false,
+          rank: 18,
+        }],
+      },
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills": {
+        trends: {
+          "vercel-labs/skills/find-skills": [20, 32, 28, 45, 41, 50, 62, 58],
+        },
+      },
+      "/api/webui/skills/search?q=React": {
+        query: "React",
+        install_supported: true,
+        skills: [{
+          id: "acme/agent-skills/react-testing",
+          skill_id: "react-testing",
+          name: "React Testing",
+          source: "acme/agent-skills",
+          installs: 42,
+          url: "https://skills.sh/acme/agent-skills/react-testing",
+          installed: false,
+        }],
+      },
+      "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
+        trends: { "acme/agent-skills/react-testing": [] },
+      },
+      "/api/webui/skills/install?source=acme%2Fagent-skills&skill=react-testing": {
+        skills: [
+          {
+            name: "react-testing",
+            description: "Test React apps.",
+            source: "workspace",
+            available: true,
+          },
+          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+        ],
+        last_action: {
+          installed: true,
+          already_installed: false,
+          name: "react-testing",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Discover" }));
+    expect(await screen.findByRole("heading", { name: "Trending today" })).toBeInTheDocument();
+    expect(screen.getByText("find-skills")).toBeInTheDocument();
+    expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: "8-week install trend" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills.sh" }), {
+      target: { value: "React" },
+    });
+
+    expect(await screen.findByText("React Testing")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(
+      await screen.findByRole("heading", { name: "Install React Testing?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/webui/skills/install?source=acme%2Fagent-skills&skill=react-testing",
+        expect.objectContaining({
+          headers: { Authorization: expect.any(String) },
+        }),
+      );
+    });
+    expect(await screen.findByRole("button", { name: "Installed" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
+    expect(screen.getByText("react-testing")).toBeInTheDocument();
   });
 
   it("opens Automations from the main sidebar", async () => {

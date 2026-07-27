@@ -388,6 +388,35 @@ class TestBuildMessages:
         assert "user-only runtime context" not in messages[-1]["content"]
         assert "_meta" not in messages[-1]
 
+    def test_explicit_skill_reference_loads_full_instructions_for_this_turn(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "review"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: review\n"
+            "description: Review changes.\n"
+            "---\n\n"
+            "# Review workflow\n\nFollow the unique review checklist.",
+            encoding="utf-8",
+        )
+        builder = _builder(tmp_path)
+
+        messages = builder.build_messages([], "Please $review this patch and use $review carefully.")
+
+        system_prompt = messages[0]["content"]
+        assert "# Active Skills" in system_prompt
+        assert "### Skill: review" in system_prompt
+        assert "Follow the unique review checklist." in system_prompt
+        assert system_prompt.count("### Skill: review") == 1
+        assert messages[-1]["content"] == (
+            "Please $review this patch and use $review carefully."
+        )
+
+    def test_unknown_skill_reference_does_not_change_active_skills(self, tmp_path):
+        messages = _builder(tmp_path).build_messages([], "Keep the shell literal $HOME.")
+
+        assert "# Active Skills" not in messages[0]["content"]
+
     def test_runtime_context_is_not_injected_by_default(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages([], "hello", channel="cli")

@@ -1478,12 +1478,29 @@ describe("ThreadComposer", () => {
         <ThreadComposer
           onSend={vi.fn()}
           placeholder="Type your message..."
-          skills={[{
-            name: skillName,
-            description: "Fetch and summarize the latest AI research papers every day",
-            source: "builtin",
-            available: true,
-          }]}
+          skills={[
+            {
+              name: skillName,
+              description: "Fetch and summarize the latest AI research papers every day",
+              source: "builtin",
+              enabled: true,
+              available: true,
+            },
+            {
+              name: "arxiv-disabled",
+              description: "Disabled research workflow",
+              source: "builtin",
+              enabled: false,
+              available: true,
+            },
+            {
+              name: "arxiv-unavailable",
+              description: "Unavailable research workflow",
+              source: "builtin",
+              enabled: true,
+              available: false,
+            },
+          ]}
           slashCommands={COMMANDS}
         />,
     );
@@ -1499,6 +1516,8 @@ describe("ThreadComposer", () => {
     const name = within(option).getByText(skillName);
     expect(name).not.toHaveClass("truncate");
     expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
+    expect(within(palette).queryByText("arxiv-disabled")).not.toBeInTheDocument();
+    expect(within(palette).queryByText("arxiv-unavailable")).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Tab" });

@@ -17,6 +17,7 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
+_SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
 
 
 class SkillsLoader:
@@ -108,6 +109,21 @@ class SkillsLoader:
             if (markdown := self.load_skill(name))
         ]
         return "\n\n---\n\n".join(parts)
+
+    def get_explicitly_invoked_skills(self, text: str) -> list[str]:
+        """Resolve ``$skill-name`` references to enabled, available skills."""
+        if not text:
+            return []
+        available = {
+            entry["name"]
+            for entry in self.list_skills(filter_unavailable=True)
+        }
+        invoked: list[str] = []
+        for match in _SKILL_REFERENCE.finditer(text):
+            name = match.group(1)
+            if name in available and name not in invoked:
+                invoked.append(name)
+        return invoked
 
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
         """

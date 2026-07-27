@@ -519,6 +519,8 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "name": "workspace-skill",
             "description": "Workspace skill.",
             "source": "workspace",
+            "enabled": True,
+            "deletable": True,
             "available": True,
             "unavailable_reason": "",
         }
@@ -543,6 +545,212 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_management_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_dir = tmp_path / "skills" / "custom-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: custom-skill\ndescription: Custom skill.\n---\n",
+        encoding="utf-8",
+    )
+
+    def set_enabled(
+        workspace: Path,
+        name: str,
+        *,
+        enabled: bool,
+        disabled_skills: set[str],
+    ) -> dict[str, Any]:
+        assert workspace == tmp_path
+        assert name == "custom-skill"
+        assert enabled is False
+        disabled_skills.add(name)
+        return {"name": name, "enabled": enabled, "deleted": False}
+
+    def delete(
+        workspace: Path,
+        name: str,
+        *,
+        disabled_skills: set[str],
+    ) -> dict[str, Any]:
+        assert workspace == tmp_path
+        assert name == "custom-skill"
+        disabled_skills.discard(name)
+        for child in skill_dir.iterdir():
+            child.unlink()
+        skill_dir.rmdir()
+        return {"name": name, "enabled": False, "deleted": True}
+
+    monkeypatch.setattr("nanobot.webui.ws_http.set_webui_skill_enabled", set_enabled)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        headers = {"Authorization": f"Bearer {token}"}
+        update_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/update"
+            "?name=custom-skill&enabled=false",
+            headers=headers,
+        )
+        assert update_response.status_code == 200
+        assert update_response.json()["last_action"]["enabled"] is False
+        custom = next(
+            item
+            for item in update_response.json()["skills"]
+            if item["name"] == "custom-skill"
+        )
+        assert custom["enabled"] is False
+
+        delete_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/delete"
+            "?name=custom-skill",
+            headers=headers,
+        )
+        assert delete_response.status_code == 200
+        assert delete_response.json()["last_action"]["deleted"] is True
+        assert all(
+            item["name"] != "custom-skill"
+            for item in delete_response.json()["skills"]
+        )
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skills_marketplace_routes_search_and_install(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = AsyncMock(return_value={
+        "query": "react",
+        "install_supported": True,
+        "skills": [{
+            "id": "acme/agent-skills/react-testing",
+            "skill_id": "react-testing",
+            "name": "React Testing",
+            "source": "acme/agent-skills",
+            "installs": 42,
+            "url": "https://skills.sh/acme/agent-skills/react-testing",
+            "installed": False,
+        }],
+    })
+    trending = AsyncMock(return_value={
+        "period": "24h",
+        "install_supported": True,
+        "skills": [{
+            "id": "acme/agent-skills/react-testing",
+            "skill_id": "react-testing",
+            "name": "React Testing",
+            "source": "acme/agent-skills",
+            "installs": 12,
+            "url": "https://skills.sh/acme/agent-skills/react-testing",
+            "installed": False,
+            "rank": 1,
+        }],
+    })
+    trends = AsyncMock(return_value={
+        "trends": {"acme/agent-skills/react-testing": [2, 4, 3, 8]},
+    })
+
+    async def install(source: str, skill_id: str, workspace: Path) -> dict[str, Any]:
+        assert source == "acme/agent-skills"
+        assert skill_id == "react-testing"
+        assert workspace == tmp_path
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    install_mock = AsyncMock(side_effect=install)
+    monkeypatch.setattr("nanobot.webui.ws_http.search_marketplace_skills", search)
+    monkeypatch.setattr("nanobot.webui.ws_http.trending_marketplace_skills", trending)
+    monkeypatch.setattr("nanobot.webui.ws_http.marketplace_skill_trends", trends)
+    monkeypatch.setattr("nanobot.webui.ws_http.install_marketplace_skill", install_mock)
+
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        denied = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/search?q=react"
+        )
+        assert denied.status_code == 401
+
+        token = channel.gateway.tokens.issue_api_token(300)
+        headers = {"Authorization": f"Bearer {token}"}
+        search_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/search?q=react",
+            headers=headers,
+        )
+        assert search_response.status_code == 200
+        assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
+        search.assert_awaited_once_with("react", tmp_path)
+
+        trending_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/trending",
+            headers=headers,
+        )
+        assert trending_response.status_code == 200
+        assert trending_response.json()["period"] == "24h"
+        trending.assert_awaited_once_with(tmp_path)
+
+        trends_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/trends"
+            "?id=acme%2Fagent-skills%2Freact-testing",
+            headers=headers,
+        )
+        assert trends_response.status_code == 200
+        assert trends_response.json()["trends"] == {
+            "acme/agent-skills/react-testing": [2, 4, 3, 8],
+        }
+        trends.assert_awaited_once_with(["acme/agent-skills/react-testing"])
+
+        params = urlencode({
+            "source": "acme/agent-skills",
+            "skill": "react-testing",
+        })
+        install_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/install?{params}",
+            headers=headers,
+        )
+        assert install_response.status_code == 200
+        body = install_response.json()
+        assert body["last_action"] == {
+            "installed": True,
+            "already_installed": False,
+            "name": "react-testing",
+        }
+        assert next(
+            skill for skill in body["skills"] if skill["name"] == "react-testing"
+        )["source"] == "workspace"
+        install_mock.assert_awaited_once()
     finally:
         await channel.stop()
         await server_task

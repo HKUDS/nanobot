@@ -87,7 +87,20 @@ from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
-from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
+from nanobot.webui.skills_api import (
+    SkillManagementError,
+    delete_webui_skill,
+    set_webui_skill_enabled,
+    webui_skill_detail_payload,
+    webui_skills_payload,
+)
+from nanobot.webui.skills_marketplace import (
+    SkillsMarketplaceError,
+    install_marketplace_skill,
+    marketplace_skill_trends,
+    search_marketplace_skills,
+    trending_marketplace_skills,
+)
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -171,6 +184,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -183,7 +197,8 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
-        self.disabled_skills = disabled_skills or set()
+        self.disabled_skills = disabled_skills if disabled_skills is not None else set()
+        self.skill_state_action = skill_state_action
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -795,6 +810,18 @@ class GatewayHTTPHandler:
             return self._handle_commands(request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
+        if got == "/api/webui/skills/search":
+            return await self._handle_webui_skills_search(request)
+        if got == "/api/webui/skills/trending":
+            return await self._handle_webui_skills_trending(request)
+        if got == "/api/webui/skills/trends":
+            return await self._handle_webui_skill_trends(request)
+        if got == "/api/webui/skills/install":
+            return await self._handle_webui_skill_install(connection, request)
+        if got == "/api/webui/skills/update":
+            return self._handle_webui_skill_update(request)
+        if got == "/api/webui/skills/delete":
+            return self._handle_webui_skill_delete(connection, request)
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
@@ -829,6 +856,142 @@ class GatewayHTTPHandler:
                 disabled_skills=self.disabled_skills,
             )
         )
+
+    async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _query_first(_parse_query(request.path), "q") or ""
+        try:
+            payload = await search_marketplace_skills(query, self.skills_workspace_path)
+        except SkillsMarketplaceError as exc:
+            return _http_error(exc.status, exc.message)
+        except Exception:
+            self._log.exception("skills.sh search failed")
+            return _http_error(500, "skills.sh search failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skills_trending(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = await trending_marketplace_skills(self.skills_workspace_path)
+        except SkillsMarketplaceError as exc:
+            return _http_error(exc.status, exc.message)
+        except Exception:
+            self._log.exception("skills.sh trending lookup failed")
+            return _http_error(500, "skills.sh trending lookup failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skill_trends(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        skill_ids = _parse_query(request.path).get("id", [])
+        try:
+            payload = await marketplace_skill_trends(skill_ids)
+        except Exception:
+            self._log.exception("skills.sh trend history lookup failed")
+            return _http_error(500, "skills.sh trend history lookup failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skill_install(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self._allow_webui_package_install(connection, request):
+            return _http_error(403, "remote skill installation is disabled")
+
+        query = _parse_query(request.path)
+        source = _query_first(query, "source") or ""
+        skill_id = _query_first(query, "skill") or ""
+        try:
+            action = await install_marketplace_skill(
+                source,
+                skill_id,
+                self.skills_workspace_path,
+            )
+        except SkillsMarketplaceError as exc:
+            return _http_error(exc.status, exc.message)
+        except Exception:
+            self._log.exception("skill installation failed")
+            return _http_error(500, "skill installation failed")
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _allow_webui_package_install(self, connection: Any, request: WsRequest) -> bool:
+        if _is_local_browser_request(connection, request.headers):
+            return True
+        try:
+            from nanobot.config.loader import load_config
+
+            return bool(load_config().tools.webui_allow_remote_package_install)
+        except Exception:
+            self._log.exception("failed to load remote package install policy")
+            return False
+
+    def _handle_webui_skill_update(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        name = _query_first(query, "name") or ""
+        raw_enabled = (_query_first(query, "enabled") or "").lower()
+        if raw_enabled not in {"true", "false"}:
+            return _http_error(400, "enabled must be true or false")
+        try:
+            action = set_webui_skill_enabled(
+                self.skills_workspace_path,
+                name,
+                enabled=raw_enabled == "true",
+                disabled_skills=self.disabled_skills,
+            )
+        except SkillManagementError as exc:
+            return _http_error(exc.status, exc.message)
+        self._apply_skill_state()
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _handle_webui_skill_delete(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self._allow_webui_package_install(connection, request):
+            return _http_error(403, "remote skill deletion is disabled")
+        name = _query_first(_parse_query(request.path), "name") or ""
+        try:
+            action = delete_webui_skill(
+                self.skills_workspace_path,
+                name,
+                disabled_skills=self.disabled_skills,
+            )
+        except SkillManagementError as exc:
+            return _http_error(exc.status, exc.message)
+        self._apply_skill_state()
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _apply_skill_state(self) -> None:
+        if self.skill_state_action is not None:
+            self.skill_state_action(set(self.disabled_skills))
 
     def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):

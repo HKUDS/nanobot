@@ -70,6 +70,7 @@ class ContextBuilder:
     def build_system_prompt(
         self,
         *,
+        active_skill_names: Sequence[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
         workspace: Path | None = None,
@@ -91,13 +92,18 @@ class ContextBuilder:
         if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        active_skills = self.skills.get_always_skills()
+        active_skills.extend(
+            name
+            for name in (active_skill_names or ())
+            if name not in active_skills
+        )
+        if active_skills:
+            active_content = self.skills.load_skills_for_context(active_skills)
+            if active_content:
+                parts.append(f"# Active Skills\n\n{active_content}")
 
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+        skills_summary = self.skills.build_skills_summary(exclude=set(active_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -214,6 +220,11 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
+        active_skill_names = (
+            self.skills.get_explicitly_invoked_skills(current_message)
+            if current_role == "user"
+            else []
+        )
         user_content = self.build_user_content(current_message, image_paths=media)
         blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
         merged, runtime_context_meta = append_runtime_context(user_content, blocks)
@@ -221,6 +232,7 @@ class ContextBuilder:
             {
                 "role": "system",
                 "content": self.build_system_prompt(
+                    active_skill_names=active_skill_names,
                     channel=channel,
                     session_summary=session_summary,
                     workspace=root,

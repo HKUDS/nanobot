@@ -1,25 +1,89 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
-import { Brain, Check, CircleAlert, KeyRound, Loader2, Terminal } from "lucide-react";
+import {
+  Check,
+  CircleAlert,
+  Copy,
+  KeyRound,
+  Loader2,
+  PowerOff,
+  RefreshCw,
+  Search,
+  Terminal,
+  Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { fetchSkillDetail } from "@/lib/api";
+import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
+import { notifySkillsChanged } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const { t } = useTranslation();
-  const availableCount = skills.filter((skill) => skill.available).length;
+  const availableCount = skills.filter(
+    (skill) => skill.enabled !== false && skill.available,
+  ).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
+  const [view, setView] = useState<"installed" | "discover">("installed");
+  const [installedQuery, setInstalledQuery] = useState("");
+  const [installedFilter, setInstalledFilter] = useState<"all" | "enabled" | "disabled">(
+    "all",
+  );
+  const normalizedQuery = installedQuery.trim().toLowerCase();
+  const filteredSkills = skills.filter((skill) => {
+    const enabled = skill.enabled !== false;
+    if (installedFilter === "enabled" && !enabled) return false;
+    if (installedFilter === "disabled" && enabled) return false;
+    return (
+      !normalizedQuery
+      || skill.name.toLowerCase().includes(normalizedQuery)
+      || skill.description.toLowerCase().includes(normalizedQuery)
+    );
+  });
+  const groupedSkills = [
+    {
+      key: "workspace",
+      label: t("settings.skills.customGroup", { defaultValue: "Custom" }),
+      skills: filteredSkills.filter((skill) => skill.source === "workspace"),
+    },
+    {
+      key: "builtin",
+      label: t("settings.skills.builtinGroup", { defaultValue: "Built-in" }),
+      skills: filteredSkills.filter((skill) => skill.source === "builtin"),
+    },
+    {
+      key: "other",
+      label: t("settings.skills.otherGroup", { defaultValue: "Other" }),
+      skills: filteredSkills.filter(
+        (skill) => skill.source !== "workspace" && skill.source !== "builtin",
+      ),
+    },
+  ].filter((group) => group.skills.length);
+  const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
     <div className="space-y-7">
       <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
           {t("settings.skills.description", {
-            defaultValue: "Review the instruction skills this agent can load during a conversation.",
+            defaultValue:
+              "Review installed skills or discover new capabilities from the skills.sh catalog.",
           })}
         </p>
         <span className="text-[12px] font-medium text-muted-foreground">
@@ -31,31 +95,122 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         </span>
       </section>
 
-      <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
-        <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
-            {t("settings.skills.featured", { defaultValue: "Agent skills" })}
-          </h2>
-          <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
-            {skills.length}
-          </span>
-        </div>
-        {skills.length ? (
-          <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
-            {skills.map((skill) => (
-              <SkillCatalogRow
-                key={`${skill.source}:${skill.name}`}
-                skill={skill}
-                onSelect={setSelectedSkill}
+      <div
+        className="inline-flex rounded-[12px] bg-muted/65 p-1"
+        role="tablist"
+        aria-label={t("settings.skills.views", { defaultValue: "Skills views" })}
+      >
+        {(["installed", "discover"] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            aria-selected={view === item}
+            onClick={() => setView(item)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+              view === item
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {item === "installed"
+              ? t("settings.skills.installedTab", { defaultValue: "Installed" })
+              : (
+                  <>
+                    <VercelMark />
+                    {t("settings.skills.discoverTab", { defaultValue: "Discover" })}
+                  </>
+                )}
+          </button>
+        ))}
+      </div>
+
+      {view === "installed" ? (
+        <section className="overflow-hidden rounded-[22px] bg-settings-surface">
+          <div className="flex flex-col gap-3 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-[320px]">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
               />
-            ))}
+              <Input
+                value={installedQuery}
+                onChange={(event) => setInstalledQuery(event.target.value)}
+                placeholder={t("settings.skills.searchInstalled", {
+                  defaultValue: "Search installed skills",
+                })}
+                aria-label={t("settings.skills.searchInstalled", {
+                  defaultValue: "Search installed skills",
+                })}
+                className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
+              />
+            </div>
+            <div className="flex items-center gap-1 rounded-[10px] bg-muted/65 p-1">
+              {([
+                ["all", t("settings.skills.filterAll", { defaultValue: "All" }), skills.length],
+                [
+                  "enabled",
+                  t("settings.skills.filterEnabled", { defaultValue: "Enabled" }),
+                  skills.length - disabledCount,
+                ],
+                [
+                  "disabled",
+                  t("settings.skills.filterDisabled", { defaultValue: "Disabled" }),
+                  disabledCount,
+                ],
+              ] as const).map(([filter, label, count]) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setInstalledFilter(filter)}
+                  className={cn(
+                    "rounded-[8px] px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    installedFilter === filter
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        ) : (
-          <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            {t("settings.skills.empty", { defaultValue: "No skills are available." })}
-          </div>
-        )}
-      </section>
+          {groupedSkills.length ? (
+            <div className="pb-2">
+              {groupedSkills.map((group) => (
+                <section key={group.key}>
+                  <div className="flex items-center gap-2 bg-muted/20 px-5 py-2.5">
+                    <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      {group.label}
+                    </h2>
+                    <span className="text-[11px] tabular-nums text-muted-foreground/60">
+                      {group.skills.length}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border/40 px-3 sm:px-4">
+                    {group.skills.map((skill) => (
+                      <SkillCatalogRow
+                        key={`${skill.source}:${skill.name}`}
+                        skill={skill}
+                        onSelect={setSelectedSkill}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="px-3 py-12 text-center text-sm text-muted-foreground">
+              {t("settings.skills.noMatching", {
+                defaultValue: "No matching skills.",
+              })}
+            </div>
+          )}
+        </section>
+      ) : (
+        <SkillsMarketplace installedSkills={skills} />
+      )}
 
       <SkillDetailSheet
         skill={selectedSkill}
@@ -68,6 +223,14 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   );
 }
 
+function VercelMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden>
+      <path d="M8 1 16 15H0L8 1Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function SkillCatalogRow({
   skill,
   onSelect,
@@ -76,11 +239,13 @@ function SkillCatalogRow({
   onSelect: (skill: SkillSummary) => void;
 }) {
   const { t } = useTranslation();
-  const sourceLabel = skillSourceLabel(skill.source, t);
-  const StatusIcon = skill.available ? Check : CircleAlert;
-  const statusLabel = skill.available
-    ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
-    : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+  const enabled = skill.enabled !== false;
+  const StatusIcon = !enabled ? PowerOff : skill.available ? Check : CircleAlert;
+  const statusLabel = !enabled
+    ? t("settings.skills.statusDisabled", { defaultValue: "Disabled" })
+    : skill.available
+      ? t("settings.skills.statusEnabled", { defaultValue: "Enabled" })
+      : t("settings.skills.statusNeedsSetup", { defaultValue: "Needs setup" });
 
   return (
     <button
@@ -91,42 +256,28 @@ function SkillCatalogRow({
       })}
       onClick={() => onSelect(skill)}
       className={cn(
-        "group flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-3 text-left transition-colors",
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left transition-colors",
         "hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        !skill.available && "opacity-65",
+        !enabled && "opacity-60",
       )}
     >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-muted/70 text-muted-foreground">
-        <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
-      </div>
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
-            {skill.name}
-          </h3>
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
-            {sourceLabel}
-          </span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+        <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
+          {skill.name}
+        </h3>
+        <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-muted-foreground">
           {skill.description}
         </p>
-        {!skill.available && skill.unavailable_reason ? (
-          <p className="mt-1 truncate text-[12px] leading-4 text-muted-foreground/80">
-            {t("settings.skills.unavailableReason", {
-              reason: skill.unavailable_reason,
-              defaultValue: "Missing: {{reason}}",
-            })}
-          </p>
-        ) : null}
       </div>
       <span
-        title={!skill.available && skill.unavailable_reason ? skill.unavailable_reason : undefined}
+        title={enabled && !skill.available ? skill.unavailable_reason : undefined}
         className={cn(
-          "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium sm:inline-flex",
-          skill.available
-            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : "bg-muted text-muted-foreground",
+          "hidden w-[92px] shrink-0 items-center justify-end gap-1 text-[11px] font-medium sm:inline-flex",
+          !enabled
+            ? "text-muted-foreground"
+            : skill.available
+              ? "text-emerald-700 dark:text-emerald-300"
+              : "text-amber-700 dark:text-amber-300",
         )}
       >
         <StatusIcon className="h-3.5 w-3.5" aria-hidden />
@@ -150,6 +301,10 @@ function SkillDetailSheet({
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -157,6 +312,8 @@ function SkillDetailSheet({
     setDetail(null);
     setLoading(true);
     setLoadFailed(false);
+    setActionError("");
+    setDeleteOpen(false);
     fetchSkillDetail(token, skill.name)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
@@ -170,90 +327,228 @@ function SkillDetailSheet({
     return () => {
       cancelled = true;
     };
-  }, [open, skill, token]);
+  }, [open, refreshKey, skill, token]);
 
   if (!skill) return null;
 
   const activeSkill = detail ?? skill;
+  const enabled = activeSkill.enabled !== false;
+  const deletable = activeSkill.deletable ?? activeSkill.source === "workspace";
   const sourceLabel = skillSourceLabel(activeSkill.source, t);
-  const statusLabel = activeSkill.available
-    ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
-    : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+  const statusLabel = !enabled
+    ? t("settings.skills.statusDisabled", { defaultValue: "Disabled" })
+    : activeSkill.available
+      ? t("settings.skills.statusEnabled", { defaultValue: "Enabled" })
+      : t("settings.skills.statusNeedsSetup", { defaultValue: "Needs setup" });
+
+  const toggleEnabled = async () => {
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const payload = await updateSkillEnabled(token, activeSkill.name, !enabled);
+      notifySkillsChanged(payload);
+      const updated = payload.skills.find((item) => item.name === activeSkill.name);
+      if (updated) {
+        setDetail((current) => current ? { ...current, ...updated } : current);
+      }
+    } catch (reason) {
+      setActionError(
+        reason instanceof Error
+          ? reason.message
+          : t("settings.skills.updateFailed", {
+              defaultValue: "Could not update this skill.",
+            }),
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const removeSkill = async () => {
+    setDeleteOpen(false);
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const payload = await deleteSkill(token, activeSkill.name);
+      notifySkillsChanged(payload);
+      onOpenChange(false);
+    } catch (reason) {
+      setActionError(
+        reason instanceof Error
+          ? reason.message
+          : t("settings.skills.deleteFailed", {
+              defaultValue: "Could not delete this skill.",
+            }),
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-[min(34rem,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
-      >
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="flex items-start gap-3 pr-8">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[15px] bg-muted/70 text-muted-foreground">
-              <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
-            </div>
-            <div className="min-w-0">
-              <SheetTitle className="truncate text-[20px] font-semibold">
-                {activeSkill.name}
-              </SheetTitle>
-              <SheetDescription className="sr-only">
-                {t("settings.skills.detailDescription", {
-                  name: activeSkill.name,
-                  defaultValue: "Details for {{name}}.",
-                })}
-              </SheetDescription>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-                <Pill>{sourceLabel}</Pill>
-                <Pill tone={activeSkill.available ? "success" : "muted"}>{statusLabel}</Pill>
-              </div>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
-            </div>
-          ) : loadFailed ? (
-            <div className="mt-8 rounded-[16px] bg-destructive/10 px-3 py-3 text-sm text-destructive">
-              {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
-            </div>
-          ) : (
-            <div className="mt-7 space-y-6">
-              <DetailSection title={t("settings.skills.descriptionTitle", { defaultValue: "Description" })}>
-                <p className="text-[14px] leading-6 text-muted-foreground">{activeSkill.description}</p>
-              </DetailSection>
-
-              <div className="grid grid-cols-2 gap-2">
-                <MetaItem
-                  label={t("settings.skills.source", { defaultValue: "Source" })}
-                  value={sourceLabel}
-                />
-                <MetaItem
-                  label={t("settings.skills.status", { defaultValue: "Status" })}
-                  value={statusLabel}
-                />
-              </div>
-
-              {!activeSkill.available && activeSkill.unavailable_reason ? (
-                <DetailSection
-                  title={t("settings.skills.unavailableReasonLabel", {
-                    defaultValue: "Unavailable reason",
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          className="w-[min(34rem,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div className="flex items-start gap-3 pr-8">
+              <div className="min-w-0 flex-1">
+                <SheetTitle className="truncate text-[20px] font-semibold">
+                  {activeSkill.name}
+                </SheetTitle>
+                <SheetDescription className="sr-only">
+                  {t("settings.skills.detailDescription", {
+                    name: activeSkill.name,
+                    defaultValue: "Details for {{name}}.",
                   })}
-                >
-                  <p className="text-[13px] leading-5 text-destructive/85">
-                    {activeSkill.unavailable_reason}
-                  </p>
-                </DetailSection>
-              ) : null}
-
-              {detail ? <RequirementsSection detail={detail} /> : null}
-
-              {detail ? <RawInstructionsBlock markdown={detail.raw_markdown} /> : null}
+                </SheetDescription>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+                  <Pill>{sourceLabel}</Pill>
+                  <Pill
+                    tone={
+                      !enabled
+                        ? "muted"
+                        : activeSkill.available
+                          ? "success"
+                          : "warning"
+                    }
+                  >
+                    {statusLabel}
+                  </Pill>
+                </div>
+                <p className="mt-3 text-[13px] leading-5 text-muted-foreground">
+                  {activeSkill.description}
+                </p>
+              </div>
             </div>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+
+            {loading ? (
+              <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
+              </div>
+            ) : loadFailed ? (
+              <div className="mt-8 rounded-[16px] bg-destructive/10 px-3 py-3 text-sm text-destructive">
+                {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
+              </div>
+            ) : (
+              <div className="mt-6 space-y-5">
+                <div className="flex items-center justify-between gap-4 border-y border-border/45 px-1 py-3.5">
+                  <div>
+                    <p className="text-[13px] font-medium text-foreground">
+                      {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
+                    </p>
+                    <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+                      {t("settings.skills.enabledDescription", {
+                        defaultValue:
+                          "Allow the agent to load this skill when its requirements are ready.",
+                      })}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={t("settings.skills.toggleEnabled", {
+                      name: activeSkill.name,
+                      defaultValue: enabled ? "Disable {{name}}" : "Enable {{name}}",
+                    })}
+                    disabled={actionBusy}
+                    onClick={() => void toggleEnabled()}
+                    className={cn(
+                      "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      "disabled:cursor-wait disabled:opacity-60",
+                      enabled ? "bg-foreground" : "bg-muted-foreground/30",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
+                        enabled ? "translate-x-5" : "translate-x-0",
+                      )}
+                    />
+                  </button>
+                </div>
+
+                {actionError ? (
+                  <div className="rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+                    {actionError}
+                  </div>
+                ) : null}
+
+                {detail && enabled ? (
+                  <RequirementsSection
+                    detail={detail}
+                    onRefresh={() => setRefreshKey((value) => value + 1)}
+                  />
+                ) : null}
+
+                {detail ? <RawInstructionsBlock markdown={detail.raw_markdown} /> : null}
+
+                {deletable ? (
+                  <div className="flex items-center justify-between gap-4 border-t border-border/45 pt-5">
+                    <div>
+                      <p className="text-[13px] font-medium text-foreground">
+                        {t("settings.skills.deleteTitle", { defaultValue: "Delete skill" })}
+                      </p>
+                      <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+                        {t("settings.skills.deleteDescription", {
+                          defaultValue: "Remove this skill from the current workspace.",
+                        })}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() => setDeleteOpen(true)}
+                      className="shrink-0 rounded-full"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {t("settings.skills.deleteAction", { defaultValue: "Delete" })}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent className="rounded-[20px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings.skills.deleteConfirmTitle", {
+                name: activeSkill.name,
+                defaultValue: "Delete {{name}}?",
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.skills.deleteConfirmDescription", {
+                defaultValue:
+                  "This removes the skill files from the current workspace. This action cannot be undone.",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("common.cancel", { defaultValue: "Cancel" })}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void removeSkill()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("settings.skills.deleteConfirmAction", { defaultValue: "Delete skill" })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -267,8 +562,13 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
 
   return (
     <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="cursor-pointer select-none text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
-        {t("settings.skills.rawInstructions", { defaultValue: "Raw SKILL.md" })}
+      <summary className="flex cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+        <span>
+          {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
+        </span>
+        <code className="font-mono text-[10px] font-normal text-muted-foreground">
+          SKILL.md
+        </code>
       </summary>
       <div className="mt-3 overflow-hidden rounded-[14px] border border-border/35 bg-background/70">
         <pre
@@ -287,100 +587,131 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
   );
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[16px] bg-muted/35 px-3 py-2.5">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate text-[13px] font-medium text-foreground">{value}</div>
-    </div>
-  );
-}
-
-function RequirementsSection({ detail }: { detail: SkillDetail }) {
+function RequirementsSection({
+  detail,
+  onRefresh,
+}: {
+  detail: SkillDetail;
+  onRefresh: () => void;
+}) {
   const { t } = useTranslation();
-  const { bins, env, missing_bins, missing_env } = detail.requirements;
-  const hasRequirements = bins.length > 0 || env.length > 0;
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const { missing_bins, missing_env } = detail.requirements;
+  const hasMissing = missing_bins.length > 0 || missing_env.length > 0;
+
+  if (!hasMissing) return null;
+
+  const installOptions = detail.install_options ?? [];
+  const copyCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopiedCommand(command);
+    } catch {
+      setCopiedCommand(null);
+    }
+  };
 
   return (
-    <DetailSection title={t("settings.skills.requirements", { defaultValue: "Requirements" })}>
-      {hasRequirements ? (
-        <div className="space-y-3">
-          {missing_bins.length ? (
-            <RequirementLine
-              title={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
-              items={missing_bins}
-              tone="danger"
-              icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            />
-          ) : null}
-          {missing_env.length ? (
-            <RequirementLine
-              title={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
-              items={missing_env}
-              tone="danger"
-              icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            />
-          ) : null}
-          {bins.length ? (
-            <RequirementLine
-              title={t("settings.skills.commands", { defaultValue: "Commands" })}
-              items={bins}
-              icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            />
-          ) : null}
-          {env.length ? (
-            <RequirementLine
-              title={t("settings.skills.environment", { defaultValue: "Environment variables" })}
-              items={env}
-              icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            />
-          ) : null}
+    <section className="rounded-[18px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
+      <div className="flex items-start gap-2.5">
+        <CircleAlert
+          className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[13px] font-semibold text-foreground">
+            {t("settings.skills.setupRequired", { defaultValue: "Setup required" })}
+          </h3>
+          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            {t("settings.skills.setupDescription", {
+              defaultValue:
+                "Install the missing dependency on the machine running nanobot, then check again.",
+            })}
+          </p>
         </div>
-      ) : (
-        <p className="text-[13px] text-muted-foreground">
-          {t("settings.skills.noRequirements", { defaultValue: "No explicit requirements." })}
-        </p>
-      )}
-    </DetailSection>
-  );
-}
+      </div>
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section>
-      <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">{title}</h3>
-      {children}
+      <div className="mt-3 space-y-2">
+        {installOptions.map((option) => (
+          <div
+            key={`${option.id}:${option.command}`}
+            className="flex min-w-0 items-center gap-2 rounded-[12px] bg-background/80 px-3 py-2"
+          >
+            <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-foreground/80">
+              {option.command}
+            </code>
+            <button
+              type="button"
+              aria-label={t("settings.skills.copySetupCommand", {
+                defaultValue: "Copy setup command",
+              })}
+              title={option.label}
+              onClick={() => void copyCommand(option.command)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {copiedCommand === option.command ? (
+                <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+              ) : (
+                <Copy className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </button>
+          </div>
+        ))}
+
+        {!installOptions.length && missing_bins.length ? (
+          <SetupRequirement
+            icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
+            label={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
+            items={missing_bins}
+          />
+        ) : null}
+        {missing_env.length ? (
+          <SetupRequirement
+            icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
+            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
+            items={missing_env}
+          />
+        ) : null}
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onRefresh}
+        className="mt-3 h-8 rounded-full bg-background/60 px-3 text-[11px]"
+      >
+        <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+        {t("settings.skills.checkAgain", { defaultValue: "Check again" })}
+      </Button>
     </section>
   );
 }
 
-function RequirementLine({
-  title,
+function SetupRequirement({
+  label,
   items,
   icon,
-  tone = "muted",
 }: {
-  title: string;
+  label: string;
   items: string[];
   icon: ReactNode;
-  tone?: "muted" | "danger";
 }) {
   return (
-    <div className="space-y-1.5">
-      <div
-        className={cn(
-          "flex items-center gap-1.5 text-[12px]",
-          tone === "danger" ? "text-destructive" : "text-muted-foreground",
-        )}
-      >
+    <div className="flex flex-wrap items-center gap-1.5 px-1 py-1 text-[11px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
         {icon}
-        {title}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item) => (
-          <Pill key={item}>{item}</Pill>
-        ))}
-      </div>
+        {label}
+      </span>
+      {items.map((item) => (
+        <code
+          key={item}
+          className="rounded-full bg-background/80 px-2 py-0.5 font-mono text-[10px] text-foreground/70"
+        >
+          {item}
+        </code>
+      ))}
     </div>
   );
 }
@@ -390,7 +721,7 @@ function Pill({
   tone = "muted",
 }: {
   children: ReactNode;
-  tone?: "muted" | "success";
+  tone?: "muted" | "success" | "warning";
 }) {
   return (
     <span
@@ -398,7 +729,9 @@ function Pill({
         "inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
         tone === "success"
           ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          : "bg-muted text-muted-foreground",
+          : tone === "warning"
+            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            : "bg-muted text-muted-foreground",
       )}
     >
       {children}

@@ -178,6 +178,8 @@ export interface SkillSummary {
   name: string;
   description: string;
   source: "workspace" | "builtin" | string;
+  enabled?: boolean;
+  deletable?: boolean;
   available: boolean;
   unavailable_reason?: string;
 }
@@ -189,12 +191,63 @@ export interface SkillRequirements {
   missing_env: string[];
 }
 
+export interface SkillInstallOption {
+  id: string;
+  kind: string;
+  label: string;
+  command: string;
+}
+
 export interface SkillDetail extends SkillSummary {
   requirements: SkillRequirements;
+  install_options?: SkillInstallOption[];
   raw_markdown: string;
 }
 
 export interface SkillsPayload { skills: SkillSummary[]; }
+
+export interface SkillActionPayload extends SkillsPayload {
+  last_action: {
+    name: string;
+    enabled: boolean;
+    deleted: boolean;
+  };
+}
+
+export interface MarketplaceSkillSummary {
+  id: string;
+  skill_id: string;
+  name: string;
+  source: string;
+  installs: number;
+  url: string;
+  installed: boolean;
+  rank?: number;
+}
+
+export interface SkillsSearchPayload {
+  query: string;
+  skills: MarketplaceSkillSummary[];
+  install_supported: boolean;
+}
+
+export interface SkillsTrendingPayload {
+  skills: MarketplaceSkillSummary[];
+  period: "24h";
+  install_supported: boolean;
+}
+
+export interface SkillsTrendsPayload {
+  trends: Record<string, number[]>;
+}
+
+export interface SkillInstallPayload extends SkillsPayload {
+  last_action: {
+    installed: boolean;
+    already_installed: boolean;
+    name: string;
+  };
+}
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
