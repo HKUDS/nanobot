@@ -98,6 +98,20 @@ def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
     assert list_webui_sessions(manager) == []
 
 
+def test_webui_session_list_ignores_legacy_stem(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    legacy_path = manager.sessions_dir / "websocket_legacy.jsonl"
+    legacy_path.write_text(
+        '{"_type":"metadata","key":"websocket:legacy",'
+        '"created_at":"2025-01-01T00:00:00",'
+        '"updated_at":"2025-01-01T00:00:00","metadata":{}}\n',
+        encoding="utf-8",
+    )
+
+    assert list_webui_sessions(manager) == []
+    assert legacy_path.exists()
+
+
 def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:cron-preview")

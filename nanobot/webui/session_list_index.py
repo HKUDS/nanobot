@@ -54,7 +54,11 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
         for row in existing_rows or []
         if isinstance(row.get("file"), str)
     }
-    paths = sorted(session_manager.sessions_dir.glob("*.jsonl"))
+    paths = sorted(
+        path
+        for path in session_manager.sessions_dir.glob("*.jsonl")
+        if SessionManager._session_key_from_path(path) is not None
+    )
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
 
@@ -268,8 +272,9 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
 
 
 def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
-    storage_key = SessionManager._decode_storage_key(path.stem)
-    fallback_key = storage_key or path.stem.replace("_", ":", 1)
+    storage_key = SessionManager._session_key_from_path(path)
+    if storage_key is None:
+        return None
     try:
         with open(path, encoding="utf-8") as f:
             first_line = f.readline().strip()
@@ -320,7 +325,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 fallback_time = datetime.fromtimestamp(signature["mtime_ns"] / 1e9).isoformat()
                 created_at_s = created_at_s or fallback_time
                 updated_at_s = updated_at_s or fallback_time
-            key = data.get("key") or fallback_key
+            key = data.get("key") or storage_key
             activity_signature = _webui_activity_signature(key)
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
@@ -340,7 +345,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 **activity_signature,
             }
     except Exception:
-        repaired = session_manager._repair(fallback_key)
+        repaired = session_manager._repair(storage_key)
         if repaired is None:
             return None
         return _indexed_row_for_session(repaired, path)
