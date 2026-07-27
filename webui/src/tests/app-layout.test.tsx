@@ -2058,11 +2058,12 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
-  it("opens Apps from the main sidebar without replacing the sidebar", async () => {
+  it("transitions between Apps and Skills without replacing the sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
       "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": { skills: [] },
     });
 
     render(<App />);
@@ -2080,7 +2081,34 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
+    expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
+      "data-settings-section",
+      "apps",
+    );
+    expect(screen.getByTestId("settings-section-transition")).toHaveClass(
+      "animate-in",
+      "fade-in-0",
+      "slide-in-from-bottom-1",
+      "duration-200",
+      "motion-reduce:animate-none",
+    );
     expect(document.title).toBe("Apps · nanobot");
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
+
+    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
+        "data-settings-section",
+        "skills",
+      );
+    });
+    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(document.title).toBe("Skills · nanobot");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
