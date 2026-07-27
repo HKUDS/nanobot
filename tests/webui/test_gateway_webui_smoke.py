@@ -15,6 +15,8 @@ import httpx
 import pytest
 import websockets
 
+from nanobot.session.manager import SessionManager
+
 _BOOTSTRAP_SECRET = "smoke-secret"
 
 
@@ -148,6 +150,11 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         ws_port=ws_port,
         gateway_port=gateway_port,
     )
+    dream_key = "dream:20260727-141409"
+    dream_session = SessionManager(workspace).get_or_create(dream_key)
+    dream_session.add_message("user", "Dream consolidation prompt")
+    dream_session.add_message("assistant", "Dream memory update completed")
+    SessionManager(workspace).save(dream_session)
 
     process = _start_gateway(config_path, log_path)
     base_url = f"http://127.0.0.1:{ws_port}"
@@ -180,6 +187,11 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         sessions = _get_json(f"{base_url}/api/sessions", token=api_token)
         key = f"websocket:{chat_id}"
         assert key in {row["key"] for row in sessions["sessions"]}
+        dream_row = next(row for row in sessions["sessions"] if row["key"] == dream_key)
+        assert dream_row["title"] == "Dream"
+        assert dream_row["read_only"] is True
+        assert dream_row["kind"] == "dream"
+        assert dream_row["preview"] == ""
 
         encoded_key = quote(key, safe="")
         thread = _get_json(
@@ -189,5 +201,15 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         contents = [str(message.get("content") or "") for message in thread["messages"]]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
+
+        encoded_dream_key = quote(dream_key, safe="")
+        dream_thread = _get_json(
+            f"{base_url}/api/sessions/{encoded_dream_key}/webui-thread",
+            token=api_token,
+        )
+        assert any(
+            "Dream memory update completed" in str(message.get("content") or "")
+            for message in dream_thread["messages"]
+        )
     finally:
         _stop_gateway(process)

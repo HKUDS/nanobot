@@ -959,7 +959,14 @@ export function ThreadShell({
         />
       ) : null}
       {session ? (
-        <ThreadComposer
+        session.readOnly ? (
+          <div
+            className="mx-auto flex w-full max-w-3xl items-center justify-center rounded-2xl border border-border/60 bg-muted/35 px-4 py-3 text-sm text-muted-foreground"
+            data-testid="readonly-session-banner"
+          >
+            {t("thread.readOnlySession", { defaultValue: "This session is read-only." })}
+          </div>
+        ) : <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
           isStreaming={turnActive}
@@ -1100,7 +1107,7 @@ export function ThreadShell({
             userMessageOffset={userMessageOffset}
             onLoadOlder={loadOlder}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
-            onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+            onForkFromMessage={onForkChat && !session?.readOnly ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
         </FilePreviewAvailabilityProvider>

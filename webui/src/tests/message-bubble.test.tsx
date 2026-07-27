@@ -95,20 +95,23 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
-  it("renders user messages as right-aligned pills", () => {
+  it("renders user messages as right-aligned Markdown pills", async () => {
     const message: UIMessage = {
       id: "u1",
       role: "user",
-      content: "hello",
+      content: "**hello**",
       createdAt: Date.now(),
     };
 
     const { container } = render(<MessageBubble message={message} />);
     const row = container.firstElementChild;
-    const pill = screen.getByText("hello");
+    const pill = row?.firstElementChild;
 
     expect(row).toHaveClass("ml-auto", "flex");
+    expect(pill).not.toBeNull();
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
+    expect(screen.getByText("hello").tagName).toBe("STRONG");
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });

@@ -8,7 +8,7 @@ export interface SessionGroup {
   id: string;
   label: string;
   sessions: ChatSummary[];
-  kind?: "project";
+  kind?: "project" | "dream";
   projectPath?: string;
   projectKey?: string;
   updatedAt?: string | null;
@@ -22,6 +22,7 @@ export interface ChatGroupLabels {
   earlier: string;
   archived: string;
   projects: string;
+  dreams: string;
   fallbackTitle: string;
 }
 
@@ -54,8 +55,13 @@ export function groupSessions(
   const pinnedSessions: ChatSummary[] = [];
   const archivedSessions: ChatSummary[] = [];
   const normalSessions: ChatSummary[] = [];
+  const dreamSessions: ChatSummary[] = [];
 
   for (const session of sessions) {
+    if (session.kind === "dream") {
+      dreamSessions.push(session);
+      continue;
+    }
     if (archived.has(session.key)) {
       if (options.showArchived) archivedSessions.push(session);
       continue;
@@ -90,6 +96,15 @@ export function groupSessions(
       ),
     }))
     .filter((group) => group.sessions.length > 0);
+
+  if (dreamSessions.length) {
+    groups.push({
+      id: "dream",
+      label: labels.dreams,
+      kind: "dream",
+      sessions: sortSessions(dreamSessions, options.sort, options.titleOverrides),
+    });
+  }
 
   if (options.sort === "title_asc" && normalSessions.length) {
     groups.push({
@@ -176,6 +191,7 @@ export function isCollapsedProject(
   group: SessionGroup,
   collapsedGroups: Record<string, boolean>,
 ): boolean {
+  if (group.kind === "dream") return collapsedGroups[group.id] !== false;
   return group.kind === "project" && Boolean(collapsedGroups[group.id]);
 }
 
@@ -224,11 +240,12 @@ export function displayTitle(
 
 function groupSessionsByProject(
   sessions: ChatSummary[],
-  labels: Pick<ChatGroupLabels, "all">,
+  labels: Pick<ChatGroupLabels, "all" | "dreams">,
   options: ChatGroupingOptions,
 ): SessionGroup[] {
   const archived = new Set(options.archivedKeys);
   const conversations: ChatSummary[] = [];
+  const dreamSessions: ChatSummary[] = [];
   const buckets = new Map<string, {
     path?: string;
     label: string;
@@ -238,6 +255,10 @@ function groupSessionsByProject(
 
   for (const session of sessions) {
     if (archived.has(session.key) && !options.showArchived) {
+      continue;
+    }
+    if (session.kind === "dream") {
+      dreamSessions.push(session);
       continue;
     }
     const scope = session.workspaceScope;
@@ -300,6 +321,23 @@ function groupSessionsByProject(
         pinned,
         archived,
       ),
+    });
+  }
+
+  if (dreamSessions.length) {
+    const dreamsUpdatedAt = dreamSessions.reduce<string | null>(
+      (best, s) => {
+        const candidate = s.updatedAt ?? s.createdAt ?? null;
+        return isNewerDate(candidate, best) ? candidate : best;
+      },
+      null,
+    );
+    groups.push({
+      id: "dream",
+      label: labels.dreams,
+      kind: "dream",
+      updatedAt: dreamsUpdatedAt,
+      sessions: sortSessions(dreamSessions, options.sort, options.titleOverrides),
     });
   }
 

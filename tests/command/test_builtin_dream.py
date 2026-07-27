@@ -19,6 +19,11 @@ from nanobot.command.router import CommandContext
 from nanobot.utils.gitstore import CommitInfo
 
 
+@pytest.fixture(autouse=True)
+def _isolate_webui_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+
+
 class _FakeStore:
     def __init__(
         self,

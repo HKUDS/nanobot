@@ -1496,7 +1496,7 @@ function Shell({
     (groupId: string) => {
       void updateSidebarState((current) => {
         const collapsedGroups = { ...current.collapsed_groups };
-        if (groupId === "workspace:chats" || groupId === "date:all") {
+        if (groupId === "workspace:chats" || groupId === "date:all" || groupId === "dream") {
           if (collapsedGroups[groupId] === false) {
             delete collapsedGroups[groupId];
           } else {

@@ -118,7 +118,7 @@ export function ThreadMessages({
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={liveActivityClusterIndices.has(index)}
-            forkIndex={forkIndex}
+            forkIndex={onForkFromMessage ? forkIndex : undefined}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
             cliApps={cliApps}

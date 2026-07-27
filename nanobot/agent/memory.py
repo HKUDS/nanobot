@@ -11,7 +11,7 @@ import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator
 
 from loguru import logger
 
@@ -47,20 +47,26 @@ if TYPE_CHECKING:
 class DreamRunProgress:
     """Track tool failures that make a nominally completed Dream run unsafe to advance."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        delegate: Callable[..., Awaitable[None]] | None = None,
+    ) -> None:
         self.had_tool_errors = False
+        self._delegate = delegate
 
     async def __call__(
         self,
-        *_args: Any,
+        *args: Any,
         tool_events: list[dict[str, Any]] | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> None:
         if any(
             isinstance(event, dict) and event.get("phase") == "error"
             for event in tool_events or ()
         ):
             self.had_tool_errors = True
+        if self._delegate is not None:
+            await self._delegate(*args, tool_events=tool_events, **kwargs)
 
 
 class MemoryStore:
@@ -589,7 +595,7 @@ class MemoryStore:
 
         batch = entries[:max_entries]
         history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
+            f"[{e['timestamp']}] {e['content']}"
             for e in batch
         )
         template = self._dream_template()
@@ -670,6 +676,7 @@ class MemoryStore:
         tools.register(WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         return tools

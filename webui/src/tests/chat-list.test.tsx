@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import { fmtDateTime } from "@/lib/format";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -83,6 +84,46 @@ describe("ChatList", () => {
     expect(
       within(screen.getByRole("region", { name: "Earlier" })).queryByTitle("Pinned"),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps Dream sessions in a separate collapsible folder", () => {
+    const sessions = [
+      session({ chatId: "normal", title: "Normal chat" }),
+      session({
+        key: "dream:20260727-141409",
+        channel: "dream",
+        chatId: "20260727-141409",
+        createdAt: "2026-07-27T14:14:09Z",
+        updatedAt: "2026-07-27T14:14:09Z",
+        title: "Dream",
+        kind: "dream",
+        readOnly: true,
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        collapsedGroups={{ dream: false }}
+      />,
+    );
+
+    const dreamRegion = screen.getByRole("region", { name: "Dream" });
+    expect(dreamRegion).toHaveTextContent("Dream");
+    expect(within(dreamRegion).queryByLabelText(/actions/i)).not.toBeInTheDocument();
+    const dreamFolder = within(dreamRegion).getAllByRole("button", { name: "Dream" });
+    expect(dreamFolder).toHaveLength(1);
+    expect(within(dreamRegion).getAllByText("Dream")).toHaveLength(1);
+    expect(within(dreamRegion).getByText(fmtDateTime("2026-07-27T14:14:09Z")))
+      .toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Earlier" })).getByText("Normal chat"))
+      .toBeInTheDocument();
   });
 
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {

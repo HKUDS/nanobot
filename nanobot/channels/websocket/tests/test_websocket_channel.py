@@ -3310,6 +3310,34 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["truncated"] is False
 
 
+def test_handle_file_preview_returns_workspace_file_for_dream_session(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "USER.md"
+    workspace.mkdir()
+    source.write_text("# User\n", encoding="utf-8")
+
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "dream:20260727-174700"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=USER.md",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["display_path"] == "USER.md"
+    assert body["content"].splitlines() == ["# User"]
+
+
 def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
     from urllib.parse import quote
 

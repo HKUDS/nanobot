@@ -10,6 +10,7 @@ import re
 import shutil
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
 from urllib.parse import unquote, urlparse
@@ -33,6 +34,107 @@ _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
 _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _session_message_created_at_ms(message: Mapping[str, Any]) -> int | None:
+    value = message.get("timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(datetime.fromisoformat(value).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _session_messages_as_transcript_lines(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
+    tool_calls: dict[str, tuple[str, Any]] = {}
+    for message in messages:
+        role = message.get("role")
+        created_at_ms = _session_message_created_at_ms(message)
+        content = message.get("content")
+        text = content if isinstance(content, str) else ""
+
+        if role == "user":
+            lines.append({
+                "event": "user",
+                "text": text,
+                "created_at_ms": created_at_ms,
+            })
+            continue
+
+        if role == "assistant":
+            if text.strip():
+                lines.append({
+                    "event": "message",
+                    "kind": "answer",
+                    "text": text,
+                    "created_at_ms": created_at_ms,
+                })
+            started: list[dict[str, Any]] = []
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function")
+                function = function if isinstance(function, dict) else {}
+                call_id = call.get("id")
+                name = function.get("name")
+                if not isinstance(call_id, str) or not call_id:
+                    continue
+                if not isinstance(name, str) or not name:
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        pass
+                tool_calls[call_id] = (name, arguments)
+                started.append({
+                    "version": 1,
+                    "phase": "start",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                })
+            if started:
+                lines.append({
+                    "event": "message",
+                    "kind": "tool_hint",
+                    "text": "",
+                    "tool_events": started,
+                    "created_at_ms": created_at_ms,
+                })
+            continue
+
+        if role != "tool":
+            continue
+        call_id = message.get("tool_call_id")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        known_name, arguments = tool_calls.get(call_id, ("", {}))
+        name = message.get("name") or known_name
+        if not isinstance(name, str) or not name:
+            continue
+        lines.append({
+            "event": "message",
+            "kind": "progress",
+            "text": "",
+            "tool_events": [{
+                "version": 1,
+                "phase": "end",
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+                "result": content,
+            }],
+            "created_at_ms": created_at_ms,
+        })
+    return lines
+
+
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
 )
@@ -661,6 +763,7 @@ class WebUITranscriptRecorder:
         chat_id: str,
         event: dict[str, Any],
         *,
+        session_key: str | None = None,
         metadata: dict[str, Any] | None = None,
         phase: str | None = None,
         include_source: bool = False,
@@ -676,7 +779,7 @@ class WebUITranscriptRecorder:
         record = dict(event)
         if transcript_overrides:
             record.update(transcript_overrides)
-        self.append(chat_id, record)
+        self.append(chat_id, record, session_key=session_key)
 
     def append_user_message(
         self,
@@ -684,6 +787,7 @@ class WebUITranscriptRecorder:
         text: str,
         *,
         metadata: dict[str, Any],
+        session_key: str | None = None,
         media_paths: list[str] | None = None,
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
@@ -699,12 +803,24 @@ class WebUITranscriptRecorder:
         )
         if payload is None:
             return
-        self.prepare_and_append(chat_id, payload, metadata=metadata, phase="user")
+        self.prepare_and_append(
+            chat_id,
+            payload,
+            session_key=session_key,
+            metadata=metadata,
+            phase="user",
+        )
 
-    def append(self, chat_id: str, event: dict[str, Any]) -> None:
+    def append(
+        self,
+        chat_id: str,
+        event: dict[str, Any],
+        *,
+        session_key: str | None = None,
+    ) -> None:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
-            append_transcript_object(f"websocket:{chat_id}", dup)
+            append_transcript_object(session_key or f"websocket:{chat_id}", dup)
         except (OSError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
 
@@ -731,6 +847,158 @@ class WebUITranscriptRecorder:
         event["turn_seq"] = self._next_turn_seq(chat_id, turn_id)
         if phase == "complete":
             self._turn_sequences.pop((chat_id, turn_id), None)
+
+
+class WebUISessionTranscriptRecorder:
+    """Record a direct agent run with the same transcript events as a WebUI turn."""
+
+    def __init__(self, session_key: str, log: Any = logger) -> None:
+        self.session_key = session_key
+        self.chat_id = session_key.split(":", 1)[-1]
+        self._recorder = WebUITranscriptRecorder(log=log)
+        self._metadata = self._recorder.client_turn_metadata(None)
+        self._stream_id = self._metadata[WEBUI_TURN_METADATA_KEY]
+        self._answer_started = False
+        self._finished = False
+
+    def start(self, text: str) -> None:
+        self._recorder.append_user_message(
+            self.chat_id,
+            text,
+            session_key=self.session_key,
+            metadata=self._metadata,
+        )
+
+    async def progress(
+        self,
+        content: str,
+        *,
+        tool_hint: bool = False,
+        tool_events: list[dict[str, Any]] | None = None,
+        file_edit_events: list[dict[str, Any]] | None = None,
+        reasoning: bool = False,
+        reasoning_end: bool = False,
+    ) -> None:
+        if reasoning_end:
+            event = {
+                "event": "reasoning_end",
+                "chat_id": self.chat_id,
+                "stream_id": self._stream_id,
+            }
+            phase = "reasoning"
+        elif reasoning:
+            event = {
+                "event": "reasoning_delta",
+                "chat_id": self.chat_id,
+                "text": content,
+                "stream_id": self._stream_id,
+            }
+            phase = "reasoning"
+        elif file_edit_events:
+            event = {
+                "event": "file_edit",
+                "chat_id": self.chat_id,
+                "edits": file_edit_events,
+            }
+            phase = "activity"
+        else:
+            event = {
+                "event": "message",
+                "chat_id": self.chat_id,
+                "text": content,
+                "kind": "tool_hint" if tool_hint else "progress",
+            }
+            if tool_events:
+                event["tool_events"] = tool_events
+            phase = "activity"
+        self._recorder.prepare_and_append(
+            self.chat_id,
+            event,
+            session_key=self.session_key,
+            metadata=self._metadata,
+            phase=phase,
+        )
+
+    async def on_stream(self, delta: str) -> None:
+        if delta:
+            self._answer_started = True
+        self._recorder.prepare_and_append(
+            self.chat_id,
+            {
+                "event": "delta",
+                "chat_id": self.chat_id,
+                "text": delta,
+                "stream_id": self._stream_id,
+            },
+            session_key=self.session_key,
+            metadata=self._metadata,
+            phase="answer",
+        )
+
+    async def on_stream_end(
+        self,
+        *,
+        resuming: bool = False,
+        merge_next: bool = False,
+    ) -> None:
+        event: dict[str, Any] = {
+            "event": "stream_end",
+            "chat_id": self.chat_id,
+            "stream_id": self._stream_id,
+        }
+        if resuming:
+            event["resuming"] = True
+        if merge_next:
+            event["merge_next"] = True
+        self._recorder.prepare_and_append(
+            self.chat_id,
+            event,
+            session_key=self.session_key,
+            metadata=self._metadata,
+            phase="answer",
+        )
+
+    def finish(self, response: Any = None, *, error: str | None = None) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        metadata = getattr(response, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        if not self._answer_started:
+            content = error or getattr(response, "content", "")
+            if isinstance(content, str) and content:
+                event: dict[str, Any] = {
+                    "event": "message",
+                    "chat_id": self.chat_id,
+                    "text": content,
+                }
+                media = getattr(response, "media", None)
+                if isinstance(media, list) and media:
+                    event["media"] = media
+                latency_ms = metadata.get("latency_ms")
+                if isinstance(latency_ms, (int, float)):
+                    event["latency_ms"] = int(latency_ms)
+                self._recorder.prepare_and_append(
+                    self.chat_id,
+                    event,
+                    session_key=self.session_key,
+                    metadata=self._metadata,
+                    phase="answer",
+                )
+        turn_end: dict[str, Any] = {
+            "event": "turn_end",
+            "chat_id": self.chat_id,
+        }
+        latency_ms = metadata.get("latency_ms")
+        if isinstance(latency_ms, (int, float)):
+            turn_end["latency_ms"] = int(latency_ms)
+        self._recorder.prepare_and_append(
+            self.chat_id,
+            turn_end,
+            session_key=self.session_key,
+            metadata=self._metadata,
+            phase="complete",
+        )
 
 
 def _chat_id_from_session_key(session_key: str) -> str | None:
@@ -2013,6 +2281,8 @@ def build_webui_thread_response(
         lines, page = _select_transcript_page(session_key, limit=limit, before=before)
     else:
         lines = read_transcript_lines(session_key)
+    if not lines and session_messages:
+        lines = _session_messages_as_transcript_lines(session_messages)
     if not lines:
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
