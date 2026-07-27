@@ -176,7 +176,10 @@ class GitStore:
             )
             if cast(object, sha_bytes) is None:
                 return None
-            sha = sha_bytes.hex()[:8]
+            # porcelain.commit returns the id as a 40-char hex string that is
+            # already encoded to bytes; .hex() would encode those ASCII bytes
+            # again and produce an id no git command can resolve.
+            sha = sha_bytes.decode()[:8]
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
         except Exception as exc:
@@ -200,7 +203,7 @@ class GitStore:
                     return None
 
                 while sha:
-                    if sha.hex().startswith(short_sha):
+                    if sha.decode().startswith(short_sha):
                         return sha
                     commit_obj = repo[sha]
                     if commit_obj.type_name != b"commit":
@@ -280,7 +283,7 @@ class GitStore:
                     msg = commit.message.decode("utf-8", errors="replace").strip()
                     if message_prefix is None or msg.startswith(message_prefix):
                         entries.append(CommitInfo(
-                            sha=sha.hex()[:8],
+                            sha=sha.decode()[:8],
                             message=msg,
                             timestamp=ts,
                         ))
@@ -484,7 +487,7 @@ class GitStore:
                     with Repo(str(self._workspace)) as repo:
                         commit = cast("Commit", repo[full_sha])
                         parent = commit.parents[0] if commit.parents else None
-                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    diff = self.diff_commits(parent.decode()[:8], c.sha) if parent else ""
                     return c, diff
             return None
         except Exception as exc:
