@@ -236,12 +236,12 @@ class TestDreamTools:
             "write_file",
             {
                 "path": "skills/demo/SKILL.md",
-                "content": "---\nname: demo\ndescription: Demo skill.\n---\n\nUse when needed.\n",
+                "content": "---\ndream_managed: true\nname: demo\ndescription: Demo skill.\n---\n\nUse when needed.\n",
             },
         )
 
         assert "Successfully wrote" in result
-        assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+        assert target.read_text(encoding="utf-8").startswith("---\ndream_managed: true")
 
     @pytest.mark.asyncio
     async def test_dream_tools_keep_internal_write_scope_under_full_access(self, store):
@@ -265,7 +265,7 @@ class TestDreamTools:
                         {
                             "path": "skills/scoped/SKILL.md",
                             "action": "add",
-                            "new_text": "---\nname: scoped\n---\n",
+                            "new_text": "---\ndream_managed: true\nname: scoped\n---\n",
                         }
                     ]
                 },
@@ -276,7 +276,7 @@ class TestDreamTools:
         assert "outside allowed directory" in outside_result
         assert not outside_target.exists()
         assert "Patch applied" in skill_result
-        assert skill_target.read_text(encoding="utf-8").startswith("---\nname: scoped")
+        assert skill_target.read_text(encoding="utf-8").startswith("---\ndream_managed: true")
 
     @pytest.mark.asyncio
     async def test_dream_cannot_modify_memory_internal_files(self, store):
