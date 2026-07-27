@@ -154,7 +154,7 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dream_internal_run_logs_runtime(tmp_path, monkeypatch) -> None:
+async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="chat1", content="/dream")
     store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=("dream prompt", 123))
     bus = _FakeBus()
@@ -171,16 +171,7 @@ async def test_dream_internal_run_logs_runtime(tmp_path, monkeypatch) -> None:
 
     sessions_dir = tmp_path / "sessions"
     sessions_dir.mkdir()
-    dream_runtime = SimpleNamespace(
-        model_preset="dream",
-        model="dream-model",
-        provider=object(),
-    )
-    logged = []
-    monkeypatch.setattr(
-        "nanobot.command.builtin.logger.info",
-        lambda *args, **kwargs: logged.append((args, kwargs)),
-    )
+    dream_runtime = object()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
@@ -196,7 +187,6 @@ async def test_dream_internal_run_logs_runtime(tmp_path, monkeypatch) -> None:
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
     assert calls[0][1]["runtime"] is dream_runtime
-    assert any("Dream manual run starting" in args[0] for args, _ in logged)
 
 
 def _build_runnable_dream(

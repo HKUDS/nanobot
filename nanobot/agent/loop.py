@@ -220,11 +220,11 @@ class AgentLoop:
             self._publish_runtime_selection(runtime)
         return runtime
 
-    def dream_runtime(self) -> LLMRuntime:
-        """Resolve the runtime used for Dream without changing defaults."""
-        if self.dream_model_preset:
-            return self.runtime_resolver.resolve_preset(self.dream_model_preset)
-        return self.llm_runtime()
+    def dream_runtime(self) -> LLMRuntime | None:
+        """Resolve the optional preset used for Dream without changing defaults."""
+        if not self.dream_model_preset:
+            return None
+        return self.runtime_resolver.resolve_preset(self.dream_model_preset)
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
