@@ -523,6 +523,21 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it("renders bold CJK text when more CJK text follows immediately", () => {
+    render(
+      <MarkdownTextRenderer streaming>
+        {
+          "**结论：目前看风险可控，没有发现常驻或可疑安装。**如果你之后不想再用，我可以帮你彻底卸载。"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByText("结论：目前看风险可控，没有发现常驻或可疑安装。").tagName,
+    ).toBe("STRONG");
+    expect(screen.getByText(/如果你之后不想再用/)).toBeInTheDocument();
+  });
+
   it("adds line numbers to multiline fenced code without changing inline code", () => {
     render(
       <MarkdownTextRenderer highlightCode={false}>

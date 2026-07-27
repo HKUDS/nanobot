@@ -237,11 +237,48 @@ function remarkSafeHtmlSubset() {
   };
 }
 
+// Recover a common model-output edge case that CommonMark leaves as literal
+// text: `**结论。**如果`, with no separator after the closing delimiter.
+const CJK_AFTER_STRONG =
+  /(?<!\\)\*\*([^*\r\n]+?)(?<!\\)\*\*(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/gu;
+
+function normalizeCjkStrongBoundaries(node: MarkdownAstNode): void {
+  if (!node.children) return;
+  node.children = node.children.flatMap((child) => {
+    if (child.type !== "text" || !child.value?.includes("**")) {
+      normalizeCjkStrongBoundaries(child);
+      return [child];
+    }
+
+    const replacement: MarkdownAstNode[] = [];
+    let cursor = 0;
+    for (const match of child.value.matchAll(CJK_AFTER_STRONG)) {
+      const start = match.index;
+      if (start > cursor) replacement.push(safeText(child.value.slice(cursor, start)));
+      replacement.push({
+        type: "strong",
+        children: [safeText(match[1])],
+      });
+      cursor = start + match[0].length;
+    }
+    if (cursor === 0) return [child];
+    if (cursor < child.value.length) replacement.push(safeText(child.value.slice(cursor)));
+    return replacement;
+  });
+}
+
+function remarkCjkStrongBoundaries() {
+  return (tree: MarkdownAstNode) => {
+    normalizeCjkStrongBoundaries(tree);
+  };
+}
+
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkBreaks,
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
+  remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
 const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKatex];
