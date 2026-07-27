@@ -923,6 +923,7 @@ class TelegramChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:
@@ -930,6 +931,10 @@ class TelegramChannel(BaseChannel):
         meta = metadata or {}
         int_chat_id = int(chat_id)
 
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             buf = self._stream_bufs.get(chat_id)
             if not buf or not buf.message_id or not buf.text:

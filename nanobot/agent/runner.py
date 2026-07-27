@@ -19,6 +19,11 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_MESSAGE_META,
+    detach_runtime_context,
+    reattach_runtime_context,
+)
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
@@ -54,6 +59,18 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+
+
+def _restore_outer_whitespace(content: str, original: str | None) -> str:
+    """Restore boundary whitespace stripped while cleaning one recovered segment."""
+    if not original:
+        return content
+    leading_size = len(original) - len(original.lstrip())
+    trailing_size = len(original) - len(original.rstrip())
+    leading = original[:leading_size]
+    trailing = original[-trailing_size:] if trailing_size else ""
+    return f"{leading}{content}{trailing}"
+
 
 @dataclass(slots=True)
 class AgentRunSpec:
@@ -96,6 +113,8 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    # Terminal tail to emit when the preceding final-content prefix was already streamed.
+    pending_stream_content: str | None = None
 
 
 class AgentRunner:
@@ -137,10 +156,51 @@ class AgentRunner:
                 and not is_hidden_history_message(messages[-1])
             ):
                 merged = dict(messages[-1])
-                merged["content"] = cls._merge_message_content(
-                    merged.get("content"),
-                    injection.get("content"),
+                left_meta = merged.get("_meta")
+                right_meta = injection.get("_meta")
+                left_marker = (
+                    left_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if isinstance(left_meta, dict)
+                    else None
                 )
+                right_marker = (
+                    right_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if isinstance(right_meta, dict)
+                    else None
+                )
+                detached_left = (
+                    detach_runtime_context(merged.get("content"), left_marker)
+                    if isinstance(left_marker, dict)
+                    else (merged.get("content"), [], [])
+                )
+                detached_right = (
+                    detach_runtime_context(injection.get("content"), right_marker)
+                    if isinstance(right_marker, dict)
+                    else (injection.get("content"), [], [])
+                )
+                if detached_left is not None and detached_right is not None:
+                    left_content, left_sources, left_blocks = detached_left
+                    right_content, right_sources, right_blocks = detached_right
+                    merged_content = cls._merge_message_content(left_content, right_content)
+                    context_blocks = [*left_blocks, *right_blocks]
+                    if context_blocks:
+                        merged_content, marker = reattach_runtime_context(
+                            merged_content,
+                            [*left_sources, *right_sources],
+                            context_blocks,
+                        )
+                        internal_meta = dict(left_meta) if isinstance(left_meta, dict) else {}
+                        if isinstance(right_meta, dict):
+                            for key, value in right_meta.items():
+                                internal_meta.setdefault(key, value)
+                        internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
+                        merged["_meta"] = internal_meta
+                    merged["content"] = merged_content
+                else:
+                    merged["content"] = cls._merge_message_content(
+                        merged.get("content"),
+                        injection.get("content"),
+                    )
                 messages[-1] = merged
                 continue
             messages.append(injection)
@@ -334,10 +394,13 @@ class AgentRunner:
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
-        length_recovery_count = 0
+        # Segments from one uninterrupted length-recovery chain. Tool work or
+        # injected user input starts a new logical answer and clears the chain.
+        length_recovery_parts: list[str] = []
         had_injections = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
+        pending_stream_content: str | None = None
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -372,6 +435,7 @@ class AgentRunner:
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
+            original_content = response.content
             reasoning_text, cleaned_content = extract_reasoning(
                 response.reasoning_content,
                 response.thinking_blocks,
@@ -458,6 +522,7 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
+                        length_recovery_parts.clear()
                         continue
                     break
                 await self._emit_checkpoint(
@@ -472,7 +537,7 @@ class AgentRunner:
                     },
                 )
                 empty_content_retries = 0
-                length_recovery_count = 0
+                length_recovery_parts.clear()
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
@@ -521,28 +586,49 @@ class AgentRunner:
                 context.response = response
                 context.usage = dict(raw_usage)
                 context.tool_calls = list(response.tool_calls)
+                original_content = response.content
                 clean = hook.finalize_content(context, response.content)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
-                length_recovery_count += 1
-                if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
+                if len(length_recovery_parts) < _MAX_LENGTH_RECOVERIES:
+                    length_recovery_parts.append(
+                        _restore_outer_whitespace(clean, original_content)
+                    )
                     logger.info(
                         "Output truncated on turn {} for {} ({}/{}); continuing",
                         iteration,
                         spec.session_key or "default",
-                        length_recovery_count,
+                        len(length_recovery_parts),
                         _MAX_LENGTH_RECOVERIES,
                     )
                     if hook.wants_streaming():
+                        context.stream_continues_current_message = True
                         await hook.on_stream_end(context, resuming=True)
                     messages.append(build_assistant_message(
                         clean,
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
-                    messages.append(build_length_recovery_message())
+                    messages.append(build_length_recovery_message(clean))
                     await hook.after_iteration(context)
                     continue
+
+            # Some streaming providers recover with a complete response but no
+            # content deltas. When an earlier length segment is already visible,
+            # emit this terminal segment into the same stream; otherwise the
+            # regular full response would duplicate the visible prefix.
+            if (
+                length_recovery_parts
+                and hook.wants_streaming()
+                and not context.streamed_content
+                and response.finish_reason != "error"
+                and not is_blank_text(clean)
+            ):
+                await hook.on_stream(
+                    context,
+                    _restore_outer_whitespace(clean, original_content),
+                )
+                context.streamed_content = True
 
             assistant_message: dict[str, Any] | None = None
             if response.finish_reason != "error" and not is_blank_text(clean):
@@ -568,6 +654,7 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
+                length_recovery_parts.clear()
                 await hook.after_iteration(context)
                 continue
 
@@ -589,6 +676,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    length_recovery_parts.clear()
                     continue
                 break
             if is_blank_text(clean):
@@ -606,6 +694,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    length_recovery_parts.clear()
                     continue
                 break
 
@@ -625,7 +714,13 @@ class AgentRunner:
                     "pending_tool_calls": [],
                 },
             )
-            final_content = clean
+            if length_recovery_parts:
+                final_content = (
+                    "".join(length_recovery_parts)
+                    + _restore_outer_whitespace(clean, original_content)
+                ).strip()
+            else:
+                final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
             await hook.after_iteration(context)
@@ -643,17 +738,25 @@ class AgentRunner:
             )
             if drained_after_max_iterations:
                 had_injections = True
-            final_content = None
+            terminal_content = None
             if spec.finalize_on_max_iterations:
-                final_content = await self._try_finalize_after_max_iterations(
+                terminal_content = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
                     messages,
                     usage,
                 )
-            if final_content is None:
-                final_content = self._max_iterations_fallback(spec)
-            self._append_final_message(messages, final_content)
+            if terminal_content is None:
+                terminal_content = self._max_iterations_fallback(spec)
+            if length_recovery_parts:
+                terminal_tail = f"\n\n{terminal_content.lstrip()}"
+                final_content = (
+                    "".join(length_recovery_parts).rstrip() + terminal_tail
+                ).strip()
+                pending_stream_content = terminal_tail
+            else:
+                final_content = terminal_content
+            self._append_final_message(messages, terminal_content)
 
         return AgentRunResult(
             final_content=final_content,
@@ -664,6 +767,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            pending_stream_content=pending_stream_content,
         )
 
     def _build_request_kwargs(

@@ -126,6 +126,7 @@ class TurnDelivery:
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)
     _stream_segment: int = field(init=False, default=0)
+    _stream_open: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self.delivery_message = dataclasses.replace(
@@ -284,8 +285,14 @@ class TurnDelivery:
                 metadata=self.delivery_message.metadata,
             )
         )
+        self._stream_open = True
 
-    async def _publish_stream_end(self, *, resuming: bool = False) -> None:
+    async def _publish_stream_end(
+        self,
+        *,
+        resuming: bool = False,
+        merge_next: bool = False,
+    ) -> None:
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=self.delivery_message.channel,
@@ -293,8 +300,16 @@ class TurnDelivery:
                 event=StreamEndEvent(
                     stream_id=self._stream_id(),
                     resuming=resuming,
+                    merge_next=merge_next,
                 ),
                 metadata=self.delivery_message.metadata,
             )
         )
-        self._stream_segment += 1
+        self._stream_open = merge_next
+        if not merge_next:
+            self._stream_segment += 1
+
+    async def abort_stream(self) -> None:
+        """Close an interrupted stream so stateful channels can release its buffer."""
+        if self._stream_open:
+            await self._publish_stream_end()

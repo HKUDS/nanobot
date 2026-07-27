@@ -223,6 +223,28 @@ describe("ThreadViewport", () => {
     expect(messageRegion.className).not.toContain("5rem");
   });
 
+  it("allows long messages to shrink within the shared mobile grid column", () => {
+    render(
+      <ThreadViewport
+        messages={[
+          ...messages,
+          {
+            id: "a-long-link",
+            role: "assistant",
+            content:
+              "https://github.com/HKUDS/nanobot/discussions/17788077"
+              + "/a-very-long-unbroken-segment-that-must-not-widen-the-thread",
+            createdAt: Date.now(),
+          },
+        ]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+
+    expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
+  });
+
   it("top-aligns a short active turn while the agent is responding", () => {
     render(
       <ThreadViewport

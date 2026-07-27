@@ -269,7 +269,7 @@ def _extract_element_content(element: dict) -> list[str]:
                 parts.append(text_content)
         elif isinstance(text, str):
             parts.append(text)
-        for field in element.get("fields", []):
+        for field in element.get("fields") or []:
             if isinstance(field, dict):
                 field_text = field.get("text", {})
                 if isinstance(field_text, dict):
@@ -291,7 +291,10 @@ def _extract_element_content(element: dict) -> list[str]:
             c = text.get("content", "")
             if c:
                 parts.append(c)
-        url = element.get("url", "") or element.get("multi_url", {}).get("url", "")
+        multi_url = element.get("multi_url") or {}
+        url = element.get("url", "") or (
+            multi_url.get("url", "") if isinstance(multi_url, dict) else ""
+        )
         if url:
             parts.append(f"link: {url}")
 
@@ -300,12 +303,14 @@ def _extract_element_content(element: dict) -> list[str]:
         parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
 
     elif tag == "note":
-        for ne in element.get("elements", []):
+        for ne in element.get("elements") or []:
             parts.extend(_extract_element_content(ne))
 
     elif tag == "column_set":
-        for col in element.get("columns", []):
-            for ce in col.get("elements", []):
+        for col in element.get("columns") or []:
+            if not isinstance(col, dict):
+                continue
+            for ce in col.get("elements") or []:
                 parts.extend(_extract_element_content(ce))
 
     elif tag == "plain_text":
@@ -319,7 +324,7 @@ def _extract_element_content(element: dict) -> list[str]:
             for column in (element.get("columns") or [])
             if isinstance(column, dict) and column.get("name")
         ]
-        rows = element.get("rows", [])
+        rows = element.get("rows") or []
         if columns:
             parts.append(" | ".join(header for _, header in columns))
         if isinstance(rows, list):
@@ -337,7 +342,7 @@ def _extract_element_content(element: dict) -> list[str]:
                     parts.append(row_text)
 
     else:
-        for ne in element.get("elements", []):
+        for ne in element.get("elements") or []:
             parts.extend(_extract_element_content(ne))
 
     return parts
@@ -356,7 +361,8 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
         if not isinstance(block, dict) or not isinstance(block.get("content"), list):
             return None, []
         texts, images = [], []
-        if title := block.get("title"):
+        title = block.get("title")
+        if isinstance(title, str) and title:
             texts.append(title)
         for row in block["content"]:
             if not isinstance(row, list):
@@ -366,12 +372,19 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     continue
                 tag = el.get("tag")
                 if tag in ("text", "a"):
-                    texts.append(el.get("text", ""))
+                    text = el.get("text", "")
+                    if isinstance(text, str):
+                        texts.append(text)
                 elif tag == "at":
-                    texts.append(f"@{el.get('user_name', 'user')}")
+                    user = el.get("user_name", "user")
+                    texts.append(f"@{user if isinstance(user, str) and user else 'user'}")
                 elif tag == "code_block":
                     lang = el.get("language", "")
                     code_text = el.get("text", "")
+                    if not isinstance(lang, str):
+                        lang = ""
+                    if not isinstance(code_text, str):
+                        code_text = ""
                     texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)
@@ -2203,6 +2216,7 @@ class FeishuChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
@@ -2218,6 +2232,10 @@ class FeishuChannel(BaseChannel):
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             message_id = meta.get("message_id")
             # Only finalize the OnIt -> DONE reaction transition on the truly

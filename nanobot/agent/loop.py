@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import os
 import time
 from collections.abc import Mapping
@@ -73,7 +74,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
     Session,
     SessionManager,
@@ -296,6 +297,7 @@ class AgentLoop:
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
         local_trigger_store: Any | None = None,
+        idle_compact_check_interval_seconds: int = 0,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -444,6 +446,8 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
+        self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
+        self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
@@ -499,6 +503,7 @@ class AgentLoop:
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
+            idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
@@ -745,14 +750,23 @@ class AgentLoop:
         self,
         ctx: TurnContext,
     ) -> list[RuntimeContextBlock]:
-        tools = ctx.tools or self.tools
+        assert ctx.request_context is not None
+        return await self._resolve_runtime_context_for_request(
+            ctx.request_context,
+            ctx.tools or self.tools,
+        )
+
+    async def _resolve_runtime_context_for_request(
+        self,
+        request: RequestContext,
+        tools: ToolRegistry,
+    ) -> list[RuntimeContextBlock]:
         providers = [
             *tools.get_runtime_context_providers(),
             *self._runtime_context_providers,
         ]
-        assert ctx.request_context is not None
-        blocks = runtime_context_blocks_from_metadata(ctx.request_context.metadata)
-        blocks.extend(await resolve_runtime_context(providers, ctx.request_context))
+        blocks = runtime_context_blocks_from_metadata(request.metadata)
+        blocks.extend(await resolve_runtime_context(providers, request))
         return blocks
 
     async def _dispatch_command_inline(
@@ -788,6 +802,27 @@ class AgentLoop:
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
+
+    def _remember_unified_session_route(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        *,
+        is_user_turn: bool,
+    ) -> None:
+        """Remember the latest user-facing route for unified-session delivery."""
+        if (
+            not self._unified_session
+            or session.key != UNIFIED_SESSION_KEY
+            or not is_user_turn
+            or msg.channel in {"cli", "system"}
+            or msg.sender_id == "subagent"
+        ):
+            return
+        _, automation_metadata = automation_history_overrides(msg.metadata)
+        if automation_metadata:
+            return
+        remember_last_channel(session.metadata, msg.channel, msg.chat_id)
 
     @staticmethod
     def _replay_token_budget(runtime: LLMRuntime) -> int:
@@ -830,9 +865,9 @@ class AgentLoop:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
-        *on_stream_end(resuming)*: called when a streaming session finishes.
-        ``resuming=True`` means tool calls follow (spinner should restart);
-        ``resuming=False`` means this is the final response.
+        *on_stream_end(resuming, merge_next)*: called when a streaming session finishes.
+        ``resuming=True`` means the active turn continues. ``merge_next=True`` means
+        the next text segment belongs to the same user-visible assistant message.
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
@@ -855,7 +890,7 @@ class AgentLoop:
             if pending_queue is None:
                 return []
 
-            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+            async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
@@ -864,6 +899,31 @@ class AgentLoop:
                 user_content = self.context._build_user_content(content, media)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
+                if pending_msg.channel != "system":
+                    scope = self.workspace_scopes.for_turn(
+                        channel=pending_msg.channel,
+                        message_metadata=metadata,
+                        session_metadata=session.metadata if session is not None else None,
+                    )
+                    pending_request = RequestContext(
+                        channel=pending_msg.channel,
+                        chat_id=pending_msg.chat_id,
+                        message_id=metadata.get("message_id"),
+                        session_key=active_session_key,
+                        original_user_text=pending_msg.content,
+                        runtime=runtime,
+                        metadata=dict(metadata),
+                        sender_id=pending_msg.sender_id,
+                        turn_id=request_ctx.turn_id,
+                        workspace=scope.project_path,
+                    )
+                    blocks = await self._resolve_runtime_context_for_request(
+                        pending_request,
+                        effective_tools,
+                    )
+                    row["content"], marker = append_runtime_context(user_content, blocks)
+                    if marker is not None:
+                        row["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: marker}
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
@@ -880,7 +940,7 @@ class AgentLoop:
             items: list[dict[str, Any]] = []
             while len(items) < limit:
                 try:
-                    items.append(_to_user_message(pending_queue.get_nowait()))
+                    items.append(await _to_user_message(pending_queue.get_nowait()))
                 except asyncio.QueueEmpty:
                     break
 
@@ -898,10 +958,10 @@ class AgentLoop:
                         session.key,
                     )
                     return items
-                items.append(_to_user_message(msg))
+                items.append(await _to_user_message(msg))
                 while len(items) < limit:
                     try:
-                        items.append(_to_user_message(pending_queue.get_nowait()))
+                        items.append(await _to_user_message(pending_queue.get_nowait()))
                     except asyncio.QueueEmpty:
                         break
 
@@ -1014,11 +1074,28 @@ class AgentLoop:
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
             if on_stream and on_stream_end and should_stream:
-                await on_stream(result.final_content or "")
+                stream_content = (
+                    result.pending_stream_content
+                    if result.pending_stream_content is not None
+                    else result.final_content or ""
+                )
+                await on_stream(stream_content)
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
+
+    def _check_expired_sessions_if_due(self) -> None:
+        """Scan idle sessions no more often than the configured interval."""
+        now = time.monotonic()
+        if now < self._next_idle_compact_check_at:
+            return
+        self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
+        self.auto_compact.check_expired(
+            self._schedule_background,
+            self.runtime_for_session,
+            active_session_keys=self._pending_queues.keys(),
+        )
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -1031,11 +1108,7 @@ class AgentLoop:
                 try:
                     msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    self.auto_compact.check_expired(
-                        self._schedule_background,
-                        self.runtime_for_session,
-                        active_session_keys=self._pending_queues.keys(),
-                    )
+                    self._check_expired_sessions_if_due()
                     continue
                 except asyncio.CancelledError:
                     # Preserve real task cancellation so shutdown can complete cleanly.
@@ -1161,6 +1234,14 @@ class AgentLoop:
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
+                    try:
+                        await delivery.abort_stream()
+                    except Exception:
+                        logger.debug(
+                            "Could not close stream for cancelled session {}",
+                            session_key,
+                            exc_info=True,
+                        )
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
                     # messages accumulated before /stop.  The checkpoint was
@@ -1330,6 +1411,19 @@ class AgentLoop:
         if ctx.on_stream is not None:
             stream_callback = ctx.on_stream
             stream_end_callback = ctx.on_stream_end
+            stream_end_accepts_merge_next = False
+            if stream_end_callback is not None:
+                try:
+                    stream_end_signature = inspect.signature(stream_end_callback)
+                    stream_end_accepts_merge_next = (
+                        "merge_next" in stream_end_signature.parameters
+                        or any(
+                            parameter.kind is inspect.Parameter.VAR_KEYWORD
+                            for parameter in stream_end_signature.parameters.values()
+                        )
+                    )
+                except (TypeError, ValueError):
+                    pass
             segment_streamed_content = False
 
             async def _tracked_stream(delta: str) -> None:
@@ -1338,12 +1432,19 @@ class AgentLoop:
                     segment_streamed_content = True
                 await stream_callback(delta)
 
-            async def _tracked_stream_end(*, resuming: bool = False) -> None:
+            async def _tracked_stream_end(
+                *,
+                resuming: bool = False,
+                merge_next: bool = False,
+            ) -> None:
                 nonlocal segment_streamed_content
                 ctx.streamed_content = segment_streamed_content
                 segment_streamed_content = False
                 if stream_end_callback is not None:
-                    await stream_end_callback(resuming=resuming)
+                    if merge_next and stream_end_accepts_merge_next:
+                        await stream_end_callback(resuming=resuming, merge_next=True)
+                    else:
+                        await stream_end_callback(resuming=resuming)
 
             ctx.on_stream = _tracked_stream
             ctx.on_stream_end = _tracked_stream_end
@@ -1456,6 +1557,11 @@ class AgentLoop:
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
+        self._remember_unified_session_route(
+            ctx.session,
+            msg,
+            is_user_turn=ctx.original_user_text is not None,
+        )
         await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(ctx.session, msg)

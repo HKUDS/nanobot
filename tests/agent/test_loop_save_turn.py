@@ -30,6 +30,10 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.keys import (
+    LAST_CHANNEL_METADATA_KEY,
+    UNIFIED_SESSION_KEY,
+)
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
@@ -680,6 +684,85 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     assert persisted.messages[0]["content"] == "persist me"
     assert persisted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
     assert persisted.updated_at >= persisted.created_at
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="feishu",
+        sender_id="u1",
+        chat_id="oc_123",
+        content="persist my route",
+        session_key_override=UNIFIED_SESSION_KEY,
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate(UNIFIED_SESSION_KEY)
+    persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
+
+
+@pytest.mark.parametrize(
+    ("msg", "is_user_turn"),
+    [
+        (
+            InboundMessage(
+                channel="cli",
+                sender_id="u1",
+                chat_id="direct",
+                content="cli input",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="system",
+                sender_id="system",
+                chat_id="discord:automation",
+                content="system event",
+            ),
+            False,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="subagent",
+                chat_id="subagent-result",
+                content="subagent result",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="u1",
+                chat_id="automation",
+                content="scheduled turn",
+                metadata={CRON_TRIGGER_META: {"job_id": "job-1"}},
+            ),
+            True,
+        ),
+    ],
+)
+def test_unified_session_route_ignores_non_user_destinations(
+    tmp_path: Path,
+    msg: InboundMessage,
+    is_user_turn: bool,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
+
+    loop._remember_unified_session_route(session, msg, is_user_turn=is_user_turn)
+
+    assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
 
 
 # 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs

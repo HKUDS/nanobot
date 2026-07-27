@@ -139,6 +139,70 @@ def append_runtime_context(
     }
 
 
+def detach_runtime_context(
+    content: Any,
+    marker: Mapping[str, Any],
+) -> tuple[Any, list[str], list[dict[str, Any]]] | None:
+    """Detach one validated runtime-context suffix for safe message merging."""
+    if marker.get("version") != 1:
+        return None
+    raw_sources = marker.get("sources")
+    sources = [
+        source
+        for source in raw_sources
+        if isinstance(source, str) and source
+    ] if isinstance(raw_sources, list) else []
+
+    suffix = marker.get("suffix")
+    if isinstance(content, str) and isinstance(suffix, str) and suffix:
+        if content == suffix:
+            clean_content = ""
+        elif content.endswith("\n\n" + suffix):
+            clean_content = content[: -(len(suffix) + 2)]
+        else:
+            return None
+        return clean_content, sources, [{"type": "text", "text": suffix}]
+
+    expected = marker.get("blocks")
+    if isinstance(content, list) and isinstance(expected, list) and expected:
+        count = len(expected)
+        if content[-count:] != expected:
+            return None
+        return content[:-count], sources, deepcopy(expected)
+    return None
+
+
+def reattach_runtime_context(
+    content: Any,
+    sources: Sequence[str],
+    blocks: Sequence[Mapping[str, Any]],
+) -> tuple[Any, dict[str, Any]]:
+    """Append detached runtime-context blocks after visible messages are merged."""
+    context_blocks = [deepcopy(dict(block)) for block in blocks]
+    if isinstance(content, str) and all(
+        block.get("type") == "text" and isinstance(block.get("text"), str)
+        for block in context_blocks
+    ):
+        suffix = "\n\n".join(block["text"] for block in context_blocks)
+        merged = f"{content}\n\n{suffix}" if content else suffix
+        return merged, {
+            "version": 1,
+            "sources": list(sources),
+            "suffix": suffix,
+        }
+
+    visible_blocks = (
+        [*content]
+        if isinstance(content, list)
+        else ([] if content is None else [{"type": "text", "text": str(content)}])
+    )
+    return [*visible_blocks, *context_blocks], {
+        "version": 1,
+        "sources": list(sources),
+        "blocks": context_blocks,
+    }
+
+
 def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:
     """Return a user-visible copy with trusted runtime context removed exactly."""
     cleaned = deepcopy(dict(message))

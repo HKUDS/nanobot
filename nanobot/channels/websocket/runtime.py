@@ -995,13 +995,18 @@ class WebSocketChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
         meta = metadata or {}
         stream_key = (chat_id, str(stream_id or ""))
         if stream_end:
             body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
-            buffered = self._stream_text_buffers.pop(stream_key, [])
+            buffered = (
+                self._stream_text_buffers.setdefault(stream_key, [])
+                if merge_next
+                else self._stream_text_buffers.pop(stream_key, [])
+            )
             if delta:
                 buffered.append(delta)
             full_text = "".join(buffered)
@@ -1019,6 +1024,8 @@ class WebSocketChannel(BaseChannel):
             body["stream_id"] = stream_id
         if stream_end and resuming:
             body["resuming"] = True
+        if stream_end and merge_next:
+            body["merge_next"] = True
         self._transcripts.prepare_and_append(
             chat_id,
             body,

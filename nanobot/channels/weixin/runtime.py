@@ -1243,6 +1243,7 @@ class WeixinChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Deliver a streamed reply to WeChat.
 
@@ -1256,6 +1257,10 @@ class WeixinChannel(BaseChannel):
             return
         is_end = stream_end or bool(meta.get("_stream_end"))
         buffer_key = stream_id or chat_id
+        if is_end and merge_next:
+            if delta:
+                self._stream_buffers.setdefault(buffer_key, []).append(delta)
+            return
         # Accumulate intermediate deltas. The stream_end message's own content
         # (present when the manager coalesces deltas into the end message) is
         # folded into `full` below instead of appended here, so a send retry

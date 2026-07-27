@@ -119,6 +119,7 @@ def test_config_defaults():
     assert config.token == ""
     assert config.streaming is True
     assert config.streaming_max_chars == 16000
+    assert config.send_tool_hints is True
     assert config.dm.enabled is True
     assert config.dm.policy == "open"
     assert config.reply_in_thread is True
@@ -131,6 +132,7 @@ def test_config_camelcase_aliases():
         "allowFromMatchMode": "username",
         "streamingMaxChars": 8000,
         "replyInThread": False,
+        "sendToolHints": False,
     }
     config = MattermostConfig.model_validate(raw)
     assert config.server_url == "https://mm.example.com"
@@ -138,11 +140,13 @@ def test_config_camelcase_aliases():
     assert config.allow_from_match_mode == "username"
     assert config.streaming_max_chars == 8000
     assert config.reply_in_thread is False
+    assert config.send_tool_hints is False
 
 
 def test_config_default_config_classmethod():
     d = MattermostChannel.default_config()
     assert d["enabled"] is False
+    assert d["sendToolHints"] is True
     assert d["serverUrl"] == ""
     assert d["token"] == ""
 
@@ -575,6 +579,33 @@ async def test_stream_end_keyword_resuming_does_not_post_or_mark_done():
     reactions = [c for c in fake.post_calls if c["path"] == "/api/v4/reactions"]
     assert posts == []
     assert reactions == []
+    assert "s1" not in channel._stream_buffers
+
+
+@pytest.mark.asyncio
+async def test_stream_end_merge_next_preserves_buffer_until_final_end():
+    channel, fake = _make_channel()
+    channel._self_id = "bot_id"
+    fake.set_post_response("/api/v4/posts", {"id": "stream_post_1"})
+    await channel.send_delta("chan_1", "first ", stream_id="s1")
+
+    await channel.send_delta(
+        "chan_1",
+        "boundary ",
+        stream_id="s1",
+        stream_end=True,
+        resuming=True,
+        merge_next=True,
+    )
+
+    assert channel._stream_buffers["s1"] == "first boundary "
+
+    await channel.send_delta("chan_1", "second", stream_id="s1")
+    await channel.send_delta("chan_1", "", stream_id="s1", stream_end=True)
+
+    posts = [call for call in fake.post_calls if call["path"] == "/api/v4/posts"]
+    assert len(posts) == 1
+    assert posts[0]["json"]["message"] == "first boundary second"
     assert "s1" not in channel._stream_buffers
 
 

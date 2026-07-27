@@ -56,7 +56,7 @@ class MattermostConfig(Base):
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
     send_progress: bool = True
-    send_tool_hints: bool = False
+    send_tool_hints: bool = True
     dm: MattermostDMConfig = Field(default_factory=MattermostDMConfig)
 
 
@@ -515,6 +515,7 @@ class MattermostChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         if not self._http_client:
             return
@@ -532,7 +533,11 @@ class MattermostChannel(BaseChannel):
                 final += delta
 
             if resuming:
-                self._clear_stream_state(stream_id)
+                if merge_next:
+                    self._stream_buffers[stream_id] = final
+                    self._stream_committed[stream_id] = final
+                else:
+                    self._clear_stream_state(stream_id)
                 return
 
             if final and not meta.get("_progress"):

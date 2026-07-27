@@ -3,6 +3,7 @@
 import asyncio
 import json
 import types
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal, NamedTuple, get_args, get_origin
@@ -14,6 +15,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in environments with
 from loguru import logger
 from pydantic import BaseModel
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -22,7 +24,7 @@ from nanobot.cli.models import (
     get_model_context_limit,
     get_model_suggestions,
 )
-from nanobot.config.loader import get_config_path, load_config
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 from nanobot.config.schema import Config, ModelPresetConfig
 
 console = Console()
@@ -44,6 +46,8 @@ class _QuickStartProviderInfo(NamedTuple):
     default_api_base: str
     backend: str
     is_direct: bool
+    is_oauth: bool
+    default_model: str
 
 
 class _QuickStartEndpointChoice(NamedTuple):
@@ -73,6 +77,7 @@ _BACK_PRESSED = object()  # Sentinel value for back navigation
 _MODEL_PRESET_CACHE: set[str] = set()
 
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
+_QUICK_START_OAUTH_PROVIDERS = {"openai_codex"}
 
 _CLEAR_CHOICE = "Clear value"
 _QUICK_START_MENU_CHOICE = "[Q] Quick Start"
@@ -1576,7 +1581,11 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
 
     result: dict[str, _QuickStartProviderInfo] = {}
     for spec in PROVIDERS:
-        if spec.name == "custom" or spec.is_oauth or spec.is_transcription_only:
+        if (
+            spec.name == "custom"
+            or spec.is_transcription_only
+            or (spec.is_oauth and spec.name not in _QUICK_START_OAUTH_PROVIDERS)
+        ):
             continue
         result[spec.name] = _QuickStartProviderInfo(
             display_name=spec.display_name or spec.name,
@@ -1584,6 +1593,8 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
             default_api_base=spec.default_api_base,
             backend=spec.backend,
             is_direct=spec.is_direct,
+            is_oauth=spec.is_oauth,
+            default_model=spec.builtin_models[0].id if spec.builtin_models else "",
         )
     return result
 
@@ -1599,7 +1610,71 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
 
 def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
     """Return whether Quick Start should ask for an API key."""
-    return provider_name == "custom" or not (info and info.is_local)
+    return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
+
+
+def _quick_start_codex_proxy(config: Config) -> str | None:
+    """Resolve only the Codex proxy without validating unrelated provider secrets."""
+    proxy_config = Config()
+    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
+    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+
+
+def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
+    """Authenticate an OAuth provider supported by Quick Start."""
+    if provider_name != "openai_codex":
+        console.print(f"[red]OAuth login is not supported for {provider_name}[/red]")
+        return False
+
+    try:
+        from oauth_cli_kit import get_token, login_oauth_interactive
+    except ImportError:
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        return False
+
+    try:
+        proxy = _quick_start_codex_proxy(config)
+    except ValueError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        return False
+
+    token = None
+    with suppress(Exception):
+        token = get_token(proxy=proxy)
+    if not getattr(token, "access", None):
+        console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
+        try:
+            token = login_oauth_interactive(
+                print_fn=lambda message: console.print(message, markup=False),
+                prompt_fn=lambda prompt: _get_questionary().text(prompt).ask() or "",
+                proxy=proxy,
+            )
+        except Exception as exc:
+            console.print(f"[red]OAuth login failed: {escape(str(exc))}[/red]")
+            return False
+
+    if not getattr(token, "access", None):
+        console.print("[red]OAuth login failed[/red]")
+        return False
+
+    account = getattr(token, "account_id", None)
+    suffix = f"  [dim]{escape(str(account))}[/dim]" if account else ""
+    console.print(f"[green]Authenticated with OpenAI Codex[/green]{suffix}")
+    return True
+
+
+def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> bool:
+    """Return whether Quick Start can load a usable OAuth token."""
+    if provider_name != "openai_codex":
+        return False
+    try:
+        from oauth_cli_kit import get_token
+
+        proxy = _quick_start_codex_proxy(config)
+        token = get_token(proxy=proxy)
+    except Exception:
+        return False
+    return bool(getattr(token, "access", None))
 
 
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
@@ -1710,13 +1785,21 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
-        model = _input_model_with_autocomplete("Model ID", "", provider_name)
+        model = _input_model_with_autocomplete(
+            "Model ID",
+            provider_info.default_model if provider_info else "",
+            provider_name,
+        )
         if model is _BACK_PRESSED:
             continue
         model = (model or "").strip()
         if not model:
             console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
             return False
+
+        if provider_info and provider_info.is_oauth:
+            if not _quick_start_oauth_login(config, provider_name):
+                return False
 
         if api_key is not None:
             provider_config.api_key = api_key
@@ -1784,17 +1867,27 @@ def _show_quick_start_summary(config: Config) -> None:
     _show_quick_start_progress(3)
     preset = config.model_presets.get("primary")
     provider_label = "AI provider"
-    has_api_key = True
+    credentials_ready = True
+    credential_name = "API key"
     if preset:
         provider_config = getattr(config.providers, preset.provider, None)
-        provider_label, _is_gateway, is_local, _api_base = _get_provider_info().get(
-            preset.provider, (preset.provider, False, False, "")
-        )
-        has_api_key = is_local or bool(provider_config and provider_config.api_key)
+        provider_info = _get_quick_start_provider_info().get(preset.provider)
+        if provider_info:
+            provider_label = provider_info.display_name
+            if provider_info.is_oauth:
+                credential_name = "OAuth login"
+                credentials_ready = _quick_start_oauth_is_authenticated(config, preset.provider)
+            else:
+                credentials_ready = provider_info.is_local or bool(
+                    provider_config and provider_config.api_key
+                )
+        else:
+            provider_label = _get_provider_names().get(preset.provider, preset.provider)
+            credentials_ready = bool(provider_config and provider_config.api_key)
 
     status = "Ready"
-    if not has_api_key:
-        status = f"{provider_label} API key missing"
+    if not credentials_ready:
+        status = f"{provider_label} {credential_name} missing"
 
     rows = [
         ("Status", status),

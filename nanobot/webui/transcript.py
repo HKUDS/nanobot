@@ -1770,6 +1770,7 @@ def replay_transcript_to_ui_messages(
                 buffer_message_id = None
                 buffer_parts = []
                 continue
+            merge_next = rec.get("resuming") is True and rec.get("merge_next") is True
             final_text = rec.get("text")
             if isinstance(final_text, str):
                 if buffer_message_id is None:
@@ -1794,8 +1795,11 @@ def replay_transcript_to_ui_messages(
                                 **_turn_fields(rec, "answer"),
                             }
                             break
-            buffer_message_id = None
-            buffer_parts = []
+                if merge_next:
+                    buffer_parts = [final_text]
+            if not merge_next:
+                buffer_message_id = None
+                buffer_parts = []
             continue
 
         if ev == "reasoning_delta":

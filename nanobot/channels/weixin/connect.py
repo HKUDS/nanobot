@@ -130,6 +130,12 @@ class WeixinConnectStore:
 
         status = status_data.get("status", "")
         if status == "confirmed":
+            if self._sessions.get(session_id) is not session:
+                return {
+                    "session_id": session_id,
+                    "status": "cancelled",
+                    "message": "WeChat login cancelled.",
+                }
             token = str(status_data.get("bot_token", "") or "")
             if not token:
                 self._sessions.pop(session_id, None)
