@@ -530,6 +530,21 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector(".katex")).toBeNull();
   });
 
+  it("keeps currency rates and later totals out of one inline math span", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "费用预估为 **$0.10/5秒（720p）**，在余额内。我选择做一条 **8秒、16:9、带自然环境音** 的电影感梦幻片，预计约 **$0.16**，现在开始生成。"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container).toHaveTextContent("$0.10/5秒（720p）");
+    expect(container).toHaveTextContent("$0.16");
+    expect(container.querySelectorAll("strong")).toHaveLength(3);
+  });
+
   it("renders guarded single-dollar inline math", () => {
     const { container } = render(
       <MarkdownTextRenderer>

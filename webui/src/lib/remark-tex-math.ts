@@ -14,7 +14,6 @@ const CARET = 94;
 const UNDERSCORE = 95;
 const EQUALS = 61;
 const PLUS = 43;
-const SLASH = 47;
 const LESS_THAN = 60;
 const GREATER_THAN = 62;
 const LEFT_BRACE = 123;
@@ -71,7 +70,6 @@ function isMathSignal(code: Code): boolean {
     || code === UNDERSCORE
     || code === EQUALS
     || code === PLUS
-    || code === SLASH
     || code === LESS_THAN
     || code === GREATER_THAN
     || code === LEFT_BRACE
