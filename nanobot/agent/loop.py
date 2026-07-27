@@ -1582,6 +1582,12 @@ class AgentLoop:
         if runtime is None:
             runtime = self.runtime_for_session(ctx.session)
             ctx.runtime = runtime
+        if ctx.session_key.startswith("dream:"):
+            logger.info(
+                "Dream run using model={} (preset={})",
+                runtime.model,
+                runtime.model_preset or "default",
+            )
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
         replay_max_messages = replay_max_messages_for_context(
