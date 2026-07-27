@@ -171,11 +171,13 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     sessions_dir = tmp_path / "sessions"
     sessions_dir.mkdir()
+    dream_runtime = object()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
         sessions=SimpleNamespace(sessions_dir=sessions_dir),
         process_direct=process_direct,
+        dream_runtime=lambda: dream_runtime,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
@@ -184,6 +186,7 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
+    assert calls[0][1]["runtime"] is dream_runtime
 
 
 def _build_runnable_dream(

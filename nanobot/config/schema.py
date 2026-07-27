@@ -63,7 +63,7 @@ class DreamConfig(Base):
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Override model for Dream sessions (pending implementation)
+    )  # Model preset name for Dream sessions
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -436,6 +436,9 @@ class Config(BaseSettings):
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
+        dream_name = self.agents.defaults.dream.model_override
+        if dream_name and dream_name != "default" and dream_name not in self.model_presets:
+            raise ValueError(f"Dream model preset {dream_name!r} not found in model_presets")
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")

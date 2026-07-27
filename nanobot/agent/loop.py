@@ -220,6 +220,12 @@ class AgentLoop:
             self._publish_runtime_selection(runtime)
         return runtime
 
+    def dream_runtime(self) -> LLMRuntime | None:
+        """Resolve the optional preset used for Dream without changing defaults."""
+        if not self.dream_model_preset:
+            return None
+        return self.runtime_resolver.resolve_preset(self.dream_model_preset)
+
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
 
@@ -257,6 +263,7 @@ class AgentLoop:
         model_presets: dict[str, ModelPresetConfig] | None = None,
         preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         model_preset: str | None = None,
+        dream_model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
@@ -311,6 +318,7 @@ class AgentLoop:
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
         )
+        self.dream_model_preset = dream_model_preset
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
             max_tool_result_chars
@@ -474,6 +482,7 @@ class AgentLoop:
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
+            dream_model_preset=defaults.dream.model_override,
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,

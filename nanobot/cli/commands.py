@@ -1820,12 +1820,17 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
+                resolve_dream_runtime = getattr(agent, "dream_runtime", None)
+                dream_runtime = (
+                    resolve_dream_runtime() if callable(resolve_dream_runtime) else None
+                )
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
                     ephemeral=True,
                     tools=store.build_dream_tools(),
                     on_progress=progress,
+                    runtime=dream_runtime,
                 )
                 # The real file delta grounds the audit record; clean completion
                 # decides whether this history batch has finished processing.

@@ -3,6 +3,7 @@
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -384,6 +385,21 @@ class TestEphemeralDirect:
             )
 
         return loop, store
+
+    def test_dream_runtime_uses_preset_without_changing_default(self, _make_loop):
+        loop, _ = _make_loop
+        loop.runtime_resolver._model_presets = {
+            "dream": ModelPresetConfig(model="dream-model"),
+        }
+        loop.dream_model_preset = "dream"
+
+        runtime = loop.dream_runtime()
+
+        assert runtime is not None
+        assert runtime.model == "dream-model"
+        assert runtime.model_preset == "dream"
+        assert loop.model == "test-model"
+        assert loop.model_preset is None
 
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
         """When ephemeral=True, raw_archive must not be called."""

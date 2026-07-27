@@ -197,13 +197,13 @@ Dream is configured under `agents.defaults.dream`:
 |-------|---------|
 | `intervalH` | How often Dream runs, in hours |
 | `cron` | Cron expression override (takes precedence over `intervalH`) |
-| `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
+| `modelOverride` | Optional model preset name used for Dream |
 
 In practical terms:
 
 - `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
 - `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
-- `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
+- `modelOverride` selects a named entry from `model_presets` for Dream. It accepts preset names only; raw model identifiers are not supported. If omitted, Dream uses the main agent's selected runtime.
 
 ## In Practice
 

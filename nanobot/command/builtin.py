@@ -427,12 +427,15 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 return
             prompt, last_cursor = result
             key = dream_session_key()
+            resolve_dream_runtime = getattr(loop, "dream_runtime", None)
+            dream_runtime = resolve_dream_runtime() if callable(resolve_dream_runtime) else None
             resp = await loop.process_direct(
                 prompt,
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
                 on_progress=progress,
+                runtime=dream_runtime,
             )
             elapsed = time.monotonic() - t0
             # The real file delta grounds the audit record; clean completion

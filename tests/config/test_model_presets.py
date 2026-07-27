@@ -267,6 +267,24 @@ def test_validator_rejects_unknown_preset() -> None:
         })
 
 
+def test_validator_accepts_dream_model_preset() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "dream": {"model": "anthropic/claude-haiku-4-5", "provider": "anthropic"},
+        },
+        "agents": {"defaults": {"dream": {"modelOverride": "dream"}}},
+    })
+
+    assert config.agents.defaults.dream.model_override == "dream"
+
+
+def test_validator_rejects_unknown_dream_model_preset() -> None:
+    with pytest.raises(ValueError, match="Dream model preset 'unknown' not found"):
+        Config.model_validate({
+            "agents": {"defaults": {"dream": {"modelOverride": "unknown"}}},
+        })
+
+
 def test_model_preset_accepts_explicit_default_name() -> None:
     config = Config.model_validate({
         "agents": {
