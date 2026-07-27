@@ -146,7 +146,12 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
               />
             </div>
-            <div className="flex items-center gap-1 rounded-[10px] bg-muted/65 p-1">
+            <div
+              className={cn(
+                "flex max-w-full items-center gap-1 overflow-x-auto rounded-[10px] bg-muted/65 p-1",
+                "scrollbar-thin scrollbar-track-transparent sm:w-auto",
+              )}
+            >
               {([
                 ["all", t("settings.skills.filterAll", { defaultValue: "All" }), skills.length],
                 [
@@ -165,7 +170,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                   type="button"
                   onClick={() => setInstalledFilter(filter)}
                   className={cn(
-                    "rounded-[8px] px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    "shrink-0 whitespace-nowrap rounded-[8px] px-2.5 py-1 text-[11px] font-medium transition-colors",
                     installedFilter === filter
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -314,6 +319,7 @@ function SkillDetailSheet({
   const [actionError, setActionError] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -323,6 +329,7 @@ function SkillDetailSheet({
     setLoadFailed(false);
     setActionError("");
     setDeleteOpen(false);
+    setDescriptionExpanded(false);
     fetchSkillDetail(token, skill.name)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
@@ -349,6 +356,7 @@ function SkillDetailSheet({
     : activeSkill.available
       ? t("settings.skills.statusEnabled", { defaultValue: "Enabled" })
       : t("settings.skills.statusNeedsSetup", { defaultValue: "Needs setup" });
+  const descriptionExpandable = activeSkill.description.length > 240;
 
   const toggleEnabled = async () => {
     setActionBusy(true);
@@ -399,12 +407,25 @@ function SkillDetailSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="w-[min(34rem,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+          closeButtonClassName={cn(
+            "right-2 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full opacity-100",
+            "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "sm:right-3 sm:top-3",
+          )}
+          className={cn(
+            "w-full max-w-none gap-0 overflow-hidden border-l-0 p-0",
+            "sm:w-[min(34rem,calc(100vw-1rem))] sm:max-w-none sm:border-l",
+          )}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5",
+              "pb-[max(1rem,env(safe-area-inset-bottom))]",
+            )}
+          >
             <div className="flex items-start gap-3 pr-8">
               <div className="min-w-0 flex-1">
-                <SheetTitle className="truncate text-[20px] font-semibold">
+                <SheetTitle className="truncate text-[19px] font-semibold sm:text-[20px]">
                   {activeSkill.name}
                 </SheetTitle>
                 <SheetDescription className="sr-only">
@@ -427,9 +448,26 @@ function SkillDetailSheet({
                     {statusLabel}
                   </Pill>
                 </div>
-                <p className="mt-3 text-[13px] leading-5 text-muted-foreground">
+                <p
+                  className={cn(
+                    "mt-3 text-[13px] leading-5 text-muted-foreground",
+                    descriptionExpandable && !descriptionExpanded && "line-clamp-5",
+                  )}
+                >
                   {activeSkill.description}
                 </p>
+                {descriptionExpandable ? (
+                  <button
+                    type="button"
+                    aria-expanded={descriptionExpanded}
+                    onClick={() => setDescriptionExpanded((value) => !value)}
+                    className="mt-1.5 min-h-8 rounded-full text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {descriptionExpanded
+                      ? t("settings.skills.showLess", { defaultValue: "Show less" })
+                      : t("settings.skills.showMore", { defaultValue: "Show more" })}
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -444,7 +482,7 @@ function SkillDetailSheet({
               </div>
             ) : (
               <div className="mt-6 space-y-5">
-                <div className="flex items-center justify-between gap-4 border-y border-border/45 px-1 py-3.5">
+                <div className="flex min-h-16 items-start justify-between gap-3 border-y border-border/45 px-1 py-3.5">
                   <div>
                     <p className="text-[13px] font-medium text-foreground">
                       {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
@@ -467,15 +505,20 @@ function SkillDetailSheet({
                     disabled={actionBusy}
                     onClick={() => void toggleEnabled()}
                     className={cn(
-                      "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+                      "relative -mr-1 h-10 w-14 shrink-0 rounded-full",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                       "disabled:cursor-wait disabled:opacity-60",
-                      enabled ? "bg-foreground" : "bg-muted-foreground/30",
                     )}
                   >
                     <span
                       className={cn(
-                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
+                        "absolute left-1.5 top-2 h-6 w-11 rounded-full transition-colors",
+                        enabled ? "bg-foreground" : "bg-muted-foreground/30",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "absolute left-2 top-2.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
                         enabled ? "translate-x-5" : "translate-x-0",
                       )}
                     />
@@ -498,7 +541,7 @@ function SkillDetailSheet({
                 {detail ? <RawInstructionsBlock markdown={detail.raw_markdown} /> : null}
 
                 {deletable ? (
-                  <div className="flex items-center justify-between gap-4 border-t border-border/45 pt-5">
+                  <div className="flex flex-col items-stretch gap-3 border-t border-border/45 pt-5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                     <div>
                       <p className="text-[13px] font-medium text-foreground">
                         {t("settings.skills.deleteTitle", { defaultValue: "Delete skill" })}
@@ -511,11 +554,14 @@ function SkillDetailSheet({
                     </div>
                     <Button
                       type="button"
-                      variant="destructive"
+                      variant="outline"
                       size="sm"
                       disabled={actionBusy}
                       onClick={() => setDeleteOpen(true)}
-                      className="shrink-0 rounded-full"
+                      className={cn(
+                        "h-10 w-full shrink-0 rounded-full border-destructive/20 text-destructive",
+                        "hover:bg-destructive/8 hover:text-destructive sm:h-9 sm:w-auto",
+                      )}
                     >
                       <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                       {t("settings.skills.deleteAction", { defaultValue: "Delete" })}
@@ -571,7 +617,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
 
   return (
     <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="flex cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+      <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
         </span>
@@ -657,7 +703,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
@@ -689,7 +735,7 @@ function RequirementsSection({
         variant="outline"
         size="sm"
         onClick={onRefresh}
-        className="mt-3 h-8 rounded-full bg-background/60 px-3 text-[11px]"
+        className="mt-3 h-9 rounded-full bg-background/60 px-3 text-[11px]"
       >
         <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
         {t("settings.skills.checkAgain", { defaultValue: "Check again" })}

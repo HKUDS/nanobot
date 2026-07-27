@@ -378,6 +378,12 @@ describe("App layout", () => {
   });
 
   it("opens Skills from the main sidebar", async () => {
+    const longSkillDescription = [
+      "Work with GitHub repositories, issues, pull requests, releases, workflows,",
+      "and code search through the GitHub CLI.",
+      "Use this skill for repository maintenance, review automation, release preparation,",
+      "and other GitHub workflows that need authenticated command-line access.",
+    ].join(" ");
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
@@ -413,7 +419,7 @@ describe("App layout", () => {
       },
       "/api/webui/skills/github": {
         name: "github",
-        description: "Work with GitHub.",
+        description: longSkillDescription,
         source: "builtin",
         enabled: true,
         deletable: false,
@@ -501,6 +507,13 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
 
     expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
+    const showMore = await screen.findByRole("button", { name: "Show more" });
+    expect(showMore).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(showMore);
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     expect(screen.getByText("Setup required")).toBeInTheDocument();
     expect(screen.getByText("brew install gh")).toBeInTheDocument();
     expect(screen.queryByText("Unavailable reason")).not.toBeInTheDocument();

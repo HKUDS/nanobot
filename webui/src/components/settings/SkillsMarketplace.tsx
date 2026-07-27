@@ -198,7 +198,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
 
       {query.trim().length < 2 ? (
         <section className="overflow-hidden rounded-[22px] bg-settings-surface">
-            <div className="flex items-center justify-between border-b border-border/45 px-5 py-4">
+            <div className="flex flex-col items-start gap-2 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-[14px] font-semibold">
                   {t("settings.skills.marketplaceTrendingTitle", {
@@ -371,9 +371,9 @@ function MarketplaceSkillRow({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-w-0 items-center gap-3 px-2 py-3.5">
+    <div className="flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
       {skill.rank ? (
-        <span className="w-7 shrink-0 text-right font-mono text-[12px] tabular-nums text-muted-foreground/65">
+        <span className="w-6 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/65 sm:w-7 sm:text-[12px]">
           #{skill.rank}
         </span>
       ) : null}
@@ -390,7 +390,7 @@ function MarketplaceSkillRow({
               name: skill.name,
               defaultValue: "Open {{name}} on skills.sh",
             })}
-            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>
@@ -418,7 +418,10 @@ function MarketplaceSkillRow({
         variant={installed ? "secondary" : "default"}
         disabled={installed || installBusy || installSupported === false}
         onClick={() => onSelect(skill)}
-        className={cn("min-w-[92px] rounded-full", installed && "text-emerald-700")}
+        className={cn(
+          "min-w-[82px] rounded-full px-2.5 sm:min-w-[92px] sm:px-3",
+          installed && "text-emerald-700",
+        )}
         title={
           installSupported === false
             ? t("settings.skills.marketplaceNpxRequired", {
@@ -512,7 +515,7 @@ function TrendingSkeleton() {
             <div className="h-3.5 w-48 max-w-[55%] animate-pulse rounded bg-muted" />
             <div className="h-3 w-32 max-w-[40%] animate-pulse rounded bg-muted/70" />
           </div>
-          <div className="h-8 w-[92px] animate-pulse rounded-full bg-muted" />
+          <div className="h-8 w-[82px] animate-pulse rounded-full bg-muted sm:w-[92px]" />
         </div>
       ))}
     </div>
