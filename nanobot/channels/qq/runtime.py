@@ -232,6 +232,7 @@ class QQChannel(BaseChannel):
         else:
             root = Path.home() / ".nanobot" / "media" / "qq"
 
+        root = root.resolve(strict=False)
         root.mkdir(parents=True, exist_ok=True)
         self.logger.info("media directory: {}", str(root))
         return root

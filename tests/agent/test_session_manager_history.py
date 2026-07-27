@@ -405,6 +405,23 @@ def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
     assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
+def test_get_history_keeps_document_media_without_image_breadcrumb():
+    session = Session(key="test:document-media")
+    session.messages.append(
+        {
+            "role": "user",
+            "content": "review\n\n[Attachment: /m/report.csv]",
+            "media": ["/m/report.csv"],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "review\n\n[Attachment: /m/report.csv]"}
+    ]
+
+
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     session = Session(key="test:cli-app")
     session.messages.append(

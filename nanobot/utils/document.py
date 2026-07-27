@@ -464,14 +464,37 @@ def reference_non_image_attachments(
     model can inspect them on demand with ``read_file`` or pass the original
     path to another tool that needs exact file bytes.
     """
+    content, _, image_paths, _ = prepare_attachment_references(content, media)
+    return content, image_paths
+
+
+def _canonical_local_media_path(path: str) -> str:
+    """Return one existing local media file as an absolute resolved path."""
+    try:
+        candidate = Path(path).expanduser()
+        if candidate.is_file():
+            return str(candidate.resolve(strict=False))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        pass
+    return path
+
+
+def prepare_attachment_references(
+    content: str,
+    media: list[str],
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Return prompt text, normalized media, vision media, and document paths."""
+    normalized_media = [_canonical_local_media_path(path) for path in media]
     image_paths: list[str] = []
+    attachment_paths: list[str] = []
     attachment_refs: list[str] = []
-    for path in media:
+    for path in normalized_media:
         if is_image_file(path):
             image_paths.append(path)
         else:
+            attachment_paths.append(path)
             attachment_refs.append(f"[Attachment: {path}]")
     if attachment_refs:
         suffix = "\n".join(attachment_refs)
         content = f"{content}\n\n{suffix}" if content else suffix
-    return content, image_paths
+    return content, normalized_media, image_paths, attachment_paths

@@ -28,7 +28,14 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
+from nanobot.agent.tools.context import (
+    RequestContext,
+    bind_attachment_paths,
+    bind_request_context,
+    extend_attachment_paths,
+    reset_attachment_paths,
+    reset_request_context,
+)
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
@@ -53,6 +60,7 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
+    ATTACHMENT_MEDIA_MESSAGE_META,
     RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -86,7 +94,7 @@ from nanobot.session.model_selection import (
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
-from nanobot.utils.document import reference_non_image_attachments
+from nanobot.utils.document import prepare_attachment_references
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -126,6 +134,7 @@ class TurnContext:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
+    attachment_paths: list[str] = field(default_factory=list)
 
     final_content: str | None = None
     all_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -807,6 +816,23 @@ class AgentLoop:
         budget = runtime.context_window_tokens - max(1, reserved_output) - 1024
         return budget if budget > 0 else max(128, runtime.context_window_tokens // 2)
 
+    @staticmethod
+    def _persisted_attachment_paths(session: Session | None) -> list[str]:
+        """Return trusted attachment paths retained with persisted user messages."""
+        if session is None:
+            return []
+        paths: dict[str, None] = {}
+        for message in session.messages:
+            if message.get("role") != "user":
+                continue
+            values = message.get("media")
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if isinstance(value, str) and value:
+                    paths.setdefault(value, None)
+        return list(paths)
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -831,6 +857,7 @@ class AgentLoop:
         turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
+        attachment_paths: list[str] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -862,12 +889,26 @@ class AgentLoop:
 
             async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
-                media = pending_msg.media if pending_msg.media else None
+                media = [
+                    path
+                    for path in (pending_msg.media or [])
+                    if isinstance(path, str) and path
+                ]
+                attachment_paths: list[str] = []
                 if media:
-                    content, media = self._prepare_message_media(content, media)
+                    content, original_media, media, attachment_paths = (
+                        self._prepare_message_media(content, media)
+                    )
+                    extend_attachment_paths(attachment_paths)
                     media = media or None
+                else:
+                    original_media = []
                 user_content = self.context._build_user_content(content, media)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
+                if original_media:
+                    row["_meta"] = {
+                        ATTACHMENT_MEDIA_MESSAGE_META: original_media,
+                    }
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
                 if pending_msg.channel != "system":
                     scope = self.workspace_scopes.for_turn(
@@ -893,7 +934,9 @@ class AgentLoop:
                     )
                     row["content"], marker = append_runtime_context(user_content, blocks)
                     if marker is not None:
-                        row["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: marker}
+                        internal_meta = dict(row.get("_meta") or {})
+                        internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
+                        row["_meta"] = internal_meta
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
@@ -954,7 +997,12 @@ class AgentLoop:
             metadata=dict(metadata or {}),
             workspace=effective_scope.project_path,
         )
+        trusted_attachment_paths = [
+            *self._persisted_attachment_paths(session),
+            *(attachment_paths or []),
+        ]
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        attachment_token = bind_attachment_paths(trusted_attachment_paths)
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
         turn_scope_stack = ExitStack()
@@ -1031,6 +1079,7 @@ class AgentLoop:
             turn_scope_stack.close()
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
+            reset_attachment_paths(attachment_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -1494,8 +1543,16 @@ class AgentLoop:
         msg = ctx.msg
 
         if ctx.kind is TurnKind.USER and msg.media:
-            new_content, image_only = self._prepare_message_media(msg.content, msg.media)
-            ctx.msg = dataclasses.replace(msg, content=new_content, media=image_only)
+            new_content, normalized_media, _, attachment_paths = self._prepare_message_media(
+                msg.content,
+                msg.media,
+            )
+            ctx.attachment_paths = attachment_paths
+            ctx.msg = dataclasses.replace(
+                msg,
+                content=new_content,
+                media=normalized_media,
+            )
             msg = ctx.msg
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
@@ -1522,8 +1579,12 @@ class AgentLoop:
         if self._restore_pending_user_turn(ctx.session):
             self.sessions.save(ctx.session)
 
-    def _prepare_message_media(self, content: str, media: list[str]) -> tuple[str, list[str]]:
-        return reference_non_image_attachments(content, media)
+    def _prepare_message_media(
+        self,
+        content: str,
+        media: list[str],
+    ) -> tuple[str, list[str], list[str], list[str]]:
+        return prepare_attachment_references(content, media)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
@@ -1560,7 +1621,9 @@ class AgentLoop:
             # intentionally clears the session.
             if cmd_ctx.raw.lower() != "/new":
                 ctx.input_persisted_early = self._persist_user_message_early(
-                    ctx.msg, ctx.session, _command=True
+                    ctx.msg,
+                    ctx.session,
+                    _command=True,
                 )
                 ctx.session.add_message(
                     "assistant", result.content, _command=True
@@ -1658,6 +1721,7 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
             request_context=ctx.request_context,
+            attachment_paths=ctx.attachment_paths,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1795,6 +1859,11 @@ class AgentLoop:
                 if isinstance(internal_meta, dict)
                 else None
             )
+            attachment_media_meta = (
+                internal_meta.get(ATTACHMENT_MEDIA_MESSAGE_META)
+                if isinstance(internal_meta, dict)
+                else None
+            )
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
@@ -1832,6 +1901,14 @@ class AgentLoop:
                     entry["content"] = filtered
                 if isinstance(runtime_context_meta, dict):
                     entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
+                if isinstance(attachment_media_meta, list):
+                    attachment_media = [
+                        path
+                        for path in attachment_media_meta
+                        if isinstance(path, str) and path
+                    ]
+                    if attachment_media:
+                        entry["media"] = attachment_media
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "assistant":

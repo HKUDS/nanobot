@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import current_attachment_paths
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
@@ -24,7 +25,7 @@ from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 class FileToolsConfig(Base):
     """Filesystem tools configuration."""
 
-    enable: bool = True  # built-in file tools on by default
+    enable: bool = True  # general file tools; uploaded attachments keep narrow read access
 
 
 class _FsTool(Tool):
@@ -275,6 +276,18 @@ class ReadFileTool(_FsTool):
     def read_only(self) -> bool:
         return True
 
+    def _resolve_read(self, path: str) -> Path:
+        return self._resolve_with_extra(
+            path,
+            self._extra_read_allowed_dirs,
+            [*self._extra_read_allowed_files, *current_attachment_paths()],
+            include_media_dir=True,
+            extra_files_require_allowed_root=True,
+        )
+
+    def _fallback_read_path(self, path: str) -> Path | None:
+        return _builtin_skill_read_path(path)
+
     async def execute(
         self,
         path: str | None = None,
@@ -294,7 +307,7 @@ class ReadFileTool(_FsTool):
 
             fp = self._resolve_read(path)
             if not fp.exists():
-                fp = _builtin_skill_read_path(path) or fp
+                fp = self._fallback_read_path(path) or fp
             if _is_blocked_device(fp):
                 return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
             if not fp.exists():
@@ -462,6 +475,50 @@ class ReadFileTool(_FsTool):
             result = result[:self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
 
         return result
+
+
+class AttachmentReadFileTool(ReadFileTool):
+    """Read only trusted user attachments when general file tools are disabled."""
+
+    _scopes = {"core", "subagent"}
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return not ctx.config.file.enable
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(
+            workspace=Path(ctx.workspace),
+            file_states=ctx.file_state_store,
+            restrict_to_workspace=True,
+        )
+
+    @property
+    def description(self) -> str:
+        return (
+            "Read a user-uploaded attachment referenced in this conversation. "
+            "Only exact trusted attachment paths are allowed; general workspace "
+            "and filesystem access is disabled. Supports text, images, PDF, "
+            "DOCX, XLSX, and PPTX documents."
+        )
+
+    def _resolve_read(self, path: str) -> Path:
+        allowed_files = list(current_attachment_paths())
+        if not allowed_files:
+            raise PermissionError(
+                "Only user-uploaded attachments referenced in this conversation can be read."
+            )
+        return resolve_workspace_path(
+            path,
+            self._workspace,
+            allowed_dir=None,
+            extra_allowed_files=allowed_files,
+            include_media_dir=False,
+        )
+
+    def _fallback_read_path(self, path: str) -> Path | None:
+        return None
 
 
 # ---------------------------------------------------------------------------

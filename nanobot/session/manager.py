@@ -21,6 +21,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.utils.document import is_image_file
 from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
@@ -217,9 +218,12 @@ class Session:
             media = message.get("media")
             if role == "user" and isinstance(media, list) and media and isinstance(content, str):
                 breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
+                    image_placeholder_text(p)
+                    for p in media
+                    if isinstance(p, str) and p and is_image_file(p)
                 )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+                if breadcrumbs:
+                    content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             cli_apps = message.get("cli_apps")
             if (
                 include_runtime_context

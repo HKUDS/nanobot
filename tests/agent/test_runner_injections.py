@@ -810,6 +810,37 @@ def test_runner_merge_preserves_runtime_markers_with_media() -> None:
     ]
 
 
+def test_runner_merge_unions_pending_attachment_media() -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import ATTACHMENT_MEDIA_MESSAGE_META
+
+    messages: list[dict] = []
+
+    AgentRunner._append_injected_messages(messages, [
+        {
+            "role": "user",
+            "content": "first",
+            "_meta": {ATTACHMENT_MEDIA_MESSAGE_META: ["/media/first.txt"]},
+        },
+        {
+            "role": "user",
+            "content": "second",
+            "_meta": {
+                ATTACHMENT_MEDIA_MESSAGE_META: [
+                    "/media/second.txt",
+                    "/media/first.txt",
+                ]
+            },
+        },
+    ])
+
+    assert len(messages) == 1
+    assert messages[0]["_meta"][ATTACHMENT_MEDIA_MESSAGE_META] == [
+        "/media/first.txt",
+        "/media/second.txt",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_injection_cycles_capped_at_max():
     """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""

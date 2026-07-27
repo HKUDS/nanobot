@@ -7,7 +7,7 @@ import pytest
 
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
-from nanobot.agent.tools.filesystem import FileToolsConfig
+from nanobot.agent.tools.filesystem import AttachmentReadFileTool, FileToolsConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
@@ -71,16 +71,16 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
 
     tools = sm._build_tools()
 
-    file_tools = {
+    general_file_tools = {
         "apply_patch",
         "edit_file",
         "find_files",
         "grep",
         "list_dir",
-        "read_file",
         "write_file",
     }
-    assert file_tools.isdisjoint(tools.tool_names)
+    assert general_file_tools.isdisjoint(tools.tool_names)
+    assert isinstance(tools.get("read_file"), AttachmentReadFileTool)
 
 
 def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):

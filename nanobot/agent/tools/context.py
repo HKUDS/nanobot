@@ -1,6 +1,7 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -13,6 +14,10 @@ if TYPE_CHECKING:
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,
+)
+_CURRENT_ATTACHMENT_PATHS: ContextVar[frozenset[Path]] = ContextVar(
+    "nanobot_tool_attachment_paths",
+    default=frozenset(),
 )
 
 
@@ -62,6 +67,39 @@ def current_request_context() -> RequestContext | None:
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
+
+
+def _attachment_paths(paths: Iterable[str | Path]) -> frozenset[Path]:
+    normalized: set[Path] = set()
+    for path in paths:
+        if isinstance(path, str) and not path:
+            continue
+        try:
+            value = Path(path).expanduser()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+        normalized.add(value)
+    return frozenset(normalized)
+
+
+def bind_attachment_paths(paths: Iterable[str | Path]) -> Token[frozenset[Path]]:
+    """Bind exact user-provided attachment paths for one agent run."""
+    return _CURRENT_ATTACHMENT_PATHS.set(_attachment_paths(paths))
+
+
+def extend_attachment_paths(paths: Iterable[str | Path]) -> None:
+    """Add pending-message attachments without mutating inherited task state."""
+    additions = _attachment_paths(paths)
+    if additions:
+        _CURRENT_ATTACHMENT_PATHS.set(current_attachment_paths() | additions)
+
+
+def reset_attachment_paths(token: Token[frozenset[Path]]) -> None:
+    _CURRENT_ATTACHMENT_PATHS.reset(token)
+
+
+def current_attachment_paths() -> frozenset[Path]:
+    return _CURRENT_ATTACHMENT_PATHS.get()
 
 
 @dataclass
