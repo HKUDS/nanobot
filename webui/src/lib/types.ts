@@ -302,6 +302,8 @@ export interface SidebarStatePayload {
   project_name_overrides: Record<string, string>;
   tags_by_key: Record<string, string[]>;
   collapsed_groups: Record<string, boolean>;
+  /** Latest durable session activity the user has viewed, keyed by session key. */
+  activity_seen_at_by_key: Record<string, string>;
   view: SidebarViewState;
   updated_at?: string | null;
 }

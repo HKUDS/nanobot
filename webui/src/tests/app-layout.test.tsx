@@ -1030,6 +1030,10 @@ describe("App layout", () => {
       title_overrides: { "websocket:chat-b": "Roadmap" },
       tags_by_key: {},
       collapsed_groups: {},
+      activity_seen_at_by_key: {
+        "websocket:chat-a": "2026-04-16T10:00:00Z",
+        "websocket:chat-b": "2026-04-16T11:00:00Z",
+      },
       view: {
         density: "comfortable",
         show_previews: false,
@@ -1118,6 +1122,11 @@ describe("App layout", () => {
       title_overrides: {},
       tags_by_key: {},
       collapsed_groups: {},
+      activity_seen_at_by_key: {
+        "websocket:zulu": "2026-04-16T12:00:00Z",
+        "websocket:new": "2026-04-15T12:00:00Z",
+        "websocket:alpha": "2026-04-14T12:00:00Z",
+      },
       view: {
         density: "comfortable",
         show_previews: false,
@@ -1293,6 +1302,88 @@ describe("App layout", () => {
     });
 
     expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+  });
+
+  it("restores unread activity from durable session timestamps after being offline", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Already read",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T12:00:00Z",
+        preview: "Scheduled reply arrived while offline",
+      },
+    ];
+    const initialState = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      title_overrides: {},
+      project_name_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      activity_seen_at_by_key: {
+        "websocket:chat-a": "2026-04-16T10:00:00Z",
+        "websocket:chat-b": "2026-04-16T11:00:00Z",
+      },
+      view: {
+        density: "comfortable",
+        show_previews: true,
+        show_timestamps: true,
+        show_archived: false,
+        sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href === "/api/webui/sidebar-state") {
+          return jsonResponse(initialState);
+        }
+        if (href.startsWith("/api/webui/sidebar-state/update?")) {
+          const encoded = new URLSearchParams(href.split("?", 2)[1]).get("state");
+          return jsonResponse(JSON.parse(encoded ?? "{}"));
+        }
+        return { ok: false, status: 404 };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(
+      within(sidebar).getByRole("button", {
+        name: /^Scheduled reply arrived while offline/,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument(),
+    );
+    const updateUrls = vi.mocked(fetch).mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith("/api/webui/sidebar-state/update?"));
+    expect(updateUrls).toHaveLength(1);
+    const encoded = new URLSearchParams(updateUrls[0].split("?", 2)[1]).get("state");
+    expect(JSON.parse(encoded ?? "{}").activity_seen_at_by_key).toMatchObject({
+      "websocket:chat-b": "2026-04-16T12:00:00Z",
+    });
   });
 
   it("restores sidebar run indicators after a page reload", async () => {

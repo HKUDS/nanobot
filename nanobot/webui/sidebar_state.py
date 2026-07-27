@@ -41,6 +41,7 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "project_name_overrides": {},
         "tags_by_key": {},
         "collapsed_groups": {},
+        "activity_seen_at_by_key": {},
         "view": {
             "density": "comfortable",
             "show_previews": False,
@@ -84,6 +85,19 @@ def _clean_bool_map(value: Any) -> dict[str, bool]:
         if cleaned_key is None:
             continue
         out[cleaned_key] = bool(raw)
+    return out
+
+
+def _clean_activity_seen_at_by_key(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, raw_timestamp in list(value.items())[:_MAX_MAP_ITEMS]:
+        cleaned_key = _clean_string(key)
+        cleaned_timestamp = _clean_string(raw_timestamp, max_len=64)
+        if cleaned_key is None or cleaned_timestamp is None:
+            continue
+        out[cleaned_key] = cleaned_timestamp
     return out
 
 
@@ -142,6 +156,9 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     )
     state["tags_by_key"] = _clean_tags_by_key(raw.get("tags_by_key"))
     state["collapsed_groups"] = _clean_bool_map(raw.get("collapsed_groups"))
+    state["activity_seen_at_by_key"] = _clean_activity_seen_at_by_key(
+        raw.get("activity_seen_at_by_key")
+    )
     state["view"] = _clean_view(raw.get("view"))
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None

@@ -372,6 +372,15 @@ function writeSessionUpdateChatIds(chatIds: Set<string>): void {
   }
 }
 
+function isActivityNewer(updatedAt: string | null, seenAt: string | undefined): boolean {
+  if (!updatedAt || !seenAt) return false;
+  const updatedTime = Date.parse(updatedAt);
+  const seenTime = Date.parse(seenAt);
+  return Number.isFinite(updatedTime)
+    && Number.isFinite(seenTime)
+    && updatedTime > seenTime;
+}
+
 function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePayload {
   const accessMode = scope.access_mode === "restricted" ? "restricted" : "full";
   return {
@@ -1104,7 +1113,20 @@ function Shell({
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
-  const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
+  const updatedChatIdList = useMemo(() => {
+    const combined = new Set(updatedChatIds);
+    for (const session of sessions) {
+      if (
+        isActivityNewer(
+          session.updatedAt,
+          sidebarState.activity_seen_at_by_key[session.key],
+        )
+      ) {
+        combined.add(session.chatId);
+      }
+    }
+    return Array.from(combined);
+  }, [sessions, sidebarState.activity_seen_at_by_key, updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -1115,7 +1137,26 @@ function Shell({
       next.delete(activeChatId);
       return next;
     });
-  }, [activeChatId]);
+    const activityAt = activeSession?.updatedAt;
+    const sessionKey = activeSession?.key;
+    if (!activityAt || !sessionKey) return;
+    void updateSidebarState((current) => {
+      const seenAt = current.activity_seen_at_by_key[sessionKey];
+      if (seenAt && !isActivityNewer(activityAt, seenAt)) return current;
+      return {
+        ...current,
+        activity_seen_at_by_key: {
+          ...current.activity_seen_at_by_key,
+          [sessionKey]: activityAt,
+        },
+      };
+    });
+  }, [
+    activeChatId,
+    activeSession?.key,
+    activeSession?.updatedAt,
+    updateSidebarState,
+  ]);
   const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
     if (activeChatId && workspaceOverrides[activeChatId]) {
       return workspaceOverrides[activeChatId];

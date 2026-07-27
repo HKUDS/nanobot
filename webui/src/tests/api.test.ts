@@ -847,6 +847,9 @@ describe("webui API helpers", () => {
       project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},
       collapsed_groups: {},
+      activity_seen_at_by_key: {
+        "websocket:chat-1": "2026-05-01T10:00:00Z",
+      },
       view: {
         density: "compact" as const,
         show_previews: false,
@@ -881,6 +884,9 @@ describe("webui API helpers", () => {
       pinned_keys: ["websocket:chat-1"],
       title_overrides: { "websocket:chat-1": "Release" },
       project_name_overrides: { "/Users/me/nanobot": "Core" },
+      activity_seen_at_by_key: {
+        "websocket:chat-1": "2026-05-01T10:00:00Z",
+      },
     });
   });
 

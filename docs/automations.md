@@ -137,6 +137,13 @@ message. Copy the `nanobot trigger ...` command from the WebUI and replace
 Automation delivery is workspace-local. Scheduled jobs and local trigger
 deliveries use the same workspace as the gateway.
 
+WebUI automation replies are written to the linked topic even when no browser
+is connected. When the WebUI is opened again, it replays the stored reply and
+compares the topic's durable activity time with its persisted read position to
+show **New activity**. A successful automation `lastStatus` means the agent turn
+completed; it does not mean a browser had a live WebSocket connection or that
+the user already read the reply.
+
 Local trigger messages are written to a durable queue. If the gateway is not
 running yet, the message waits in that workspace. If the linked topic is
 already running a turn, the trigger waits until the session becomes idle instead

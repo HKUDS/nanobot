@@ -1891,11 +1891,15 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert initial.status_code == 200
         assert initial.json()["schema_version"] == 1
         assert initial.json()["pinned_keys"] == []
+        assert initial.json()["activity_seen_at_by_key"] == {}
 
         payload = {
             "pinned_keys": ["websocket:sidebar"],
             "archived_keys": ["websocket:old"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
+            "activity_seen_at_by_key": {
+                "websocket:sidebar": "2026-07-27T08:30:00Z"
+            },
             "view": {"density": "compact", "show_archived": True},
         }
         query = urlencode({"state": json.dumps(payload)})
@@ -1907,6 +1911,9 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
+        assert body["activity_seen_at_by_key"] == {
+            "websocket:sidebar": "2026-07-27T08:30:00Z"
+        }
         assert body["view"]["density"] == "compact"
 
         state_path = tmp_path / "webui" / "sidebar-state.json"
@@ -1914,6 +1921,9 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
             "websocket:sidebar"
         ]
+        assert json.loads(state_path.read_text(encoding="utf-8"))[
+            "activity_seen_at_by_key"
+        ] == {"websocket:sidebar": "2026-07-27T08:30:00Z"}
     finally:
         await channel.stop()
         await server_task

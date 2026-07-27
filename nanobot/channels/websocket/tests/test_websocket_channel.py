@@ -1583,6 +1583,49 @@ async def test_stream_transcript_persists_without_subscribers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cron_reply_persists_for_replay_without_subscribers() -> None:
+    from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
+    from nanobot.webui.transcript import build_webui_thread_response
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    metadata = cron_proactive_delivery_metadata(
+        "websocket",
+        None,
+        turn_seed="cron:daily-digest",
+        source_label="Daily digest",
+    )
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="cron-offline",
+        content="The scheduled digest is ready.",
+        metadata=metadata,
+    ))
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="cron-offline",
+        content="",
+        event=TurnEndEvent(),
+        metadata=metadata,
+    ))
+
+    assert channel._subs == {}
+    body = build_webui_thread_response("websocket:cron-offline")
+    assert body is not None
+    assert body["messages"][-1]["role"] == "assistant"
+    assert body["messages"][-1]["content"] == "The scheduled digest is ready."
+    assert body["messages"][-1]["source"] == {
+        "kind": "cron",
+        "label": "Daily digest",
+    }
+
+
+@pytest.mark.asyncio
 async def test_send_turn_end_emits_turn_end_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))

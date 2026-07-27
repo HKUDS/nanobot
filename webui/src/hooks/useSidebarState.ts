@@ -15,6 +15,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   project_name_overrides: {},
   tags_by_key: {},
   collapsed_groups: {},
+  activity_seen_at_by_key: {},
   view: {
     density: "comfortable",
     show_previews: false,
@@ -94,6 +95,7 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
     collapsed_groups: boolMap(value.collapsed_groups),
+    activity_seen_at_by_key: stringMap(value.activity_seen_at_by_key),
     view: {
       density,
       show_previews: Boolean(view.show_previews),
@@ -124,7 +126,22 @@ function pruneMissingSessions(
     archived_keys: filterKeys(state.archived_keys),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
+    activity_seen_at_by_key: filterMap(state.activity_seen_at_by_key),
   };
+}
+
+function seedMissingActivitySeenAt(
+  state: SidebarStatePayload,
+  sessions: ChatSummary[],
+): SidebarStatePayload {
+  const seenAt = { ...state.activity_seen_at_by_key };
+  let changed = false;
+  for (const session of sessions) {
+    if (seenAt[session.key] || !session.updatedAt) continue;
+    seenAt[session.key] = session.updatedAt;
+    changed = true;
+  }
+  return changed ? { ...state, activity_seen_at_by_key: seenAt } : state;
 }
 
 function sameState(a: SidebarStatePayload, b: SidebarStatePayload): boolean {
@@ -196,7 +213,10 @@ export function useSidebarState(
 
   const pruned = useMemo(() => {
     if (!sessionsLoaded || loading) return state;
-    return pruneMissingSessions(state, sessions);
+    return seedMissingActivitySeenAt(
+      pruneMissingSessions(state, sessions),
+      sessions,
+    );
   }, [loading, sessions, sessionsLoaded, state]);
 
   useEffect(() => {
