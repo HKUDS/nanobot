@@ -185,7 +185,6 @@ packages = ["nanobot"]
 "nanobot" = "nanobot"
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
 "examples" = "examples"
 
 [tool.hatch.build.targets.sdist]
