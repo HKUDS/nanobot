@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -646,7 +646,7 @@ def onboard(
     non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.loader import get_config_path, save_config, set_config_path
     from nanobot.config.schema import Config
 
     explicit_config = config is not None
@@ -665,7 +665,7 @@ def onboard(
     # Create or update config
     if config_path.exists():
         if wizard:
-            config = _apply_workspace_override(load_config(config_path))
+            config = _apply_workspace_override(_load_config_for_cli(config_path))
         else:
             should_refresh = non_interactive_refresh
             if not non_interactive_refresh:
@@ -684,7 +684,7 @@ def onboard(
                     should_refresh = True
 
             if should_refresh:
-                config = _apply_workspace_override(load_config(config_path))
+                config = _apply_workspace_override(_load_config_for_cli(config_path))
                 save_config(config, config_path)
                 console.print(
                     f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
@@ -797,9 +797,45 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
+def _print_config_error(error: Exception, *, show_check_hint: bool = True) -> None:
+    """Render a configuration failure without exposing traceback internals."""
+    from nanobot.config.errors import ConfigLoadError
+
+    console.print(Text(str(error), style="red"))
+    if show_check_hint and isinstance(error, ConfigLoadError):
+        command = f'nanobot config check --config "{error.path}"'
+        console.print(f"[dim]Check again after editing: {escape(command)}[/dim]")
+
+
+_CONFIG_PATH_UNSET = object()
+
+
+def _load_config_for_cli(
+    config_path: Path | None | object = _CONFIG_PATH_UNSET,
+    *,
+    resolve_env: bool = False,
+    show_check_hint: bool = True,
+) -> Config:
+    """Load CLI configuration and turn expected failures into a clean exit."""
+    from nanobot.config.errors import ConfigLoadError
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+    try:
+        if config_path is _CONFIG_PATH_UNSET:
+            loaded = load_config()
+        else:
+            loaded = load_config(cast(Path | None, config_path))
+        if resolve_env:
+            loaded = resolve_config_env_vars(loaded)
+        return loaded
+    except ConfigLoadError as exc:
+        _print_config_error(exc, show_check_hint=show_check_hint)
+        raise typer.Exit(1) from exc
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from nanobot.config.loader import set_config_path
 
     config_path = None
     if config:
@@ -810,11 +846,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
-    try:
-        loaded = resolve_config_env_vars(load_config(config_path))
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+    loaded = _load_config_for_cli(config_path, resolve_env=True)
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return loaded
@@ -840,7 +872,7 @@ def _load_inspection_config(
     workspace: str | None = None,
 ) -> tuple[Path, Config]:
     """Load config for diagnostic commands without resolving secret env refs."""
-    from nanobot.config.loader import get_config_path, load_config, set_config_path
+    from nanobot.config.loader import get_config_path, set_config_path
 
     config_path = None
     if config:
@@ -849,11 +881,7 @@ def _load_inspection_config(
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     display_path = config_path or get_config_path()
-    try:
-        loaded = load_config(config_path)
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
+    loaded = _load_config_for_cli(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return display_path, loaded
@@ -901,13 +929,7 @@ def _resolve_webui_config_path(config: str | None) -> Path:
 
 def _load_webui_setup_config(config_path: Path) -> Config:
     """Load config for first-run mutation without resolving env-var placeholders."""
-    from nanobot.config.loader import load_config
-
-    try:
-        return load_config(config_path)
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1) from e
+    return _load_config_for_cli(config_path)
 
 
 def _provider_setup_error(config: Config) -> str | None:
@@ -923,18 +945,37 @@ def _provider_setup_error(config: Config) -> str | None:
 
 def _webui_config_dict(config: Config) -> dict[str, Any]:
     """Return the current WebSocket config as a mutable alias-key dictionary."""
+    return _validated_websocket_config(config).model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+
+
+def _validated_websocket_config(config: Config) -> Any:
+    """Validate WebSocket settings through the user-safe CLI error boundary."""
+    from pydantic import ValidationError
+
     from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.config.errors import ConfigLoadError, validation_issues
+    from nanobot.config.loader import get_config_path
 
     current = getattr(config.channels, "websocket", None) or {}
-    model = WebSocketConfig.model_validate(current)
-    return model.model_dump(by_alias=True, exclude_none=True)
+    try:
+        return WebSocketConfig.model_validate(current)
+    except ValidationError as exc:
+        issues = validation_issues(exc, prefix=("channels", "websocket"))
+        error = ConfigLoadError(
+            get_config_path(),
+            kind="invalid_schema",
+            summary=f"Found {len(issues)} invalid channel setting(s).",
+            issues=issues,
+        )
+        _print_config_error(error)
+        raise typer.Exit(1) from exc
 
 
 def _webui_channel_enabled(config: Config) -> bool:
-    from nanobot.channels.websocket.runtime import WebSocketConfig
-
-    current = getattr(config.channels, "websocket", None) or {}
-    return bool(WebSocketConfig.model_validate(current).enabled)
+    return bool(_validated_websocket_config(config).enabled)
 
 
 def _prepare_webui_bundle_for_gateway(
@@ -1008,11 +1049,6 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
     )
 
 
-def _webui_bootstrap_secret(config: Config) -> str:
-    ws_cfg = _webui_config_dict(config)
-    return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
-
-
 def _webui_browser_url(config: Config) -> str:
     from urllib.parse import quote
 
@@ -1020,7 +1056,7 @@ def _webui_browser_url(config: Config) -> str:
     host = _host_for_local_browser(str(ws_cfg.get("host") or "127.0.0.1"))
     port = int(ws_cfg.get("port") or 8765)
     base_url = f"http://{host}:{port}"
-    secret = _webui_bootstrap_secret(config)
+    secret = str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
     if not secret:
         return base_url
     return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
@@ -1036,10 +1072,7 @@ def _webui_display_url(url: str) -> str:
 
 def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> tuple[bool, bool]:
     """Enable the local WebUI channel with safe localhost defaults."""
-    from nanobot.channels.websocket.runtime import WebSocketConfig
-
-    current = getattr(config.channels, "websocket", None) or {}
-    model = WebSocketConfig.model_validate(current)
+    model = _validated_websocket_config(config)
     changed = False
     generated_secret = False
 
@@ -2514,6 +2547,65 @@ def agent(
 
 
 # ============================================================================
+# Config Commands
+# ============================================================================
+
+
+config_app = typer.Typer(help="Inspect and validate configuration")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("check")
+def config_check(
+    config_path: str | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config file",
+    ),
+    resolve_env: bool = typer.Option(
+        True,
+        "--resolve-env/--no-resolve-env",
+        help="Check ${VAR} references against the current environment",
+    ),
+) -> None:
+    """Check the configuration without starting nanobot."""
+    from nanobot.config.errors import ConfigLoadError
+    from nanobot.config.loader import get_config_path, set_config_path
+    from nanobot.config.validation import channel_config_issues
+
+    path = (
+        Path(config_path).expanduser().resolve(strict=False)
+        if config_path
+        else get_config_path().expanduser().resolve(strict=False)
+    )
+    if not path.exists():
+        console.print(Text(f"Configuration file not found: {path}", style="red"))
+        console.print("[dim]Create it with: nanobot onboard[/dim]")
+        raise typer.Exit(1)
+
+    set_config_path(path)
+    loaded = _load_config_for_cli(
+        path,
+        resolve_env=resolve_env,
+        show_check_hint=False,
+    )
+    channel_issues = channel_config_issues(loaded)
+    if channel_issues:
+        error = ConfigLoadError(
+            path,
+            kind="invalid_schema",
+            summary=f"Found {len(channel_issues)} invalid channel setting(s).",
+            issues=channel_issues,
+        )
+        _print_config_error(error, show_check_hint=False)
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Configuration is valid: {escape(str(path))}")
+    if not resolve_env:
+        console.print("[yellow]Environment variable references were not checked.[/yellow]")
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 
@@ -2595,7 +2687,7 @@ def plugins_list(
 ):
     """List optional nanobot features."""
     from nanobot.channels.registry import discover_plugins
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -2604,7 +2696,7 @@ def plugins_list(
     _print_enable_options(
         feature_support.optional_dependency_groups(),
         discover_plugins(),
-        load_config(resolved_config_path),
+        _load_config_for_cli(resolved_config_path),
     )
 
 
@@ -2767,14 +2859,14 @@ def _set_oauth_provider_as_main(
     config_path: str | None = None,
 ) -> None:
     """Persist an OAuth provider as the active agent provider."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.loader import get_config_path, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None and get_config_path() != resolved_config_path:
         set_config_path(resolved_config_path)
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
-    config = load_config(resolved_config_path)
+    config = _load_config_for_cli(resolved_config_path)
     selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name
@@ -2864,14 +2956,10 @@ def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
-        from nanobot.config.loader import load_config, resolve_config_env_vars
-
-        proxy = None
-        try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
-        except ValueError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1) from e
+        proxy = (
+            _load_config_for_cli(resolve_env=True).providers.openai_codex.proxy
+            or None
+        )
         token = None
         with suppress(Exception):
             token = get_token(proxy=proxy)
@@ -2908,14 +2996,9 @@ def _logout_openai_codex() -> None:
 @_register_login("xai_grok")
 def _login_xai_grok() -> None:
     """Authenticate with xAI using the Grok subscription OAuth contract."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars
     from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
 
-    try:
-        proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+    proxy = _load_config_for_cli(resolve_env=True).providers.xai_grok.proxy or None
 
     token = None
     with suppress(Exception):

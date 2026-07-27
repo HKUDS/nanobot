@@ -14,6 +14,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from nanobot.channels.base import BaseChannel
 
 _CHANNEL_PACKAGE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
@@ -39,6 +41,7 @@ class ChannelPlugin:
     settings_visible: bool = True
     capabilities: frozenset[str] = frozenset()
     webui: str | None = None
+    config_model: str | None = None
 
     def __post_init__(self) -> None:
         if _CHANNEL_PACKAGE_NAME.fullmatch(self.name) is None:
@@ -47,6 +50,8 @@ class ChannelPlugin:
                 "digits, or underscores"
             )
         _target_parts(self.runtime, label="runtime")
+        if self.config_model is not None:
+            _target_parts(self.config_model, label="config model")
         if self.connector is not None:
             _target_parts(self.connector, label="connector")
         if self.setup is not None and not isinstance(self.setup, ChannelSetupSpec):
@@ -92,6 +97,27 @@ class ChannelPlugin:
                 f"Channel plugin '{self.name}' runtime declares name '{channel_cls.name}'"
             )
         return channel_cls
+
+    def load_config_model(self) -> type[BaseModel] | None:
+        """Resolve the channel's Pydantic model without constructing a runtime."""
+        if self.config_model is None:
+            return None
+
+        from pydantic import BaseModel
+
+        module_name, attr_name = _target_parts(self.config_model, label="config model")
+        module = importlib.import_module(module_name)
+        config_model: Any = getattr(module, attr_name, None)
+        if (
+            not isinstance(config_model, type)
+            or not issubclass(config_model, BaseModel)
+            or config_model is BaseModel
+        ):
+            raise ImportError(
+                f"Channel plugin '{self.name}' config model '{self.config_model}' "
+                "does not resolve to a Pydantic model"
+            )
+        return config_model
 
     def load_connector(self) -> Any:
         """Construct the optional channel-owned interactive connector."""
@@ -150,6 +176,8 @@ def load_channel_package(name: str) -> ChannelPlugin | None:
     package_name = f"nanobot.channels.{name}"
     package_root = files("nanobot.channels").joinpath(name)
     targets = [("runtime", plugin.runtime)]
+    if plugin.config_model is not None:
+        targets.append(("config model", plugin.config_model))
     if plugin.connector is not None:
         targets.append(("connector", plugin.connector))
     for label, target in targets:

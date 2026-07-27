@@ -20,6 +20,7 @@ PLUGIN = ChannelPlugin(
     name="slack",
     display_name="Slack",
     runtime=f"{__package__}.runtime:SlackChannel",
+    config_model=f"{__package__}.runtime:SlackConfig",
     setup=SETUP_SPEC,
     dependencies=(
         "aiohttp>=3.9.0,<4.0.0",

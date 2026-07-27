@@ -21,6 +21,7 @@ PLUGIN = ChannelPlugin(
     name="discord",
     display_name="Discord",
     runtime=f"{__package__}.runtime:DiscordChannel",
+    config_model=f"{__package__}.runtime:DiscordConfig",
     setup=SETUP_SPEC,
     dependencies=("discord.py>=2.5.2,<3.0.0",),
     webui="webui/index.ts",

@@ -20,6 +20,7 @@ PLUGIN = ChannelPlugin(
     name="msteams",
     display_name="Microsoft Teams",
     runtime=f"{__package__}.runtime:MSTeamsChannel",
+    config_model=f"{__package__}.runtime:MSTeamsConfig",
     setup=SETUP_SPEC,
     dependencies=(
         "PyJWT>=2.0,<3.0",

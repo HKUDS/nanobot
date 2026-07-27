@@ -5,15 +5,12 @@ import html
 import json
 import mimetypes
 import re
-import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, TypeAlias
 from urllib.parse import quote, unquote, urlparse
-
-from pydantic import Field
 
 from nanobot.security.workspace_policy import is_path_within
 
@@ -55,8 +52,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.matrix.config import MatrixConfig
 from nanobot.config.paths import get_data_dir, get_media_dir
-from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -247,27 +244,6 @@ def _build_matrix_text_content(
 
 def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
     return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
-
-
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    user_id: str = ""
-    password: str = ""
-    access_token: str = ""
-    device_id: str = ""
-    e2ee_enabled: bool = Field(default=sys.platform != "win32", alias="e2eeEnabled")
-    sas_verification: bool = Field(default=False, alias="sasVerification")
-    sync_stop_grace_seconds: int = 2
-    max_media_bytes: int = 20 * 1024 * 1024
-    max_concurrent_media_downloads: int = 2
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
-    streaming: bool = False
 
 
 class MatrixChannel(BaseChannel):

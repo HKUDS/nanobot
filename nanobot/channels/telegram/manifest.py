@@ -21,6 +21,7 @@ PLUGIN = ChannelPlugin(
     name="telegram",
     display_name="Telegram",
     runtime=f"{__package__}.runtime:TelegramChannel",
+    config_model=f"{__package__}.runtime:TelegramConfig",
     setup=SETUP_SPEC,
     dependencies=(
         "python-telegram-bot[socks,webhooks]>=22.6,<23.0",

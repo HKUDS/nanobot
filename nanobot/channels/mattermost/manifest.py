@@ -20,6 +20,7 @@ PLUGIN = ChannelPlugin(
     name="mattermost",
     display_name="Mattermost",
     runtime=f"{__package__}.runtime:MattermostChannel",
+    config_model=f"{__package__}.runtime:MattermostConfig",
     setup=SETUP_SPEC,
     webui="webui/index.ts",
 )

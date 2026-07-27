@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
 from nanobot.config.schema import Config, _resolve_tool_config_refs
 from nanobot.utils.helpers import _write_text_atomic
 
@@ -47,15 +47,71 @@ def load_config(config_path: Path | None = None) -> Config:
 
     path = config_path or get_config_path()
 
-    config = Config()
-    if path.exists():
+    if not path.exists():
         try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            data = _migrate_config(data)
-            config = Config.model_validate(data)
-        except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
-            raise ValueError(f"Failed to load config from {path}: {e}") from e
+            config = Config()
+        except ValidationError as exc:
+            raise ConfigLoadError(
+                path,
+                kind="invalid_schema",
+                summary="Environment-based configuration is invalid.",
+                issues=validation_issues(exc),
+            ) from exc
+        _apply_ssrf_whitelist(config)
+        return config
+
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ConfigLoadError(
+            path,
+            kind="invalid_json",
+            summary=(
+                f"JSON syntax error at line {exc.lineno}, column {exc.colno}: "
+                f"{_sentence(exc.msg)}"
+            ),
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigLoadError(
+            path,
+            kind="io_error",
+            summary="The file is not valid UTF-8.",
+        ) from exc
+    except OSError as exc:
+        detail = exc.strerror or type(exc).__name__
+        raise ConfigLoadError(
+            path,
+            kind="io_error",
+            summary=f"Unable to read the file: {_sentence(detail)}",
+        ) from exc
+
+    if not isinstance(data, dict):
+        root_type = type(data).__name__
+        raise ConfigLoadError(
+            path,
+            kind="invalid_root",
+            summary="The top level of config.json must be a JSON object.",
+            issues=(
+                ConfigIssue(
+                    path=(),
+                    message=f"Expected an object, but found {root_type}.",
+                    code="invalid_root",
+                ),
+            ),
+        )
+
+    data = _migrate_config(data)
+    try:
+        config = Config.model_validate(data)
+    except ValidationError as exc:
+        issues = validation_issues(exc)
+        raise ConfigLoadError(
+            path,
+            kind="invalid_schema",
+            summary=f"Found {len(issues)} invalid setting(s).",
+            issues=issues,
+        ) from exc
 
     _apply_ssrf_whitelist(config)
     return config
@@ -116,13 +172,25 @@ def merge_missing_defaults(existing: Any, defaults: Any) -> Any:
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-def resolve_config_env_vars(config: Config) -> Config:
+def resolve_config_env_vars(
+    config: Config,
+    *,
+    config_path: Path | None = None,
+) -> Config:
     """Return *config* with ``${VAR}`` env-var references resolved.
 
     Walks in place so fields declared with ``exclude=True`` survive;
     returns the same instance when no references are present.
-    Raises ``ValueError`` if a referenced variable is not set.
+    Raises ``ConfigLoadError`` if a referenced variable is not set.
     """
+    missing = tuple(_missing_env_issues(config))
+    if missing:
+        raise ConfigLoadError(
+            config_path or get_config_path(),
+            kind="missing_env",
+            summary=f"Found {len(missing)} missing environment variable reference(s).",
+            issues=missing,
+        )
     return _resolve_in_place(config)
 
 
@@ -176,6 +244,43 @@ def _resolve_in_place(obj: Any) -> Any:
     return obj
 
 
+def _missing_env_issues(
+    obj: Any,
+    path: tuple[str | int, ...] = (),
+) -> list[ConfigIssue]:
+    if isinstance(obj, str):
+        return [
+            ConfigIssue(
+                path=path,
+                message=f"Environment variable '{name}' is not set.",
+                code="missing_env",
+            )
+            for name in dict.fromkeys(_ENV_REF_PATTERN.findall(obj))
+            if name not in os.environ
+        ]
+    if isinstance(obj, BaseModel):
+        issues: list[ConfigIssue] = []
+        for name, field in type(obj).model_fields.items():
+            alias = field.serialization_alias or field.alias or name
+            part = alias if isinstance(alias, str) else name
+            issues.extend(_missing_env_issues(getattr(obj, name), (*path, part)))
+        for name, value in (obj.__pydantic_extra__ or {}).items():
+            issues.extend(_missing_env_issues(value, (*path, name)))
+        return issues
+    if isinstance(obj, dict):
+        issues = []
+        for name, value in obj.items():
+            part = name if isinstance(name, (str, int)) else str(name)
+            issues.extend(_missing_env_issues(value, (*path, part)))
+        return issues
+    if isinstance(obj, list):
+        issues = []
+        for index, value in enumerate(obj):
+            issues.extend(_missing_env_issues(value, (*path, index)))
+        return issues
+    return []
+
+
 def _resolve_env_vars(obj: object) -> object:
     """Recursively resolve ``${VAR}`` patterns in plain strings/dicts/lists."""
     if isinstance(obj, str):
@@ -201,15 +306,26 @@ def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})
+    if not isinstance(tools, dict):
+        return data
     exec_cfg = tools.get("exec", {})
-    if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
+    if (
+        isinstance(exec_cfg, dict)
+        and "restrictToWorkspace" in exec_cfg
+        and "restrictToWorkspace" not in tools
+    ):
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
 
     # Move tools.myEnabled / tools.mySet → tools.my.{enable, allowSet}.
     # The old flat keys shipped in the initial MyTool landing; wrapping them in a
     # sub-config keeps `web` / `exec` / `my` symmetric and gives room to grow.
     if "myEnabled" in tools or "mySet" in tools:
-        my_cfg = tools.setdefault("my", {})
+        my_cfg = tools.get("my")
+        if my_cfg is None:
+            my_cfg = {}
+            tools["my"] = my_cfg
+        if not isinstance(my_cfg, dict):
+            return data
         if "myEnabled" in tools and "enable" not in my_cfg:
             my_cfg["enable"] = tools.pop("myEnabled")
         else:
@@ -220,3 +336,10 @@ def _migrate_config(data: dict) -> dict:
             tools.pop("mySet", None)
 
     return data
+
+
+def _sentence(message: str) -> str:
+    message = message.strip()
+    if message and message[-1] not in ".!?":
+        message += "."
+    return message

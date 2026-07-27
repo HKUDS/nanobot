@@ -20,6 +20,7 @@ PLUGIN = ChannelPlugin(
     name="weixin",
     display_name="WeChat",
     runtime=f"{__package__}.runtime:WeixinChannel",
+    config_model=f"{__package__}.runtime:WeixinConfig",
     connector=f"{__package__}.connect:WeixinConnectStore",
     setup=SETUP_SPEC,
     management=ChannelManagementSpec(local_state_present=local_state_present),

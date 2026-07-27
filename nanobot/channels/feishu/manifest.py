@@ -34,6 +34,7 @@ PLUGIN = ChannelPlugin(
     name="feishu",
     display_name="Feishu",
     runtime=f"{__package__}.runtime:FeishuChannel",
+    config_model=f"{__package__}.config:FeishuConfig",
     connector=f"{__package__}.connect:FeishuConnectStore",
     setup=SETUP_SPEC,
     management=FEISHU_MANAGEMENT,
