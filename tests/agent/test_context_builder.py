@@ -353,6 +353,14 @@ class TestBuildSystemPrompt:
 
 
 class TestBuildMessages:
+    def test_optional_arguments_are_keyword_only(self, tmp_path):
+        builder = _builder(tmp_path)
+
+        with pytest.raises(TypeError):
+            builder.build_system_prompt(["legacy-skill"])
+        with pytest.raises(TypeError):
+            builder.build_messages([], "hello", ["legacy-skill"])
+
     def test_basic_empty_history(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages([], "hello")
@@ -363,7 +371,7 @@ class TestBuildMessages:
 
     def test_runtime_context_is_not_injected_by_default(self, tmp_path):
         builder = _builder(tmp_path)
-        messages = builder.build_messages([], "hello", channel="cli", chat_id="direct")
+        messages = builder.build_messages([], "hello", channel="cli")
         user_msg = str(messages[-1]["content"])
         assert user_msg == "hello"
 

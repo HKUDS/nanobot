@@ -1273,7 +1273,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
 
         tools_removed = 0
         for name in [*removed, *changed]:
-            tools_removed += _unregister_server_tools(state, registry, name)
+            tools_removed += _unregister_server_tools(registry, name)
             await _close_server(state, name)
 
         state._mcp_servers = next_servers
@@ -1447,7 +1447,7 @@ async def _refresh_terminated_server(
             return current_tool
 
         logger.warning("MCP server '{}' session terminated; refreshing connection", server_name)
-        _unregister_server_tools(state, registry, server_name)
+        _unregister_server_tools(registry, server_name)
         await _close_server(state, server_name)
 
         connected = await connect_mcp_servers({server_name: cfg}, registry)
@@ -1479,7 +1479,7 @@ def _tool_belongs_to_server(tool: Tool | None, tool_name: str, server_name: str)
     return tool_name.startswith(_tool_prefix(server_name))
 
 
-def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
+def _unregister_server_tools(registry: ToolRegistry, server_name: str) -> int:
     removed = 0
     for tool_name in list(registry.tool_names):
         tool = registry.get(tool_name)

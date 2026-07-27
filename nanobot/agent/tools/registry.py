@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
 
 
-def is_tool_error_result(name: str, result: Any) -> bool:
+def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
@@ -193,7 +193,7 @@ class ToolRegistry:
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
-            if is_tool_error_result(name, result):
+            if is_tool_error_result(result):
                 return ToolResult.error(str(result) + hint)
             return result
         except Exception as e:

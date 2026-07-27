@@ -447,7 +447,6 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             default=False,
         ),
         yield_time_ms=IntegerSchema(
-            DEFAULT_YIELD_MS,
             description="Milliseconds to wait before returning recent output (default 1000, max 30000).",
             minimum=0,
             maximum=MAX_YIELD_MS,
@@ -458,20 +457,17 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             nullable=True,
         ),
         wait_timeout_ms=IntegerSchema(
-            DEFAULT_WAIT_FOR_MS,
             description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
             description="Maximum output characters to return from this poll (default 10000, max 50000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
         ),
         max_output_tokens=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
             description="Compatibility alias for max_output_chars. The current runtime uses a character budget.",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,

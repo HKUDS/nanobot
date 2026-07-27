@@ -912,7 +912,7 @@ class Consolidator:
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
         history = self._full_unconsolidated_history(session)
-        channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
         summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
@@ -920,10 +920,7 @@ class Consolidator:
             history=history,
             current_message="[token-probe]",
             channel=channel,
-            chat_id=chat_id,
-            sender_id=None,
             session_summary=summary,
-            session_metadata=session.metadata,
             session_key=session.key,
             unified_session=self.unified_session,
         )

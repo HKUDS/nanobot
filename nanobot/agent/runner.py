@@ -1327,7 +1327,7 @@ class AgentRunner:
                 return payload, event, exc
             return payload, event, None
 
-        if is_tool_error_result(tool_call.name, result):
+        if is_tool_error_result(result):
             await hook.on_execute_tool_error(context, tool_call, tool, params, result)
             event = {
                 "name": tool_call.name,

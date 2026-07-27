@@ -271,13 +271,12 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema("Search query"),
-        count=IntegerSchema(1, description="Results (1-10)", minimum=1, maximum=10),
+        count=IntegerSchema(description="Results (1-10)", minimum=1, maximum=10),
         timeRange=StringSchema(
             "Optional time filter for providers that support it: "
             "OneDay, OneWeek, OneMonth, OneYear, or YYYY-MM-DD..YYYY-MM-DD",
         ),
         authLevel=IntegerSchema(
-            0,
             description="Optional authority filter for providers that support it: 0=all, 1=authoritative",
             minimum=0,
             maximum=1,
@@ -939,7 +938,7 @@ class WebSearchTool(Tool):
             "enum": ["markdown", "text"],
             "default": "markdown",
         },
-        maxChars=IntegerSchema(0, minimum=100),
+        maxChars=IntegerSchema(minimum=100),
         required=["url"],
     )
 )

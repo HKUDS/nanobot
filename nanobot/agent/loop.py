@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 from loguru import logger
 
@@ -103,15 +103,7 @@ if TYPE_CHECKING:
     )
     from nanobot.cron.service import CronService
 
-class TurnState(Enum):
-    RESTORE = auto()
-    COMPACT = auto()
-    COMMAND = auto()
-    BUILD = auto()
-    RUN = auto()
-    SAVE = auto()
-    RESPOND = auto()
-    DONE = auto()
+_T = TypeVar("_T")
 
 
 class TurnKind(Enum):
@@ -120,19 +112,9 @@ class TurnKind(Enum):
 
 
 @dataclass
-class StateTraceEntry:
-    state: TurnState
-    started_at: float
-    duration_ms: float
-    event: str
-    error: str | None = None
-
-
-@dataclass
 class TurnContext:
     msg: InboundMessage
     session_key: str
-    state: TurnState
     turn_id: str
     runtime: LLMRuntime | None
     kind: TurnKind
@@ -146,7 +128,6 @@ class TurnContext:
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
 
     final_content: str | None = None
-    tools_used: list[str] = field(default_factory=list)
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
     had_injections: bool = False
@@ -177,8 +158,6 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
-
-    trace: list[StateTraceEntry] = field(default_factory=list)
 
 
 class AgentLoop:
@@ -243,19 +222,6 @@ class AgentLoop:
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
-
-    # Event-driven state transition table.
-    # Handlers return an event string; the driver looks up the next state here.
-    _TRANSITIONS: dict[tuple[TurnState, str], TurnState] = {
-        (TurnState.RESTORE, "ok"): TurnState.COMPACT,
-        (TurnState.COMPACT, "ok"): TurnState.COMMAND,
-        (TurnState.COMMAND, "dispatch"): TurnState.BUILD,
-        (TurnState.COMMAND, "shortcut"): TurnState.DONE,
-        (TurnState.BUILD, "ok"): TurnState.RUN,
-        (TurnState.RUN, "ok"): TurnState.SAVE,
-        (TurnState.SAVE, "ok"): TurnState.RESPOND,
-        (TurnState.RESPOND, "ok"): TurnState.DONE,
-    }
 
     def __init__(
         self,
@@ -712,13 +678,8 @@ class AgentLoop:
             current_message=ctx.msg.content,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
             channel=ctx.delivery.route.channel,
-            chat_id=str(
-                ctx.msg.metadata.get("context_chat_id") or ctx.delivery.route.chat_id
-            ),
             current_role="user",
-            sender_id=ctx.msg.sender_id,
             session_summary=ctx.pending_summary,
-            session_metadata=ctx.session.metadata,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
             include_memory_recent_history=not ctx.ephemeral,
@@ -1379,7 +1340,6 @@ class AgentLoop:
             msg=msg,
             session=None,
             session_key=key,
-            state=TurnState.RESTORE,
             turn_id=f"{key}:{time.time_ns()}",
             runtime=runtime,
             kind=kind,
@@ -1449,65 +1409,47 @@ class AgentLoop:
             ctx.on_stream = _tracked_stream
             ctx.on_stream_end = _tracked_stream_end
 
-        while ctx.state is not TurnState.DONE:
-            handler_name = f"_state_{ctx.state.name.lower()}"
-            handler = getattr(self, handler_name, None)
-            if handler is None:
-                raise RuntimeError(f"Missing state handler for {ctx.state}")
-
-            t0 = time.perf_counter()
-            try:
-                event = await handler(ctx)
-            except Exception:
-                duration = (time.perf_counter() - t0) * 1000
-                ctx.trace.append(
-                    StateTraceEntry(
-                        state=ctx.state,
-                        started_at=t0,
-                        duration_ms=duration,
-                        event="",
-                        error="exception",
-                    )
-                )
-                raise
-
-            duration = (time.perf_counter() - t0) * 1000
-            ctx.trace.append(
-                StateTraceEntry(
-                    state=ctx.state,
-                    started_at=t0,
-                    duration_ms=duration,
-                    event=event,
-                )
-            )
-            logger.debug(
-                "[turn {}] State {} took {:.1f}ms -> event {}",
-                ctx.turn_id,
-                ctx.state.name,
-                duration,
-                event,
-            )
-
-            next_state = self._TRANSITIONS.get((ctx.state, event))
-            if next_state is None:
-                raise RuntimeError(
-                    f"[turn {ctx.turn_id}] No transition from {ctx.state} "
-                    f"on event {event!r}"
-                )
-            ctx.state = next_state
-
-        logger.debug(
-            "[turn {}] Turn completed after {} states",
-            ctx.turn_id,
-            len(ctx.trace),
-        )
+        await self._run_turn_stage(ctx, "restore", self._restore_turn)
+        await self._run_turn_stage(ctx, "compact", self._compact_session)
+        if await self._run_turn_stage(ctx, "command", self._dispatch_command):
+            return ctx.outbound
+        await self._run_turn_stage(ctx, "build", self._build_turn)
+        await self._run_turn_stage(ctx, "run", self._run_turn)
+        await self._run_turn_stage(ctx, "save", self._persist_turn)
+        await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
         return ctx.outbound
+
+    async def _run_turn_stage(
+        self,
+        ctx: TurnContext,
+        name: str,
+        handler: Callable[[TurnContext], Awaitable[_T]],
+    ) -> _T:
+        started_at = time.perf_counter()
+        try:
+            result = await handler(ctx)
+        except Exception:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            logger.debug(
+                "[turn {}] Stage {} failed after {:.1f}ms",
+                ctx.turn_id,
+                name,
+                duration_ms,
+            )
+            raise
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.debug(
+            "[turn {}] Stage {} completed in {:.1f}ms",
+            ctx.turn_id,
+            name,
+            duration_ms,
+        )
+        return result
 
     def _assemble_outbound(
         self,
         msg: InboundMessage,
         final_content: str,
-        all_msgs: list[dict[str, Any]],
         stop_reason: str,
         had_injections: bool,
         streamed_content: bool,
@@ -1538,7 +1480,7 @@ class AgentLoop:
             metadata=meta,
         )
 
-    async def _state_restore(self, ctx: TurnContext) -> TurnState:
+    async def _restore_turn(self, ctx: TurnContext) -> None:
         """Restore checkpoint / pending user turn; extract documents."""
         msg = ctx.msg
 
@@ -1571,8 +1513,6 @@ class AgentLoop:
         if self._restore_pending_user_turn(ctx.session):
             self.sessions.save(ctx.session)
 
-        return "ok"
-
     def _prepare_message_media(self, content: str, media: list[str]) -> tuple[str, list[str]]:
         if self._should_extract_document_text():
             return extract_documents(content, media)
@@ -1583,14 +1523,13 @@ class AgentLoop:
             return True
         return self.channels_config.extract_document_text
 
-    async def _state_compact(self, ctx: TurnContext) -> str:
+    async def _compact_session(self, ctx: TurnContext) -> None:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
         ctx.pending_summary = pending
-        return "ok"
 
-    async def _state_command(self, ctx: TurnContext) -> str:
+    async def _dispatch_command(self, ctx: TurnContext) -> bool:
         if ctx.kind is TurnKind.SYSTEM:
-            return "dispatch"
+            return False
         raw = ctx.msg.content.strip()
         _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
         is_user_turn = (
@@ -1626,10 +1565,10 @@ class AgentLoop:
                 )
                 self.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
-            return "shortcut"
-        return "dispatch"
+            return True
+        return False
 
-    async def _state_build(self, ctx: TurnContext) -> str:
+    async def _build_turn(self, ctx: TurnContext) -> None:
         runtime = ctx.runtime
         if runtime is None:
             runtime = self.runtime_for_session(ctx.session)
@@ -1685,9 +1624,7 @@ class AgentLoop:
         if ctx.on_retry_wait is None:
             ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
 
-        return "ok"
-
-    async def _state_run(self, ctx: TurnContext) -> str:
+    async def _run_turn(self, ctx: TurnContext) -> None:
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
         await ctx.delivery.running(started_at=ctx.visible_run_started_at)
@@ -1714,17 +1651,15 @@ class AgentLoop:
             tools=ctx.tools,
             request_context=ctx.request_context,
         )
-        final_content, tools_used, all_msgs, stop_reason, had_injections = result
+        final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
-        ctx.tools_used = tools_used
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
-        return "ok"
 
-    async def _state_save(self, ctx: TurnContext) -> str:
+    async def _persist_turn(self, ctx: TurnContext) -> None:
         turn_continuation.prepare_save_boundary(ctx)
 
         if (
@@ -1765,12 +1700,11 @@ class AgentLoop:
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
-        return "ok"
 
-    async def _state_respond(self, ctx: TurnContext) -> str:
+    async def _prepare_outbound(self, ctx: TurnContext) -> None:
         if ctx.suppress_response:
             ctx.outbound = None
-            return "ok"
+            return
         if ctx.kind is TurnKind.SYSTEM:
             ctx.outbound = ctx.delivery.background_response(
                 ctx.final_content,
@@ -1778,11 +1712,10 @@ class AgentLoop:
                 streamed=ctx.streamed_content,
                 latency_ms=ctx.turn_latency_ms,
             )
-            return "ok"
+            return
         ctx.outbound = self._assemble_outbound(
             ctx.msg,
             ctx.final_content,
-            ctx.all_messages,
             ctx.stop_reason,
             ctx.had_injections,
             ctx.streamed_content,
@@ -1790,7 +1723,6 @@ class AgentLoop:
         )
         if ctx.ephemeral and ctx.outbound is not None:
             ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
-        return "ok"
 
     def _sanitize_persisted_blocks(
         self,

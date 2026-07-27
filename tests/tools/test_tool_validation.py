@@ -60,7 +60,7 @@ class SampleTool(Tool):
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
 )
@@ -81,12 +81,12 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
     root = tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
     obj = ObjectSchema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
     params = {"query": "h", "count": 2}
@@ -110,14 +110,14 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     expected = _Mini().validate_params(params)
     assert Schema.validate_json_schema_value(params, root, "") == expected
     assert obj.validate_value(params, "") == expected
-    assert IntegerSchema(0, minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n must be >= 1"]
 
 
 def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
     """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
     built = tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         mode=StringSchema("", enum=["fast", "full"]),
         meta=ObjectSchema(
             tag=StringSchema(""),
