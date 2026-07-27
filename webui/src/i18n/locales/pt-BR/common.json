@@ -1266,56 +1266,38 @@
   "extensions": {
     "backToChat": "Voltar ao chat",
     "title": "Extensões",
-    "tabs": {
-      "label": "Visualizações de extensões",
-      "installed": "Instaladas",
-      "discover": "Descobrir",
-      "builtin": "Integradas"
-    },
-    "ecosystem": {
-      "all": "Todas",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Buscar pacotes de extensão",
     "searchInstalled": "Buscar extensões",
     "empty": {
-      "installed": "Nenhuma extensão externa instalada.",
-      "discover": "Nenhum pacote de extensão correspondente.",
-      "builtin": "Nenhum recurso integrado encontrado."
+      "installed": "Nenhuma extensão instalada."
     },
-    "installed": "Instalada",
-    "install": "Instalar {{name}}",
+    "installKind": "Origem da instalação",
+    "source": {
+      "git": "Repositório Git",
+      "local": "Pasta local"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/caminho/absoluto/para/extensão",
+    "installAction": "Instalar",
     "details": {
       "identity": "Identidade",
       "source": "Origem",
-      "scope": "Escopo",
       "license": "Licença",
       "homepage": "Página inicial",
-      "contributions": "Contribuições",
       "dependencies": "Dependências",
       "permissions": "Permissões",
-      "diagnostics": "Diagnóstico"
+      "diagnostics": "Diagnósticos"
     },
     "permissionGranted": "Concedida",
     "permissionPending": "Não concedida",
     "revokePermissions": "Revogar permissões",
     "grantPermissions": "Conceder permissões",
-  "noPermissions": "Nenhuma permissão do host solicitada.",
-  "configManaged": "Gerenciada pela configuração.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Runtime Node.js",
-        "reason": "Executa JavaScript ou TypeScript de terceiros em um processo Node.js."
-      }
-    },
+    "noPermissions": "Nenhuma permissão do host solicitada.",
     "revokeTrust": "Revogar confiança",
     "trust": "Confiar",
     "disable": "Desativar",
     "enable": "Ativar",
     "uninstall": "Desinstalar",
-    "uninstallTitle": "Desinstalar a extensão?",
+    "uninstallTitle": "Desinstalar extensão?",
     "uninstallDescription": "Isso remove {{name}} e seus arquivos instalados do nanobot.",
     "cancel": "Cancelar",
     "status": {
@@ -1324,7 +1306,7 @@
       "untrusted": "Não confiável",
       "inactive": "Inativa"
     },
-    "none": "Nenhuma",
+    "none": "Nenhum",
     "loading": "Carregando extensões…"
   }
 }

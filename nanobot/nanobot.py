@@ -11,7 +11,7 @@ from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
-from nanobot.extensions import ExtensionHost
+from nanobot.extensions.host import ExtensionHost
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
@@ -334,7 +334,6 @@ class Nanobot:
             return
         async with self._extensions_lock:
             if not self._extensions_started:
-                await self._loop._connect_mcp()
                 await self._extensions.reload()
                 self._extensions_started = True
 

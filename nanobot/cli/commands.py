@@ -1349,7 +1349,7 @@ def serve(
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
-    from nanobot.extensions import ExtensionHost
+    from nanobot.extensions.host import ExtensionHost
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
@@ -1652,7 +1652,8 @@ def _run_gateway(
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
-    from nanobot.extensions import ExtensionHost, ExtensionService
+    from nanobot.extensions.host import ExtensionHost
+    from nanobot.extensions.service import ExtensionService
     from nanobot.providers.factory import (
         build_provider_snapshot,
         build_unconfigured_provider_snapshot,
@@ -2164,7 +2165,6 @@ def _run_gateway(
             console.print,
         )
         try:
-            await agent._connect_mcp()
             await extension_host.reload()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
@@ -2285,7 +2285,7 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
-    from nanobot.extensions import ExtensionHost
+    from nanobot.extensions.host import ExtensionHost
     from nanobot.providers.image_generation import image_gen_provider_configs
 
     config = _load_runtime_config(config, workspace)
@@ -2356,7 +2356,6 @@ def agent(
         # Single message mode — direct call, no bus needed
         async def run_once():
             try:
-                await agent_loop._connect_mcp()
                 await extension_host.reload()
                 renderer = StreamRenderer(
                     render_markdown=markdown,
@@ -2418,7 +2417,6 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
-            await agent_loop._connect_mcp()
             await extension_host.reload()
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()

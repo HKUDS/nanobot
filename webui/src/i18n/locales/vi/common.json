@@ -1251,35 +1251,24 @@
   },
   "extensions": {
     "backToChat": "Quay lại trò chuyện",
-    "title": "Tiện ích mở rộng",
-    "tabs": {
-      "label": "Chế độ xem tiện ích",
-      "installed": "Đã cài",
-      "discover": "Khám phá",
-      "builtin": "Tích hợp"
-    },
-    "ecosystem": {
-      "all": "Tất cả",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Tìm gói tiện ích",
+    "title": "Tiện ích",
     "searchInstalled": "Tìm tiện ích",
     "empty": {
-      "installed": "Chưa cài tiện ích bên ngoài.",
-      "discover": "Không có gói tiện ích phù hợp.",
-      "builtin": "Không tìm thấy khả năng tích hợp."
+      "installed": "Chưa cài tiện ích nào."
     },
-    "installed": "Đã cài",
-    "install": "Cài {{name}}",
+    "installKind": "Nguồn cài đặt",
+    "source": {
+      "git": "Kho Git",
+      "local": "Thư mục cục bộ"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/đường/dẫn/tuyệt/đối/đến/tiện-ích",
+    "installAction": "Cài đặt",
     "details": {
-      "identity": "Định danh",
+      "identity": "Danh tính",
       "source": "Nguồn",
-      "scope": "Phạm vi",
       "license": "Giấy phép",
       "homepage": "Trang chủ",
-      "contributions": "Khả năng cung cấp",
       "dependencies": "Phụ thuộc",
       "permissions": "Quyền",
       "diagnostics": "Chẩn đoán"
@@ -1288,14 +1277,7 @@
     "permissionPending": "Chưa cấp",
     "revokePermissions": "Thu hồi quyền",
     "grantPermissions": "Cấp quyền",
-  "noPermissions": "Không yêu cầu quyền máy chủ.",
-  "configManaged": "Được quản lý bằng cấu hình.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Môi trường chạy Node.js",
-        "reason": "Chạy JavaScript hoặc TypeScript của bên thứ ba trong tiến trình Node.js."
-      }
-    },
+    "noPermissions": "Không yêu cầu quyền máy chủ.",
     "revokeTrust": "Thu hồi tin cậy",
     "trust": "Tin cậy",
     "disable": "Tắt",
@@ -1305,7 +1287,7 @@
     "uninstallDescription": "Thao tác này xóa {{name}} và các tệp đã cài khỏi nanobot.",
     "cancel": "Hủy",
     "status": {
-      "active": "Đang chạy",
+      "active": "Đang hoạt động",
       "disabled": "Đã tắt",
       "untrusted": "Chưa tin cậy",
       "inactive": "Không hoạt động"

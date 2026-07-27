@@ -1252,34 +1252,23 @@
   "extensions": {
     "backToChat": "チャットに戻る",
     "title": "拡張機能",
-    "tabs": {
-      "label": "拡張機能ビュー",
-      "installed": "インストール済み",
-      "discover": "探す",
-      "builtin": "組み込み"
-    },
-    "ecosystem": {
-      "all": "すべて",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "拡張パッケージを検索",
     "searchInstalled": "拡張機能を検索",
     "empty": {
-      "installed": "外部拡張機能はありません。",
-      "discover": "一致する拡張パッケージはありません。",
-      "builtin": "組み込み機能が見つかりません。"
+      "installed": "拡張機能はインストールされていません。"
     },
-    "installed": "インストール済み",
-    "install": "{{name}} をインストール",
+    "installKind": "インストール元",
+    "source": {
+      "git": "Git リポジトリ",
+      "local": "ローカルフォルダー"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/拡張機能への絶対パス",
+    "installAction": "インストール",
     "details": {
       "identity": "識別情報",
       "source": "ソース",
-      "scope": "スコープ",
       "license": "ライセンス",
       "homepage": "ホームページ",
-      "contributions": "提供機能",
       "dependencies": "依存関係",
       "permissions": "権限",
       "diagnostics": "診断"
@@ -1288,14 +1277,7 @@
     "permissionPending": "未許可",
     "revokePermissions": "権限を取り消す",
     "grantPermissions": "権限を許可",
-  "noPermissions": "ホスト権限の要求はありません。",
-  "configManaged": "設定で管理されています。",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Node.js ランタイム",
-        "reason": "サードパーティーの JavaScript または TypeScript を Node.js プロセスで実行します。"
-      }
-    },
+    "noPermissions": "ホスト権限は要求されていません。",
     "revokeTrust": "信頼を取り消す",
     "trust": "信頼する",
     "disable": "無効化",
@@ -1305,7 +1287,7 @@
     "uninstallDescription": "{{name}} とインストール済みファイルを nanobot から削除します。",
     "cancel": "キャンセル",
     "status": {
-      "active": "実行中",
+      "active": "有効",
       "disabled": "無効",
       "untrusted": "未信頼",
       "inactive": "停止中"

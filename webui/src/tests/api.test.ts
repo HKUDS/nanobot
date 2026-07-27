@@ -87,7 +87,7 @@ describe("webui API helpers", () => {
     await fetchExtensions("tok");
     await runExtensionAction("tok", "install", {
       source: "本地扩展",
-      kind: "npm",
+      kind: "local",
     });
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -105,7 +105,7 @@ describe("webui API helpers", () => {
       JSON.parse(
         decodeURIComponent(headers.get("X-Nanobot-Extension-Values") ?? ""),
       ),
-    ).toEqual({ source: "本地扩展", kind: "npm" });
+    ).toEqual({ source: "本地扩展", kind: "local" });
   });
 
   it("passes pagination params when fetching a WebUI thread page", async () => {

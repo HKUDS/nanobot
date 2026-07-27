@@ -1252,57 +1252,39 @@
   "extensions": {
     "backToChat": "Retour au chat",
     "title": "Extensions",
-    "tabs": {
-      "label": "Vues des extensions",
-      "installed": "Installées",
-      "discover": "Découvrir",
-      "builtin": "Intégrées"
-    },
-    "ecosystem": {
-      "all": "Toutes",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Rechercher des paquets d’extension",
     "searchInstalled": "Rechercher des extensions",
     "empty": {
-      "installed": "Aucune extension externe installée.",
-      "discover": "Aucun paquet d’extension correspondant.",
-      "builtin": "Aucune capacité intégrée trouvée."
+      "installed": "Aucune extension installée."
     },
-    "installed": "Installée",
-    "install": "Installer {{name}}",
+    "installKind": "Source d’installation",
+    "source": {
+      "git": "Dépôt Git",
+      "local": "Dossier local"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/chemin/absolu/vers/extension",
+    "installAction": "Installer",
     "details": {
       "identity": "Identité",
       "source": "Source",
-      "scope": "Portée",
       "license": "Licence",
-      "homepage": "Site web",
-      "contributions": "Contributions",
+      "homepage": "Page d’accueil",
       "dependencies": "Dépendances",
       "permissions": "Autorisations",
-      "diagnostics": "Diagnostic"
+      "diagnostics": "Diagnostics"
     },
     "permissionGranted": "Accordée",
     "permissionPending": "Non accordée",
     "revokePermissions": "Révoquer les autorisations",
     "grantPermissions": "Accorder les autorisations",
-  "noPermissions": "Aucune autorisation hôte demandée.",
-  "configManaged": "Gérée par la configuration.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Environnement Node.js",
-        "reason": "Exécute du JavaScript ou TypeScript tiers dans un processus Node.js."
-      }
-    },
+    "noPermissions": "Aucune autorisation hôte demandée.",
     "revokeTrust": "Révoquer la confiance",
     "trust": "Faire confiance",
     "disable": "Désactiver",
     "enable": "Activer",
     "uninstall": "Désinstaller",
-    "uninstallTitle": "Désinstaller l’extension ?",
-    "uninstallDescription": "Cette action supprime {{name}} et ses fichiers installés de nanobot.",
+    "uninstallTitle": "Désinstaller l’extension ?",
+    "uninstallDescription": "Cela supprime {{name}} et ses fichiers installés de nanobot.",
     "cancel": "Annuler",
     "status": {
       "active": "Active",
@@ -1310,7 +1292,7 @@
       "untrusted": "Non approuvée",
       "inactive": "Inactive"
     },
-    "none": "Aucune",
+    "none": "Aucun",
     "loading": "Chargement des extensions…"
   }
 }

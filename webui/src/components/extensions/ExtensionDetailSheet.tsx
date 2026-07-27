@@ -24,7 +24,6 @@ import {
   ExtensionMark,
   MetaItem,
   NamedItems,
-  RuntimeBadge,
   StatusBadge,
 } from "./extension-ui";
 
@@ -52,8 +51,6 @@ export function ExtensionDetailSheet({
   const [uninstallOpen, setUninstallOpen] = useState(false);
   if (!extension) return null;
 
-  const configManaged =
-    extension.scope !== "builtin" && !extension.managed_by_store;
   const requested = new Set(extension.requested_permissions);
   const granted = new Set(extension.granted_permissions);
   const allGranted = [...requested].every((permission) => granted.has(permission));
@@ -67,7 +64,7 @@ export function ExtensionDetailSheet({
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <div className="flex items-start gap-3 pr-8">
-              <ExtensionMark runtime={extension.runtime} large />
+              <ExtensionMark large />
               <div className="min-w-0 flex-1">
                 <SheetTitle className="truncate text-[20px] font-semibold">
                   {extension.name}
@@ -76,7 +73,6 @@ export function ExtensionDetailSheet({
                   {extension.description || extension.id}
                 </SheetDescription>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <RuntimeBadge runtime={extension.runtime} />
                   <DetailPill>{extension.version}</DetailPill>
                   <StatusBadge extension={extension} />
                 </div>
@@ -90,10 +86,6 @@ export function ExtensionDetailSheet({
                   <MetaItem
                     label={t("extensions.details.source")}
                     value={extension.source}
-                  />
-                  <MetaItem
-                    label={t("extensions.details.scope")}
-                    value={extension.scope}
                   />
                   <MetaItem
                     label={t("extensions.details.license")}
@@ -114,13 +106,6 @@ export function ExtensionDetailSheet({
               </DetailSection>
 
               <NamedItems
-                title={t("extensions.details.contributions")}
-                rows={extension.contributions.map((item) => ({
-                  name: item.name,
-                  meta: item.kind,
-                }))}
-              />
-              <NamedItems
                 title={t("extensions.details.dependencies")}
                 rows={extension.dependencies.map((item) => ({
                   name: item.name,
@@ -138,15 +123,11 @@ export function ExtensionDetailSheet({
                       >
                         <div className="min-w-0">
                           <div className="text-[13px] font-medium text-foreground">
-                            {permission.name === "runtime.node"
-                              ? t("extensions.knownPermissions.runtimeNode.label")
-                              : permission.name}
+                            {permission.name}
                           </div>
                           {permission.reason ? (
                             <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                              {permission.name === "runtime.node"
-                                ? t("extensions.knownPermissions.runtimeNode.reason")
-                                : permission.reason}
+                              {permission.reason}
                             </p>
                           ) : null}
                         </div>
@@ -164,24 +145,22 @@ export function ExtensionDetailSheet({
                         </span>
                       </div>
                     ))}
-                    {extension.managed_by_store ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busy !== null}
-                        onClick={() =>
-                          void onAction("permissions", {
-                            id: extension.id,
-                            permissions: allGranted ? [] : [...requested],
-                          })
-                        }
-                        className="rounded-full"
-                      >
-                        {allGranted
-                          ? t("extensions.revokePermissions")
-                          : t("extensions.grantPermissions")}
-                      </Button>
-                    ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void onAction("permissions", {
+                          id: extension.id,
+                          permissions: allGranted ? [] : [...requested],
+                        })
+                      }
+                      className="rounded-full"
+                    >
+                      {allGranted
+                        ? t("extensions.revokePermissions")
+                        : t("extensions.grantPermissions")}
+                    </Button>
                   </div>
                 ) : (
                   <p className="text-[13px] text-muted-foreground">
@@ -212,56 +191,50 @@ export function ExtensionDetailSheet({
             </div>
           </div>
 
-          {extension.managed_by_store ? (
-            <div className="flex flex-wrap items-center gap-2 border-t border-border/45 bg-background/95 px-5 py-4">
-              <Button
-                size="sm"
-                variant={extension.trusted ? "outline" : "default"}
-                disabled={busy !== null || (!extension.trusted && !allGranted)}
-                onClick={() =>
-                  void onAction(extension.trusted ? "untrust" : "trust", {
-                    id: extension.id,
-                  })
-                }
-                className="rounded-full"
-              >
-                <ShieldCheck className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                {extension.trusted
-                  ? t("extensions.revokeTrust")
-                  : t("extensions.trust")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy !== null || !extension.trusted}
-                onClick={() =>
-                  void onAction(extension.enabled ? "disable" : "enable", {
-                    id: extension.id,
-                  })
-                }
-                className="rounded-full"
-              >
-                {extension.enabled
-                  ? t("extensions.disable")
-                  : t("extensions.enable")}
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                disabled={busy !== null}
-                aria-label={t("extensions.uninstall")}
-                title={t("extensions.uninstall")}
-                onClick={() => setUninstallOpen(true)}
-                className="ml-auto h-8 w-8 rounded-full text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </Button>
-            </div>
-          ) : configManaged ? (
-            <div className="border-t border-border/45 bg-background/95 px-5 py-4 text-[12px] text-muted-foreground">
-              {t("extensions.configManaged")}
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2 border-t border-border/45 bg-background/95 px-5 py-4">
+            <Button
+              size="sm"
+              variant={extension.trusted ? "outline" : "default"}
+              disabled={busy !== null || (!extension.trusted && !allGranted)}
+              onClick={() =>
+                void onAction(extension.trusted ? "untrust" : "trust", {
+                  id: extension.id,
+                })
+              }
+              className="rounded-full"
+            >
+              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {extension.trusted
+                ? t("extensions.revokeTrust")
+                : t("extensions.trust")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy !== null || !extension.trusted}
+              onClick={() =>
+                void onAction(extension.enabled ? "disable" : "enable", {
+                  id: extension.id,
+                })
+              }
+              className="rounded-full"
+            >
+              {extension.enabled
+                ? t("extensions.disable")
+                : t("extensions.enable")}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              disabled={busy !== null}
+              aria-label={t("extensions.uninstall")}
+              title={t("extensions.uninstall")}
+              onClick={() => setUninstallOpen(true)}
+              className="ml-auto h-8 w-8 rounded-full text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
         </SheetContent>
       </Sheet>
 

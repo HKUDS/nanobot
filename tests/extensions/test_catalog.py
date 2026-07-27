@@ -1,8 +1,8 @@
 import json
-from unittest.mock import patch
 
 from nanobot.config.schema import Config
-from nanobot.extensions import build_extension_catalog
+from nanobot.extensions.catalog import build_extension_catalog
+from nanobot.extensions.store import ExtensionStore
 
 
 def _write_extension(root, extension_id: str) -> None:
@@ -14,60 +14,39 @@ def _write_extension(root, extension_id: str) -> None:
                 "id": extension_id,
                 "name": extension_id,
                 "version": "1.0.0",
-                "runtime": "python",
-                "contributions": [{"kind": "tool", "name": f"{extension_id}_tool"}],
+                "entry": "extension:register",
             }
         )
     )
 
 
-def _catalog(config: Config, user_root):
-    with (
-        patch("nanobot.channels.registry.discover_plugins", return_value={}),
-        patch("nanobot.providers.registry.PROVIDERS", ()),
-        patch("nanobot.audio.transcription_registry.TRANSCRIPTION_PROVIDERS", ()),
-        patch(
-            "nanobot.providers.image_generation.image_gen_provider_names",
-            return_value=(),
-        ),
-    ):
-        return build_extension_catalog(config, user_root=user_root)
-
-
-def test_installed_extension_requires_explicit_trust(tmp_path) -> None:
+def test_catalog_requires_trust_before_activation(tmp_path) -> None:
     _write_extension(tmp_path, "acme")
 
-    catalog = _catalog(Config(), tmp_path)
+    catalog = build_extension_catalog(Config(), user_root=tmp_path)
 
     assert [item.manifest.id for item in catalog.candidates] == ["acme"]
     assert catalog.snapshot.extensions == ()
 
 
-def test_entry_config_trust_activates_installed_extension(tmp_path) -> None:
-    _write_extension(tmp_path, "acme")
-    config = Config.model_validate(
-        {
-            "extensions": {
-                "entries": {
-                    "acme": {
-                        "enabled": True,
-                        "trusted": True,
-                    }
-                }
-            }
-        }
-    )
+def test_store_policy_can_trust_an_extension(tmp_path) -> None:
+    source = tmp_path / "source"
+    _write_extension(source, "acme")
+    store = ExtensionStore(tmp_path / "installed")
+    store.install_local(source / "acme")
+    store.set_trusted("acme", True)
 
-    catalog = _catalog(config, tmp_path)
+    catalog = build_extension_catalog(Config(), user_root=store.root)
 
     assert [item.manifest.id for item in catalog.snapshot.extensions] == ["acme"]
-    assert catalog.snapshot.contributions[0].contribution.name == "acme_tool"
 
 
-def test_extensions_disabled_keeps_native_catalog_only(tmp_path) -> None:
+def test_disabled_catalog_discovers_nothing(tmp_path) -> None:
     _write_extension(tmp_path, "acme")
-    config = Config.model_validate({"extensions": {"enabled": False}})
 
-    catalog = _catalog(config, tmp_path)
+    catalog = build_extension_catalog(
+        Config.model_validate({"extensions": {"enabled": False}}),
+        user_root=tmp_path,
+    )
 
-    assert all(item.manifest.id != "acme" for item in catalog.candidates)
+    assert catalog.candidates == ()

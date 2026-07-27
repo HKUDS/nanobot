@@ -1,21 +1,11 @@
 import type { ReactNode } from "react";
-import { Box, Loader2, PackageOpen } from "lucide-react";
+import { Loader2, PackageOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { ExtensionInfo, ExtensionMarketPackage } from "@/lib/types";
+import type { ExtensionInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type ExtensionTab = "installed" | "discover" | "builtin";
-export type ExtensionEcosystem = "all" | "nanobot" | "pi" | "openclaw";
-
-export function ExtensionMark({
-  runtime,
-  large = false,
-}: {
-  runtime: string;
-  large?: boolean;
-}) {
-  const Icon = runtime === "pi" || runtime === "openclaw" ? Box : PackageOpen;
+export function ExtensionMark({ large = false }: { large?: boolean }) {
   return (
     <div
       className={cn(
@@ -23,16 +13,12 @@ export function ExtensionMark({
         large ? "h-12 w-12" : "h-10 w-10",
       )}
     >
-      <Icon className={large ? "h-5 w-5" : "h-4 w-4"} strokeWidth={1.8} aria-hidden />
+      <PackageOpen
+        className={large ? "h-5 w-5" : "h-4 w-4"}
+        strokeWidth={1.8}
+        aria-hidden
+      />
     </div>
-  );
-}
-
-export function RuntimeBadge({ runtime }: { runtime: string }) {
-  return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      {runtime}
-    </span>
   );
 }
 
@@ -137,20 +123,7 @@ export function filterExtensions(
   const term = query.trim().toLowerCase();
   if (!term) return items;
   return items.filter((item) =>
-    [item.name, item.id, item.description, item.runtime].some((value) =>
-      value.toLowerCase().includes(term),
-    ),
-  );
-}
-
-export function filterPackages(
-  items: ExtensionMarketPackage[],
-  query: string,
-): ExtensionMarketPackage[] {
-  const term = query.trim().toLowerCase();
-  if (!term) return items;
-  return items.filter((item) =>
-    [item.name, item.description, item.publisher].some((value) =>
+    [item.name, item.id, item.description].some((value) =>
       value.toLowerCase().includes(term),
     ),
   );

@@ -1250,36 +1250,25 @@
     }
   },
   "extensions": {
-    "backToChat": "Kembali ke obrolan",
+    "backToChat": "Kembali ke chat",
     "title": "Ekstensi",
-    "tabs": {
-      "label": "Tampilan ekstensi",
-      "installed": "Terpasang",
-      "discover": "Temukan",
-      "builtin": "Bawaan"
-    },
-    "ecosystem": {
-      "all": "Semua",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Cari paket ekstensi",
     "searchInstalled": "Cari ekstensi",
     "empty": {
-      "installed": "Belum ada ekstensi eksternal terpasang.",
-      "discover": "Tidak ada paket ekstensi yang cocok.",
-      "builtin": "Kemampuan bawaan tidak ditemukan."
+      "installed": "Belum ada ekstensi terpasang."
     },
-    "installed": "Terpasang",
-    "install": "Pasang {{name}}",
+    "installKind": "Sumber instalasi",
+    "source": {
+      "git": "Repositori Git",
+      "local": "Folder lokal"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/jalur/absolut/ke/ekstensi",
+    "installAction": "Pasang",
     "details": {
       "identity": "Identitas",
       "source": "Sumber",
-      "scope": "Cakupan",
       "license": "Lisensi",
       "homepage": "Beranda",
-      "contributions": "Kontribusi",
       "dependencies": "Dependensi",
       "permissions": "Izin",
       "diagnostics": "Diagnostik"
@@ -1288,14 +1277,7 @@
     "permissionPending": "Belum diberikan",
     "revokePermissions": "Cabut izin",
     "grantPermissions": "Berikan izin",
-  "noPermissions": "Tidak meminta izin host.",
-  "configManaged": "Dikelola melalui konfigurasi.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Runtime Node.js",
-        "reason": "Jalankan JavaScript atau TypeScript pihak ketiga dalam proses Node.js."
-      }
-    },
+    "noPermissions": "Tidak meminta izin host.",
     "revokeTrust": "Cabut kepercayaan",
     "trust": "Percayai",
     "disable": "Nonaktifkan",
@@ -1306,7 +1288,7 @@
     "cancel": "Batal",
     "status": {
       "active": "Aktif",
-      "disabled": "Dinonaktifkan",
+      "disabled": "Nonaktif",
       "untrusted": "Belum dipercaya",
       "inactive": "Tidak aktif"
     },

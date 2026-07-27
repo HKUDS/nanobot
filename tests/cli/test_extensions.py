@@ -20,13 +20,10 @@ class _Service:
                     "id": "sample",
                     "name": "Sample",
                     "version": "1.0.0",
-                    "runtime": "pi",
-                    "scope": "user",
                     "description": "Example extension",
                     "enabled": True,
                     "trusted": False,
                     "active": False,
-                    "contributions": [],
                     "dependencies": [],
                     "permissions": [{"name": "network", "reason": "Fetch data"}],
                     "granted_permissions": [],
@@ -34,10 +31,6 @@ class _Service:
             ],
             "diagnostics": [],
         }
-
-    async def search(self, query, *, ecosystem, limit):
-        self.calls.append(("search", (query, ecosystem, limit)))
-        return {"packages": []}
 
     async def install(self, source, *, kind, ref, trusted):
         self.calls.append(("install", (source, kind, ref, trusted)))
@@ -80,27 +73,21 @@ def _runner(service: _Service):
     return CliRunner(), app, output
 
 
-def test_extension_cli_inspects_and_searches() -> None:
+def test_extension_cli_inspects() -> None:
     service = _Service()
     runner, app, output = _runner(service)
 
     inspected = runner.invoke(app, ["inspect", "sample"])
-    searched = runner.invoke(app, ["search", "web", "--ecosystem", "pi", "--limit", "7"])
-
     assert inspected.exit_code == 0
-    assert searched.exit_code == 0
     assert "Sample" in output.getvalue()
-    assert service.calls == [
-        ("status", None),
-        ("search", ("web", "pi", 7)),
-    ]
+    assert service.calls == [("status", None)]
 
 
 def test_extension_cli_install_and_policy_commands() -> None:
     service = _Service()
     runner, app, _output = _runner(service)
 
-    assert runner.invoke(app, ["install", "pi-example"]).exit_code == 0
+    assert runner.invoke(app, ["install", "https://example.com/acme.git"]).exit_code == 0
     assert runner.invoke(app, ["trust", "sample"]).exit_code == 0
     assert runner.invoke(app, ["disable", "sample"]).exit_code == 0
     assert runner.invoke(
@@ -110,7 +97,7 @@ def test_extension_cli_install_and_policy_commands() -> None:
     assert runner.invoke(app, ["uninstall", "sample", "--yes"]).exit_code == 0
 
     assert service.calls == [
-        ("install", ("pi-example", "npm", "", False)),
+        ("install", ("https://example.com/acme.git", "git", "", False)),
         ("trusted", ("sample", True)),
         ("enabled", ("sample", False)),
         ("permissions", ("sample", {"network", "filesystem.read"})),

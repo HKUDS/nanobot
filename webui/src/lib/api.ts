@@ -7,7 +7,6 @@ import type {
   ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
-  ExtensionMarketPayload,
   ExtensionsPayload,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
@@ -305,21 +304,6 @@ export async function fetchExtensions(
 ): Promise<ExtensionsPayload> {
   return request<ExtensionsPayload>(
     `${base}/api/extensions`,
-    token,
-    undefined,
-    API_READ_TIMEOUT_MS,
-  );
-}
-
-export async function searchExtensions(
-  token: string,
-  query: string,
-  ecosystem: string,
-  base: string = "",
-): Promise<ExtensionMarketPayload> {
-  const params = new URLSearchParams({ q: query, ecosystem });
-  return request<ExtensionMarketPayload>(
-    `${base}/api/extensions/market?${params}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

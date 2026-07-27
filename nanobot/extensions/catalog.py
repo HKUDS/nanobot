@@ -1,31 +1,21 @@
-"""Assemble native and installed extensions into one inspectable catalog."""
+"""Discover installed extensions and resolve one activation snapshot."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
-from nanobot.extensions.discovery import (
-    ExtensionDiscoveryResult,
-    discover_manifest_root,
-)
-from nanobot.extensions.native import discover_native_extensions
 from nanobot.extensions.preflight import evaluate_dependencies
 from nanobot.extensions.registry import (
     ExtensionCandidate,
     ExtensionDiagnostic,
-    ExtensionPolicy,
     ExtensionRegistry,
-    ExtensionScope,
     ExtensionSnapshot,
 )
 from nanobot.extensions.store import ExtensionStore
 
 if TYPE_CHECKING:
-    from nanobot.agent.skills import SkillsLoader
-    from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.command.router import CommandRouter
     from nanobot.config.schema import Config
 
 
@@ -41,43 +31,17 @@ class ExtensionCatalog:
 def build_extension_catalog(
     config: Config,
     *,
-    skills: SkillsLoader | None = None,
-    tools: ToolRegistry | None = None,
-    commands: CommandRouter | None = None,
     user_root: Path | None = None,
 ) -> ExtensionCatalog:
-    """Build the authoritative extension view without executing plugin code."""
-    native = discover_native_extensions(
-        config,
-        skills=skills,
-        tools=tools,
-        commands=commands,
-    )
-    discoveries = [native]
-    if config.extensions.enabled:
-        external_root = user_root or Path.home() / ".nanobot" / "extensions"
-        discoveries.append(ExtensionStore(external_root).discover())
-        discoveries.extend(
-            _external_discoveries(config, user_root=external_root)
-        )
+    """Build the authoritative extension view without executing package code."""
+    if not config.extensions.enabled:
+        return ExtensionCatalog((), ExtensionSnapshot((), ()), ())
 
-    candidates = tuple(
-        _apply_entry_config(config, candidate)
-        for result in discoveries
-        for candidate in result.candidates
+    discovery = ExtensionStore(user_root).discover()
+    candidates, dependency_diagnostics = evaluate_dependencies(
+        discovery.candidates
     )
-    candidates, dependency_diagnostics = evaluate_dependencies(candidates)
-    discovery_diagnostics = tuple(
-        diagnostic
-        for result in discoveries
-        for diagnostic in result.diagnostics
-    )
-    registry = ExtensionRegistry(
-        ExtensionPolicy(
-            allow=frozenset(config.extensions.allow),
-            deny=frozenset(config.extensions.deny),
-        )
-    )
+    registry = ExtensionRegistry()
     registry_diagnostics: list[ExtensionDiagnostic] = []
     for candidate in candidates:
         try:
@@ -92,47 +56,9 @@ def build_extension_catalog(
             )
     snapshot = registry.snapshot()
     diagnostics = (
-        discovery_diagnostics
+        discovery.diagnostics
         + dependency_diagnostics
         + tuple(registry_diagnostics)
         + snapshot.diagnostics
     )
     return ExtensionCatalog(candidates, snapshot, diagnostics)
-
-
-def _external_discoveries(
-    config: Config,
-    *,
-    user_root: Path,
-) -> Iterable[ExtensionDiscoveryResult]:
-    for raw_path in config.extensions.paths:
-        yield discover_manifest_root(
-            Path(raw_path).expanduser(),
-            scope=ExtensionScope.USER,
-        )
-
-    workspace_root = config.workspace_path / ".nanobot" / "extensions"
-    workspace_trust = config.extensions.workspace_trust
-    if workspace_trust != "deny":
-        yield discover_manifest_root(
-            workspace_root,
-            scope=ExtensionScope.WORKSPACE,
-            trusted=workspace_trust == "allow",
-        )
-
-
-def _apply_entry_config(
-    config: Config,
-    candidate: ExtensionCandidate,
-) -> ExtensionCandidate:
-    entry = config.extensions.entries.get(candidate.manifest.id)
-    if entry is None or candidate.scope is ExtensionScope.BUILTIN:
-        return candidate
-    return replace(
-        candidate,
-        enabled=entry.enabled,
-        trusted=candidate.trusted or entry.trusted,
-        granted_permissions=(
-            candidate.granted_permissions | frozenset(entry.permissions)
-        ),
-    )

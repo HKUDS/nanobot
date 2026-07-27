@@ -2,11 +2,8 @@ import json
 
 import pytest
 
-from nanobot.extensions import (
-    ContributionKind,
-    ExtensionContribution,
-    ExtensionManifest,
-    ExtensionRuntime,
+from nanobot.extensions import ExtensionManifest
+from nanobot.extensions.codec import (
     ManifestFormatError,
     dump_manifest,
     load_manifest,
@@ -20,14 +17,7 @@ def test_manifest_json_round_trip(tmp_path) -> None:
         id="acme.tools",
         name="Acme Tools",
         version="2.0.0",
-        runtime=ExtensionRuntime.PI,
-        contributions=(
-            ExtensionContribution(
-                kind=ContributionKind.TOOL,
-                name="acme_search",
-                target="./index.ts#search",
-            ),
-        ),
+        entry="acme_extension:register",
     )
 
     dump_manifest(original, path)
@@ -36,27 +26,17 @@ def test_manifest_json_round_trip(tmp_path) -> None:
     assert json.loads(path.read_text())["apiVersion"] == 1
 
 
-def test_manifest_rejects_unknown_fields() -> None:
+def test_manifest_codec_rejects_unknown_fields() -> None:
     with pytest.raises(ManifestFormatError, match="unknown fields: typo"):
         manifest_from_mapping(
-            {
-                "id": "bad",
-                "name": "Bad",
-                "version": "1.0.0",
-                "runtime": "python",
-                "typo": True,
-            }
+            {"id": "bad", "name": "Bad", "version": "1.0.0", "typo": True}
         )
-
-
-def test_manifest_rejects_unknown_contribution_kind() -> None:
-    with pytest.raises(ManifestFormatError, match="invalid extension contribution"):
+    with pytest.raises(ManifestFormatError, match="unknown fields: contributions"):
         manifest_from_mapping(
             {
                 "id": "bad",
                 "name": "Bad",
                 "version": "1.0.0",
-                "runtime": "python",
                 "contributions": [{"kind": "mystery", "name": "unknown"}],
             }
         )

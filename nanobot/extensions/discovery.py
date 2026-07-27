@@ -9,7 +9,6 @@ from nanobot.extensions.codec import MANIFEST_FILENAME, load_manifest
 from nanobot.extensions.registry import (
     ExtensionCandidate,
     ExtensionDiagnostic,
-    ExtensionScope,
 )
 
 
@@ -21,10 +20,6 @@ class ExtensionDiscoveryResult:
 
 def discover_manifest_root(
     root: Path,
-    *,
-    scope: ExtensionScope,
-    trusted: bool = False,
-    enabled_ids: frozenset[str] = frozenset(),
 ) -> ExtensionDiscoveryResult:
     """Discover direct children containing ``nanobot.extension.json``."""
     if not root.exists():
@@ -62,10 +57,7 @@ def discover_manifest_root(
             candidates.append(
                 ExtensionCandidate(
                     manifest=manifest,
-                    scope=scope,
                     location=path.parent.resolve(),
-                    enabled=not enabled_ids or manifest.id in enabled_ids,
-                    trusted=trusted,
                 )
             )
         except Exception as exc:

@@ -1,88 +1,53 @@
 import pytest
 
 from nanobot.extensions import (
-    ContributionKind,
-    DependencyKind,
-    ExtensionContribution,
     ExtensionDependency,
     ExtensionManifest,
     ExtensionPermission,
-    ExtensionRuntime,
 )
+from nanobot.extensions.manifest import DependencyKind
 
 
-def test_manifest_accepts_portable_contributions() -> None:
+def test_manifest_defaults_to_native_python_entry() -> None:
     manifest = ExtensionManifest(
         id="acme.research",
         name="Acme Research",
         version="1.2.0",
-        runtime=ExtensionRuntime.PYTHON,
-        contributions=(
-            ExtensionContribution(
-                kind=ContributionKind.TOOL,
-                name="research",
-                target="acme_nanobot:ResearchTool",
-            ),
-        ),
         permissions=(
             ExtensionPermission(
                 name="network",
-                reason="Fetch sources selected by the user.",
+                reason="Fetch user-selected sources.",
             ),
         ),
     )
 
-    assert manifest.api_version == 1
-    assert manifest.contributions[0].name == "research"
+    assert manifest.entry == "extension:register"
 
 
 @pytest.mark.parametrize("extension_id", ["Uppercase", "../escape", "two words", ""])
 def test_manifest_rejects_invalid_ids(extension_id: str) -> None:
     with pytest.raises(ValueError):
-        ExtensionManifest(
-            id=extension_id,
-            name="Invalid",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-        )
+        ExtensionManifest(id=extension_id, name="Invalid", version="1.0.0")
 
 
-def test_manifest_rejects_duplicate_contributions() -> None:
-    contribution = ExtensionContribution(
-        kind=ContributionKind.SKILL,
-        name="review",
-    )
-
-    with pytest.raises(ValueError, match="duplicate contributions"):
-        ExtensionManifest(
-            id="duplicate",
-            name="Duplicate",
-            version="1.0.0",
-            runtime=ExtensionRuntime.DECLARATIVE,
-            contributions=(contribution, contribution),
-        )
-
-
-def test_manifest_rejects_duplicate_dependencies() -> None:
+def test_manifest_rejects_duplicate_contract_rows() -> None:
     dependency = ExtensionDependency(
-        kind=DependencyKind.EXTENSION,
-        name="acme.base",
+        kind=DependencyKind.PYTHON,
+        name="httpx",
     )
+    permission = ExtensionPermission(name="network")
 
     with pytest.raises(ValueError, match="duplicate dependencies"):
         ExtensionManifest(
             id="duplicate",
             name="Duplicate",
             version="1.0.0",
-            runtime=ExtensionRuntime.DECLARATIVE,
             dependencies=(dependency, dependency),
         )
-
-
-def test_dependency_optional_must_be_boolean() -> None:
-    with pytest.raises(TypeError, match="optional must be a boolean"):
-        ExtensionDependency(
-            kind=DependencyKind.EXTENSION,
-            name="acme.base",
-            optional="false",  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="duplicate permissions"):
+        ExtensionManifest(
+            id="duplicate",
+            name="Duplicate",
+            version="1.0.0",
+            permissions=(permission, permission),
         )

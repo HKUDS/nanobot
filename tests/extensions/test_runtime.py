@@ -1,157 +1,46 @@
 from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
 
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.command.router import CommandRouter
-from nanobot.config.schema import Config
-from nanobot.extensions import (
-    DependencyKind,
+from nanobot.extensions import ExtensionManifest
+from nanobot.extensions.registry import (
     ExtensionCandidate,
-    ExtensionDependency,
-    ExtensionManifest,
-    ExtensionRuntime,
-    ExtensionRuntimeManager,
-    ExtensionScope,
     ExtensionSnapshot,
 )
+from nanobot.extensions.runtime import ExtensionRuntimeManager
 
 
-def _snapshot(candidate: ExtensionCandidate) -> ExtensionSnapshot:
-    return ExtensionSnapshot((candidate,), (), ())
-
-
-@pytest.mark.asyncio
-async def test_runtime_activation_and_close_are_transactional(tmp_path: Path) -> None:
-    (tmp_path / "index.mjs").write_text(
-        """
-        export default function (pi) {
-          pi.registerTool({
-            name: "remote_echo",
-            description: "Echo",
-            parameters: { type: "object", properties: {} },
-            execute: async () => ({ content: [{ type: "text", text: "ok" }] })
-          });
-          pi.registerCommand("remote", {
-            description: "Remote command",
-            handler: async () => undefined
-          });
-          pi.on("agent_start", () => undefined);
-        }
-        """
-    )
-    candidate = ExtensionCandidate(
+def _candidate(root: Path, extension_id: str = "test.python") -> ExtensionCandidate:
+    return ExtensionCandidate(
         ExtensionManifest(
-            id="test.remote",
-            name="Remote",
+            id=extension_id,
+            name="Python extension",
             version="1.0.0",
-            runtime=ExtensionRuntime.PI,
-            entry="index.mjs",
+            entry="extension:register",
         ),
-        ExtensionScope.USER,
-        location=tmp_path,
+        location=root,
         trusted=True,
     )
-    tools = ToolRegistry()
-    commands = CommandRouter()
-    manager = ExtensionRuntimeManager(
-        tools=tools,
-        commands=commands,
-        config=Config(),
-    )
-
-    result = await manager.activate(_snapshot(candidate))
-
-    assert not result.diagnostics
-    assert tools.owner("remote_echo") == "test.remote"
-    assert commands.owner("exact", "/remote") == "test.remote"
-    assert len(result.hook_factories) == 1
-
-    await manager.close()
-
-    assert tools.owner("remote_echo") is None
-    assert commands.owner("exact", "/remote") is None
 
 
-@pytest.mark.asyncio
-async def test_runtime_rolls_back_partial_registration(tmp_path: Path) -> None:
-    (tmp_path / "index.mjs").write_text(
-        """
-        export default function (pi) {
-          pi.registerTool({
-            name: "duplicate",
-            description: "Duplicate",
-            parameters: {},
-            execute: async () => ({ content: [] })
-          });
-          pi.registerCommand("duplicate", {
-            handler: async () => undefined
-          });
-        }
-        """
-    )
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.duplicate",
-            name="Duplicate",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PI,
-            entry="index.mjs",
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
-    commands = CommandRouter()
-
-    async def core_handler(_ctx):
-        return None
-
-    commands.exact("/duplicate", core_handler)
-    manager = ExtensionRuntimeManager(
-        tools=ToolRegistry(),
-        commands=commands,
-        config=Config(),
-    )
-
-    result = await manager.activate(_snapshot(candidate))
-
-    assert result.extensions == ()
-    assert result.diagnostics[0].code == "activation_failed"
-    assert commands.owner("exact", "/duplicate") == "nanobot.core"
+def _snapshot(*candidates: ExtensionCandidate) -> ExtensionSnapshot:
+    return ExtensionSnapshot(candidates, ())
 
 
-@pytest.mark.asyncio
-async def test_python_runtime_reloads_updated_source(tmp_path: Path) -> None:
-    source = tmp_path / "plugin.py"
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.python",
-            name="Python",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entry="plugin:register",
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
-    tools = ToolRegistry()
-
-    def write_plugin(result: str) -> None:
-        source.write_text(
-            f"""
+def _write_extension(root: Path, result: str = "ok") -> None:
+    (root / "extension.py").write_text(
+        f"""
+from nanobot.agent.hook import AgentHook
 from nanobot.agent.tools.base import Tool
 
-class ReloadTool(Tool):
+class ExtensionTool(Tool):
     @property
     def name(self):
-        return "reload_test"
+        return "extension_echo"
 
     @property
     def description(self):
-        return "Reload test"
+        return "Echo from an extension"
 
     @property
     def parameters(self):
@@ -160,143 +49,50 @@ class ReloadTool(Tool):
     async def execute(self):
         return "{result}"
 
-def register(api):
-    api.register_tool(ReloadTool())
-"""
-        )
+async def command(_context):
+    return None
 
-    write_plugin("first")
-    first = ExtensionRuntimeManager(
-        tools=tools,
-        commands=CommandRouter(),
-        config=Config(),
-    )
-    first_result = await first.activate(_snapshot(candidate))
-    assert first_result.diagnostics == ()
-    assert await tools.get("reload_test").execute() == "first"
-    await first.close()
-
-    write_plugin("later")
-    second = ExtensionRuntimeManager(
-        tools=tools,
-        commands=CommandRouter(),
-        config=Config(),
-    )
-    second_result = await second.activate(_snapshot(candidate))
-    assert second_result.diagnostics == ()
-    assert await tools.get("reload_test").execute() == "later"
-    await second.close()
-
-
-@pytest.mark.asyncio
-async def test_python_runtime_accepts_single_entries_form(tmp_path: Path) -> None:
-    (tmp_path / "plugin.py").write_text(
-        """
-def register(_api):
-    pass
-"""
-    )
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.python-entries",
-            name="Python entries",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entries=("plugin:register",),
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
-    manager = ExtensionRuntimeManager(
-        tools=ToolRegistry(),
-        commands=CommandRouter(),
-        config=Config(),
-    )
-
-    result = await manager.activate(_snapshot(candidate))
-
-    assert result.diagnostics == ()
-    await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_python_runtime_rejects_module_outside_package(tmp_path: Path) -> None:
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.collision",
-            name="Collision",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entry="json:register",
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
-    manager = ExtensionRuntimeManager(
-        tools=ToolRegistry(),
-        commands=CommandRouter(),
-        config=Config(),
-    )
-
-    result = await manager.activate(_snapshot(candidate))
-
-    assert result.extensions == ()
-    assert result.diagnostics[0].code == "activation_failed"
-    assert "conflicts with loaded module" in result.diagnostics[0].message
-
-
-@pytest.mark.asyncio
-async def test_python_hook_factory_is_removed_without_clearing_core_hooks(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / "plugin.py").write_text(
-        """
-from nanobot.agent.hook import AgentHook
-
-def extension_hook(_context):
+def hook_factory(_context):
     return AgentHook()
 
 def register(api):
-    api.register_hook_factory(extension_hook)
+    api.register_tool(ExtensionTool())
+    api.register_command("extension", command)
+    api.register_hook_factory(hook_factory)
 """
     )
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.hook",
-            name="Hook",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entry="plugin:register",
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
 
-    def core_hook(_context):
-        return None
 
-    hooks = [core_hook]
+async def test_python_extension_registers_and_removes_owned_capabilities(
+    tmp_path: Path,
+) -> None:
+    _write_extension(tmp_path)
+    tools = ToolRegistry()
+    commands = CommandRouter()
+    hooks = []
     manager = ExtensionRuntimeManager(
-        tools=ToolRegistry(),
-        commands=CommandRouter(),
-        config=Config(),
+        tools=tools,
+        commands=commands,
         hook_factories=hooks,
     )
 
-    result = await manager.activate(_snapshot(candidate))
+    result = await manager.activate(_snapshot(_candidate(tmp_path)))
 
     assert result.diagnostics == ()
-    assert len(hooks) == 2
+    assert tools.owner("extension_echo") == "test.python"
+    assert commands.owner("exact", "/extension") == "test.python"
+    assert len(hooks) == 1
+    assert await tools.get("extension_echo").execute() == "ok"
+
     await manager.close()
-    assert hooks == [core_hook]
+
+    assert tools.owner("extension_echo") is None
+    assert commands.owner("exact", "/extension") is None
+    assert hooks == []
 
 
-@pytest.mark.asyncio
-async def test_python_runtime_cannot_overwrite_core_tool(tmp_path: Path) -> None:
-    (tmp_path / "plugin.py").write_text(
+async def test_failed_registration_rolls_back_partial_state(tmp_path: Path) -> None:
+    (tmp_path / "extension.py").write_text(
         """
 from nanobot.agent.tools.base import Tool
 
@@ -304,88 +100,81 @@ class DuplicateTool(Tool):
     name = "duplicate"
     description = "Duplicate"
     parameters = {"type": "object", "properties": {}}
-
     async def execute(self):
-        return "extension"
+        return "ok"
+
+async def command(_context):
+    return None
 
 def register(api):
     api.register_tool(DuplicateTool())
+    api.register_command("duplicate", command)
 """
     )
-    candidate = ExtensionCandidate(
-        ExtensionManifest(
-            id="test.overwrite",
-            name="Overwrite",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entry="plugin:register",
-        ),
-        ExtensionScope.USER,
-        location=tmp_path,
-        trusted=True,
-    )
-    core_tool = SimpleNamespace(name="duplicate")
     tools = ToolRegistry()
-    tools.register(core_tool)
+    commands = CommandRouter()
+
+    async def core_handler(_context):
+        return None
+
+    commands.exact("/duplicate", core_handler)
     manager = ExtensionRuntimeManager(
         tools=tools,
-        commands=CommandRouter(),
-        config=Config(),
+        commands=commands,
     )
 
-    result = await manager.activate(_snapshot(candidate))
+    result = await manager.activate(_snapshot(_candidate(tmp_path)))
 
     assert result.extensions == ()
     assert result.diagnostics[0].code == "activation_failed"
-    assert tools.get("duplicate") is core_tool
-    assert tools.owner("duplicate") == "nanobot.core"
+    assert tools.get("duplicate") is None
+    assert commands.owner("exact", "/duplicate") == "nanobot.core"
 
 
-@pytest.mark.asyncio
-async def test_failed_extension_prevents_dependent_activation(tmp_path: Path) -> None:
-    base_root = tmp_path / "base"
-    dependent_root = tmp_path / "dependent"
-    base_root.mkdir()
-    dependent_root.mkdir()
-    base = ExtensionCandidate(
-        ExtensionManifest(
-            id="base",
-            name="Base",
-            version="1.0.0",
-            runtime=ExtensionRuntime.PYTHON,
-            entry="missing:register",
-        ),
-        ExtensionScope.USER,
-        location=base_root,
-        trusted=True,
-    )
-    dependent = ExtensionCandidate(
-        ExtensionManifest(
-            id="dependent",
-            name="Dependent",
-            version="1.0.0",
-            runtime=ExtensionRuntime.DECLARATIVE,
-            dependencies=(
-                ExtensionDependency(
-                    kind=DependencyKind.EXTENSION,
-                    name="base",
-                ),
-            ),
-        ),
-        ExtensionScope.USER,
-        location=dependent_root,
-        trusted=True,
-    )
-    manager = ExtensionRuntimeManager(
-        tools=ToolRegistry(),
-        commands=CommandRouter(),
-        config=Config(),
+async def test_python_extension_reloads_updated_source(tmp_path: Path) -> None:
+    tools = ToolRegistry()
+    candidate = _candidate(tmp_path)
+    _write_extension(tmp_path, "first")
+    first = ExtensionRuntimeManager(tools=tools, commands=CommandRouter())
+
+    await first.activate(_snapshot(candidate))
+    assert await tools.get("extension_echo").execute() == "first"
+    await first.close()
+
+    _write_extension(tmp_path, "later")
+    second = ExtensionRuntimeManager(tools=tools, commands=CommandRouter())
+    await second.activate(_snapshot(candidate))
+
+    assert await tools.get("extension_echo").execute() == "later"
+    await second.close()
+
+
+async def test_extensions_with_the_same_entry_module_are_isolated(
+    tmp_path: Path,
+) -> None:
+    tools = ToolRegistry()
+    manager = ExtensionRuntimeManager(tools=tools, commands=CommandRouter())
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    _write_extension(first_root, "first")
+    _write_extension(second_root, "second")
+    second_source = (second_root / "extension.py").read_text()
+    (second_root / "extension.py").write_text(
+        second_source
+        .replace("extension_echo", "second_echo")
+        .replace('register_command("extension"', 'register_command("second"')
     )
 
-    result = await manager.activate(ExtensionSnapshot((base, dependent), (), ()))
+    result = await manager.activate(
+        _snapshot(
+            _candidate(first_root, "test.first"),
+            _candidate(second_root, "test.second"),
+        )
+    )
 
-    assert result.extensions == ()
-    assert [item.code for item in result.diagnostics] == [
-        "activation_failed",
-        "dependency_activation_failed",
-    ]
+    assert result.diagnostics == ()
+    assert await tools.get("extension_echo").execute() == "first"
+    assert await tools.get("second_echo").execute() == "second"
+    await manager.close()

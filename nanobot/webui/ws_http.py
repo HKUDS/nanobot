@@ -212,7 +212,6 @@ class GatewayHTTPHandler:
         self.extensions_routes = WebUIExtensionsRouter(
             service=extension_service,
             check_api_token=self.check_api_token,
-            parse_query=_parse_query,
             json_response=_http_json_response,
             error_response=_http_error,
             allow_remote_package_install=allow_remote_package_install,

@@ -34,7 +34,6 @@ class WebUIExtensionsRouter:
         *,
         service: ExtensionService | None,
         check_api_token: Callable[[WsRequest], bool],
-        parse_query: Callable[[str], dict[str, list[str]]],
         json_response: Callable[[dict[str, Any]], Response],
         error_response: Callable[[int, str | None], Response],
         allow_remote_package_install: bool = False,
@@ -42,7 +41,6 @@ class WebUIExtensionsRouter:
     ) -> None:
         self._service = service
         self._check_api_token = check_api_token
-        self._parse_query = parse_query
         self._json_response = json_response
         self._error_response = error_response
         self._allow_remote_package_install = allow_remote_package_install
@@ -65,17 +63,6 @@ class WebUIExtensionsRouter:
                 if _method(request) != "GET":
                     return self._error_response(405, "Method not allowed")
                 return self._json_response(await self._service.status())
-            if path == "/api/extensions/market":
-                if _method(request) != "GET":
-                    return self._error_response(405, "Method not allowed")
-                query = self._parse_query(request.path)
-                return self._json_response(
-                    await self._service.search(
-                        _first(query, "q"),
-                        ecosystem=_first(query, "ecosystem") or "all",
-                        limit=_int_value(_first(query, "limit"), default=30),
-                    )
-                )
             action = _ACTION_PATHS.get(path)
             if action is None:
                 return None
@@ -89,7 +76,7 @@ class WebUIExtensionsRouter:
             values = self._values(request)
             if (
                 action == "install"
-                and str(values.get("kind") or "npm") == "local"
+                and str(values.get("kind") or "git") == "local"
                 and not is_local_browser_request(connection, request.headers)
             ):
                 return self._error_response(
@@ -116,7 +103,7 @@ class WebUIExtensionsRouter:
                 raise ValueError("Missing extension source")
             return await self._service.install(
                 source,
-                kind=str(values.get("kind") or "npm"),
+                kind=str(values.get("kind") or "git"),
                 ref=str(values.get("ref") or ""),
                 trusted=False,
             )
@@ -162,20 +149,6 @@ class WebUIExtensionsRouter:
         return is_local_browser_request(connection, request.headers) or (
             action == "install" and self._allow_remote_package_install
         )
-
-
-def _first(query: dict[str, list[str]], key: str) -> str:
-    values = query.get(key, [])
-    return values[0] if values else ""
-
-
-def _int_value(value: str, *, default: int) -> int:
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ValueError("Extension market limit must be a number") from exc
 
 
 def _method(request: WsRequest) -> str:

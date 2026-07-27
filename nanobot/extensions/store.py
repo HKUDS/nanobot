@@ -8,9 +8,8 @@ import os
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -19,48 +18,33 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from filelock import FileLock
+from pydantic import BaseModel, ConfigDict, field_validator
 
-from nanobot.extensions.codec import MANIFEST_FILENAME, dump_manifest, load_manifest
+from nanobot.extensions.codec import MANIFEST_FILENAME, load_manifest
 from nanobot.extensions.discovery import (
     ExtensionDiscoveryResult,
     discover_manifest_root,
 )
-from nanobot.extensions.manifest import (
-    DependencyKind,
-    ExtensionManifest,
-    validate_extension_id,
-)
-from nanobot.extensions.package_adapter import AdaptedPackage, adapt_package
-from nanobot.extensions.registry import ExtensionDiagnostic, ExtensionScope
+from nanobot.extensions.manifest import ExtensionManifest, validate_extension_id
+from nanobot.extensions.registry import ExtensionDiagnostic
 
 _REGISTRY_FILENAME = ".registry.json"
 _GIT_SCHEMES = frozenset({"git", "http", "https", "ssh"})
 _SCP_GIT_URL = re.compile(
     r"(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:\S+"
 )
-_NPM_ALIAS = re.compile(
-    r"npm:(?:(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*)"
-    r"(?:@[^:/\\\s]+)?"
-)
-_NPM_PACKAGE_SPEC = re.compile(
-    r"(?:(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*)"
-    r"(?:@[^:/\\\s]+)?"
-)
 _SHA256_INTEGRITY = re.compile(r"sha256:[0-9a-f]{64}")
-_MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
-_MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
-_MAX_ARCHIVE_MEMBERS = 50_000
 
 
 class ExtensionSourceKind(str, Enum):
     LOCAL = "local"
     GIT = "git"
-    NPM = "npm"
 
 
-@dataclass(frozen=True, slots=True)
-class InstalledExtension:
+class InstalledExtension(BaseModel):
     """Persistent installation and policy record."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str
     version: str
@@ -72,65 +56,39 @@ class InstalledExtension:
     trusted: bool = False
     granted_permissions: tuple[str, ...] = ()
 
+    @field_validator("id")
     @classmethod
-    def from_mapping(cls, value: object) -> InstalledExtension:
-        if not isinstance(value, dict):
-            raise ValueError("extension registry record must be an object")
-        required = {
-            "id",
-            "version",
-            "source",
-            "source_ref",
-            "integrity",
-            "installed_at",
-        }
-        missing = sorted(required - value.keys())
-        if missing:
-            raise ValueError(
-                "extension registry record is missing: " + ", ".join(missing)
-            )
-        permissions = value.get("granted_permissions", ())
-        if not isinstance(permissions, (list, tuple)) or not all(
-            isinstance(permission, str) for permission in permissions
-        ):
-            raise ValueError("extension granted permissions must be an array of strings")
-        if len(set(permissions)) != len(permissions):
-            raise ValueError("extension granted permissions cannot contain duplicates")
-        extension_id = validate_extension_id(value["id"])
-        strings = {
-            field: value[field]
-            for field in ("version", "source_ref", "integrity", "installed_at")
-        }
-        if not all(isinstance(item, str) and item for item in strings.values()):
+    def validate_id(cls, value: str) -> str:
+        return validate_extension_id(value)
+
+    @field_validator("version", "source_ref", "installed_at")
+    @classmethod
+    def validate_metadata(cls, value: str) -> str:
+        if not value:
             raise ValueError("extension registry metadata must use non-empty strings")
-        if _SHA256_INTEGRITY.fullmatch(strings["integrity"]) is None:
+        return value
+
+    @field_validator("integrity")
+    @classmethod
+    def validate_integrity(cls, value: str) -> str:
+        if _SHA256_INTEGRITY.fullmatch(value) is None:
             raise ValueError("extension registry integrity must be a sha256 digest")
-        source = value["source"]
-        if not isinstance(source, str):
-            raise ValueError("extension registry source must be a string")
-        enabled = value.get("enabled", True)
-        trusted = value.get("trusted", False)
-        if not isinstance(enabled, bool) or not isinstance(trusted, bool):
-            raise ValueError("extension enabled and trusted values must be booleans")
-        return cls(
-            id=extension_id,
-            version=strings["version"],
-            source=ExtensionSourceKind(source),
-            source_ref=strings["source_ref"],
-            integrity=strings["integrity"],
-            installed_at=strings["installed_at"],
-            enabled=enabled,
-            trusted=trusted,
-            granted_permissions=tuple(permissions),
-        )
+        return value
+
+    @field_validator("granted_permissions")
+    @classmethod
+    def reject_duplicate_permissions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("extension granted permissions cannot contain duplicates")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
 class InstallResult:
-    """Installed package plus metadata-adapter notices."""
+    """Installed package metadata."""
 
     record: InstalledExtension
-    package: AdaptedPackage
+    manifest: ExtensionManifest
 
 
 class ExtensionStore:
@@ -154,7 +112,7 @@ class ExtensionStore:
                 raise ValueError("extension registry extensions must be an array")
             records: dict[str, InstalledExtension] = {}
             for item in rows:
-                record = InstalledExtension.from_mapping(item)
+                record = InstalledExtension.model_validate(item)
                 if record.id in records:
                     raise ValueError(
                         f"extension registry contains duplicate id: {record.id}"
@@ -176,7 +134,7 @@ class ExtensionStore:
 
     def discover(self) -> ExtensionDiscoveryResult:
         """Discover packages and apply persisted enable/trust state."""
-        result = discover_manifest_root(self.root, scope=ExtensionScope.USER)
+        result = discover_manifest_root(self.root)
         diagnostics = list(result.diagnostics)
         try:
             records = self.records(strict=True)
@@ -191,15 +149,12 @@ class ExtensionStore:
             )
         candidates = []
         for candidate in result.candidates:
-            record = records.get(candidate.manifest.id, _DEFAULT_RECORD)
-            trusted = record.trusted
+            record = records.get(candidate.manifest.id)
+            trusted = record.trusted if record else False
             integrity_valid = True
-            if candidate.location is not None and record is not _DEFAULT_RECORD:
+            if candidate.location is not None and record is not None:
                 try:
-                    _reject_unsafe_files(
-                        candidate.location,
-                        allow_installed_node_links=True,
-                    )
+                    _reject_unsafe_files(candidate.location)
                     actual_integrity = _tree_hash(candidate.location)
                 except (OSError, ValueError) as exc:
                     actual_integrity = ""
@@ -226,10 +181,12 @@ class ExtensionStore:
             candidates.append(
                 replace(
                     candidate,
-                    enabled=record.enabled,
+                    enabled=record.enabled if record else True,
                     trusted=trusted,
                     integrity_valid=integrity_valid,
-                    granted_permissions=frozenset(record.granted_permissions),
+                    granted_permissions=frozenset(
+                        record.granted_permissions if record else ()
+                    ),
                 )
             )
         return ExtensionDiscoveryResult(tuple(candidates), tuple(diagnostics))
@@ -298,48 +255,6 @@ class ExtensionStore:
                 checkout,
                 source_kind=ExtensionSourceKind.GIT,
                 source_ref=f"{url}#{ref}" if ref else url,
-                trusted=trusted,
-            )
-
-    def install_npm(
-        self,
-        spec: str,
-        *,
-        trusted: bool = False,
-    ) -> InstallResult:
-        _validate_npm_package_spec(spec)
-        with tempfile.TemporaryDirectory(prefix="nanobot-extension-npm-") as raw:
-            temp = Path(raw)
-            output = _run(
-                [
-                    "npm",
-                    "pack",
-                    "--ignore-scripts",
-                    "--json",
-                    "--pack-destination",
-                    str(temp),
-                    "--",
-                    spec,
-                ]
-            )
-            rows = json.loads(output)
-            if not isinstance(rows, list) or not rows:
-                raise ValueError("npm pack did not return a package")
-            row = rows[0]
-            filename = row.get("filename") if isinstance(row, dict) else None
-            if not isinstance(filename, str) or not filename:
-                raise ValueError("npm pack returned invalid package metadata")
-            archive = (temp / filename).resolve()
-            if not archive.is_relative_to(temp.resolve()) or not archive.is_file():
-                raise ValueError("npm pack returned an invalid package archive")
-            checkout = temp / "checkout"
-            checkout.mkdir()
-            _extract_tar(archive, checkout)
-            package_root = checkout / "package"
-            return self._install_from_directory(
-                package_root,
-                source_kind=ExtensionSourceKind.NPM,
-                source_ref=spec,
                 trusted=trusted,
             )
 
@@ -420,9 +335,11 @@ class ExtensionStore:
     ) -> InstallResult:
         if not source.is_dir():
             raise ValueError(f"extension source is not a directory: {source}")
+        if self.root.resolve().is_relative_to(source.resolve()):
+            raise ValueError("extension source cannot contain the extension store")
         _reject_unsafe_files(source)
-        package = adapt_package(source)
-        extension_id = package.manifest.id
+        manifest = load_manifest(source / MANIFEST_FILENAME)
+        extension_id = manifest.id
         self.root.mkdir(parents=True, exist_ok=True)
         staging = self.root / f".install-{uuid4().hex}"
         target = self.root / extension_id
@@ -437,10 +354,7 @@ class ExtensionStore:
                 staging,
                 ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"),
             )
-            if package.generated:
-                dump_manifest(package.manifest, staging / MANIFEST_FILENAME)
-            _install_node_dependencies(staging, package.manifest)
-            _reject_unsafe_files(staging, allow_installed_node_links=True)
+            _reject_unsafe_files(staging)
             integrity = _tree_hash(staging)
             if target.exists():
                 target.rename(backup)
@@ -448,12 +362,12 @@ class ExtensionStore:
             staging.rename(target)
             target_installed = True
             requested_permissions = {
-                permission.name for permission in package.manifest.permissions
+                permission.name for permission in manifest.permissions
             }
             unchanged = bool(previous and previous.integrity == integrity)
             record = InstalledExtension(
                 id=extension_id,
-                version=package.manifest.version,
+                version=manifest.version,
                 source=source_kind,
                 source_ref=source_ref,
                 integrity=integrity,
@@ -473,7 +387,7 @@ class ExtensionStore:
             records[extension_id] = record
             self._write_records(records)
             shutil.rmtree(backup, ignore_errors=True)
-            return InstallResult(record, package)
+            return InstallResult(record, manifest)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             if target_installed:
@@ -498,7 +412,7 @@ class ExtensionStore:
         **changes: Any,
     ) -> InstalledExtension:
         try:
-            record = replace(records[extension_id], **changes)
+            record = records[extension_id].model_copy(update=changes)
         except KeyError as exc:
             raise KeyError(
                 f"extension '{extension_id}' is not installed"
@@ -512,81 +426,13 @@ class ExtensionStore:
         payload = {
             "version": 1,
             "extensions": [
-                {
-                    **asdict(record),
-                    "source": record.source.value,
-                }
+                record.model_dump(mode="json")
                 for record in sorted(records.values(), key=lambda item: item.id)
             ],
         }
         temp = self.registry_path.with_suffix(".tmp")
         temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         os.replace(temp, self.registry_path)
-
-
-_DEFAULT_RECORD = InstalledExtension(
-    id="",
-    version="",
-    source=ExtensionSourceKind.LOCAL,
-    source_ref="",
-    integrity="",
-    installed_at="",
-    enabled=True,
-    trusted=False,
-    granted_permissions=(),
-)
-
-
-def _install_node_dependencies(root: Path, manifest: ExtensionManifest) -> None:
-    package_path = root / "package.json"
-    if not package_path.is_file():
-        return
-    original = package_path.read_text(encoding="utf-8")
-    package = json.loads(original)
-    if not isinstance(package, dict):
-        raise ValueError("extension package.json must be an object")
-    dependencies = _dependency_mapping(package, "dependencies")
-    peer_dependencies = _dependency_mapping(package, "peerDependencies")
-    peer_metadata = _dependency_mapping(package, "peerDependenciesMeta")
-    for name, specifier in peer_dependencies.items():
-        metadata = peer_metadata.get(name, {})
-        if metadata is not None and not isinstance(metadata, dict):
-            raise ValueError(
-                f"extension package.json peerDependenciesMeta.{name} must be an object"
-            )
-        if not metadata or metadata.get("optional") is not True:
-            dependencies.setdefault(name, specifier)
-    for dependency in manifest.dependencies:
-        if dependency.kind is not DependencyKind.NPM or dependency.optional:
-            continue
-        dependencies[dependency.name] = dependency.specifier or "latest"
-    optional = _dependency_mapping(package, "optionalDependencies")
-    for name, specifier in {**dependencies, **optional}.items():
-        _validate_npm_dependency_spec(str(name), specifier)
-    if not dependencies and not optional:
-        return
-    runtime_package = {
-        "name": "nanobot-extension-runtime",
-        "private": True,
-        "dependencies": dependencies,
-        "optionalDependencies": optional,
-    }
-    package_path.write_text(json.dumps(runtime_package), encoding="utf-8")
-    try:
-        _run(
-            [
-                "npm",
-                "install",
-                "--omit=dev",
-                "--ignore-scripts",
-                "--no-audit",
-                "--no-fund",
-                "--package-lock=false",
-            ],
-            cwd=root,
-        )
-    finally:
-        package_path.write_text(original, encoding="utf-8")
 
 
 def _run(command: list[str], *, cwd: Path | None = None) -> str:
@@ -603,15 +449,6 @@ def _run(command: list[str], *, cwd: Path | None = None) -> str:
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()
         raise RuntimeError(f"{command[0]} failed: {detail}") from exc
-
-
-def _dependency_mapping(package: dict[str, Any], key: str) -> dict[str, Any]:
-    value = package.get(key)
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"extension package.json {key} must be an object")
-    return dict(value)
 
 
 def _validate_git_url(url: str) -> None:
@@ -644,55 +481,12 @@ def _validate_git_url(url: str) -> None:
         raise ValueError("extension Git source must be a remote repository URL")
 
 
-def _validate_npm_package_spec(spec: str) -> None:
-    if (
-        not isinstance(spec, str)
-        or _NPM_PACKAGE_SPEC.fullmatch(spec.strip()) is None
-    ):
-        raise ValueError(
-            "extension npm source must be a registry package name with an "
-            "optional version or tag"
-        )
-
-
-def _validate_npm_dependency_spec(name: str, specifier: object) -> None:
-    if not isinstance(specifier, str) or not specifier.strip():
-        raise ValueError(f"npm dependency '{name}' must use a non-empty registry specifier")
-    value = specifier.strip()
-    if any(character in value for character in ("\0", "\r", "\n")):
-        raise ValueError(f"npm dependency '{name}' contains invalid characters")
-    if value.startswith("npm:"):
-        if _NPM_ALIAS.fullmatch(value) is not None:
-            return
-    elif not any(character in value for character in (":", "/", "\\")):
-        return
-    raise ValueError(
-        f"npm dependency '{name}' must resolve through the npm registry"
-    )
-
-
-def _reject_unsafe_files(
-    root: Path,
-    *,
-    allow_installed_node_links: bool = False,
-) -> None:
-    package_root = root.resolve()
+def _reject_unsafe_files(root: Path) -> None:
     for path in root.rglob("*"):
         if path.is_symlink():
-            relative = path.relative_to(root)
-            if (
-                allow_installed_node_links
-                and "node_modules" in relative.parts
-                and _link_target(path).is_relative_to(package_root)
-            ):
-                continue
             raise ValueError(f"extension packages cannot contain symlinks: {path}")
         if not path.is_file() and not path.is_dir():
             raise ValueError(f"extension package contains a special file: {path}")
-
-
-def _link_target(path: Path) -> Path:
-    return (path.parent / os.readlink(path)).resolve()
 
 
 def _tree_hash(root: Path) -> str:
@@ -715,25 +509,3 @@ def _tree_hash(root: Path) -> str:
             while chunk := handle.read(1024 * 1024):
                 digest.update(chunk)
     return f"sha256:{digest.hexdigest()}"
-
-
-def _extract_tar(archive: Path, target: Path) -> None:
-    if archive.stat().st_size > _MAX_ARCHIVE_BYTES:
-        raise ValueError("npm package archive exceeds the 128 MB limit")
-    with tarfile.open(archive) as bundle:
-        members = bundle.getmembers()
-        if len(members) > _MAX_ARCHIVE_MEMBERS:
-            raise ValueError("npm package archive contains too many files")
-        extracted_bytes = 0
-        for member in members:
-            destination = (target / member.name).resolve()
-            if not destination.is_relative_to(target.resolve()):
-                raise ValueError("npm package archive contains a path traversal")
-            if member.issym() or member.islnk():
-                raise ValueError("npm package archive contains a link")
-            if not member.isfile() and not member.isdir():
-                raise ValueError("npm package archive contains a special file")
-            extracted_bytes += member.size
-            if extracted_bytes > _MAX_EXTRACTED_BYTES:
-                raise ValueError("npm package archive exceeds the 512 MB extracted limit")
-        bundle.extractall(target, members=members)

@@ -1266,34 +1266,23 @@
   "extensions": {
     "backToChat": "Back to chat",
     "title": "Extensions",
-    "tabs": {
-      "label": "Extension views",
-      "installed": "Installed",
-      "discover": "Discover",
-      "builtin": "Built in"
-    },
-    "ecosystem": {
-      "all": "All",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Search extension packages",
     "searchInstalled": "Search extensions",
     "empty": {
-      "installed": "No external extensions installed.",
-      "discover": "No matching extension packages.",
-      "builtin": "No built-in capabilities found."
+      "installed": "No extensions installed."
     },
-    "installed": "Installed",
-    "install": "Install {{name}}",
+    "installKind": "Installation source",
+    "source": {
+      "git": "Git repository",
+      "local": "Local folder"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/absolute/path/to/extension",
+    "installAction": "Install",
     "details": {
       "identity": "Identity",
       "source": "Source",
-      "scope": "Scope",
       "license": "License",
       "homepage": "Homepage",
-      "contributions": "Contributions",
       "dependencies": "Dependencies",
       "permissions": "Permissions",
       "diagnostics": "Diagnostics"
@@ -1302,14 +1291,7 @@
     "permissionPending": "Not granted",
     "revokePermissions": "Revoke permissions",
     "grantPermissions": "Grant permissions",
-  "noPermissions": "No host permissions requested.",
-  "configManaged": "Managed by configuration.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Node.js runtime",
-        "reason": "Run third-party JavaScript or TypeScript in a Node.js process."
-      }
-    },
+    "noPermissions": "No host permissions requested.",
     "revokeTrust": "Revoke trust",
     "trust": "Trust",
     "disable": "Disable",

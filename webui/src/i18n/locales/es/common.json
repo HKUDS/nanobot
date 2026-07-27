@@ -1253,34 +1253,23 @@
   "extensions": {
     "backToChat": "Volver al chat",
     "title": "Extensiones",
-    "tabs": {
-      "label": "Vistas de extensiones",
-      "installed": "Instaladas",
-      "discover": "Descubrir",
-      "builtin": "Integradas"
-    },
-    "ecosystem": {
-      "all": "Todas",
-      "nanobot": "nanobot",
-      "pi": "Pi",
-      "openclaw": "OpenClaw"
-    },
-    "searchMarket": "Buscar paquetes de extensiones",
     "searchInstalled": "Buscar extensiones",
     "empty": {
-      "installed": "No hay extensiones externas instaladas.",
-      "discover": "No hay paquetes de extensiones coincidentes.",
-      "builtin": "No se encontraron capacidades integradas."
+      "installed": "No hay extensiones instaladas."
     },
-    "installed": "Instalada",
-    "install": "Instalar {{name}}",
+    "installKind": "Origen de instalación",
+    "source": {
+      "git": "Repositorio Git",
+      "local": "Carpeta local"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/ruta/absoluta/a/la/extensión",
+    "installAction": "Instalar",
     "details": {
       "identity": "Identidad",
       "source": "Origen",
-      "scope": "Ámbito",
       "license": "Licencia",
       "homepage": "Página principal",
-      "contributions": "Contribuciones",
       "dependencies": "Dependencias",
       "permissions": "Permisos",
       "diagnostics": "Diagnóstico"
@@ -1289,14 +1278,7 @@
     "permissionPending": "No concedido",
     "revokePermissions": "Revocar permisos",
     "grantPermissions": "Conceder permisos",
-  "noPermissions": "No solicita permisos del host.",
-  "configManaged": "Gestionada por la configuración.",
-    "knownPermissions": {
-      "runtimeNode": {
-        "label": "Entorno de ejecución Node.js",
-        "reason": "Ejecuta JavaScript o TypeScript de terceros en un proceso de Node.js."
-      }
-    },
+    "noPermissions": "No solicita permisos del sistema.",
     "revokeTrust": "Revocar confianza",
     "trust": "Confiar",
     "disable": "Desactivar",
@@ -1311,7 +1293,7 @@
       "untrusted": "No confiable",
       "inactive": "Inactiva"
     },
-    "none": "Ninguna",
+    "none": "Ninguno",
     "loading": "Cargando extensiones…"
   }
 }

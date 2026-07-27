@@ -1,56 +1,33 @@
 # Extension Authoring
 
-nanobot extensions are packages with a strict `nanobot.extension.json`
-manifest. The manifest can be inspected without importing optional SDKs or
-executing package code. Runtime activation then projects each contribution into
-the native nanobot registry that owns that capability.
-
-This guide covers native Python extensions and the compatibility boundary for
-Pi and OpenClaw packages. Users installing packages should read
-[Extensions](./extensions.md).
-
-## Package Layout
-
-A minimal native package is:
+A native nanobot extension is a directory containing:
 
 ```text
-my-extension/
-|-- nanobot.extension.json
-`-- my_extension/
-    `-- __init__.py
+nanobot-review/
+├── nanobot.extension.json
+└── extension.py
 ```
 
-`nanobot.extension.json`:
+The manifest describes identity, activation prerequisites, and requested
+permissions. The Python entry point performs the real registration. This keeps
+one authoritative source for tool, command, and hook ownership.
+
+## Manifest
 
 ```json
 {
   "id": "acme.review",
   "name": "Acme Review",
   "version": "1.0.0",
+  "entry": "extension:register",
+  "description": "Adds repository review tools.",
   "apiVersion": 1,
-  "runtime": "python",
-  "entry": "my_extension:register",
-  "description": "Adds a review tool and command.",
-  "homepage": "https://example.com/acme-review",
   "license": "MIT",
-  "contributions": [
-    {
-      "kind": "tool",
-      "name": "review_code",
-      "description": "Review a local change."
-    },
-    {
-      "kind": "command",
-      "name": "review",
-      "description": "Start a review from chat."
-    }
-  ],
+  "homepage": "https://github.com/acme/nanobot-review",
   "dependencies": [
     {
-      "kind": "python",
-      "name": "acme-review-core",
-      "specifier": ">=1,<2",
-      "optional": false
+      "kind": "executable",
+      "name": "git"
     }
   ],
   "permissions": [
@@ -62,245 +39,109 @@ my-extension/
 }
 ```
 
-Unknown fields are rejected. This is deliberate: a misspelled permission,
-dependency, or contribution must not silently change package behavior.
+Required fields are `id`, `name`, and `version`. `entry` defaults to
+`"extension:register"` and `apiVersion` defaults to `1`.
 
-## Manifest Reference
-
-### Top-level fields
-
-| Field | Required | Meaning |
-|---|---:|---|
-| `id` | yes | Stable lowercase package identity |
-| `name` | yes | Human-readable name |
-| `version` | yes | Installed package version |
-| `apiVersion` | no | Manifest API, currently `1` |
-| `runtime` | yes | `python`, `pi`, `openclaw`, or `declarative` |
-| `entry` | runtime-dependent | One activation entry |
-| `entries` | runtime-dependent | Multiple Pi/OpenClaw entries; takes precedence over `entry` |
-| `contributions` | no | Capabilities owned by the package |
-| `dependencies` | no | Activation prerequisites |
-| `permissions` | no | Privileged host capabilities requested from the user |
-| `description` | no | Catalog summary |
-| `homepage` | no | Project or documentation URL |
-| `license` | no | SPDX-style license label |
-
-Entries must be relative to the package root and cannot contain `..`.
-
-### Contributions
-
-Supported `kind` values are:
-
-```text
-tool
-skill
-channel
-llm_provider
-transcription_provider
-image_generation_provider
-web_search_provider
-mcp_server
-hook
-command
-webui
-```
-
-Each contribution has a stable `name`, optional runtime `target`, and optional
-`description`. Two active extensions cannot own the same contribution name.
-Disable one owner before activating the other; v1 deliberately does not allow
-extensions to replace core or third-party registrations.
-
-The manifest declares ownership. It does not create an implementation by
-itself. A runtime must register the corresponding native capability.
+IDs use lowercase letters, digits, dots, underscores, and hyphens. Entry points
+use `module:function` syntax and must resolve inside the package.
 
 ### Dependencies
 
-| Kind | `name` identifies | Version behavior |
-|---|---|---|
-| `python` | Installed Python distribution | PEP 440 specifier |
-| `npm` | Package under the extension's `node_modules` | npm installation constraint |
-| `executable` | Command on `PATH` | No version probe |
-| `environment` | Environment variable | Must be non-empty |
-| `extension` | Another extension ID | Active extension version |
+| Kind | Meaning |
+|---|---|
+| `python` | Installed Python distribution; `specifier` accepts a version constraint |
+| `executable` | Command available on `PATH` |
+| `environment` | Non-empty environment variable |
 
-Set `optional: true` when the extension can activate without the dependency.
-Do not put API keys in the manifest.
+Set `"optional": true` when a missing dependency should not block activation.
 
 ### Permissions
 
-Permission names are lowercase namespaced identifiers such as
-`workspace.read`, `workspace.write`, or `network.http`. Include a concrete
-reason the user can evaluate. Activation requires every requested permission to
-be granted.
+Permissions are lowercase namespaced identifiers chosen by the package, such
+as `workspace.read` or `network`. Give each permission a concrete reason.
+Activation waits until every requested permission is granted.
 
-Permissions are review and activation gates; they do not constrain direct
-Python or Node process access and are not an OS sandbox. Keep the request set
-minimal and use native host operations when one exists.
+The host currently uses permissions as explicit user consent. They do not
+sandbox Python code, so do not describe a permission as stronger isolation
+than it provides.
 
-## Native Python Runtime
+## Registration API
 
-The Python entry is `module[:attribute]`; the default attribute is `register`.
-The function is synchronous and must return `None`:
+The entry point receives `PythonExtensionApi` and must return `None`:
 
 ```python
+from typing import Any
+
 from nanobot.agent.tools.base import Tool
 
 
 class ReviewTool(Tool):
     @property
     def name(self) -> str:
-        return "review_code"
+        return "review_repository"
 
     @property
     def description(self) -> str:
-        return "Review a local code change."
+        return "Review the current repository."
 
     @property
-    def parameters(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-            },
-            "required": ["path"],
-        }
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}}
 
-    async def execute(self, path: str) -> str:
-        return f"Review requested for {path}"
+    async def execute(self, **kwargs: Any) -> str:
+        return "No findings."
 
 
 def register(api) -> None:
     api.register_tool(ReviewTool())
 ```
 
-The v1 Python API exposes:
+The API has three stable methods:
 
-- `register_tool(tool)`
-- `register_command(command, handler, prefix=False)`
-- `register_hook_factory(factory)`
-
-These methods use existing nanobot registries. Do not import or patch
-`AgentLoop`, reach into WebSocket internals, or create a second tool registry.
-If a new contribution kind needs execution support, add an adapter at the
-native subsystem boundary and keep the manifest API independent from that
-implementation.
-
-## Publish and Discover
-
-For npm discovery, include the exact `nanobot-extension` keyword:
-
-```json
-{
-  "keywords": [
-    "nanobot-extension"
-  ]
-}
+```python
+api.register_tool(tool)
+api.register_command("review", handler)
+api.register_hook_factory(factory)
 ```
 
-Compatibility packages use their upstream metadata and keyword:
+Command handlers use nanobot's `CommandContext` and return an
+`OutboundMessage` or `None`. Hook factories receive `AgentTurnHookContext` and
+return an `AgentHook` or `None`.
 
-- Pi: `pi-package` plus `pi.extensions`
-- OpenClaw: `openclaw-plugin` plus `openclaw.extensions` or
-  `openclaw.runtimeExtensions`
+Do not modify `AgentLoop` or global registries directly. The API tags every
+registration with the extension ID so reload, failure rollback, and uninstall
+can remove exactly what the package owns.
 
-The adapter adds the `runtime.node` permission to both generated manifests.
-Users must explicitly grant it before any third-party JavaScript or TypeScript
-entry runs.
+## Collision and failure behavior
 
-Native Python packages can be installed from a local directory or Git source.
-The market is an index; installation always passes through local validation,
-dependency checks, permission review, trust, and activation.
+Tool and command names are unique across core and active extensions. If an
+extension registers a duplicate name, activation fails for that extension and
+all of its partial registrations are rolled back.
 
-## Compatibility Matrix
+Missing dependencies are reported as diagnostics instead of crashing the
+gateway.
 
-The matrix describes the current adapter, not an intention to support every
-upstream API.
+## Develop locally
 
-| Upstream capability | Pi | OpenClaw | nanobot behavior |
-|---|---|---|---|
-| Tool registration and calls | Executable | Executable | Projected as native `Tool`; implementation stays in Node sidecar |
-| Slash commands | Executable | Executable | Registered in native command router |
-| Supported lifecycle events | Observation-only | Observation-only | Receives serialized run/tool events; cannot mutate native context |
-| Provider registration | Metadata only | Metadata only | Visible in catalog and diagnostics; not an executable provider |
-| Transcription/image/web-search provider contracts | N/A | Metadata only | Visible but not projected into native provider registries |
-| Skills declared in plugin metadata | N/A | Metadata only | Catalog ownership only; runtime skill installation is not synthesized |
-| Channels | N/A | Metadata only | No OpenClaw channel host emulation |
-| Session tree and custom entries | Unsupported | Unsupported | No compatible host surface |
-| Terminal UI, widgets, renderers, shortcuts | Unsupported | Unsupported | WebUI and CLI have different rendering contracts |
-| Model selection and thinking control | Unsupported | Unsupported | Remains owned by nanobot model presets and request policy |
-| Arbitrary upstream host services | Unsupported | Unsupported | Reported as diagnostics rather than silently emulated |
-
-### Pi package shape
-
-```json
-{
-  "name": "@acme/pi-review",
-  "version": "1.0.0",
-  "keywords": ["pi-package"],
-  "pi": {
-    "extensions": ["./index.ts"]
-  }
-}
-```
-
-The sidecar supports `registerTool`, `registerCommand`, and selected `on(...)`
-lifecycle handlers. TypeScript uses Node's native type stripping when
-available, with `jiti` as a fallback installed with the package runtime.
-Required `peerDependencies` are installed into that runtime as well; peers
-marked optional in `peerDependenciesMeta` remain optional.
-The generated manifest requests `runtime.node`.
-
-### OpenClaw package shape
-
-```json
-{
-  "name": "@acme/openclaw-review",
-  "version": "1.0.0",
-  "keywords": ["openclaw-plugin"],
-  "openclaw": {
-    "runtimeExtensions": ["./dist/index.js"]
-  }
-}
-```
-
-If present, `openclaw.plugin.json` supplies catalog identity, contribution
-contracts, command aliases, and compatibility diagnostics. The OpenClaw
-`register` function must complete synchronously during load.
-The generated manifest requests `runtime.node`.
-
-## Test an Extension
-
-Use an isolated config and workspace while developing:
+1. Create the manifest and entry module.
+2. Install the directory with `--kind local`.
+3. Inspect and grant its permissions.
+4. Trust it.
+5. Reinstall after editing so nanobot records a new integrity digest.
 
 ```bash
-nanobot extensions install ./my-extension --kind local
+nanobot extensions install "$PWD" --kind local
 nanobot extensions inspect acme.review
 nanobot extensions permissions acme.review workspace.read
 nanobot extensions trust acme.review
-nanobot extensions enable acme.review
-nanobot agent -m "Use review_code on README.md"
 ```
 
-Also test:
+Keep tests in the extension repository. At minimum, test registration,
+duplicate-name failure, and behavior when each required dependency is missing.
 
-- install while untrusted does not execute code;
-- package changes after installation revoke effective trust;
-- missing hard dependencies leave the package inactive;
-- extension dependencies activate before their dependents and reject cycles;
-- denied or missing permissions prevent activation;
-- duplicate contribution names become diagnostics;
-- disable, untrust, reload, and uninstall remove runtime registrations;
-- one broken package does not block unrelated packages.
+## Distribution
 
-For nanobot itself, extension tests live under `tests/extensions/`. Keep
-compatibility fixtures small and assert diagnostics for unsupported APIs.
-
-## Design Rules
-
-1. Extend the control plane, not the core loop.
-2. Keep one native owner for each capability.
-3. Make discovery metadata-only.
-4. Separate install, permission grant, trust, and enable.
-5. Report partial compatibility honestly.
-6. Keep market metadata independent from runtime execution.
-7. Roll back all registrations owned by a failed or unloaded extension.
+Publish the directory in a Git repository. Users can pin a release tag or
+commit with `--ref`. The repository root must contain
+`nanobot.extension.json`; install scripts and generated compatibility manifests
+are not part of the native contract.

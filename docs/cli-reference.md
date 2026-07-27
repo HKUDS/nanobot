@@ -18,7 +18,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
-| Manage extension packages | `nanobot extensions list` | Install, inspect, trust, enable, and remove nanobot, Pi, or OpenClaw packages |
+| Manage extension packages | `nanobot extensions list` | Install, inspect, trust, enable, and remove native nanobot packages |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
 | Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OpenAI Codex, xAI subscription, and GitHub Copilot providers |
@@ -257,10 +257,7 @@ operations:
 | Command | Description |
 |---|---|
 | `nanobot extensions list` | Show installed packages and activation policy |
-| `nanobot extensions inspect <id>` | Show contributions, dependencies, requested permissions, and diagnostics |
-| `nanobot extensions search [query]` | Search compatible packages on npm |
-| `nanobot extensions search [query] --ecosystem <name>` | Filter to `nanobot`, `pi`, or `openclaw` |
-| `nanobot extensions install <npm-spec>` | Install an npm package as untrusted |
+| `nanobot extensions inspect <id>` | Show identity, dependencies, requested permissions, and diagnostics |
 | `nanobot extensions install <url> --kind git [--ref <ref>]` | Install from a Git branch, tag, or commit |
 | `nanobot extensions install <path> --kind local` | Install from a local package directory |
 | `nanobot extensions permissions <id> [permissions...]` | Replace the exact granted permission set; omit values to revoke all |
@@ -274,16 +271,16 @@ operations:
 Example:
 
 ```bash
-nanobot extensions install @acme/pi-review
-nanobot extensions inspect pi.acme.pi-review
-nanobot extensions permissions pi.acme.pi-review workspace.read
-nanobot extensions trust pi.acme.pi-review
-nanobot extensions enable pi.acme.pi-review
+nanobot extensions install https://github.com/acme/nanobot-review.git
+nanobot extensions inspect acme.review
+nanobot extensions permissions acme.review workspace.read
+nanobot extensions trust acme.review
+nanobot extensions enable acme.review
 ```
 
 Installed packages live under `~/.nanobot/extensions/`. They do not execute
 until trusted. See [Extensions](./extensions.md) for the safety model and
-[Extension Authoring](./extension-authoring.md) for package compatibility.
+[Extension Authoring](./extension-authoring.md) for the native package contract.
 
 ## Optional Features
 

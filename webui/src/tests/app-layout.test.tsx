@@ -361,11 +361,9 @@ describe("App layout", () => {
           id: "nanobot.shell",
           name: "Shell",
           version: "1",
-          runtime: "python",
           description: "Run shell commands.",
           homepage: "",
           license: "",
-          scope: "builtin",
           location: null,
           enabled: true,
           trusted: true,
@@ -376,7 +374,6 @@ describe("App layout", () => {
           source_ref: "",
           integrity: "",
           installed_at: "",
-          contributions: [{ kind: "tool", name: "shell", description: "" }],
           dependencies: [],
           permissions: [],
         }],
@@ -391,7 +388,6 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Extensions" }));
 
     expect(await screen.findByRole("heading", { name: "Extensions" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Built in/ }));
     expect(await screen.findByText("Shell")).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Extensions" })).toHaveAttribute(
       "aria-current",

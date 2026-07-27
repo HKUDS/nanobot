@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from nanobot.extensions import ExtensionService
+from nanobot.extensions.service import ExtensionService
 
 ServiceFactory = Callable[[], ExtensionService]
 
@@ -21,7 +21,7 @@ def create_extensions_app(
     service_factory: ServiceFactory = ExtensionService,
 ) -> typer.Typer:
     """Build the extension command group around the transport-neutral service."""
-    app = typer.Typer(help="Discover, install, inspect, and govern extensions.")
+    app = typer.Typer(help="Install, inspect, and govern native extensions.")
 
     def service() -> ExtensionService:
         return service_factory()
@@ -39,7 +39,6 @@ def create_extensions_app(
         payload = run(service().status())
         table = Table(show_header=True, header_style="bold")
         table.add_column("Extension")
-        table.add_column("Runtime")
         table.add_column("State")
         table.add_column("Trust")
         table.add_column("Version")
@@ -47,7 +46,6 @@ def create_extensions_app(
             state = "active" if item["active"] else ("enabled" if item["enabled"] else "disabled")
             table.add_row(
                 item["name"],
-                item["runtime"],
                 state,
                 "trusted" if item["trusted"] else "untrusted",
                 item["version"],
@@ -71,12 +69,10 @@ def create_extensions_app(
             raise typer.Exit(1)
         console.print(f"[bold]{item['name']}[/bold] [dim]{item['version']}[/dim]")
         console.print(item["description"] or "[dim]No description.[/dim]")
-        console.print(f"Runtime: {item['runtime']}  Scope: {item['scope']}")
         console.print(
             f"State: {'active' if item['active'] else 'inactive'}  "
             f"Trust: {'trusted' if item['trusted'] else 'untrusted'}"
         )
-        _print_named_rows(console, "Contributions", item["contributions"], "kind", "name")
         _print_named_rows(console, "Dependencies", item["dependencies"], "kind", "name")
         _print_permissions(console, item["permissions"], set(item["granted_permissions"]))
         diagnostics = [
@@ -91,39 +87,10 @@ def create_extensions_app(
                     f"  [yellow]{diagnostic['code']}[/yellow] {diagnostic['message']}"
                 )
 
-    @app.command("search")
-    def search_extensions(
-        query: str = typer.Argument("", help="Package name or keyword"),
-        ecosystem: str = typer.Option(
-            "all",
-            "--ecosystem",
-            "-e",
-            help="all, nanobot, pi, or openclaw",
-        ),
-        limit: int = typer.Option(20, "--limit", min=1, max=100),
-    ) -> None:
-        """Search compatible extension packages on npm."""
-        payload = run(service().search(query, ecosystem=ecosystem, limit=limit))
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("Package")
-        table.add_column("Ecosystem")
-        table.add_column("Version")
-        table.add_column("Description")
-        for package in payload["packages"]:
-            table.add_row(
-                package["name"],
-                package["ecosystem"],
-                package["version"],
-                package["description"],
-            )
-        console.print(table)
-        if not payload["packages"]:
-            console.print("[dim]No compatible packages found.[/dim]")
-
     @app.command("install")
     def install_extension(
-        source: str = typer.Argument(..., help="npm spec, Git URL, or local path"),
-        kind: str = typer.Option("npm", "--kind", help="npm, git, or local"),
+        source: str = typer.Argument(..., help="Git URL or local package path"),
+        kind: str = typer.Option("git", "--kind", help="git or local"),
         ref: str = typer.Option("", "--ref", help="Git branch, tag, or commit"),
     ) -> None:
         """Install an extension without granting trust or permissions."""

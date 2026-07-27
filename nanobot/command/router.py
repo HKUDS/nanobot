@@ -97,13 +97,6 @@ class CommandRouter:
         self._prefix.sort(key=lambda p: len(p[0]), reverse=True)
         self._owners[("prefix", pfx)] = owner
 
-    def registrations(self) -> tuple[tuple[str, str, str], ...]:
-        """Return ``(tier, command, owner)`` rows for extension inspection."""
-        return tuple(
-            (tier, command, owner)
-            for (tier, command), owner in sorted(self._owners.items())
-        )
-
     def owner(self, tier: str, command: str) -> str | None:
         """Return the extension that owns one command registration."""
         return self._owners.get((tier, command))

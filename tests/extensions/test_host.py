@@ -11,7 +11,6 @@ class _Agent:
     def __init__(self) -> None:
         self.tools = ToolRegistry()
         self.commands = CommandRouter()
-        self.context = type("Context", (), {"skills": None})()
         self._hook_factories = []
 
 
@@ -44,7 +43,7 @@ async def test_host_reloads_and_closes_runtime(
     await host.close()
 
     assert host.snapshot is None
-    assert first.catalog.snapshot.extensions
-    assert second.catalog.snapshot.extensions
+    assert first.catalog.snapshot.extensions == ()
+    assert second.catalog.snapshot.extensions == ()
     assert len(activated) == 2
     assert len(closed) == 2

@@ -734,12 +734,6 @@ export interface CliAppsPayload {
   };
 }
 
-export interface ExtensionContributionInfo {
-  kind: string;
-  name: string;
-  description: string;
-}
-
 export interface ExtensionDependencyInfo {
   kind: string;
   name: string;
@@ -756,11 +750,9 @@ export interface ExtensionInfo {
   id: string;
   name: string;
   version: string;
-  runtime: "python" | "pi" | "openclaw" | "declarative" | string;
   description: string;
   homepage: string;
   license: string;
-  scope: "builtin" | "user" | "workspace" | string;
   location: string | null;
   enabled: boolean;
   trusted: boolean;
@@ -771,8 +763,6 @@ export interface ExtensionInfo {
   source_ref: string;
   integrity: string;
   installed_at: string;
-  managed_by_store: boolean;
-  contributions: ExtensionContributionInfo[];
   dependencies: ExtensionDependencyInfo[];
   permissions: ExtensionPermissionInfo[];
 }
@@ -787,22 +777,6 @@ export interface ExtensionDiagnosticInfo {
 export interface ExtensionsPayload {
   extensions: ExtensionInfo[];
   diagnostics: ExtensionDiagnosticInfo[];
-}
-
-export interface ExtensionMarketPackage {
-  name: string;
-  version: string;
-  description: string;
-  ecosystem: "nanobot" | "pi" | "openclaw" | string;
-  publisher: string;
-  license: string;
-  homepage: string;
-  repository: string;
-  published_at: string;
-}
-
-export interface ExtensionMarketPayload {
-  packages: ExtensionMarketPackage[];
 }
 
 export interface NanobotFeatureInfo {

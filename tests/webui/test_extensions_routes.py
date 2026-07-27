@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import quote
 
 import pytest
 from websockets.datastructures import Headers
@@ -19,16 +19,16 @@ class _Service:
         self.calls.append(("status", None))
         return {"extensions": [], "diagnostics": []}
 
-    async def search(self, query, *, ecosystem, limit):
-        self.calls.append(("search", (query, ecosystem, limit)))
-        return {"packages": []}
-
     async def install(self, source, *, kind, ref, trusted):
         self.calls.append(("install", (source, kind, ref, trusted)))
         return {"record": {"id": "sample"}}
 
     async def set_trusted(self, extension_id, trusted):
         self.calls.append(("trust", (extension_id, trusted)))
+        return {"record": {"id": extension_id}}
+
+    async def set_permissions(self, extension_id, permissions):
+        self.calls.append(("permissions", (extension_id, permissions)))
         return {"record": {"id": extension_id}}
 
 
@@ -41,7 +41,6 @@ def _router(
     return WebUIExtensionsRouter(
         service=service,
         check_api_token=lambda _request: authorized,
-        parse_query=lambda path: parse_qs(urlsplit(path).query),
         json_response=http_json_response,
         error_response=lambda status, message: http_json_response(
             {"error": message},
@@ -58,12 +57,10 @@ def _request(
     method: str = "GET",
     values: dict[str, object] | None = None,
     host: str = "127.0.0.1:8765",
-    encode_values: bool = False,
 ):
     headers = Headers([("Host", host)])
     if values is not None:
-        payload = json.dumps(values)
-        headers["X-Nanobot-Extension-Values"] = quote(payload) if encode_values else payload
+        headers["X-Nanobot-Extension-Values"] = quote(json.dumps(values))
     return SimpleNamespace(path=path, method=method, headers=headers)
 
 
@@ -98,56 +95,42 @@ async def test_extension_status_requires_auth_and_get() -> None:
 
 
 @pytest.mark.asyncio
-async def test_extension_market_parses_query() -> None:
-    service = _Service()
-    response = await _router(service).dispatch(
-        _LOCAL,
-        _request("/api/extensions/market?q=web&ecosystem=pi&limit=7"),
-        "/api/extensions/market",
-    )
-
-    assert response is not None and response.status_code == 200
-    assert service.calls == [("search", ("web", "pi", 7))]
-
-
-@pytest.mark.asyncio
-async def test_extension_install_is_local_and_untrusted() -> None:
+async def test_local_install_is_untrusted() -> None:
     service = _Service()
     response = await _router(service).dispatch(
         _LOCAL,
         _request(
             "/api/extensions/install",
             method="POST",
-            values={"source": "中文扩展", "kind": "npm"},
-            encode_values=True,
+            values={"source": "https://example.com/acme.git", "kind": "git"},
         ),
         "/api/extensions/install",
     )
 
     assert response is not None and response.status_code == 200
     assert service.calls == [
-        ("install", ("中文扩展", "npm", "", False)),
+        ("install", ("https://example.com/acme.git", "git", "", False)),
     ]
 
 
 @pytest.mark.asyncio
-async def test_remote_install_policy_never_exposes_server_local_paths() -> None:
+async def test_remote_policy_allows_git_but_never_local_paths() -> None:
     service = _Service()
     denied = await _router(service).dispatch(
         _REMOTE,
         _request(
             "/api/extensions/install",
             method="POST",
-            values={"source": "pi-example", "kind": "npm"},
+            values={"source": "https://example.com/acme.git", "kind": "git"},
         ),
         "/api/extensions/install",
     )
-    npm_allowed = await _router(service, allow_remote=True).dispatch(
+    allowed = await _router(service, allow_remote=True).dispatch(
         _REMOTE,
         _request(
             "/api/extensions/install",
             method="POST",
-            values={"source": "pi-example", "kind": "npm"},
+            values={"source": "https://example.com/acme.git", "kind": "git"},
         ),
         "/api/extensions/install",
     )
@@ -162,17 +145,16 @@ async def test_remote_install_policy_never_exposes_server_local_paths() -> None:
     )
 
     assert denied is not None and denied.status_code == 403
-    assert npm_allowed is not None and npm_allowed.status_code == 200
+    assert allowed is not None and allowed.status_code == 200
     assert local_denied is not None and local_denied.status_code == 403
     assert service.calls == [
-        ("install", ("pi-example", "npm", "", False)),
+        ("install", ("https://example.com/acme.git", "git", "", False)),
     ]
 
 
 @pytest.mark.asyncio
-async def test_remote_install_policy_does_not_grant_remote_trust() -> None:
+async def test_remote_clients_cannot_change_trust() -> None:
     service = _Service()
-
     response = await _router(service, allow_remote=True).dispatch(
         _REMOTE,
         _request(
@@ -185,3 +167,18 @@ async def test_remote_install_policy_does_not_grant_remote_trust() -> None:
 
     assert response is not None and response.status_code == 403
     assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_permissions_require_an_array_of_strings() -> None:
+    response = await _router(_Service()).dispatch(
+        _LOCAL,
+        _request(
+            "/api/extensions/permissions",
+            method="POST",
+            values={"id": "sample", "permissions": "network"},
+        ),
+        "/api/extensions/permissions",
+    )
+
+    assert response is not None and response.status_code == 400

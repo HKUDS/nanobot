@@ -305,7 +305,8 @@ WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it as
 remote access and leave package installs disabled unless that is intentional.
 
 Optional feature installs use pip's configured package index, including
-`PIP_INDEX_URL`. Extension packages use their declared Git or npm source.
+`PIP_INDEX_URL`. Extension packages install from an explicit Git repository or
+local directory.
 
 Leave remote package installs disabled when the WebUI is exposed beyond a
 private, trusted network.

@@ -18,28 +18,24 @@ function response(body: unknown): Response {
 
 function extension(overrides: Partial<ExtensionInfo> = {}): ExtensionInfo {
   return {
-    id: "sample.pi",
-    name: "Sample Pi",
+    id: "sample.tools",
+    name: "Sample Tools",
     version: "1.0.0",
-    runtime: "pi",
-    description: "A compatible Pi extension.",
+    description: "Adds a small set of native tools.",
     homepage: "",
     license: "MIT",
-    scope: "user",
-    location: "/tmp/extensions/sample.pi",
+    location: "/tmp/extensions/sample.tools",
     enabled: true,
     trusted: false,
     active: false,
-    requested_permissions: ["process.spawn"],
+    requested_permissions: ["network"],
     granted_permissions: [],
-    source: "npm",
-    source_ref: "@sample/pi-extension",
-    integrity: "sha512-example",
+    source: "git",
+    source_ref: "https://example.com/sample-tools.git",
+    integrity: "sha256:example",
     installed_at: "2026-07-26T00:00:00Z",
-    managed_by_store: true,
-    contributions: [{ kind: "tool", name: "sample", description: "" }],
     dependencies: [],
-    permissions: [{ name: "process.spawn", reason: "Runs the extension host." }],
+    permissions: [{ name: "network", reason: "Fetch selected URLs." }],
     ...overrides,
   };
 }
@@ -57,18 +53,18 @@ describe("ExtensionsView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("requires permission grants before an extension can be trusted", async () => {
+  it("requires permission grants before trust", async () => {
     let current = extension();
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, init });
       if (url === "/api/extensions/permissions") {
-        current = extension({ granted_permissions: ["process.spawn"] });
+        current = extension({ granted_permissions: ["network"] });
       }
       if (url === "/api/extensions/trust") {
         current = extension({
-          granted_permissions: ["process.spawn"],
+          granted_permissions: ["network"],
           trusted: true,
           active: true,
         });
@@ -79,110 +75,45 @@ describe("ExtensionsView", () => {
     }));
 
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: /Sample Pi/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Sample Tools/ }));
 
     const trust = screen.getByRole("button", { name: "Trust" });
     expect(trust).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Grant permissions" }));
-
     await waitFor(() => expect(trust).toBeEnabled());
     fireEvent.click(trust);
 
-    await waitFor(() => {
-      expect(requests.some(({ url }) => url === "/api/extensions/trust")).toBe(true);
-    });
-    const permissionRequest = requests.find(
-      ({ url }) => url === "/api/extensions/permissions",
+    await waitFor(() =>
+      expect(requests.some(({ url }) => url === "/api/extensions/trust")).toBe(true),
     );
-    const encoded = new Headers(permissionRequest?.init?.headers).get(
-      "X-Nanobot-Extension-Values",
-    );
-    expect(JSON.parse(decodeURIComponent(encoded ?? ""))).toEqual({
-      id: "sample.pi",
-      permissions: ["process.spawn"],
-    });
   });
 
-  it("discovers and installs a package without granting trust", async () => {
+  it("installs a Git package without granting trust", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, init });
-      if (url.startsWith("/api/extensions/market?")) {
-        return response({
-          packages: [{
-            name: "@sample/pi-extension",
-            version: "1.0.0",
-            description: "A compatible Pi extension.",
-            ecosystem: "pi",
-            publisher: "sample",
-            license: "MIT",
-            homepage: "",
-            repository: "",
-            published_at: "",
-          }],
-        });
-      }
       return url === "/api/extensions"
         ? response({ extensions: [], diagnostics: [] })
         : response({});
     }));
 
     renderView();
-    fireEvent.click(screen.getByRole("button", { name: "Discover" }));
-    fireEvent.click(await screen.findByRole("button", {
-      name: "Install @sample/pi-extension",
-    }));
-
-    await waitFor(() => {
-      expect(requests.some(({ url }) => url === "/api/extensions/install")).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("https://github.com/acme/extension.git"), {
+      target: { value: "https://example.com/sample-tools.git" },
     });
-    const installRequest = requests.find(({ url }) => url === "/api/extensions/install");
-    const encoded = new Headers(installRequest?.init?.headers).get(
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(requests.some(({ url }) => url === "/api/extensions/install")).toBe(true),
+    );
+    const install = requests.find(({ url }) => url === "/api/extensions/install");
+    const encoded = new Headers(install?.init?.headers).get(
       "X-Nanobot-Extension-Values",
     );
     expect(JSON.parse(decodeURIComponent(encoded ?? ""))).toEqual({
-      source: "@sample/pi-extension",
-      kind: "npm",
+      source: "https://example.com/sample-tools.git",
+      kind: "git",
     });
-  });
-
-  it("localizes permissions generated by a compatibility adapter", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({
-      extensions: [extension({
-        requested_permissions: ["runtime.node"],
-        permissions: [{
-          name: "runtime.node",
-          reason: "Raw adapter copy.",
-        }],
-      })],
-      diagnostics: [],
-    })));
-
-    renderView();
-    fireEvent.click(await screen.findByRole("button", { name: /Sample Pi/ }));
-
-    expect(screen.getByText("Node.js runtime")).toBeInTheDocument();
-    expect(screen.getByText(
-      "Run third-party JavaScript or TypeScript in a Node.js process.",
-    )).toBeInTheDocument();
-  });
-
-  it("keeps config-discovered extensions read-only", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({
-      extensions: [extension({
-        scope: "workspace",
-        source: "path",
-        managed_by_store: false,
-      })],
-      diagnostics: [],
-    })));
-
-    renderView();
-    fireEvent.click(await screen.findByRole("button", { name: /Sample Pi/ }));
-
-    expect(screen.getByText("Managed by configuration.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Trust" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Uninstall" })).not.toBeInTheDocument();
   });
 });

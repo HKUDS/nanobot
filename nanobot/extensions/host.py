@@ -59,19 +59,11 @@ class ExtensionHost:
             config = self._config_loader()
             catalog = build_extension_catalog(
                 config,
-                skills=getattr(
-                    getattr(self._agent, "context", None),
-                    "skills",
-                    None,
-                ),
-                tools=self._agent.tools,
-                commands=self._agent.commands,
                 user_root=self._user_root,
             )
             manager = ExtensionRuntimeManager(
                 tools=self._agent.tools,
                 commands=self._agent.commands,
-                config=config,
                 hook_factories=self._agent._hook_factories,
             )
             activation = await manager.activate(catalog.snapshot)

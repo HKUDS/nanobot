@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.extensions.host import ExtensionHost
-from nanobot.extensions.market import ExtensionMarketplace
-from nanobot.extensions.registry import ExtensionCandidate, ExtensionScope
-from nanobot.extensions.store import ExtensionStore
+from nanobot.extensions.manifest import ExtensionManifest
+from nanobot.extensions.registry import ExtensionCandidate
+from nanobot.extensions.store import ExtensionStore, InstalledExtension
 
 
 class ExtensionService:
@@ -21,15 +21,14 @@ class ExtensionService:
         *,
         host: ExtensionHost | None = None,
         store: ExtensionStore | None = None,
-        marketplace: ExtensionMarketplace | None = None,
     ) -> None:
         self.host = host
         self.store = store or ExtensionStore()
-        self.marketplace = marketplace or ExtensionMarketplace()
         self._mutation_lock = asyncio.Lock()
 
     async def status(self) -> dict[str, Any]:
-        catalog = self.host.snapshot.catalog if self.host and self.host.snapshot else None
+        snapshot = self.host.snapshot if self.host else None
+        catalog = snapshot.catalog if snapshot else None
         if catalog is None:
             discovery = self.store.discover()
             candidates = discovery.candidates
@@ -37,61 +36,33 @@ class ExtensionService:
             active_ids: set[str] = set()
         else:
             candidates = catalog.candidates
-            diagnostics = catalog.diagnostics
             active_ids = {
-                active.candidate.manifest.id
-                for active in self.host.snapshot.activation.extensions
+                active.manifest.id
+                for active in snapshot.activation.extensions
             }
-            active_ids.update(
-                candidate.manifest.id
-                for candidate in catalog.snapshot.extensions
-                if candidate.location is None
-            )
-            if self.host and self.host.snapshot:
-                diagnostics += self.host.snapshot.activation.diagnostics
+            diagnostics = catalog.diagnostics + snapshot.activation.diagnostics
         records = self.store.records()
         return {
             "extensions": [
                 _candidate_payload(candidate, active_ids, records.get(candidate.manifest.id))
                 for candidate in sorted(
                     candidates,
-                    key=lambda item: (item.scope, item.manifest.name.lower()),
+                    key=lambda item: item.manifest.name.lower(),
                 )
             ],
             "diagnostics": [asdict(item) for item in diagnostics],
         }
 
-    async def search(
-        self,
-        query: str = "",
-        *,
-        ecosystem: str = "all",
-        limit: int = 30,
-    ) -> dict[str, Any]:
-        packages = await asyncio.to_thread(
-            self.marketplace.search,
-            query,
-            ecosystem=ecosystem,
-            limit=limit,
-        )
-        return {"packages": [asdict(package) for package in packages]}
-
     async def install(
         self,
         source: str,
         *,
-        kind: str = "npm",
+        kind: str = "git",
         ref: str = "",
         trusted: bool = False,
     ) -> dict[str, Any]:
         async with self._mutation_lock:
-            if kind == "npm":
-                result = await asyncio.to_thread(
-                    self.store.install_npm,
-                    source,
-                    trusted=trusted,
-                )
-            elif kind == "git":
+            if kind == "git":
                 result = await asyncio.to_thread(
                     self.store.install_git,
                     source,
@@ -109,8 +80,7 @@ class ExtensionService:
             await self._reload()
             return {
                 "record": _record_payload(result.record),
-                "manifest": _manifest_payload(result.package.manifest),
-                "diagnostics": list(result.package.diagnostics),
+                "manifest": _manifest_payload(result.manifest),
             }
 
     async def set_enabled(self, extension_id: str, enabled: bool) -> dict[str, Any]:
@@ -150,46 +120,33 @@ class ExtensionService:
 def _candidate_payload(
     candidate: ExtensionCandidate,
     active_ids: set[str],
-    record: Any | None,
+    record: InstalledExtension | None,
 ) -> dict[str, Any]:
     manifest = candidate.manifest
     requested = [permission.name for permission in manifest.permissions]
     return {
         **_manifest_payload(manifest),
-        "scope": candidate.scope.name.lower(),
         "location": str(candidate.location) if candidate.location else None,
         "enabled": candidate.enabled,
         "trusted": candidate.trusted,
         "active": manifest.id in active_ids,
         "requested_permissions": requested,
         "granted_permissions": sorted(candidate.granted_permissions),
-        "source": record.source.value if record else (
-            "builtin" if candidate.scope is ExtensionScope.BUILTIN else "path"
-        ),
+        "source": record.source.value if record else "path",
         "source_ref": record.source_ref if record else "",
         "integrity": record.integrity if record else "",
         "installed_at": record.installed_at if record else "",
-        "managed_by_store": record is not None,
     }
 
 
-def _manifest_payload(manifest: Any) -> dict[str, Any]:
+def _manifest_payload(manifest: ExtensionManifest) -> dict[str, Any]:
     return {
         "id": manifest.id,
         "name": manifest.name,
         "version": manifest.version,
-        "runtime": manifest.runtime.value,
         "description": manifest.description,
         "homepage": manifest.homepage,
         "license": manifest.license,
-        "contributions": [
-            {
-                "kind": contribution.kind.value,
-                "name": contribution.name,
-                "description": contribution.description,
-            }
-            for contribution in manifest.contributions
-        ],
         "dependencies": [
             {
                 "kind": dependency.kind.value,
@@ -206,8 +163,5 @@ def _manifest_payload(manifest: Any) -> dict[str, Any]:
     }
 
 
-def _record_payload(record: Any) -> dict[str, Any]:
-    return {
-        **asdict(record),
-        "source": record.source.value,
-    }
+def _record_payload(record: InstalledExtension) -> dict[str, Any]:
+    return record.model_dump(mode="json")
