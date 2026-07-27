@@ -19,6 +19,11 @@ from nanobot.command.router import CommandContext
 from nanobot.utils.gitstore import CommitInfo
 
 
+@pytest.fixture(autouse=True)
+def _isolate_webui_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+
+
 class _FakeStore:
     def __init__(
         self,
@@ -253,6 +258,29 @@ async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
     await asyncio.sleep(0)
     assert store._last_dream_cursor == 42
     assert "no memory changes" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_removes_webui_transcripts_for_pruned_sessions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    ctx, _store = _build_runnable_dream(tmp_path, initialized=False, content_diff="")
+    deleted: list[str] = []
+    monkeypatch.setattr(
+        MemoryStore,
+        "prune_dream_sessions",
+        staticmethod(lambda _sessions_dir: ["dream:old"]),
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.delete_webui_transcript",
+        deleted.append,
+    )
+
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert deleted == ["dream:old"]
 
 
 @pytest.mark.asyncio

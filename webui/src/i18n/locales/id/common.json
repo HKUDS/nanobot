@@ -839,6 +839,7 @@
       "pinned": "Pinned",
       "all": "Topik",
       "projects": "Projects",
+      "dreams": "Mimpi",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -878,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "Memuat percakapan…",
+    "readOnlySession": "Sesi ini hanya dapat dibaca.",
     "empty": {
       "greetings": {
         "workOn": "Apa yang kita kerjakan bersama?",

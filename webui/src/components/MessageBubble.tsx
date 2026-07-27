@@ -199,14 +199,14 @@ export function MessageBubble({
           />
         ) : null}
         {hasText ? (
-          <p
+          <div
             className={cn(
               "ml-auto w-fit max-w-full min-w-0 rounded-[18px] bg-secondary/70 px-4 py-2",
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
             )}
           >
             {messageText}
-          </p>
+          </div>
         ) : null}
         {hasText && showCopyAction ? (
           <TooltipProvider delayDuration={220} skipDelayDuration={80}>

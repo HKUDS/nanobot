@@ -1496,7 +1496,7 @@ function Shell({
     (groupId: string) => {
       void updateSidebarState((current) => {
         const collapsedGroups = { ...current.collapsed_groups };
-        if (groupId === "workspace:chats" || groupId === "date:all") {
+        if (groupId === "workspace:chats" || groupId === "date:all" || groupId === "dream") {
           if (collapsedGroups[groupId] === false) {
             delete collapsedGroups[groupId];
           } else {
@@ -1850,9 +1850,11 @@ function Shell({
   }, []);
 
   const headerTitle = activeSession
-    ? sidebarState.title_overrides[activeSession.key] ||
-      activeSession.title ||
-      deriveTitle(activeSession.preview, t("chat.newChat"))
+    ? activeSession.kind === "dream"
+      ? t("chat.groups.dreams")
+      : sidebarState.title_overrides[activeSession.key] ||
+        activeSession.title ||
+        deriveTitle(activeSession.preview, t("chat.newChat"))
     : t("app.brand");
 
   useEffect(() => {

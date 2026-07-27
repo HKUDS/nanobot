@@ -413,13 +413,21 @@ class GatewayHTTPHandler:
         cleaned = []
         for s in sessions:
             key = s.get("key")
-            if not (isinstance(key, str) and key.startswith("websocket:")):
+            is_websocket = isinstance(key, str) and key.startswith("websocket:")
+            is_dream = isinstance(key, str) and key.startswith("dream:")
+            if not (is_websocket or is_dream):
                 continue
             row = {k: v for k, v in s.items() if k != "path"}
-            chat_id = key.split(":", 1)[1]
-            started_at = websocket_turn_wall_started_at(chat_id)
-            if started_at is not None:
-                row["run_started_at"] = started_at
+            if is_dream:
+                row["title"] = row.get("title") or "Dream"
+                row["preview"] = ""
+                row["read_only"] = True
+                row["kind"] = "dream"
+            else:
+                chat_id = key.split(":", 1)[1]
+                started_at = websocket_turn_wall_started_at(chat_id)
+                if started_at is not None:
+                    row["run_started_at"] = started_at
             scope = self.workspaces.scope_for_session_key(key)
             row["workspace_scope"] = scope.payload()
             cleaned.append(row)
@@ -433,7 +441,7 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
+        if not _is_readable_session_key(decoded_key):
             return _http_error(404, "session not found")
         data = self.session_manager.read_session_file(decoded_key)
         if data is None:
@@ -453,7 +461,7 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
+        if not _is_readable_session_key(decoded_key):
             return _http_error(404, "session not found")
         scope = self.workspaces.scope_for_session_key(decoded_key)
         session_messages: list[dict[str, Any]] | None = None
@@ -498,7 +506,7 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
+        if not _is_readable_session_key(decoded_key):
             return _http_error(404, "session not found")
         query = _parse_query(request.path)
         path = _query_first(query, "path")
@@ -1031,3 +1039,7 @@ def _positive_int(value: Any) -> int | None:
 
 def _is_websocket_channel_session_key(key: str) -> bool:
     return key.startswith("websocket:")
+
+
+def _is_readable_session_key(key: str) -> bool:
+    return _is_websocket_channel_session_key(key) or key.startswith("dream:")

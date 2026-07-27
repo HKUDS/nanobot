@@ -51,9 +51,6 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         tool_hint_max_length=spec.tool_hint_max_length,
         on_iteration=spec.on_iteration,
     )
-    if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
-        return progress_hook
-
     turn_context = AgentTurnHookContext(
         on_progress=spec.on_progress,
         workspace=spec.workspace,
@@ -66,16 +63,17 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
     )
     hook_chain: list[AgentHook] = [progress_hook]
 
-    for factory in spec.registered_hook_factories:
-        try:
-            created_hook = factory(turn_context)
-        except Exception:
-            logger.exception("Agent turn hook factory failed: {}", factory)
-            continue
-        if created_hook is not None:
-            hook_chain.append(created_hook)
+    if not spec.ephemeral or spec.run_extra_hooks_for_ephemeral:
+        for factory in spec.registered_hook_factories:
+            try:
+                created_hook = factory(turn_context)
+            except Exception:
+                logger.exception("Agent turn hook factory failed: {}", factory)
+                continue
+            if created_hook is not None:
+                hook_chain.append(created_hook)
 
-    hook_chain.extend(spec.registered_hooks)
+        hook_chain.extend(spec.registered_hooks)
 
     for factory in spec.turn_hook_factories:
         try:

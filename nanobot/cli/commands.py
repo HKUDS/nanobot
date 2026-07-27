@@ -1805,13 +1805,17 @@ def _run_gateway(
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
             from nanobot.agent.memory import DreamRunProgress, MemoryStore
+            from nanobot.webui.transcript import (
+                WebUISessionTranscriptRecorder,
+                delete_webui_transcript,
+            )
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
-            progress = DreamRunProgress()
             resp = None
+            transcript = None
             diff_body = ""
             try:
                 result = store.build_dream_prompt()
@@ -1820,6 +1824,9 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
+                transcript = WebUISessionTranscriptRecorder(key)
+                transcript.start(prompt)
+                progress = DreamRunProgress(transcript.progress)
                 resolve_dream_runtime = getattr(agent, "dream_runtime", None)
                 dream_runtime = (
                     resolve_dream_runtime() if callable(resolve_dream_runtime) else None
@@ -1830,8 +1837,12 @@ def _run_gateway(
                     ephemeral=True,
                     tools=store.build_dream_tools(),
                     on_progress=progress,
+                    on_stream=transcript.on_stream,
+                    on_stream_end=transcript.on_stream_end,
+                    hook_factories=[create_file_edit_activity_hook],
                     runtime=dream_runtime,
                 )
+                transcript.finish(resp)
                 # The real file delta grounds the audit record; clean completion
                 # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()
@@ -1857,7 +1868,9 @@ def _run_gateway(
                         "Dream cron job did not complete; cursor remains at {}",
                         store.get_last_dream_cursor(),
                     )
-            except Exception:
+            except Exception as exc:
+                if transcript is not None:
+                    transcript.finish(error=f"Dream failed: {exc}")
                 logger.exception("Dream cron job failed")
             finally:
                 from nanobot.webui.token_usage import record_response_token_usage
@@ -1871,7 +1884,8 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+                for session_key in prune_dream_sessions(agent.sessions.sessions_dir):
+                    delete_webui_transcript(session_key)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.

@@ -853,6 +853,7 @@
       "pinned": "置顶",
       "all": "话题",
       "projects": "项目",
+      "dreams": "梦境",
       "today": "今天",
       "yesterday": "昨天",
       "earlier": "更早",
@@ -892,6 +893,7 @@
   },
   "thread": {
     "loadingConversation": "正在加载话题…",
+    "readOnlySession": "此会话为只读。",
     "empty": {
       "greetings": {
         "workOn": "我们要一起做点什么？",

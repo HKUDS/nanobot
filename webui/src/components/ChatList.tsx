@@ -23,7 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
+import { deriveTitle, fmtDateTime, relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,
@@ -110,6 +110,7 @@ export const ChatList = memo(function ChatList({
     earlier: t("chat.groups.earlier"),
     archived: t("chat.groups.archived"),
     projects: t("chat.groups.projects"),
+    dreams: t("chat.groups.dreams"),
     fallbackTitle: t("chat.newChat"),
   }), [t]);
   const groups = useMemo(
@@ -204,7 +205,7 @@ export const ChatList = memo(function ChatList({
                 <ProjectGroupHeader
                   label={group.label}
                   path={group.projectPath}
-                  collapsed={Boolean(collapsedGroups[group.id])}
+                  collapsed={isCollapsedProject(group, collapsedGroups)}
                   onToggle={() => onToggleGroup?.(group.id)}
                   onRequestRename={
                     group.projectKey && onRequestRenameProject
@@ -219,10 +220,16 @@ export const ChatList = memo(function ChatList({
                   actionMenuPortalContainer={actionMenuPortalContainer}
                   updatedAt={showTimestamps ? group.updatedAt : null}
                 />
+              ) : group.kind === "dream" ? (
+                <DreamGroupHeader
+                  label={group.label}
+                  collapsed={isCollapsedProject(group, collapsedGroups)}
+                  onToggle={() => onToggleGroup?.(group.id)}
+                />
               ) : (
                 <ChatsGroupHeader label={group.label} />
               )}
-              {group.kind === "project" && collapsedGroups[group.id] ? null : (
+              {isCollapsedProject(group, collapsedGroups) ? null : (
                 <ul className="space-y-0.5">
                   {visibleSessions.map((s) => {
                     const active = s.key === activeKey;
@@ -230,19 +237,25 @@ export const ChatList = memo(function ChatList({
                       id: s.chatId.slice(0, 6),
                     });
                     const generatedTitle = s.title?.trim() || "";
-                    const title = displayTitle(s, titleOverrides, t("chat.newChat"));
-                    const tooltipTitle =
-                      titleOverrides[s.key]?.trim() ||
-                      generatedTitle ||
-                      deriveTitle(s.preview, fallbackTitle);
+                    const dreamMode = group.kind === "dream";
+                    const dreamTimestamp = dreamMode
+                      ? fmtDateTime(s.updatedAt ?? s.createdAt)
+                      : "";
+                    const title = dreamTimestamp ||
+                      displayTitle(s, titleOverrides, t("chat.newChat"));
+                    const tooltipTitle = dreamMode
+                      ? title
+                      : titleOverrides[s.key]?.trim() ||
+                        generatedTitle ||
+                        deriveTitle(s.preview, fallbackTitle);
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
                     const preview = visibleSessionPreview(s.preview);
                     const showPreview = showPreviews && preview && preview !== title;
-                    const timestamp = showTimestamps
+                    const timestamp = !dreamMode && showTimestamps
                       ? relativeTime(s.updatedAt ?? s.createdAt)
                       : "";
-                    const projectMode = group.kind === "project";
+                    const projectMode = group.kind === "project" || group.kind === "dream";
                     const activityState = running.has(s.chatId)
                       ? "running"
                       : updated.has(s.chatId) && !active
@@ -301,7 +314,7 @@ export const ChatList = memo(function ChatList({
                             ) : null}
                           </button>
                           <SessionActivityIndicator state={activityState} />
-                          <DropdownMenu modal={false}>
+                          {!s.readOnly ? <DropdownMenu modal={false}>
                             <DropdownMenuTrigger
                               className={cn(
                                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
@@ -361,7 +374,7 @@ export const ChatList = memo(function ChatList({
                                 {t("chat.delete")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
-                          </DropdownMenu>
+                          </DropdownMenu> : null}
                         </div>
                       </li>
                     );
@@ -488,6 +501,30 @@ function ChatsGroupHeader({ label }: { label: string }) {
   return (
     <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
       {label}
+    </div>
+  );
+}
+
+function DreamGroupHeader({
+  label,
+  collapsed,
+  onToggle,
+}: {
+  label: string;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="group flex min-w-0 items-center gap-1 px-1 pb-1 pt-1 text-[12px] font-medium text-muted-foreground/78">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-sidebar-accent/45 hover:text-sidebar-foreground"
+      >
+        <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+      </button>
     </div>
   );
 }

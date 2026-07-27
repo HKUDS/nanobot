@@ -404,16 +404,21 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
+        from nanobot.agent.hooks import create_file_edit_activity_hook
         from nanobot.agent.memory import DreamRunProgress, MemoryStore
+        from nanobot.webui.transcript import (
+            WebUISessionTranscriptRecorder,
+            delete_webui_transcript,
+        )
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
-        progress = DreamRunProgress()
         content = ""
         resp = None
+        transcript = None
         diff_body = ""
         t0 = time.monotonic()
         try:
@@ -427,6 +432,9 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 return
             prompt, last_cursor = result
             key = dream_session_key()
+            transcript = WebUISessionTranscriptRecorder(key)
+            transcript.start(prompt)
+            progress = DreamRunProgress(transcript.progress)
             resolve_dream_runtime = getattr(loop, "dream_runtime", None)
             dream_runtime = resolve_dream_runtime() if callable(resolve_dream_runtime) else None
             resp = await loop.process_direct(
@@ -435,8 +443,12 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 ephemeral=True,
                 tools=store.build_dream_tools(),
                 on_progress=progress,
+                on_stream=transcript.on_stream,
+                on_stream_end=transcript.on_stream_end,
+                hook_factories=[create_file_edit_activity_hook],
                 runtime=dream_runtime,
             )
+            transcript.finish(resp)
             elapsed = time.monotonic() - t0
             # The real file delta grounds the audit record; clean completion
             # decides whether this history batch has finished processing.
@@ -457,6 +469,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                     "memory cursor was not advanced."
                 )
         except Exception as e:
+            if transcript is not None:
+                transcript.finish(error=f"Dream failed: {e}")
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
@@ -473,7 +487,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
-            prune_dream_sessions(loop.sessions.sessions_dir)
+            for session_key in prune_dream_sessions(loop.sessions.sessions_dir):
+                delete_webui_transcript(session_key)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))

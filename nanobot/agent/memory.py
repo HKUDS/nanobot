@@ -11,7 +11,7 @@ import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator
 
 from loguru import logger
 
@@ -47,20 +47,26 @@ if TYPE_CHECKING:
 class DreamRunProgress:
     """Track tool failures that make a nominally completed Dream run unsafe to advance."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        delegate: Callable[..., Awaitable[None]] | None = None,
+    ) -> None:
         self.had_tool_errors = False
+        self._delegate = delegate
 
     async def __call__(
         self,
-        *_args: Any,
+        *args: Any,
         tool_events: list[dict[str, Any]] | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> None:
         if any(
             isinstance(event, dict) and event.get("phase") == "error"
             for event in tool_events or ()
         ):
             self.had_tool_errors = True
+        if self._delegate is not None:
+            await self._delegate(*args, tool_events=tool_events, **kwargs)
 
 
 class MemoryStore:
@@ -589,7 +595,7 @@ class MemoryStore:
 
         batch = entries[:max_entries]
         history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
+            f"[{e['timestamp']}] {e['content']}"
             for e in batch
         )
         template = self._dream_template()
@@ -670,6 +676,7 @@ class MemoryStore:
         tools.register(WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         return tools
@@ -752,28 +759,33 @@ class MemoryStore:
         return f"{prefix}\n\n{diff_body}"
 
     @staticmethod
-    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
+    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> list[str]:
         """Remove the oldest Dream session files, keeping only the N most recent.
 
         Only current base64url-encoded Dream session keys are considered.
         Non-dream session files are never touched.
+
+        Returns the decoded session keys whose files were removed.
         """
-        dream_files = []
+        dream_files: list[tuple[Path, str]] = []
         for path in sessions_dir.glob("*.jsonl"):
             decoded_key = SessionManager._decode_storage_key(path.stem)
             if decoded_key is not None and decoded_key.startswith("dream:"):
-                dream_files.append(path)
-        dream_files.sort(key=lambda p: p.stat().st_mtime)
+                dream_files.append((path, decoded_key))
+        dream_files.sort(key=lambda item: item[0].stat().st_mtime)
         if len(dream_files) <= keep:
-            return
+            return []
 
         to_remove = dream_files[: len(dream_files) - keep]
-        for path in to_remove:
+        removed_keys: list[str] = []
+        for path, session_key in to_remove:
             try:
                 path.unlink()
+                removed_keys.append(session_key)
                 logger.debug("Pruned old dream session: {}", path.stem)
             except OSError:
                 logger.warning("Failed to prune dream session {}", path)
+        return removed_keys
 
 
 # ---------------------------------------------------------------------------

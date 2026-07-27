@@ -839,6 +839,7 @@
       "pinned": "Pinned",
       "all": "Chủ đề",
       "projects": "Projects",
+      "dreams": "Giấc mơ",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -878,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
+    "readOnlySession": "Phiên này chỉ có thể đọc.",
     "empty": {
       "greetings": {
         "workOn": "Mình cùng làm gì tiếp?",

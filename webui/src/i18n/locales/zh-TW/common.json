@@ -839,6 +839,7 @@
       "pinned": "置頂",
       "all": "話題",
       "projects": "專案",
+      "dreams": "夢境",
       "today": "今天",
       "yesterday": "昨天",
       "earlier": "更早",
@@ -878,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "正在載入話題…",
+    "readOnlySession": "此工作階段為唯讀。",
     "empty": {
       "greetings": {
         "workOn": "我們要一起做點什麼？",

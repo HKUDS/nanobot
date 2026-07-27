@@ -116,6 +116,24 @@ async def test_turn_hook_builder_skips_extra_hooks_for_ephemeral_turns_by_defaul
 
 
 @pytest.mark.asyncio
+async def test_turn_hook_builder_runs_explicit_factory_for_ephemeral_turn() -> None:
+    events: list[str] = []
+
+    def factory(context: AgentTurnHookContext) -> AgentHook:
+        return RecordingHook(events, "turn_factory")
+
+    hook = build_agent_turn_hook(AgentTurnHookSpec(
+        registered_hooks=[RecordingHook(events, "registered")],
+        turn_hook_factories=[factory],
+        ephemeral=True,
+    ))
+
+    await hook.before_iteration(AgentHookContext(iteration=1, messages=[]))
+
+    assert events == ["turn_factory:1"]
+
+
+@pytest.mark.asyncio
 async def test_turn_hook_builder_can_include_extra_hooks_for_ephemeral_turns() -> None:
     events: list[str] = []
 

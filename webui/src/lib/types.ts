@@ -251,6 +251,9 @@ export interface ChatSummary {
   modelPreset?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
+  /** Internal sessions such as Dream are visible for inspection but not writable. */
+  readOnly?: boolean;
+  kind?: string;
   workspaceScope?: WorkspaceScopePayload | null;
 }
 

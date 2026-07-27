@@ -304,6 +304,32 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("keeps read-only sessions free of session management controls", async () => {
+    const client = makeClient();
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={{
+          ...session("dream"),
+          kind: "dream" as const,
+          readOnly: true,
+        }}
+        title="Dream"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("readonly-session-banner")).toHaveTextContent(
+        "This session is read-only.",
+      );
+      expect(
+        screen.queryByRole("button", { name: "Session details" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
     await preloadMarkdownText();
     const client = makeClient();

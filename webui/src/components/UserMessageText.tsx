@@ -1,5 +1,4 @@
-import { Fragment } from "react";
-
+import { MarkdownText } from "@/components/MarkdownText";
 import {
   CliAppMentionToken,
   McpPresetMentionToken,
@@ -60,6 +59,25 @@ function splitUserMessageSegments(
   return segments;
 }
 
+function MarkdownUserTextSegment({ text }: { text: string }) {
+  const match = /^(\s*)([\s\S]*?\S)?(\s*)$/.exec(text);
+  const leading = match?.[1] ?? "";
+  const content = match?.[2] ?? "";
+  const trailing = match?.[3] ?? "";
+  if (!content) return <>{text}</>;
+  return (
+    <>
+      {leading ? <span>{leading}</span> : null}
+      <MarkdownText
+        className="prose-p:my-0 prose-headings:my-1 prose-ul:my-1 prose-ol:my-1"
+      >
+        {content}
+      </MarkdownText>
+      {trailing ? <span>{trailing}</span> : null}
+    </>
+  );
+}
+
 export function UserMessageText({
   text,
   cliApps,
@@ -74,7 +92,7 @@ export function UserMessageText({
     <>
       {segments.map((segment, index) => {
         if (segment.kind === "text") {
-          return <Fragment key={`text-${index}`}>{segment.text}</Fragment>;
+          return <MarkdownUserTextSegment key={`text-${index}`} text={segment.text} />;
         }
         if (segment.kind === "skill") return (
           <InlineTokenHighlight

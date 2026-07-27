@@ -853,6 +853,7 @@
       "pinned": "Fixadas",
       "all": "Tópicos",
       "projects": "Projetos",
+      "dreams": "Sonhos",
       "today": "Hoje",
       "yesterday": "Ontem",
       "earlier": "Anteriores",
@@ -892,6 +893,7 @@
   },
   "thread": {
     "loadingConversation": "Carregando conversa…",
+    "readOnlySession": "Esta sessão é somente leitura.",
     "empty": {
       "greetings": {
         "workOn": "Em que vamos trabalhar?",

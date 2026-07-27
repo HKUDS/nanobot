@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from nanobot.bus.events import OutboundMessage
+from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
+    WebUISessionTranscriptRecorder,
     append_fork_marker,
     append_transcript_object,
     build_webui_thread_response,
@@ -277,6 +280,227 @@ def test_write_session_messages_as_transcript_builds_canonical_prefix(
     ]
     msgs = replay_transcript_to_ui_messages(lines)
     assert [m["content"] for m in msgs] == ["round1", "answer1"]
+
+
+def test_build_response_replays_tool_calls_from_session_messages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+    out = build_webui_thread_response(
+        "dream:20260727-161857",
+        session_messages=[
+            {
+                "role": "user",
+                "content": "Consolidate memory",
+                "timestamp": "2026-07-27T16:18:57",
+            },
+            {
+                "role": "assistant",
+                "content": "",
+                "timestamp": "2026-07-27T16:19:00",
+                "tool_calls": [{
+                    "id": "call-read",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path":"MEMORY.md"}',
+                    },
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call-read",
+                "name": "read_file",
+                "content": "memory contents",
+                "timestamp": "2026-07-27T16:19:01",
+            },
+            {
+                "role": "assistant",
+                "content": "Memory consolidated.",
+                "timestamp": "2026-07-27T16:19:02",
+            },
+        ],
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("user", "Consolidate memory"),
+        ("tool", 'read_file({"path": "MEMORY.md"})'),
+        ("assistant", "Memory consolidated."),
+    ]
+    assert out["messages"][1]["toolEvents"] == [{
+        "version": 1,
+        "phase": "end",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": {"path": "MEMORY.md"},
+        "result": "memory contents",
+    }]
+
+
+def test_session_message_fallback_only_replays_public_history(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    runtime_context = "[Runtime Context]\ninternal metadata"
+
+    out = build_webui_thread_response(
+        "dream:20260727-161858",
+        session_messages=[
+            {
+                "role": "user",
+                "content": "hidden subagent payload",
+                HIDDEN_HISTORY_META: True,
+            },
+            {
+                "role": "user",
+                "content": f"visible prompt\n\n{runtime_context}",
+                RUNTIME_CONTEXT_HISTORY_META: {
+                    "version": 1,
+                    "suffix": runtime_context,
+                },
+            },
+            {
+                "role": "user",
+                "content": (
+                    "[Subagent 'worker']\n\nTask: hidden task\n\nResult: hidden result\n\n"
+                    "Summarize this naturally"
+                ),
+            },
+            {"role": "assistant", "content": "visible answer"},
+        ],
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("user", "visible prompt"),
+        ("assistant", "visible answer"),
+    ]
+
+
+async def test_direct_session_recorder_preserves_webui_turn_events(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    recorder = WebUISessionTranscriptRecorder("dream:20260727-171635")
+    recorder.start("Consolidate memory")
+    await recorder.progress("Checking memory", reasoning=True)
+    await recorder.progress("", reasoning_end=True)
+    await recorder.progress(
+        'read_file({"path":"MEMORY.md"})',
+        tool_hint=True,
+        tool_events=[{
+            "version": 1,
+            "phase": "start",
+            "call_id": "call-read",
+            "name": "read_file",
+            "arguments": {"path": "MEMORY.md"},
+        }],
+    )
+    await recorder.progress(
+        "",
+        tool_events=[{
+            "version": 1,
+            "phase": "end",
+            "call_id": "call-read",
+            "name": "read_file",
+            "arguments": {"path": "MEMORY.md"},
+            "result": "memory contents",
+        }],
+    )
+    await recorder.on_stream("Memory consolidated.")
+    await recorder.on_stream_end()
+    recorder.finish()
+
+    lines = read_transcript_lines("dream:20260727-171635")
+    out = build_webui_thread_response("dream:20260727-171635")
+
+    assert [line["event"] for line in lines] == [
+        "user",
+        "reasoning_delta",
+        "reasoning_end",
+        "message",
+        "message",
+        "delta",
+        "stream_end",
+        "turn_end",
+    ]
+    assert out is not None
+    assert {message.get("turnId") for message in out["messages"]} == {
+        lines[0]["turn_id"],
+    }
+    trace = next(message for message in out["messages"] if message.get("role") == "tool")
+    assert trace["toolEvents"][0]["phase"] == "end"
+    answer = next(
+        message
+        for message in out["messages"]
+        if message.get("role") == "assistant" and message.get("content")
+    )
+    assert answer["content"] == "Memory consolidated."
+    reasoning = next(
+        message
+        for message in out["messages"]
+        if message.get("role") == "assistant" and message.get("reasoning")
+    )
+    assert reasoning["reasoning"] == "Checking memory"
+
+
+async def test_direct_session_recorder_keeps_exception_after_partial_stream(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "dream:20260727-171636"
+    recorder = WebUISessionTranscriptRecorder(key)
+    recorder.start("Consolidate memory")
+    await recorder.on_stream("Partial answer")
+
+    recorder.finish(error="Dream failed: provider disconnected")
+
+    lines = read_transcript_lines(key)
+    out = build_webui_thread_response(key)
+    assert [(line["event"], line.get("text")) for line in lines] == [
+        ("user", "Consolidate memory"),
+        ("delta", "Partial answer"),
+        ("message", "Dream failed: provider disconnected"),
+        ("turn_end", None),
+    ]
+    assert out is not None
+    assert [message["content"] for message in out["messages"]] == [
+        "Consolidate memory",
+        "Partial answer",
+        "Dream failed: provider disconnected",
+    ]
+
+
+async def test_direct_session_recorder_keeps_provider_error_after_partial_stream(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "dream:20260727-171637"
+    recorder = WebUISessionTranscriptRecorder(key)
+    recorder.start("Consolidate memory")
+    await recorder.on_stream("Partial answer")
+
+    recorder.finish(OutboundMessage(
+        channel="cli",
+        chat_id="direct",
+        content="Error calling LLM: stream stalled",
+        metadata={"_stop_reason": "error"},
+    ))
+
+    lines = read_transcript_lines(key)
+    assert [(line["event"], line.get("text")) for line in lines] == [
+        ("user", "Consolidate memory"),
+        ("delta", "Partial answer"),
+        ("message", "Error calling LLM: stream stalled"),
+        ("turn_end", None),
+    ]
 
 
 def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:

@@ -139,6 +139,8 @@ export async function listSessions(
     preview?: string;
     model_preset?: string | null;
     run_started_at?: number | null;
+    read_only?: boolean;
+    kind?: string;
     workspace_scope?: WorkspaceScopePayload | null;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -156,6 +158,8 @@ export async function listSessions(
     preview: s.preview ?? "",
     modelPreset: s.model_preset ?? null,
     runStartedAt: s.run_started_at ?? null,
+    readOnly: s.read_only === true,
+    kind: s.kind,
     workspaceScope: s.workspace_scope ?? null,
   }));
 }
