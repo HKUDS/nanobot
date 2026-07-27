@@ -513,7 +513,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     invalidateGeometry();
     const observer = typeof ResizeObserver === "undefined"
       ? null
-      : new ResizeObserver(invalidateGeometry);
+      : new ResizeObserver((entries) => {
+          threadMotionRef.current?.invalidateGeometry({
+            preserveScrollPosition: Boolean(
+              composerDock
+              && entries.some((entry) => entry.target === composerDock),
+            ),
+          });
+        });
     observer?.observe(el);
     if (content) observer?.observe(content);
     if (messageRegion) observer?.observe(messageRegion);

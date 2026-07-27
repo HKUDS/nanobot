@@ -192,6 +192,38 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.followTo).toHaveBeenLastCalledWith(1_950);
   });
 
+  it("preserves the viewport instead of easing composer growth after completion", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    coordinator.completeTurn();
+    camera.jumpTo.mockClear();
+    camera.followTo.mockClear();
+    camera.cancel.mockClear();
+
+    setGeometry({
+      scrollTop: 1_400,
+      scrollHeight: 1_940,
+      composerHeight: 160,
+    });
+    coordinator.invalidateGeometry({ preserveScrollPosition: true });
+    advanceFrame();
+
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(camera.followTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("follow-completion");
+  });
+
   it("keeps turn identity stable when canonical replay replaces DOM ids", () => {
     const {
       camera,
@@ -261,15 +293,17 @@ describe("ThreadMotionCoordinator", () => {
       hasOutput: true,
     });
     advanceFrame();
+    camera.jumpTo.mockClear();
     camera.followTo.mockClear();
     onGeometry.mockClear();
 
     coordinator.takeUserControl();
     setGeometry({ scrollTop: 200, scrollHeight: 2_100 });
-    coordinator.invalidateGeometry();
+    coordinator.invalidateGeometry({ preserveScrollPosition: true });
     advanceFrame();
 
     expect(onGeometry).toHaveBeenCalledTimes(1);
+    expect(camera.jumpTo).not.toHaveBeenCalled();
     expect(camera.followTo).not.toHaveBeenCalled();
     expect(coordinator.snapshot().mode).toBe("browsing-history");
 

@@ -110,6 +110,10 @@ interface ThreadMotionCoordinatorOptions {
   scheduler?: ThreadMotionScheduler;
 }
 
+interface ThreadMotionInvalidationOptions {
+  preserveScrollPosition?: boolean;
+}
+
 const GEOMETRY_EPSILON_PX = 0.5;
 
 type ThreadScrollOwner = "automatic" | "navigation" | "user";
@@ -141,6 +145,7 @@ export class ThreadMotionCoordinator {
   private promptPositioned = false;
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
+  private preserveScrollPositionPending = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
     this.camera = options.camera;
@@ -195,8 +200,10 @@ export class ThreadMotionCoordinator {
     this.invalidateGeometry();
   }
 
-  invalidateGeometry(): void {
+  invalidateGeometry(options?: ThreadMotionInvalidationOptions): void {
     this.geometryDirty = true;
+    this.preserveScrollPositionPending ||=
+      options?.preserveScrollPosition === true;
     if (this.measurementFrameId !== null) return;
     this.measurementFrameId = this.scheduler.request(this.flushGeometry);
   }
@@ -273,6 +280,7 @@ export class ThreadMotionCoordinator {
       this.measurementFrameId = null;
     }
     this.geometryDirty = false;
+    this.preserveScrollPositionPending = false;
     this.camera.cancel();
     this.turn = { id: null, promptId: null, hasOutput: false };
     this.mode = "idle";
@@ -328,6 +336,8 @@ export class ThreadMotionCoordinator {
     this.measurementFrameId = null;
     if (!this.geometryDirty) return;
     this.geometryDirty = false;
+    const preserveScrollPosition = this.preserveScrollPositionPending;
+    this.preserveScrollPositionPending = false;
 
     const needsPromptGeometry =
       !this.isHistoryMode()
@@ -336,6 +346,21 @@ export class ThreadMotionCoordinator {
     const geometry = this.measure(needsPromptGeometry ? this.turn.promptId : null);
     if (!geometry) return;
     this.onGeometry?.(geometry);
+
+    if (
+      preserveScrollPosition
+      && !this.isHistoryMode()
+      && (this.turn.id === null || this.promptPositioned)
+    ) {
+      // A focused textarea asks the browser to preserve the caret's viewport
+      // position while its sticky composer grows. Any simultaneous camera
+      // write fights that adjustment and makes the transcript bounce between
+      // two scroll positions. Measure the new geometry, but leave scrolling
+      // untouched until message output or an explicit navigation invalidates
+      // it again.
+      this.camera.cancel();
+      return;
+    }
 
     if (this.mode === "follow-completion") {
       this.followGeometry(geometry);
