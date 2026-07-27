@@ -401,6 +401,14 @@ class TestEphemeralDirect:
         assert loop.model == "test-model"
         assert loop.model_preset is None
 
+    def test_dream_runtime_uses_default_when_no_override(self, _make_loop):
+        loop, _ = _make_loop
+
+        runtime = loop.dream_runtime()
+
+        assert runtime.model == "test-model"
+        assert runtime.model_preset is None
+
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
         """When ephemeral=True, raw_archive must not be called."""
         from unittest.mock import patch

@@ -1824,6 +1824,13 @@ def _run_gateway(
                 dream_runtime = (
                     resolve_dream_runtime() if callable(resolve_dream_runtime) else None
                 )
+                if dream_runtime is not None:
+                    logger.info(
+                        "Dream cron job starting: model_preset={}, model={}, provider={}",
+                        dream_runtime.model_preset or "default",
+                        dream_runtime.model,
+                        type(dream_runtime.provider).__name__,
+                    )
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
