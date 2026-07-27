@@ -2130,6 +2130,77 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
   });
 
+  it("keeps repeated fallback preset rows stable when changing the primary preset", async () => {
+    const { payload, backupPreset } = settingsPayloadWithBackup();
+    const initialPayload: SettingsPayload = {
+      ...payload,
+      agent: {
+        ...payload.agent,
+        model: backupPreset.model,
+        provider: backupPreset.provider,
+        resolved_provider: backupPreset.resolved_provider,
+        model_preset: backupPreset.name,
+      },
+      model_presets: payload.model_presets.map((preset) => ({
+        ...preset,
+        active: preset.name === backupPreset.name,
+      })),
+      model_call_order: ["backup", "primary", "backup"],
+    };
+    const updatedPayload: SettingsPayload = {
+      ...initialPayload,
+      agent: {
+        ...payload.agent,
+        model_preset: "primary",
+      },
+      model_presets: payload.model_presets.map((preset) => ({
+        ...preset,
+        active: preset.name === "primary",
+      })),
+      model_call_order: ["primary", "backup", "backup"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(initialPayload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url.startsWith("/api/settings/model-call-order/update?")) {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: initialPayload });
+
+    const primaryRow = screen.getByTestId("model-call-order-row-primary");
+    const firstBackupRow = screen.getAllByTestId("model-call-order-row-backup")[0];
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "move",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(primaryRow, { dataTransfer });
+    fireEvent.dragEnter(firstBackupRow, { dataTransfer });
+    fireEvent.drop(firstBackupRow, { dataTransfer });
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId(/^model-call-order-row-/)
+          .map((row) => row.getAttribute("data-testid")),
+      ).toEqual([
+        "model-call-order-row-primary",
+        "model-call-order-row-backup",
+        "model-call-order-row-backup",
+      ]),
+    );
+  });
+
   it("restores the model call order when immediate persistence fails", async () => {
     const { payload } = settingsPayloadWithBackup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
