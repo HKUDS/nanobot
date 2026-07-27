@@ -31,9 +31,19 @@ class AutoCompact:
                     now: datetime | None = None) -> bool:
         if self._ttl <= 0 or not ts:
             return False
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
-        return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
+        try:
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+            current = now or datetime.now()
+            if getattr(ts, "tzinfo", None) is not None or current.tzinfo is not None:
+                idle_seconds = current.timestamp() - ts.timestamp()
+            else:
+                idle_seconds = (current - ts).total_seconds()
+        except (OSError, OverflowError, TypeError, ValueError):
+            # list_sessions() forwards raw persisted metadata; an unusable value
+            # must not escape the idle scan and stop the agent loop.
+            return False
+        return idle_seconds >= self._ttl * 60
 
     def _has_compactable_idle_tail(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)

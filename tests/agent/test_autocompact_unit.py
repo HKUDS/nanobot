@@ -154,6 +154,26 @@ class TestIsExpired:
         now_over = datetime(2026, 1, 1, 10, 10, 0)
         assert ac._is_expired(ts, now=now_over) is True
 
+    def test_unparseable_string_timestamp_returns_false(self):
+        """A persisted timestamp that no longer parses must not raise.
+
+        list_sessions() forwards the raw persisted updated_at string, and
+        SessionManager._load already tolerates a malformed value through its
+        recovery path. The idle scan must mirror that tolerance instead of crashing.
+        """
+        ac = _make_autocompact(ttl=15)
+        assert ac._is_expired("not-a-timestamp") is False
+
+    def test_tz_aware_string_timestamp_is_compared_by_instant(self):
+        """A valid timestamp with an offset remains eligible for expiry."""
+        ac = _make_autocompact(ttl=15)
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        recent = (now - timedelta(minutes=10)).astimezone().isoformat()
+        expired = (now - timedelta(minutes=20)).astimezone().isoformat()
+
+        assert ac._is_expired(recent, now=now) is False
+        assert ac._is_expired(expired, now=now) is True
+
 
 # ---------------------------------------------------------------------------
 # _format_summary
@@ -220,6 +240,36 @@ class TestCheckExpired:
         ac.check_expired(scheduler, _runtime)
         assert len(scheduled) == 1
         assert "cli:old" in ac._archiving
+
+    def test_unparseable_updated_at_does_not_stop_scan(self):
+        """A malformed timestamp is skipped without hiding later sessions.
+
+        The idle scan runs from the agent loop's inbound-timeout branch, so a
+        raised exception here would tear down the loop. list_sessions() forwards
+        the raw string, so check_expired must tolerate it like SessionManager
+        does when loading.
+        """
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:corrupt", "updated_at": "not-a-timestamp"},
+            {"key": "cli:old", "updated_at": old_dt.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, _runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:old"}
 
     @pytest.mark.asyncio
     async def test_runtime_is_captured_before_background_starts(self):
