@@ -803,23 +803,23 @@ def _print_config_error(error: Exception) -> None:
 
     console.print(Text(str(error), style="red"))
     if isinstance(error, ConfigLoadError):
-        command = _doctor_command(error.path)
+        command = _status_command(error.path)
         console.print(f"[dim]Check again after editing: {escape(command)}[/dim]")
 
 
-def _doctor_command(config_path: Path) -> str:
-    return f'nanobot doctor --config "{config_path}"'
+def _status_command(config_path: Path) -> str:
+    return f'nanobot status --config "{config_path}"'
 
 
 def _print_model_setup_steps(config_path: Path) -> None:
-    """Show the shortest setup routes shared by Doctor and Agent startup."""
+    """Show the shortest setup routes shared by Status and Agent startup."""
     config_arg = f'--config "{config_path}"'
     console.print(
         f"  WebUI: run [cyan]nanobot webui {escape(config_arg)}[/cyan], "
         "then open Settings → Models"
     )
     console.print(f"  CLI:   run [cyan]nanobot onboard --wizard {escape(config_arg)}[/cyan]")
-    console.print(f"  Check: [cyan]{escape(_doctor_command(config_path))}[/cyan]")
+    console.print(f"  Check: [cyan]{escape(_status_command(config_path))}[/cyan]")
 
 
 def _print_agent_start_error(error: ValueError) -> None:
@@ -888,6 +888,7 @@ def _load_inspection_config(
     workspace: str | None = None,
 ) -> tuple[Path, Config]:
     """Load config for diagnostic commands without resolving secret env refs."""
+    from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import get_config_path, load_config, set_config_path
 
     config_path = None
@@ -899,6 +900,9 @@ def _load_inspection_config(
     display_path = config_path or get_config_path()
     try:
         loaded = load_config(config_path)
+    except ConfigLoadError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from exc
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -2564,61 +2568,6 @@ def agent(
 
 
 # ============================================================================
-# Doctor
-# ============================================================================
-
-
-@app.command()
-def doctor(
-    config_path: str | None = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Path to config file",
-    ),
-) -> None:
-    """Check the shortest path to an Agent reply without calling the model."""
-    from nanobot.config.loader import get_config_path, set_config_path
-    from nanobot.providers.factory import build_provider_snapshot
-
-    path = (
-        Path(config_path).expanduser().resolve(strict=False)
-        if config_path
-        else get_config_path().expanduser().resolve(strict=False)
-    )
-    if not path.exists():
-        console.print(Text(f"Agent is not ready: configuration file not found at {path}", style="red"))
-        console.print("Create the provider/model configuration:")
-        _print_model_setup_steps(path)
-        raise typer.Exit(1)
-
-    set_config_path(path)
-    loaded = _load_config_for_cli(path, resolve_env=True)
-    resolved = loaded.resolve_preset()
-    try:
-        snapshot = build_provider_snapshot(loaded)
-    except ValueError as exc:
-        console.print(Text(f"Agent is not ready: {exc}", style="red"))
-        console.print(f"  Model: {escape(resolved.model)}")
-        provider_name = loaded.get_provider_name(resolved.model, preset=resolved)
-        if not provider_name and resolved.provider != "auto":
-            provider_name = resolved.provider
-        if provider_name:
-            console.print(f"  Provider: {escape(provider_name)}")
-        console.print("Complete provider/model setup:")
-        _print_model_setup_steps(path)
-        raise typer.Exit(1)
-
-    provider_name = loaded.get_provider_name(snapshot.model, preset=resolved)
-    console.print("[green]✓[/green] Agent provider/model setup is ready")
-    console.print(f"  Provider: {escape(provider_name or resolved.provider)}")
-    console.print(f"  Model: {escape(snapshot.model)}")
-    console.print()
-    console.print('Next: [cyan]nanobot agent -m "Hello!"[/cyan]')
-    console.print("[dim]No model request was sent; this check does not verify network access or credentials.[/dim]")
-
-
-# ============================================================================
 # Channel Commands
 # ============================================================================
 
@@ -2788,10 +2737,31 @@ def status(
     )
 
     if config_path.exists():
+        from nanobot.config.errors import ConfigLoadError
+        from nanobot.config.loader import resolve_config_env_vars
         from nanobot.providers.registry import PROVIDERS
 
         _model, _preset_tag = _model_display(loaded)
         console.print(f"Model: {_model}{_preset_tag}")
+
+        provider_ready = False
+        try:
+            resolved = resolve_config_env_vars(
+                loaded.model_copy(deep=True),
+                config_path=config_path,
+            )
+        except ConfigLoadError as exc:
+            console.print("Agent: [red]✗ configuration is not ready[/red]")
+            _print_config_error(exc)
+        else:
+            provider_error = _provider_setup_error(resolved)
+            if provider_error:
+                console.print(Text(f"Agent: ✗ {provider_error}", style="red"))
+                console.print("Complete provider/model setup:")
+                _print_model_setup_steps(config_path)
+            else:
+                provider_ready = True
+                console.print("Agent: [green]✓ provider/model setup is ready[/green]")
 
         # Check API keys from registry
         for spec in PROVIDERS:
@@ -2809,6 +2779,17 @@ def status(
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        if provider_ready:
+            console.print()
+            console.print('Next: [cyan]nanobot agent -m "Hello!"[/cyan]')
+            console.print(
+                "[dim]Status does not call the model or verify network access and credentials.[/dim]"
+            )
+    else:
+        console.print("Agent: [red]✗ configuration file not found[/red]")
+        console.print("Create the provider/model configuration:")
+        _print_model_setup_steps(config_path)
 
 
 # ============================================================================

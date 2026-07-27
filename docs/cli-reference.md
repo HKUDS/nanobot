@@ -11,8 +11,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
-| Check config without calling a model | `nanobot status` | Summarizes the selected config, workspace, active model, and providers |
-| Check readiness for an Agent reply | `nanobot doctor` | Validates config/env references and constructs the active provider/model without calling it |
+| Check readiness without calling a model | `nanobot status` | Summarizes config/workspace and checks whether the active provider/model can start |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
@@ -71,14 +70,15 @@ Default paths:
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
 
-## Doctor
+## Status
 
 | Command | Description |
 |---|---|
-| `nanobot doctor` | Check whether the default config can construct the active Agent provider/model |
-| `nanobot doctor --config <path>` | Check a specific config file |
+| `nanobot status` | Summarize the default config/workspace and check Agent provider/model readiness |
+| `nanobot status --config <path>` | Check a specific config file |
+| `nanobot status --workspace <path>` | Show status with a workspace override |
 
-Doctor does not send a model request. On success, run the printed
+Status does not send a model request. On success, run the printed
 `nanobot agent -m "Hello!"` command to verify network access and credentials. On failure,
 follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` route.
 
