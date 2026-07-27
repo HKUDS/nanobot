@@ -27,7 +27,6 @@ PLUGIN = ChannelPlugin(
     name="matrix",
     display_name="Matrix",
     runtime=f"{__package__}.runtime:MatrixChannel",
-    config_model=f"{__package__}.config:MatrixConfig",
     setup=SETUP_SPEC,
     dependencies=(
         "matrix-nio[e2e]>=0.25.2; sys_platform != 'win32'",

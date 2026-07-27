@@ -24,7 +24,6 @@ class ConfigIssue:
 
     path: tuple[ConfigPathPart, ...]
     message: str
-    code: str | None = None
 
     @property
     def location(self) -> str:
@@ -60,8 +59,6 @@ class ConfigLoadError(ValueError):
 
 def validation_issues(
     error: ValidationError,
-    *,
-    prefix: tuple[ConfigPathPart, ...] = (),
 ) -> tuple[ConfigIssue, ...]:
     """Convert Pydantic details to actionable messages without exposing input values."""
     issues: list[ConfigIssue] = []
@@ -70,29 +67,14 @@ def validation_issues(
         include_context=False,
         include_input=False,
     ):
-        location = prefix + tuple(detail.get("loc", ()))
+        location = tuple(detail.get("loc", ()))
         code = str(detail.get("type") or "")
         message = _friendly_validation_message(
             str(detail.get("msg") or "Invalid value"),
             code,
         )
-        issues.append(ConfigIssue(path=location, message=message, code=code or None))
+        issues.append(ConfigIssue(path=location, message=message))
     return tuple(issues)
-
-
-def concise_validation_error(
-    error: ValidationError,
-    *,
-    prefix: tuple[ConfigPathPart, ...] = (),
-) -> str:
-    """Return a compact validation message suitable for status surfaces."""
-    issues = validation_issues(error, prefix=prefix)
-    visible = issues[:3]
-    message = "; ".join(f"{issue.location}: {issue.message}" for issue in visible)
-    remaining = len(issues) - len(visible)
-    if remaining > 0:
-        message += f"; and {remaining} more issue(s)"
-    return message or "Invalid configuration."
 
 
 def _friendly_validation_message(message: str, code: str) -> str:

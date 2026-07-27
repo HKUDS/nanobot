@@ -20,7 +20,6 @@ PLUGIN = ChannelPlugin(
     name="signal",
     display_name="Signal",
     runtime=f"{__package__}.runtime:SignalChannel",
-    config_model=f"{__package__}.runtime:SignalConfig",
     setup=SETUP_SPEC,
     webui="webui/index.ts",
 )

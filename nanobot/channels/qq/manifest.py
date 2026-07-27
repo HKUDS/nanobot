@@ -19,7 +19,6 @@ PLUGIN = ChannelPlugin(
     name="qq",
     display_name="QQ",
     runtime=f"{__package__}.runtime:QQChannel",
-    config_model=f"{__package__}.runtime:QQConfig",
     setup=SETUP_SPEC,
     dependencies=(
         "aiohttp>=3.9.0,<4.0.0",

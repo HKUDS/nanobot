@@ -19,7 +19,6 @@ PLUGIN = ChannelPlugin(
     name="napcat",
     display_name="NapCat",
     runtime=f"{__package__}.runtime:NapcatChannel",
-    config_model=f"{__package__}.runtime:NapcatConfig",
     setup=SETUP_SPEC,
     dependencies=("aiohttp>=3.9.0,<4.0.0",),
     webui="webui/index.ts",

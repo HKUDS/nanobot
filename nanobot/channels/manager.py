@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic import ValidationError
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -34,7 +33,6 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.registry import channel_default_enabled
-from nanobot.config.errors import concise_validation_error
 from nanobot.config.schema import Config
 from nanobot.utils.restart import (
     RestartNotice,
@@ -66,14 +64,6 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_tool_hints": "sendToolHints",
     "show_reasoning": "showReasoning",
 }
-
-
-def _channel_build_error(name: str, error: Exception) -> str:
-    if isinstance(error, ValidationError):
-        detail = concise_validation_error(error, prefix=("channels", name))
-        return f"Invalid channel configuration: {detail}"
-    return "Channel runtime could not be loaded. Check gateway logs."
-
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
     from nanobot.channels.registry import load_channel_plugin
@@ -274,15 +264,11 @@ class ChannelManager:
                     self._channel_owners[runtime_name] = name
                     logger.info("{} channel enabled as {}", cls.display_name, runtime_name)
             except Exception as exc:
-                message = _channel_build_error(name, exc)
                 self._mark_channel_error(
                     name,
-                    message,
+                    "Channel runtime could not be loaded. Check gateway logs.",
                 )
-                if isinstance(exc, ValidationError):
-                    logger.warning("{} channel not available: {}", name, message)
-                else:
-                    logger.warning("{} channel not available: {}", name, exc)
+                logger.warning("{} channel not available: {}", name, exc)
 
         self._validate_allow_from()
 
@@ -510,25 +496,17 @@ class ChannelManager:
                 )
                 for runtime_name, spec in runtime_specs
             ]
-        except Exception as exc:
-            message = _channel_build_error(name, exc)
+        except Exception:
             self._mark_runtime_error(
                 (runtime_name for runtime_name, _spec in runtime_specs),
-                message,
+                "Channel runtime could not be built. Check gateway logs.",
             )
-            if isinstance(exc, ValidationError):
-                logger.warning(
-                    "Failed to build {} channel after settings change: {}",
-                    name,
-                    message,
-                )
-            else:
-                logger.exception("Failed to build {} channel after settings change", name)
+            logger.exception("Failed to build {} channel after settings change", name)
             return {
                 "handled": True,
                 "ok": False,
                 "requires_restart": False,
-                "message": message,
+                "message": f"{name} channel could not be started. Check gateway logs.",
             }
 
         runtime_names_to_replace = {runtime_name for runtime_name, _channel in built}

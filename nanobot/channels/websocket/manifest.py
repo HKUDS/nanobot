@@ -14,7 +14,6 @@ PLUGIN = ChannelPlugin(
     name="websocket",
     display_name="WebSocket",
     runtime=f"{__package__}.runtime:WebSocketChannel",
-    config_model=f"{__package__}.runtime:WebSocketConfig",
     setup=SETUP_SPEC,
     default_enabled=True,
     capabilities=frozenset({"always_enabled"}),

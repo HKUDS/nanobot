@@ -8,7 +8,7 @@ Run these in order:
 
 ```bash
 nanobot --version
-nanobot status
+nanobot doctor
 nanobot agent -m "Hello!"
 ```
 
@@ -23,11 +23,14 @@ This separates failures into layers:
 | Layer | What it proves |
 |---|---|
 | `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace path, active model, and provider summary |
+| `nanobot doctor` | Config parsing, environment references, and whether the active provider/model can start |
 | `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
 | `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
 
 If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
+
+`nanobot doctor` does not call the model. If provider/model setup is incomplete, it points to
+WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
 
 ## How to Read `nanobot status`
 
@@ -107,6 +110,12 @@ Common config mistakes:
 | snake_case vs camelCase confusion | Both are accepted, but docs use camelCase because nanobot writes config with aliases such as `apiKey`, `modelPresets`, `intervalS`. |
 | Environment variable error | `${VAR_NAME}` references are resolved at startup. Set the variable before running nanobot. |
 | Edited config but behavior did not change | Restart `nanobot gateway`; long-running processes read config at startup. |
+
+After editing config, check the shortest path to an Agent reply:
+
+```bash
+nanobot doctor
+```
 
 To refresh missing defaults without overwriting existing settings, run:
 

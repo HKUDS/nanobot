@@ -18,7 +18,6 @@ PLUGIN = ChannelPlugin(
     name="wecom",
     display_name="WeCom",
     runtime=f"{__package__}.runtime:WecomChannel",
-    config_model=f"{__package__}.runtime:WecomConfig",
     setup=SETUP_SPEC,
     dependencies=("wecom-aibot-sdk-python>=0.1.5",),
     webui="webui/index.ts",

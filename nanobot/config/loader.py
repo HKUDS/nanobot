@@ -96,7 +96,6 @@ def load_config(config_path: Path | None = None) -> Config:
                 ConfigIssue(
                     path=(),
                     message=f"Expected an object, but found {root_type}.",
-                    code="invalid_root",
                 ),
             ),
         )
@@ -253,7 +252,6 @@ def _missing_env_issues(
             ConfigIssue(
                 path=path,
                 message=f"Environment variable '{name}' is not set.",
-                code="missing_env",
             )
             for name in dict.fromkeys(_ENV_REF_PATTERN.findall(obj))
             if name not in os.environ
