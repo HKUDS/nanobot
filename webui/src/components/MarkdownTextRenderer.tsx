@@ -642,7 +642,9 @@ export default function MarkdownTextRenderer({
           <li
             className={cn(
               itemClassName,
-              taskItem && "flex min-w-0 items-start gap-2 text-[13px] leading-5 [&>p]:m-0",
+              taskItem
+                ? "flex min-w-0 items-start gap-2 text-[13px] leading-5 [&>p]:m-0"
+                : "[&>p]:inline",
             )}
           >
             {markdownChildren}

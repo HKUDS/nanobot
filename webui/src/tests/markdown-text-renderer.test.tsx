@@ -405,6 +405,26 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.queryByRole("button", { name: /tasks/i })).not.toBeInTheDocument();
   });
 
+  it("keeps loose ordered-list titles beside their markers", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>
+        {
+          "1. **一个约 16 MB 的 CLI 可执行文件**\n   - `~/.local/bin/inferencesh`\n   - `belt` 和 `infsh` 只是指向它的软链接。\n\n2. **登录凭据文件**\n   - `~/.inferencesh/config.json`\n   - 权限是 `600`。\n\n3. **Shell PATH 配置**\n   - `.zshrc`"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    const items = container.querySelectorAll("ol > li");
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveClass("[&>p]:inline");
+    expect(items[0].firstElementChild).toHaveTextContent(
+      "一个约 16 MB 的 CLI 可执行文件",
+    );
+    expect(items[0].querySelector("ul")).toHaveTextContent(
+      "~/.local/bin/inferencesh",
+    );
+  });
+
   it("renders GFM tables in a responsive data surface", () => {
     const { container } = render(
       <MarkdownTextRenderer>
