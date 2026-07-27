@@ -134,10 +134,21 @@ class AutoCompact:
         if entry:
             return session, self._format_summary(entry[0], entry[1])
         # Cold path: summary persisted in session metadata (process restarted).
+        # Persisted metadata may outlive schema changes; a malformed summary must
+        # not abort turn preparation.
         meta = session.metadata.get("_last_summary")
         if isinstance(meta, dict):
-            return session, self._format_summary(
-                cast(str, meta["text"]),
-                datetime.fromisoformat(cast(str, meta["last_active"])),
-            )
+            summary_meta = cast(dict[str, object], meta)
+            text = summary_meta.get("text")
+            if isinstance(text, str) and text:
+                raw_last_active = summary_meta.get("last_active")
+                try:
+                    last_active = (
+                        datetime.fromisoformat(raw_last_active)
+                        if isinstance(raw_last_active, str)
+                        else session.updated_at
+                    )
+                except ValueError:
+                    last_active = session.updated_at
+                return session, self._format_summary(text, last_active)
         return session, None

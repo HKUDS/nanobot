@@ -592,6 +592,58 @@ class TestPrepareSession:
         assert summary is not None
         assert "Cold summary." in summary
 
+    def test_cold_path_tolerates_malformed_last_active(self):
+        """A malformed persisted last_active must not raise on the turn path.
+
+        prepare_session runs from _compact_session on every turn. Persisted
+        _last_summary can be hand-edited or written by another version, so a bad
+        last_active should degrade gracefully (mirror estimate_session_prompt_tokens
+        and _archive) instead of crashing the turn.
+        """
+        ac = _make_autocompact(ttl=0)
+        fallback = datetime(2026, 1, 2, 3, 4, 5)
+        session = _make_session(
+            metadata={
+                "_last_summary": {"text": "Cold summary.", "last_active": "not-a-date"},
+            },
+            updated_at=fallback,
+        )
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is not None
+        assert "Cold summary." in summary
+        assert fallback.isoformat() in summary
+
+    def test_cold_path_tolerates_missing_last_active(self):
+        """A _last_summary dict without last_active must not raise."""
+        ac = _make_autocompact(ttl=0)
+        fallback = datetime(2026, 1, 2, 3, 4, 5)
+        session = _make_session(
+            metadata={"_last_summary": {"text": "Cold summary."}},
+            updated_at=fallback,
+        )
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is not None
+        assert "Cold summary." in summary
+        assert fallback.isoformat() in summary
+
+    def test_cold_path_missing_text_returns_none(self):
+        """A _last_summary without a non-empty string text yields no summary."""
+        ac = _make_autocompact()
+        session = _make_session(metadata={
+            "_last_summary": {"last_active": datetime(2026, 1, 1).isoformat()},
+        })
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is None
+
     def test_no_summary_available_returns_none(self):
         """When no summary is available, should return (session, None)."""
         ac = _make_autocompact()
