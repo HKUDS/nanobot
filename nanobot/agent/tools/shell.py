@@ -108,7 +108,6 @@ class _PreparedCommand:
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
         timeout=IntegerSchema(
-            60,
             description=(
                 "Timeout in seconds. Increase for long-running commands "
                 "like compilation or installation (default 60, max 600)."

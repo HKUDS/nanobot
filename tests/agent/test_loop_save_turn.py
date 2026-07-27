@@ -7,7 +7,7 @@ import pytest
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.loop import AgentLoop, TurnState
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
@@ -451,7 +451,6 @@ def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_pat
         [],
         user_text,
         channel="cli",
-        chat_id="direct",
     )
     assert "_meta" not in messages[-1]
 
@@ -476,7 +475,6 @@ def test_build_and_save_preserves_multimodal_user_block_starting_with_runtime_ta
         user_text,
         media=[str(image)],
         channel="cli",
-        chat_id="direct",
     )
 
     loop._save_turn(session, messages, skip=1)
@@ -1101,7 +1099,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 
 
 @pytest.mark.asyncio
-async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
+async def test_process_message_keeps_delivery_chat_for_thread_session(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
@@ -1135,12 +1133,11 @@ async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path:
 
     assert result is not None
     assert result.chat_id == "thread-777"
-    assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
     assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
 
 
 @pytest.mark.asyncio
-async def test_process_message_uses_explicit_session_metadata_for_goal_context(
+async def test_process_message_uses_explicit_session_for_goal_context(
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
@@ -1185,10 +1182,10 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
 
     assert result is not None
     assert result.content == "ok"
-    kwargs = loop.context.build_messages.call_args.kwargs
-    assert kwargs["chat_id"] == "chat-with-goal"
-    assert kwargs["session_metadata"] is system_session.metadata
-    assert GOAL_STATE_KEY not in kwargs["session_metadata"]
+    kwargs = loop._run_agent_loop.call_args.kwargs
+    assert kwargs["session"] is system_session
+    assert kwargs["session_key"] == "system"
+    assert GOAL_STATE_KEY not in kwargs["session"].metadata
 
 
 @pytest.mark.asyncio
@@ -1570,27 +1567,26 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_system_subagent_followup_uses_common_turn_state_machine(tmp_path: Path) -> None:
+async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
         return_value=False
     )
-    visited: list[TurnState] = []
+    visited: list[str] = []
 
-    for state in (
-        TurnState.RESTORE,
-        TurnState.COMPACT,
-        TurnState.COMMAND,
-        TurnState.BUILD,
-        TurnState.RUN,
-        TurnState.SAVE,
-        TurnState.RESPOND,
+    for name in (
+        "_restore_turn",
+        "_compact_session",
+        "_dispatch_command",
+        "_build_turn",
+        "_run_turn",
+        "_persist_turn",
+        "_prepare_outbound",
     ):
-        name = f"_state_{state.name.lower()}"
         original = getattr(loop, name)
 
-        async def record(ctx, *, _original=original, _state=state):
-            visited.append(_state)
+        async def record(ctx, *, _original=original, _name=name):
+            visited.append(_name)
             return await _original(ctx)
 
         setattr(loop, name, record)
@@ -1606,25 +1602,33 @@ async def test_system_subagent_followup_uses_common_turn_state_machine(tmp_path:
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._process_message(
-        InboundMessage(
-            channel="system",
-            sender_id="subagent",
-            chat_id="cli:test",
-            content="subagent result",
-            metadata={"subagent_task_id": "sub-1"},
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    try:
+        await loop._process_message(
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="cli:test",
+                content="subagent result",
+                metadata={"subagent_task_id": "sub-1"},
+            )
         )
-    )
+    finally:
+        logger.remove(sink_id)
 
     assert visited == [
-        TurnState.RESTORE,
-        TurnState.COMPACT,
-        TurnState.COMMAND,
-        TurnState.BUILD,
-        TurnState.RUN,
-        TurnState.SAVE,
-        TurnState.RESPOND,
+        "_restore_turn",
+        "_compact_session",
+        "_dispatch_command",
+        "_build_turn",
+        "_run_turn",
+        "_persist_turn",
+        "_prepare_outbound",
     ]
+    logged = "".join(logs)
+    for stage in ("restore", "compact", "command", "build", "run", "save", "respond"):
+        assert f"Stage {stage} completed in" in logged
 
 
 @pytest.mark.asyncio
@@ -1689,7 +1693,6 @@ def test_subagent_followup_uses_user_model_input_and_assistant_history(tmp_path:
         current_message="subagent result",
         current_role="user",
         channel="cli",
-        chat_id="merge",
     )
 
     non_system = [m for m in projected if m.get("role") != "system"]

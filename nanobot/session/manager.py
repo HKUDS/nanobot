@@ -5,7 +5,6 @@ import errno
 import json
 import os
 import re
-import shutil
 from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
@@ -477,6 +476,14 @@ class SessionManager:
         except _SESSION_DATA_ERRORS:
             return None
 
+    @classmethod
+    def _session_key_from_path(cls, path: Path) -> str | None:
+        """Decode a session key only from a canonical collision-resistant filename."""
+        key = cls._decode_storage_key(path.stem)
+        if key is None or cls._storage_key(key) != path.stem:
+            return None
+        return key
+
     def _get_session_path(self, key: str) -> Path:
         """Get the collision-resistant workspace path for a session."""
         return self.sessions_dir / f"{self._storage_key(key)}.jsonl"
@@ -488,61 +495,6 @@ class SessionManager:
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
-
-    @staticmethod
-    def _stored_key_for_path(path: Path) -> str | None:
-        """Read the stored session key from a JSONL metadata row, if present."""
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
-                    if data.get("_type") == "metadata":
-                        stored_key = data.get("key")
-                        return stored_key if isinstance(stored_key, str) else None
-                    return None
-        except _SESSION_DATA_ERRORS:
-            return None
-        return None
-
-    def _resolve_session_path(self, key: str, *, migrate: bool = False) -> Path | None:
-        """Resolve a session path, falling back to legacy storage locations."""
-        path = self._get_session_path(key)
-        if path.exists():
-            return path
-
-        # TODO(v0.3.1): Remove both legacy fallbacks. v0.3.0 is the final
-        # compatibility window for reading and lazily migrating legacy session files.
-        fallback_paths = [
-            (self._get_legacy_lossy_path(key), "legacy lossy path"),
-            (self._get_legacy_session_path(key), "legacy path"),
-        ]
-        for fallback_path, description in fallback_paths:
-            if not fallback_path.exists():
-                continue
-            stored_key = self._stored_key_for_path(fallback_path)
-            if stored_key and stored_key != key:
-                logger.info(
-                    "Skipping session {} from {} because it belongs to {}",
-                    key,
-                    description,
-                    stored_key,
-                )
-                continue
-            if not migrate:
-                return fallback_path
-            try:
-                shutil.move(str(fallback_path), str(path))
-                logger.info("Migrated session {} from {}", key, description)
-            except Exception:
-                logger.exception("Failed to migrate session {}", key)
-                return None
-            return path
-        return None
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -567,8 +519,8 @@ class SessionManager:
 
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
-        path = self._resolve_session_path(key, migrate=True)
-        if path is None:
+        path = self._get_session_path(key)
+        if not path.exists():
             return None
 
         try:
@@ -847,8 +799,8 @@ class SessionManager:
         Returns ``{"key", "created_at", "updated_at", "metadata", "messages"}`` or
         ``None`` when the session file does not exist or fails to parse.
         """
-        path = self._resolve_session_path(key)
-        if path is None:
+        path = self._get_session_path(key)
+        if not path.exists():
             return None
         try:
             messages: list[dict[str, Any]] = []
@@ -890,8 +842,8 @@ class SessionManager:
         This is used by WebUI routes that need session-level metadata but not the
         full conversation transcript.
         """
-        path = self._resolve_session_path(key)
-        if path is None:
+        path = self._get_session_path(key)
+        if not path.exists():
             return None
         try:
             with open(path, encoding="utf-8") as f:
@@ -935,8 +887,9 @@ class SessionManager:
         sessions = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
-            decoded = self._decode_storage_key(path.stem)
-            fallback_key = decoded or path.stem.replace("_", ":", 1)
+            storage_key = self._session_key_from_path(path)
+            if storage_key is None:
+                continue
             try:
                 # Read the metadata line and a small preview for session lists.
                 with open(path, encoding="utf-8") as f:
@@ -946,7 +899,7 @@ class SessionManager:
                         if not isinstance(data, dict):
                             raise ValueError("session records must be JSON objects")
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or fallback_key
+                            key = data.get("key") or storage_key
                             metadata = data.get("metadata", {})
                             title = _metadata_title(metadata)
                             preview = ""
@@ -991,7 +944,7 @@ class SessionManager:
             except FileNotFoundError:
                 continue
             except _SESSION_DATA_ERRORS:
-                repaired = self._repair(fallback_key, path=path)
+                repaired = self._repair(storage_key, path=path)
                 if repaired is not None:
                     sessions.append(
                         {

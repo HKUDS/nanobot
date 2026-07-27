@@ -39,12 +39,6 @@ def _validate_patch_path(path: str) -> str:
     return normalized
 
 
-def _lines_to_text(lines: list[str]) -> str:
-    if not lines:
-        return ""
-    return "\n".join(lines) + "\n"
-
-
 def _text_line_count(text: str) -> int:
     if not text:
         return 0

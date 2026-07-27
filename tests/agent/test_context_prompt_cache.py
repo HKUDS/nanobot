@@ -70,7 +70,6 @@ def test_provider_context_appended_after_user_content(tmp_path) -> None:
         history=[],
         current_message="hello world",
         channel="cli",
-        chat_id="direct",
         runtime_context_blocks=[
             RuntimeContextBlock(source="test", content="provider context"),
         ],
@@ -322,7 +321,7 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
 
     messages = builder.build_messages(
         history=[], current_message="hi",
-        channel="telegram", chat_id="123",
+        channel="telegram",
     )
     system = messages[0]["content"]
     assert "Format Hint" in system
@@ -349,7 +348,6 @@ def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path
         history=[{"role": "assistant", "content": "previous result"}],
         current_message="subagent result",
         channel="cli",
-        chat_id="direct",
         current_role="assistant",
     )
 

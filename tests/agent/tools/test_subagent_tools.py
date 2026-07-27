@@ -78,7 +78,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
     )
 
     assert result == "subagent failed"
-    assert is_tool_error_result("spawn", result)
+    assert is_tool_error_result(result)
     assert manager._running_tasks == {}
     assert manager._session_tasks == {}
 

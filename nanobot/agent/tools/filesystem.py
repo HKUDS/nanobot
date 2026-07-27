@@ -226,12 +226,10 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
         offset=IntegerSchema(
-            1,
             description="Line number to start reading from (1-indexed, default 1)",
             minimum=1,
         ),
         limit=IntegerSchema(
-            2000,
             description="Maximum number of lines to read (default 2000)",
             minimum=1,
         ),
@@ -790,13 +788,11 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         new_text=StringSchema("The text to replace with"),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
         occurrence=IntegerSchema(
-            1,
             description="Optional 1-based occurrence to replace when old_text appears multiple times.",
             minimum=1,
             nullable=True,
         ),
         line_hint=IntegerSchema(
-            1,
             description=(
                 "Optional exact 1-based target line copied from read_file. "
                 "The selected old_text match must cover this line."
@@ -805,7 +801,6 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
             nullable=True,
         ),
         expected_replacements=IntegerSchema(
-            1,
             description="Optional guard for the number of replacements that must be made.",
             minimum=1,
             nullable=True,
@@ -1036,7 +1031,6 @@ class EditFileTool(_FsTool):
         path=StringSchema("The directory path to list"),
         recursive=BooleanSchema(description="Recursively list all files (default false)"),
         max_entries=IntegerSchema(
-            200,
             description="Maximum entries to return (default 200)",
             minimum=1,
         ),

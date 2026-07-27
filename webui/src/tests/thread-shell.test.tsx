@@ -259,9 +259,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       },
       dream: {
         schedule: "every 2h",
-        max_batch_size: 20,
-        max_iterations: 15,
-        annotate_line_ages: true,
       },
       unified_session: false,
     },

@@ -64,9 +64,6 @@ class DreamConfig(Base):
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
     )  # Override model for Dream sessions (pending implementation)
-    max_batch_size: int = Field(default=20, ge=1)  # Deprecated: no longer used
-    max_iterations: int = Field(default=15, ge=1)  # Deprecated: no longer used
-    annotate_line_ages: bool = True  # Deprecated: no longer used
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""

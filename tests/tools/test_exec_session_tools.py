@@ -380,7 +380,7 @@ def test_write_stdin_reports_missing_session(tmp_path):
     result = asyncio.run(tool.execute(session_id="missing\nExit code: 0", chars=""))
 
     assert result == "Error: exec session not found: 'missing\\nExit code: 0'"
-    assert is_tool_error_result("write_stdin", result)
+    assert is_tool_error_result(result)
 
 
 def test_list_exec_sessions_reports_running_commands(tmp_path):

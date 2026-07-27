@@ -414,13 +414,13 @@ class TestEphemeralDirect:
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct(
                 "test", session_key="dream:check", ephemeral=True,
             )
@@ -435,13 +435,13 @@ class TestEphemeralDirect:
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct("test", session_key="cli:normal")
 
         assert captured.get("ephemeral") is False

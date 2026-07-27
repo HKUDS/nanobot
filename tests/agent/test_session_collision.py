@@ -65,7 +65,7 @@ def test_save_uses_new_path_not_lossy(tmp_path: Path, monkeypatch) -> None:
     assert lossy_path.read_text(encoding="utf-8") == stale_lossy
 
 
-def test_load_falls_back_to_lossy_path(tmp_path: Path, monkeypatch) -> None:
+def test_load_ignores_legacy_lossy_path(tmp_path: Path, monkeypatch) -> None:
     sm = _manager(tmp_path, monkeypatch)
     key = "telegram:legacy:lossy"
     lossy_path = sm._get_legacy_lossy_path(key)
@@ -73,49 +73,23 @@ def test_load_falls_back_to_lossy_path(tmp_path: Path, monkeypatch) -> None:
 
     session = sm._load(key)
 
-    assert session is not None
-    assert session.metadata == {"source": "test"}
-    assert session.messages[0]["content"] == "loaded from lossy"
+    assert session is None
+    assert lossy_path.exists()
+    assert not sm._get_session_path(key).exists()
 
 
-def test_load_migrates_lossy_to_new_path(tmp_path: Path, monkeypatch) -> None:
+def test_load_ignores_legacy_global_path(tmp_path: Path, monkeypatch) -> None:
     sm = _manager(tmp_path, monkeypatch)
-    key = "telegram:migrate:lossy"
+    key = "telegram:legacy:global"
     new_path = sm._get_session_path(key)
-    lossy_path = sm._get_legacy_lossy_path(key)
-    _write_session_file(lossy_path, key, "migrate me")
+    legacy_path = sm._get_legacy_session_path(key)
+    _write_session_file(legacy_path, key, "loaded from global")
 
     session = sm._load(key)
 
-    assert session is not None
-    assert session.messages[0]["content"] == "migrate me"
-    assert new_path.exists()
-    assert not lossy_path.exists()
-
-
-def test_load_does_not_migrate_lossy_path_for_different_stored_key(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    sm = _manager(tmp_path, monkeypatch)
-    first_key = "telegram:a_b"
-    second_key = "telegram:a:b"
-    lossy_path = sm._get_legacy_lossy_path(first_key)
-    assert lossy_path == sm._get_legacy_lossy_path(second_key)
-    _write_session_file(lossy_path, first_key, "belongs to first")
-
-    loaded_second = sm._load(second_key)
-
-    assert loaded_second is None
-    assert lossy_path.exists()
-    assert not sm._get_session_path(second_key).exists()
-
-    loaded_first = sm._load(first_key)
-
-    assert loaded_first is not None
-    assert loaded_first.messages[0]["content"] == "belongs to first"
-    assert sm._get_session_path(first_key).exists()
-    assert not lossy_path.exists()
+    assert session is None
+    assert legacy_path.exists()
+    assert not new_path.exists()
 
 
 def test_safe_key_is_lossy() -> None:
