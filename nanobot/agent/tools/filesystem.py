@@ -261,6 +261,8 @@ class ReadFileTool(_FsTool):
             "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
             "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Uploaded non-image attachments are referenced by path; read them "
+            "with this tool only when their contents are needed. "
             "Use find_files/list_dir first when the path is uncertain. "
             "Read the relevant range before editing so replacements or patches "
             "are based on current content. "

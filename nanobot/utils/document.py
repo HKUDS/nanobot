@@ -431,7 +431,7 @@ def _is_text_extension(ext: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# High-level helper: split media into images + extracted document text
+# High-level helper: split images from on-demand attachment references
 # ---------------------------------------------------------------------------
 
 
@@ -457,10 +457,12 @@ def is_image_file(path: str) -> bool:
 def reference_non_image_attachments(
     content: str, media: list[str],
 ) -> tuple[str, list[str]]:
-    """Separate images from non-image attachments without reading file content.
+    """Reference non-image attachments without reading file content.
 
     Image paths are preserved for downstream vision-block construction.
-    Non-image paths are appended as ``[Attachment: path]`` references.
+    Non-image paths are appended as ``[Attachment: path]`` references so the
+    model can inspect them on demand with ``read_file`` or pass the original
+    path to another tool that needs exact file bytes.
     """
     image_paths: list[str] = []
     attachment_refs: list[str] = []
@@ -473,51 +475,3 @@ def reference_non_image_attachments(
         suffix = "\n".join(attachment_refs)
         content = f"{content}\n\n{suffix}" if content else suffix
     return content, image_paths
-
-
-def extract_documents(
-    text: str,
-    media_paths: list[str],
-    *,
-    max_file_size: int = _MAX_EXTRACT_FILE_SIZE,
-) -> tuple[str, list[str]]:
-    """Separate images from documents in *media_paths*.
-
-    Documents (PDF, DOCX, XLSX, PPTX, plain-text, …) have their text
-    extracted and appended to *text*.  Only image paths are kept in the
-    returned list so that downstream layers only need to handle vision
-    blocks.
-
-    Files larger than *max_file_size* bytes are skipped with a warning
-    to avoid unbounded memory / CPU usage.
-    """
-    image_paths: list[str] = []
-    doc_texts: list[str] = []
-
-    for path_str in media_paths:
-        p = Path(path_str)
-        if not p.is_file():
-            continue
-
-        try:
-            size = p.stat().st_size
-        except OSError:
-            continue
-        if size > max_file_size:
-            logger.warning(
-                "Skipping oversized file for extraction: {} ({:.1f} MB > {} MB limit)",
-                p.name, size / (1024 * 1024), max_file_size // (1024 * 1024),
-            )
-            continue
-
-        if is_image_file(path_str):
-            image_paths.append(path_str)
-        else:
-            extracted = extract_text(p)
-            if extracted and not extracted.startswith("[error:"):
-                doc_texts.append(f"[File: {p.name}]\n{extracted}")
-
-    if doc_texts:
-        text = text + "\n\n" + "\n\n".join(doc_texts)
-
-    return text, image_paths

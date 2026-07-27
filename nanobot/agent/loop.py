@@ -86,7 +86,7 @@ from nanobot.session.model_selection import (
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
-from nanobot.utils.document import extract_documents, reference_non_image_attachments
+from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -1490,7 +1490,7 @@ class AgentLoop:
         )
 
     async def _restore_turn(self, ctx: TurnContext) -> None:
-        """Restore checkpoint / pending user turn; extract documents."""
+        """Restore checkpoint / pending user turn; reference non-image attachments."""
         msg = ctx.msg
 
         if ctx.kind is TurnKind.USER and msg.media:
@@ -1523,14 +1523,7 @@ class AgentLoop:
             self.sessions.save(ctx.session)
 
     def _prepare_message_media(self, content: str, media: list[str]) -> tuple[str, list[str]]:
-        if self._should_extract_document_text():
-            return extract_documents(content, media)
         return reference_non_image_attachments(content, media)
-
-    def _should_extract_document_text(self) -> bool:
-        if self.channels_config is None:
-            return True
-        return self.channels_config.extract_document_text
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)

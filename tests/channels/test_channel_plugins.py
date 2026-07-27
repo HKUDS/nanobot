@@ -272,14 +272,12 @@ def test_channels_config_has_no_per_channel_fields():
     assert cfg.send_tool_hints is True
     assert cfg.extract_document_text is True
 
-    opted_out = ChannelsConfig.model_validate({"sendToolHints": False})
+    opted_out = ChannelsConfig.model_validate({
+        "sendToolHints": False,
+        "extractDocumentText": False,
+    })
     assert opted_out.send_tool_hints is False
-
-
-def test_channels_config_extract_document_text_accepts_camel_alias():
-    cfg = ChannelsConfig.model_validate({"extractDocumentText": False})
-
-    assert cfg.extract_document_text is False
+    assert opted_out.extract_document_text is False
 
 
 @pytest.mark.parametrize(
