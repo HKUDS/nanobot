@@ -192,6 +192,31 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
+  it("visually distinguishes the selected topic", () => {
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "active", title: "Active topic" }),
+          session({ chatId: "inactive", title: "Inactive topic" }),
+        ]}
+        activeKey="websocket:active"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const activeButton = screen.getByTitle("Active topic");
+    expect(activeButton).toHaveAttribute("aria-current", "page");
+    expect(activeButton.parentElement).toHaveClass(
+      "bg-sidebar-accent",
+      "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
+    );
+    expect(screen.getByTitle("Inactive topic")).not.toHaveAttribute("aria-current");
+  });
+
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {
     const onToggleGroup = vi.fn();
     const onRequestRenameProject = vi.fn();
