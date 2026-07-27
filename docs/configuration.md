@@ -1597,6 +1597,47 @@ Global settings that apply to all channels. Configure under the `channels` secti
 
 Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API 10.1 `sendRichMessage` rendering; leave it disabled for Telegram Web clients that show unsupported-message errors for rich messages.
 
+### Rate Limiting
+
+`channels.rateLimitPerMin` caps how many inbound messages a single sender may deliver within any trailing 60-second window (per channel identity, so the same person is limited independently on each channel). It defaults to `0`, which disables rate limiting entirely — existing configs are unaffected. `channels.rateLimitBurst` optionally adds a tighter cap over a short 10-second window to catch rapid-fire bursts that a 60-second budget alone would smooth over.
+
+```json
+{
+  "channels": {
+    "rateLimitPerMin": 20,
+    "rateLimitBurst": 5,
+    "telegram": {
+      "enabled": true
+    }
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `rateLimitPerMin` | `0` | Max inbound messages per sender per 60s window. `0` disables rate limiting. |
+| `rateLimitBurst` | _(none)_ | Optional tighter cap within a 10s window, checked in addition to `rateLimitPerMin`. |
+
+Both settings can be overridden per channel, following the same override pattern as `sendProgress`/`sendToolHints`:
+
+```json
+{
+  "channels": {
+    "rateLimitPerMin": 20,
+    "telegram": {
+      "enabled": true,
+      "rateLimitPerMin": 5
+    },
+    "websocket": {
+      "enabled": true,
+      "rateLimitPerMin": 0
+    }
+  }
+}
+```
+
+When a sender exceeds the limit, the message is dropped before it reaches the agent loop. Direct messages get a single friendly cooldown notice (further rejected messages stay silent until the sender is allowed through again, so a burst of retries does not itself flood the chat); group/channel messages are dropped silently to avoid drawing attention to the limiter in shared chats.
+
 ### Retry Behavior
 
 Retry is intentionally simple.

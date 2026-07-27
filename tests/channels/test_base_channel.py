@@ -125,3 +125,88 @@ async def test_handle_message_rejects_when_authorization_id_is_not_allowed() -> 
 
     assert bus.inbound_size == 0
 
+
+class TestRateLimiting:
+    @pytest.mark.asyncio
+    async def test_disabled_by_default(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel({"allowFrom": ["*"]}, bus)
+
+        for _ in range(50):
+            await channel._handle_message(sender_id="alice", chat_id="c1", content="hi")
+
+        assert bus.inbound_size == 50
+
+    @pytest.mark.asyncio
+    async def test_blocks_sender_over_the_limit(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel(
+            {"allowFrom": ["*"], "rate_limit_per_min": 2}, bus
+        )
+
+        for _ in range(5):
+            await channel._handle_message(sender_id="alice", chat_id="c1", content="hi")
+
+        assert bus.inbound_size == 2
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_is_per_sender(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel(
+            {"allowFrom": ["*"], "rate_limit_per_min": 1}, bus
+        )
+
+        await channel._handle_message(sender_id="alice", chat_id="c1", content="hi")
+        await channel._handle_message(sender_id="bob", chat_id="c1", content="hi")
+        await channel._handle_message(sender_id="alice", chat_id="c1", content="hi again")
+
+        assert bus.inbound_size == 2
+
+    @pytest.mark.asyncio
+    async def test_dm_gets_a_single_cooldown_notice_not_a_reply_per_message(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel(
+            {"allowFrom": ["*"], "rate_limit_per_min": 1}, bus
+        )
+
+        for _ in range(5):
+            await channel._handle_message(
+                sender_id="alice", chat_id="c1", content="hi", is_dm=True
+            )
+
+        assert bus.inbound_size == 1
+        assert len(channel._sent) == 1
+        assert "too quickly" in channel._sent[0].content
+
+    @pytest.mark.asyncio
+    async def test_group_chat_is_silently_dropped_without_cooldown_spam(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel(
+            {"allowFrom": ["*"], "rate_limit_per_min": 1}, bus
+        )
+
+        for _ in range(5):
+            await channel._handle_message(
+                sender_id="alice", chat_id="c1", content="hi", is_dm=False
+            )
+
+        assert bus.inbound_size == 1
+        assert channel._sent == []
+
+    @pytest.mark.asyncio
+    async def test_burst_limit_narrower_than_per_minute_still_applies(self) -> None:
+        bus = MessageBus()
+        channel = _DummyChannel(
+            {
+                "allowFrom": ["*"],
+                "rate_limit_per_min": 100,
+                "rate_limit_burst": 2,
+            },
+            bus,
+        )
+
+        for _ in range(5):
+            await channel._handle_message(sender_id="alice", chat_id="c1", content="hi")
+
+        assert bus.inbound_size == 2
+

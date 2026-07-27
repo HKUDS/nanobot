@@ -32,6 +32,7 @@ from nanobot.channels.contracts import (
     channel_runtime_name,
     resolve_channel_action_target,
 )
+from nanobot.channels.rate_limit import RateLimiter
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 from nanobot.utils.restart import (
@@ -191,7 +192,27 @@ class ChannelManager:
         channel.show_reasoning = self._resolve_bool_override(
             section, "show_reasoning", self.config.channels.show_reasoning,
         )
+        self._apply_rate_limit_override(channel, section)
         return channel
+
+    def _apply_rate_limit_override(self, channel: BaseChannel, section: Any) -> None:
+        """Fall back to the global rate-limit config when a channel section
+        does not declare its own ``rate_limit_per_min``/``rate_limit_burst``.
+        """
+        per_min = self._section_value(section, "rate_limit_per_min", "rateLimitPerMin")
+        burst = self._section_value(section, "rate_limit_burst", "rateLimitBurst")
+        if per_min is None:
+            per_min = self.config.channels.rate_limit_per_min
+        if burst is None:
+            burst = self.config.channels.rate_limit_burst
+        channel._rate_limiter = RateLimiter(per_minute=per_min or 0, burst=burst)
+
+    @staticmethod
+    def _section_value(section: Any, key: str, camel_key: str) -> Any:
+        if isinstance(section, dict):
+            value = section.get(key)
+            return value if value is not None else section.get(camel_key)
+        return getattr(section, key, None)
 
     def _init_channels(self) -> None:
         """Initialize enabled runtimes from dependency-free channel descriptors."""

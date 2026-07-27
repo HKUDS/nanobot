@@ -36,6 +36,8 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Deprecated: use top-level transcription.language
+    rate_limit_per_min: int = Field(default=0, ge=0)  # Max inbound messages per sender per 60s window (0 disables)
+    rate_limit_burst: int | None = Field(default=None, ge=1)  # Optional tighter cap within a short burst window
 
 
 class TranscriptionConfig(Base):

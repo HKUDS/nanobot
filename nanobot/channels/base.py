@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.rate_limit import RateLimiter, format_cooldown_reply
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
     format_pairing_reply,
@@ -44,6 +45,21 @@ class BaseChannel(ABC):
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
+        # Per-channel config wins when set; ChannelManager additionally
+        # applies the global channels.rateLimitPerMin default for sections
+        # that do not declare their own override (mirrors how
+        # send_progress/send_tool_hints/show_reasoning are resolved).
+        self._rate_limiter = RateLimiter(
+            per_minute=self._config_get("rate_limit_per_min", 0) or 0,
+            burst=self._config_get("rate_limit_burst", None),
+        )
+        self._rate_limit_notified: set[str] = set()
+
+    def _config_get(self, key: str, default: Any = None) -> Any:
+        """Read *key* from ``self.config`` regardless of dict-or-object shape."""
+        if isinstance(self.config, dict):
+            return self.config.get(key, default)
+        return getattr(self.config, key, default)
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
@@ -260,6 +276,29 @@ class BaseChannel(ABC):
                     sender_id,
                 )
             return
+
+        if self._rate_limiter.enabled:
+            rate_key = f"{self.name}:{permission_id}"
+            retry_after = self._rate_limiter.check(rate_key)
+            if retry_after is not None:
+                self.logger.warning(
+                    "Rate limit exceeded for sender {} in chat {} (retry in {:.1f}s)",
+                    sender_id, chat_id, retry_after,
+                )
+                # Notify at most once per cooldown window so a burst of
+                # rejected messages does not itself flood the chat with
+                # cooldown replies.
+                if is_dm and rate_key not in self._rate_limit_notified:
+                    self._rate_limit_notified.add(rate_key)
+                    await self.send(
+                        OutboundMessage(
+                            channel=self.name,
+                            chat_id=str(chat_id),
+                            content=format_cooldown_reply(retry_after),
+                        )
+                    )
+                return
+            self._rate_limit_notified.discard(rate_key)
 
         meta = metadata or {}
         if self.supports_streaming:

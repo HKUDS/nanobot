@@ -3524,3 +3524,81 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
     assert channel.attempts == 2
     assert channel.sent is not None
     assert channel.sent.content == "Restart completed."
+
+
+# ---------------------------------------------------------------------------
+# Rate limit config resolution (global default with per-channel override)
+# ---------------------------------------------------------------------------
+
+
+def _rate_limit_manager(monkeypatch, channels_config: dict) -> ChannelManager:
+    plugin = _channel_plugin(_FakePlugin, default_enabled=True)
+    _stub_channel_registry(monkeypatch, plugin)
+    config = Config.model_validate({"channels": channels_config})
+    return ChannelManager(config, MessageBus())
+
+
+def test_rate_limit_disabled_by_default(monkeypatch):
+    manager = _rate_limit_manager(monkeypatch, {"fakeplugin": {"enabled": True}})
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.enabled is False
+
+
+def test_rate_limit_global_default_applies_without_channel_override(monkeypatch):
+    manager = _rate_limit_manager(
+        monkeypatch,
+        {
+            "rateLimitPerMin": 5,
+            "fakeplugin": {"enabled": True},
+        },
+    )
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.enabled is True
+    assert channel._rate_limiter.per_minute == 5
+
+
+def test_rate_limit_global_burst_default_applies(monkeypatch):
+    manager = _rate_limit_manager(
+        monkeypatch,
+        {
+            "rateLimitPerMin": 30,
+            "rateLimitBurst": 3,
+            "fakeplugin": {"enabled": True},
+        },
+    )
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.per_minute == 30
+    assert channel._rate_limiter.burst == 3
+
+
+def test_rate_limit_channel_section_overrides_global_default(monkeypatch):
+    manager = _rate_limit_manager(
+        monkeypatch,
+        {
+            "rateLimitPerMin": 5,
+            "fakeplugin": {"enabled": True, "rate_limit_per_min": 20},
+        },
+    )
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.per_minute == 20
+
+
+def test_rate_limit_channel_section_can_disable_when_global_is_enabled(monkeypatch):
+    manager = _rate_limit_manager(
+        monkeypatch,
+        {
+            "rateLimitPerMin": 5,
+            "fakeplugin": {"enabled": True, "rate_limit_per_min": 0},
+        },
+    )
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.enabled is False
+
+
+def test_rate_limit_channel_section_accepts_camel_case_alias(monkeypatch):
+    manager = _rate_limit_manager(
+        monkeypatch,
+        {"fakeplugin": {"enabled": True, "rateLimitPerMin": 15}},
+    )
+    channel = manager.channels["fakeplugin"]
+    assert channel._rate_limiter.per_minute == 15
