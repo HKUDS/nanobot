@@ -513,14 +513,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     invalidateGeometry();
     const observer = typeof ResizeObserver === "undefined"
       ? null
-      : new ResizeObserver((entries) => {
-          threadMotionRef.current?.invalidateGeometry({
-            preserveScrollPosition: Boolean(
-              composerDock
-              && entries.some((entry) => entry.target === composerDock),
-            ),
-          });
-        });
+      : new ResizeObserver(invalidateGeometry);
     observer?.observe(el);
     if (content) observer?.observe(content);
     if (messageRegion) observer?.observe(messageRegion);
@@ -671,6 +664,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           <div
             ref={composerDockRef}
             data-testid="thread-composer-dock"
+            onInputCapture={(event) => {
+              if (event.target instanceof HTMLTextAreaElement) {
+                threadMotionRef.current?.handleComposerInput();
+              }
+            }}
             className={cn(
               "row-start-2 z-10 w-full",
               hasMessages ? "sticky bottom-0 bg-background" : "relative self-center",

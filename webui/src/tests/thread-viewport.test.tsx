@@ -772,7 +772,7 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("preserves the waiting viewport across composer and grid-track growth", async () => {
+  it("pins the waiting boundary across composer and grid-track growth", async () => {
     const resizeObserver = stubResizeObserver();
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
 
@@ -845,64 +845,47 @@ describe("ThreadViewport", () => {
         value: 1228,
       });
       act(() => {
-        composerObserver!.callback(
-          [{ target: composerDock }] as ResizeObserverEntry[],
-          composerObserver as unknown as ResizeObserver,
-        );
+        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
       await flushAnimationFrame();
 
-      expect(jumpTo).not.toHaveBeenCalled();
-      expect(scroller.scrollTop).toBe(700);
+      expect(jumpTo).toHaveBeenCalledWith(728);
 
+      jumpTo.mockClear();
       Object.defineProperty(scroller, "scrollHeight", {
         configurable: true,
         value: 1268,
       });
       act(() => {
-        composerObserver!.callback(
-          [{ target: composerDock }] as ResizeObserverEntry[],
-          composerObserver as unknown as ResizeObserver,
-        );
+        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
       await flushAnimationFrame();
 
-      expect(jumpTo).not.toHaveBeenCalled();
-      expect(scroller.scrollTop).toBe(700);
+      expect(jumpTo).toHaveBeenCalledWith(768);
     } finally {
       resizeObserver.restore();
     }
   });
 
-  it("preserves completed threads when the composer grows", async () => {
+  it("releases completion follow when single-line input starts before completion", async () => {
     const resizeObserver = stubResizeObserver();
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
 
     try {
       const threaded: UIMessage[] = [
-        {
-          id: "u1",
-          role: "user",
-          content: "question",
-          turnId: "turn-1",
-          createdAt: 1,
-        },
-        {
-          id: "a1",
-          role: "assistant",
-          content: "answer",
-          turnId: "turn-1",
-          createdAt: 2,
-        },
+        { id: "u1", role: "user", content: "question", turnId: "turn-1", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "answer", turnId: "turn-1", createdAt: 2 },
       ];
-      const { container, rerender } = render(
+      const viewport = (isStreaming: boolean, activeTurnId?: string) => (
         <ThreadViewport
           messages={threaded}
-          isStreaming
-          composer={<div>composer</div>}
-        />,
+          isStreaming={isStreaming}
+          composer={<textarea aria-label="Message input" />}
+          activeTurnId={activeTurnId}
+        />
       );
+      const { container, rerender } = render(viewport(true));
       const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
       Object.defineProperties(scroller, {
         scrollHeight: { configurable: true, value: 1_200 },
@@ -910,22 +893,7 @@ describe("ThreadViewport", () => {
         scrollTop: { configurable: true, writable: true, value: 700 },
       });
 
-      rerender(
-        <ThreadViewport
-          messages={threaded}
-          isStreaming
-          composer={<div>composer</div>}
-          activeTurnId="turn-1"
-        />,
-      );
-      await flushAnimationFrame();
-      rerender(
-        <ThreadViewport
-          messages={threaded}
-          isStreaming={false}
-          composer={<div>composer</div>}
-        />,
-      );
+      rerender(viewport(true, "turn-1"));
       await flushAnimationFrame();
       jumpTo.mockClear();
       followTo.mockClear();
@@ -948,9 +916,31 @@ describe("ThreadViewport", () => {
       });
       await flushAnimationFrame();
 
+      expect(followTo).toHaveBeenCalled();
+
+      followTo.mockClear();
+      fireEvent.input(screen.getByLabelText("Message input"), {
+        target: { value: "x" },
+      });
+      const scrollTopAfterInput = scroller.scrollTop;
+      rerender(viewport(false));
+      await flushAnimationFrame();
+      expect(followTo).not.toHaveBeenCalled();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1_280,
+      });
+      act(() => {
+        composerObserver!.callback(
+          [{ target: composerDock }] as ResizeObserverEntry[],
+          composerObserver as unknown as ResizeObserver,
+        );
+      });
+      await flushAnimationFrame();
+
       expect(jumpTo).not.toHaveBeenCalled();
       expect(followTo).not.toHaveBeenCalled();
-      expect(scroller.scrollTop).toBe(700);
+      expect(scroller.scrollTop).toBe(scrollTopAfterInput);
     } finally {
       resizeObserver.restore();
     }

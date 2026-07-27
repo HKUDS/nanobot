@@ -21,6 +21,7 @@ type ThreadMotionEvent =
   | "navigation-settled"
   | "user-scroll"
   | "boundary-scroll"
+  | "composer-input"
   | "turn-completed"
   | "resume-follow";
 
@@ -49,6 +50,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
   "follow-completion": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
+    "composer-input": "idle",
   },
   "navigating-history": {
     "navigate-history": "navigating-history",
@@ -110,10 +112,6 @@ interface ThreadMotionCoordinatorOptions {
   scheduler?: ThreadMotionScheduler;
 }
 
-interface ThreadMotionInvalidationOptions {
-  preserveScrollPosition?: boolean;
-}
-
 const GEOMETRY_EPSILON_PX = 0.5;
 
 type ThreadScrollOwner = "automatic" | "navigation" | "user";
@@ -145,7 +143,7 @@ export class ThreadMotionCoordinator {
   private promptPositioned = false;
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
-  private preserveScrollPositionPending = false;
+  private composerInputDuringTurn = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
     this.camera = options.camera;
@@ -175,6 +173,7 @@ export class ThreadMotionCoordinator {
     this.turn = turn;
     if (isNewTurn) {
       this.camera.cancel();
+      this.composerInputDuringTurn = false;
       this.promptPositioned = turn.entry === "restored";
       this.mode = this.promptPositioned && turn.hasOutput
         ? "follow-output"
@@ -192,20 +191,34 @@ export class ThreadMotionCoordinator {
     }
     // Protocol completion can share a React commit with the last large text
     // batch and begins the run-drawer exit. Keep camera ownership through
-    // those final layout changes; only a new turn or explicit user navigation
-    // may end completion follow.
+    // those final layout changes; only a new turn, explicit user navigation,
+    // or input for the next prompt may end completion follow.
     this.transition("turn-completed");
+    if (
+      this.composerInputDuringTurn
+      && this.transition("composer-input")
+    ) {
+      this.camera.cancel();
+    }
     this.turn = { id: null, promptId: null, hasOutput: false };
+    this.composerInputDuringTurn = false;
     this.promptPositioned = false;
     this.invalidateGeometry();
   }
 
-  invalidateGeometry(options?: ThreadMotionInvalidationOptions): void {
+  invalidateGeometry(): void {
     this.geometryDirty = true;
-    this.preserveScrollPositionPending ||=
-      options?.preserveScrollPosition === true;
     if (this.measurementFrameId !== null) return;
     this.measurementFrameId = this.scheduler.request(this.flushGeometry);
+  }
+
+  handleComposerInput(): void {
+    // Input and protocol completion can arrive in either order. Remember
+    // editing that starts just before turn_end so the completion drawer
+    // cannot reacquire the camera a few milliseconds later.
+    if (this.turn.id) this.composerInputDuringTurn = true;
+    if (!this.transition("composer-input")) return;
+    this.camera.cancel();
   }
 
   takeUserControl(): void {
@@ -280,9 +293,9 @@ export class ThreadMotionCoordinator {
       this.measurementFrameId = null;
     }
     this.geometryDirty = false;
-    this.preserveScrollPositionPending = false;
     this.camera.cancel();
     this.turn = { id: null, promptId: null, hasOutput: false };
+    this.composerInputDuringTurn = false;
     this.mode = "idle";
     this.promptPositioned = false;
   }
@@ -336,8 +349,6 @@ export class ThreadMotionCoordinator {
     this.measurementFrameId = null;
     if (!this.geometryDirty) return;
     this.geometryDirty = false;
-    const preserveScrollPosition = this.preserveScrollPositionPending;
-    this.preserveScrollPositionPending = false;
 
     const needsPromptGeometry =
       !this.isHistoryMode()
@@ -346,21 +357,6 @@ export class ThreadMotionCoordinator {
     const geometry = this.measure(needsPromptGeometry ? this.turn.promptId : null);
     if (!geometry) return;
     this.onGeometry?.(geometry);
-
-    if (
-      preserveScrollPosition
-      && !this.isHistoryMode()
-      && (this.turn.id === null || this.promptPositioned)
-    ) {
-      // A focused textarea asks the browser to preserve the caret's viewport
-      // position while its sticky composer grows. Any simultaneous camera
-      // write fights that adjustment and makes the transcript bounce between
-      // two scroll positions. Measure the new geometry, but leave scrolling
-      // untouched until message output or an explicit navigation invalidates
-      // it again.
-      this.camera.cancel();
-      return;
-    }
 
     if (this.mode === "follow-completion") {
       this.followGeometry(geometry);
