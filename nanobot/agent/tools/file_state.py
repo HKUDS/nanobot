@@ -19,6 +19,11 @@ class ReadState:
 
 
 def _hash_file(p: str) -> str | None:
+    """Return a SHA-256 hex digest of *p* for file-integrity checking only.
+
+    This hash is used exclusively to detect file modifications between reads.
+    It is NOT used for password storage or any cryptographic security purpose.
+    """
     try:
         return hashlib.sha256(Path(p).read_bytes()).hexdigest()
     except OSError:
