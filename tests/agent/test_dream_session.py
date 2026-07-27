@@ -34,6 +34,7 @@ class TestPruneDreamSessions:
 
         base_time = time.time() - 100
         dream_paths = []
+        dream_keys = []
 
         for i in range(15):
             key = f"dream:20260528-{100000 + i:06d}"
@@ -46,12 +47,14 @@ class TestPruneDreamSessions:
             )
             os.utime(path, (base_time + i, base_time + i))
             dream_paths.append(path)
+            dream_keys.append(key)
 
         normal_path = sessions_dir / "telegram_123.jsonl"
         normal_path.write_text('{"_type": "metadata"}\n', encoding="utf-8")
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        removed = MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
 
+        assert removed == dream_keys[:5]
         assert [path.exists() for path in dream_paths] == [False] * 5 + [True] * 10
         assert normal_path.exists()
 
@@ -81,8 +84,9 @@ class TestPruneDreamSessions:
         )
         os.utime(legacy_path, (base_time - 1, base_time - 1))
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=1)
+        removed = MemoryStore.prune_dream_sessions(sessions_dir, keep=1)
 
+        assert removed == ["dream:20260713-100000"]
         assert [path.exists() for path in current_paths] == [False, True]
         assert legacy_path.exists()
 
@@ -94,11 +98,13 @@ class TestPruneDreamSessions:
             path = sessions_dir / f"{SessionManager._storage_key(key)}.jsonl"
             path.write_text("{}", encoding="utf-8")
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        removed = MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        assert removed == []
         assert len(list(sessions_dir.glob("*.jsonl"))) == 3
 
     def test_empty_dir_noop(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        removed = MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        assert removed == []
         assert list(sessions_dir.iterdir()) == []

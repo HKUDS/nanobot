@@ -893,6 +893,7 @@
   },
   "thread": {
     "loadingConversation": "正在加载话题…",
+    "readOnlySession": "此会话为只读。",
     "empty": {
       "greetings": {
         "workOn": "我们要一起做点什么？",

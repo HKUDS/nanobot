@@ -879,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "正在載入話題…",
+    "readOnlySession": "此工作階段為唯讀。",
     "empty": {
       "greetings": {
         "workOn": "我們要一起做點什麼？",

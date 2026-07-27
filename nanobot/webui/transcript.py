@@ -52,6 +52,11 @@ def _session_messages_as_transcript_lines(
     lines: list[dict[str, Any]] = []
     tool_calls: dict[str, tuple[str, Any]] = {}
     for message in messages:
+        if is_hidden_history_message(message):
+            continue
+        message = public_history_message(message)
+        if message.get("role") == "user" and _is_legacy_raw_subagent_result(message):
+            continue
         role = message.get("role")
         created_at_ms = _session_message_created_at_ms(message)
         content = message.get("content")
@@ -964,8 +969,9 @@ class WebUISessionTranscriptRecorder:
         self._finished = True
         metadata = getattr(response, "metadata", None)
         metadata = metadata if isinstance(metadata, dict) else {}
-        if not self._answer_started:
-            content = error or getattr(response, "content", "")
+        stop_reason = metadata.get("_stop_reason")
+        content = error or getattr(response, "content", "")
+        if error or stop_reason == "error" or not self._answer_started:
             if isinstance(content, str) and content:
                 event: dict[str, Any] = {
                     "event": "message",

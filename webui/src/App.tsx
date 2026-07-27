@@ -1850,9 +1850,11 @@ function Shell({
   }, []);
 
   const headerTitle = activeSession
-    ? sidebarState.title_overrides[activeSession.key] ||
-      activeSession.title ||
-      deriveTitle(activeSession.preview, t("chat.newChat"))
+    ? activeSession.kind === "dream"
+      ? t("chat.groups.dreams")
+      : sidebarState.title_overrides[activeSession.key] ||
+        activeSession.title ||
+        deriveTitle(activeSession.preview, t("chat.newChat"))
     : t("app.brand");
 
   useEffect(() => {

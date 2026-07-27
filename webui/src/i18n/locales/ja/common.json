@@ -879,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "会話を読み込み中…",
+    "readOnlySession": "このセッションは読み取り専用です。",
     "empty": {
       "greetings": {
         "workOn": "一緒に何に取り組みましょうか？",

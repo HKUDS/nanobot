@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from nanobot.bus.events import OutboundMessage
+from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
@@ -338,6 +340,47 @@ def test_build_response_replays_tool_calls_from_session_messages(
     }]
 
 
+def test_session_message_fallback_only_replays_public_history(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    runtime_context = "[Runtime Context]\ninternal metadata"
+
+    out = build_webui_thread_response(
+        "dream:20260727-161858",
+        session_messages=[
+            {
+                "role": "user",
+                "content": "hidden subagent payload",
+                HIDDEN_HISTORY_META: True,
+            },
+            {
+                "role": "user",
+                "content": f"visible prompt\n\n{runtime_context}",
+                RUNTIME_CONTEXT_HISTORY_META: {
+                    "version": 1,
+                    "suffix": runtime_context,
+                },
+            },
+            {
+                "role": "user",
+                "content": (
+                    "[Subagent 'worker']\n\nTask: hidden task\n\nResult: hidden result\n\n"
+                    "Summarize this naturally"
+                ),
+            },
+            {"role": "assistant", "content": "visible answer"},
+        ],
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("user", "visible prompt"),
+        ("assistant", "visible answer"),
+    ]
+
+
 async def test_direct_session_recorder_preserves_webui_turn_events(
     tmp_path,
     monkeypatch,
@@ -404,6 +447,60 @@ async def test_direct_session_recorder_preserves_webui_turn_events(
         if message.get("role") == "assistant" and message.get("reasoning")
     )
     assert reasoning["reasoning"] == "Checking memory"
+
+
+async def test_direct_session_recorder_keeps_exception_after_partial_stream(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "dream:20260727-171636"
+    recorder = WebUISessionTranscriptRecorder(key)
+    recorder.start("Consolidate memory")
+    await recorder.on_stream("Partial answer")
+
+    recorder.finish(error="Dream failed: provider disconnected")
+
+    lines = read_transcript_lines(key)
+    out = build_webui_thread_response(key)
+    assert [(line["event"], line.get("text")) for line in lines] == [
+        ("user", "Consolidate memory"),
+        ("delta", "Partial answer"),
+        ("message", "Dream failed: provider disconnected"),
+        ("turn_end", None),
+    ]
+    assert out is not None
+    assert [message["content"] for message in out["messages"]] == [
+        "Consolidate memory",
+        "Partial answer",
+        "Dream failed: provider disconnected",
+    ]
+
+
+async def test_direct_session_recorder_keeps_provider_error_after_partial_stream(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "dream:20260727-171637"
+    recorder = WebUISessionTranscriptRecorder(key)
+    recorder.start("Consolidate memory")
+    await recorder.on_stream("Partial answer")
+
+    recorder.finish(OutboundMessage(
+        channel="cli",
+        chat_id="direct",
+        content="Error calling LLM: stream stalled",
+        metadata={"_stop_reason": "error"},
+    ))
+
+    lines = read_transcript_lines(key)
+    assert [(line["event"], line.get("text")) for line in lines] == [
+        ("user", "Consolidate memory"),
+        ("delta", "Partial answer"),
+        ("message", "Error calling LLM: stream stalled"),
+        ("turn_end", None),
+    ]
 
 
 def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:

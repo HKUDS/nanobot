@@ -1366,6 +1366,36 @@ describe("App layout", () => {
     );
   });
 
+  it("localizes the Dream session header instead of using its API title", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const dreamKey = "dream:20260727-175801";
+    mockSessions = [
+      {
+        key: dreamKey,
+        channel: "dream",
+        chatId: "20260727-175801",
+        createdAt: "2026-07-27T17:58:01Z",
+        updatedAt: "2026-07-27T17:58:01Z",
+        title: "Dream",
+        preview: "Consolidate memory",
+        kind: "dream",
+        readOnly: true,
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      `/#/chat/${encodeURIComponent(dreamKey)}`,
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() => expect(document.title).toBe("梦境 · nanobot"));
+    expect(within(screen.getByRole("main")).getByText("梦境")).toBeInTheDocument();
+    expect(screen.getByText("此会话为只读。")).toBeInTheDocument();
+  });
+
   it("opens the settings view from the sidebar footer", async () => {
     mockSessions = [
       {

@@ -964,7 +964,7 @@ export function ThreadShell({
             className="mx-auto flex w-full max-w-3xl items-center justify-center rounded-2xl border border-border/60 bg-muted/35 px-4 py-3 text-sm text-muted-foreground"
             data-testid="readonly-session-banner"
           >
-            {t("thread.readOnlySession", { defaultValue: "This session is read-only." })}
+            {t("thread.readOnlySession")}
           </div>
         ) : <ThreadComposer
           onSend={handleThreadSend}
@@ -1057,7 +1057,7 @@ export function ThreadShell({
       <HeroGreeting text={t(heroGreetingKey)} />
     </div>
   );
-  const sessionInfoAction = historyKey ? (
+  const sessionInfoAction = historyKey && !session?.readOnly ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (

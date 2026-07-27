@@ -261,6 +261,29 @@ async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dream_removes_webui_transcripts_for_pruned_sessions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    ctx, _store = _build_runnable_dream(tmp_path, initialized=False, content_diff="")
+    deleted: list[str] = []
+    monkeypatch.setattr(
+        MemoryStore,
+        "prune_dream_sessions",
+        staticmethod(lambda _sessions_dir: ["dream:old"]),
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.delete_webui_transcript",
+        deleted.append,
+    )
+
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert deleted == ["dream:old"]
+
+
+@pytest.mark.asyncio
 async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
     """An incomplete run remains retryable even if it left a partial edit."""
     ctx, store = _build_runnable_dream(

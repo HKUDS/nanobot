@@ -1805,7 +1805,10 @@ def _run_gateway(
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
             from nanobot.agent.memory import DreamRunProgress, MemoryStore
-            from nanobot.webui.transcript import WebUISessionTranscriptRecorder
+            from nanobot.webui.transcript import (
+                WebUISessionTranscriptRecorder,
+                delete_webui_transcript,
+            )
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
@@ -1881,7 +1884,8 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+                for session_key in prune_dream_sessions(agent.sessions.sessions_dir):
+                    delete_webui_transcript(session_key)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.

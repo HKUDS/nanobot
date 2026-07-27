@@ -879,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
+    "readOnlySession": "이 세션은 읽기 전용입니다.",
     "empty": {
       "greetings": {
         "workOn": "우리 무엇을 함께 해볼까요?",

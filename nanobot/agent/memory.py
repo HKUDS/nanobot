@@ -759,28 +759,33 @@ class MemoryStore:
         return f"{prefix}\n\n{diff_body}"
 
     @staticmethod
-    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
+    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> list[str]:
         """Remove the oldest Dream session files, keeping only the N most recent.
 
         Only current base64url-encoded Dream session keys are considered.
         Non-dream session files are never touched.
+
+        Returns the decoded session keys whose files were removed.
         """
-        dream_files = []
+        dream_files: list[tuple[Path, str]] = []
         for path in sessions_dir.glob("*.jsonl"):
             decoded_key = SessionManager._decode_storage_key(path.stem)
             if decoded_key is not None and decoded_key.startswith("dream:"):
-                dream_files.append(path)
-        dream_files.sort(key=lambda p: p.stat().st_mtime)
+                dream_files.append((path, decoded_key))
+        dream_files.sort(key=lambda item: item[0].stat().st_mtime)
         if len(dream_files) <= keep:
-            return
+            return []
 
         to_remove = dream_files[: len(dream_files) - keep]
-        for path in to_remove:
+        removed_keys: list[str] = []
+        for path, session_key in to_remove:
             try:
                 path.unlink()
+                removed_keys.append(session_key)
                 logger.debug("Pruned old dream session: {}", path.stem)
             except OSError:
                 logger.warning("Failed to prune dream session {}", path)
+        return removed_keys
 
 
 # ---------------------------------------------------------------------------

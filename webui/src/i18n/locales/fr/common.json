@@ -879,6 +879,7 @@
   },
   "thread": {
     "loadingConversation": "Chargement de la conversation…",
+    "readOnlySession": "Cette session est en lecture seule.",
     "empty": {
       "greetings": {
         "workOn": "Sur quoi travaillons-nous ensemble ?",

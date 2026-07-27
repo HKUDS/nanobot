@@ -406,7 +406,10 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     async def _run_dream():
         from nanobot.agent.hooks import create_file_edit_activity_hook
         from nanobot.agent.memory import DreamRunProgress, MemoryStore
-        from nanobot.webui.transcript import WebUISessionTranscriptRecorder
+        from nanobot.webui.transcript import (
+            WebUISessionTranscriptRecorder,
+            delete_webui_transcript,
+        )
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
@@ -484,7 +487,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
-            prune_dream_sessions(loop.sessions.sessions_dir)
+            for session_key in prune_dream_sessions(loop.sessions.sessions_dir):
+                delete_webui_transcript(session_key)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
