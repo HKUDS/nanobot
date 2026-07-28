@@ -92,6 +92,23 @@ def test_load_config_error_does_not_expose_invalid_secret_value(tmp_path) -> Non
     assert secret not in str(exc_info.value)
 
 
+def test_load_config_error_does_not_trust_custom_validator_message(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    secret = "diagnostic-secret-should-not-print"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"thinkingStyle": secret}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_config(config_path)
+
+    message = str(exc_info.value)
+    assert "providers.openrouter.thinkingStyle" in message
+    assert "Value does not satisfy this setting's requirements." in message
+    assert secret not in message
+
+
 @pytest.mark.parametrize(
     "tools",
     [

@@ -29,6 +29,7 @@ from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
+GatewayConfigValidator = Callable[[Config], None]
 GatewayRuntimeFactory = Callable[..., Any]
 GatewayServiceFactory = Callable[[], Any]
 WebUIBundlePreparer = Callable[[Config, BuildMode], None]
@@ -40,6 +41,7 @@ def create_gateway_app(
     log_handler_id: int,
     load_runtime_config: RuntimeConfigLoader,
     run_gateway: GatewayRunner,
+    validate_startup_config: GatewayConfigValidator | None = None,
     runtime_factory: GatewayRuntimeFactory | None = None,
     service_factory: GatewayServiceFactory | None = None,
     prepare_webui_bundle: WebUIBundlePreparer | None = None,
@@ -149,6 +151,8 @@ def create_gateway_app(
             raise typer.Exit(1)
         if background:
             cfg = load_runtime_config(config, workspace)
+            if validate_startup_config is not None:
+                validate_startup_config(cfg)
             if prepare_webui_bundle is not None:
                 prepare_webui_bundle(cfg, interactive_build_mode())
             runtime = runtime_for_instance(workspace=workspace, config=config)
@@ -171,6 +175,8 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
+        if validate_startup_config is not None:
+            validate_startup_config(cfg)
         run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
 
     @gateway_app.command("status")
@@ -225,6 +231,8 @@ def create_gateway_app(
     ) -> None:
         """Restart the background gateway."""
         cfg = load_runtime_config(config, workspace)
+        if validate_startup_config is not None:
+            validate_startup_config(cfg)
         if prepare_webui_bundle is not None:
             prepare_webui_bundle(cfg, interactive_build_mode())
         runtime = runtime_for_instance(workspace=workspace, config=config)

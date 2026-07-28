@@ -215,6 +215,88 @@ def test_agent_provider_setup_failure_points_to_shortest_routes(tmp_path) -> Non
     assert not workspace.exists()
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["gateway"],
+        ["gateway", "--background"],
+        ["gateway", "restart"],
+    ],
+)
+def test_gateway_provider_setup_failure_points_to_shortest_routes(
+    tmp_path,
+    args: list[str],
+) -> None:
+    config_path = tmp_path / "explicit-gateway-config.json"
+    workspace = tmp_path / "workspace"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, [*args, "--config", str(config_path)])
+
+    assert result.exit_code == 1
+    assert "Gateway cannot start: No provider is configured for model" in result.stdout
+    assert "Settings → Models" in result.stdout
+    assert "nanobot onboard --wizard" in result.stdout
+    assert "nanobot status --config" in result.stdout
+    assert config_path.name in result.stdout
+    assert "Traceback" not in result.stdout
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "summary", "retry_command"),
+    [
+        (
+            ["webui", "--yes", "--no-open"],
+            "WebUI configuration is invalid.",
+            "nanobot webui --config",
+        ),
+        (
+            ["gateway"],
+            "Gateway configuration is invalid.",
+            "nanobot gateway --config",
+        ),
+    ],
+)
+def test_runtime_config_validation_is_redacted_and_actionable(
+    tmp_path,
+    args: list[str],
+    summary: str,
+    retry_command: str,
+) -> None:
+    config_path = tmp_path / "explicit-runtime-config.json"
+    workspace = tmp_path / "workspace"
+    invalid_value = "sensitive-not-a-port"
+    _write_ready_config(
+        config_path,
+        channels={
+            "websocket": {
+                "enabled": True,
+                "port": invalid_value,
+            }
+        },
+    )
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["agents"]["defaults"]["workspace"] = str(workspace)
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = runner.invoke(app, [*args, "--config", str(config_path)])
+
+    assert result.exit_code == 1
+    assert summary in result.stdout
+    assert "channels.websocket.port" in result.stdout
+    assert retry_command in result.stdout
+    assert config_path.name in result.stdout
+    assert invalid_value not in result.stdout
+    assert "input_value" not in result.stdout
+    assert "errors.pydantic.dev" not in result.stdout
+    assert "Traceback" not in result.stdout
+    assert not workspace.exists()
+
+
 def test_status_missing_file_points_to_setup_without_changing_exit_contract(tmp_path) -> None:
     config_path = tmp_path / "missing.json"
 

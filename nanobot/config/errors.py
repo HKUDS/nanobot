@@ -82,6 +82,10 @@ def _friendly_validation_message(message: str, code: str) -> str:
         return "Unknown setting."
     if code == "missing":
         return "This setting is required."
+    if code in {"assertion_error", "value_error"}:
+        # Custom validators control these messages and may interpolate the
+        # rejected value. Keep the field location, but never render that text.
+        return "Value does not satisfy this setting's requirements."
     if message.startswith("Value error, "):
         message = message.removeprefix("Value error, ")
     elif message.startswith("Input should be "):

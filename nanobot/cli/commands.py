@@ -54,6 +54,7 @@ from prompt_toolkit.history import FileHistory  # noqa: E402
 from prompt_toolkit.key_binding import KeyBindings  # noqa: E402
 from prompt_toolkit.keys import Keys  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 from rich.markup import escape  # noqa: E402
@@ -807,6 +808,34 @@ def _print_config_error(error: Exception) -> None:
         console.print(f"[dim]Check again after editing: {escape(command)}[/dim]")
 
 
+def _print_runtime_config_validation_error(
+    error: ValidationError,
+    *,
+    config_path: Path,
+    summary: str,
+    path_prefix: tuple[str | int, ...],
+    retry_command: str,
+) -> None:
+    """Render a runtime-owned Pydantic config error without exposing input values."""
+    from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
+
+    issues = tuple(
+        ConfigIssue(
+            path=(*path_prefix, *issue.path),
+            message=issue.message,
+        )
+        for issue in validation_issues(error)
+    )
+    diagnostic = ConfigLoadError(
+        config_path,
+        kind="invalid_schema",
+        summary=summary,
+        issues=issues,
+    )
+    console.print(Text(str(diagnostic), style="red"))
+    console.print(f"[dim]Fix the listed setting, then retry: {escape(retry_command)}[/dim]")
+
+
 def _status_command(config_path: Path) -> str:
     return f'nanobot status --config "{config_path}"'
 
@@ -981,6 +1010,32 @@ def _webui_channel_enabled(config: Config) -> bool:
 
     current = getattr(config.channels, "websocket", None) or {}
     return bool(WebSocketConfig.model_validate(current).enabled)
+
+
+def _validate_gateway_startup(config: Config) -> None:
+    """Fail direct gateway starts before runtime side effects when config is invalid."""
+    from nanobot.config.loader import get_config_path
+
+    config_path = get_config_path()
+    provider_error = _provider_setup_error(config)
+    if provider_error:
+        console.print(Text(f"Gateway cannot start: {provider_error}", style="red"))
+        console.print("Complete provider/model setup:")
+        _print_model_setup_steps(config_path)
+        raise typer.Exit(1)
+
+    try:
+        _webui_config_dict(config)
+    except ValidationError as exc:
+        retry_command = f'nanobot gateway --config "{config_path}"'
+        _print_runtime_config_validation_error(
+            exc,
+            config_path=config_path,
+            summary="Gateway configuration is invalid.",
+            path_prefix=("channels", "websocket"),
+            retry_command=retry_command,
+        )
+        raise typer.Exit(1) from exc
 
 
 def _prepare_webui_bundle_for_gateway(
@@ -1280,14 +1335,20 @@ def _gateway_instance_command(
     return " ".join(shlex.quote(part) for part in parts)
 
 
-def _run_quick_start_for_webui(config: Config, *, yes: bool) -> Config:
+def _run_quick_start_for_webui(
+    config: Config,
+    *,
+    yes: bool,
+    config_path: Path,
+) -> Config:
     """Offer the existing Quick Start flow when provider setup is missing."""
     if yes:
         console.print(
             "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
-            "provider credentials. Run `nanobot webui` interactively or "
-            "`nanobot onboard --wizard`.[/red]"
+            "provider credentials.[/red]"
         )
+        console.print("Complete provider/model setup:")
+        _print_model_setup_steps(config_path)
         raise typer.Exit(1)
 
     console.print()
@@ -1484,7 +1545,7 @@ def webui(
             config_path=config_path,
         )
     except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
+        _print_config_error(exc)
         raise typer.Exit(1) from exc
 
     provider_error = _provider_setup_error(resolved_setup_config)
@@ -1500,7 +1561,11 @@ def webui(
             raise typer.Exit(1)
     elif provider_error:
         console.print(f"[dim]Provider check: {provider_error}[/dim]")
-        setup_config = _run_quick_start_for_webui(setup_config, yes=yes)
+        setup_config = _run_quick_start_for_webui(
+            setup_config,
+            yes=yes,
+            config_path=config_path,
+        )
         if workspace:
             setup_config.agents.defaults.workspace = workspace
 
@@ -1512,6 +1577,16 @@ def webui(
         )
         _warn_webui_bind_scope(setup_config)
         webui_url = _webui_browser_url(setup_config)
+    except ValidationError as exc:
+        retry_command = f'nanobot webui --config "{config_path}"'
+        _print_runtime_config_validation_error(
+            exc,
+            config_path=config_path,
+            summary="WebUI configuration is invalid.",
+            path_prefix=("channels", "websocket"),
+            retry_command=retry_command,
+        )
+        raise typer.Exit(1) from exc
     except ValueError as exc:
         console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -2277,6 +2352,7 @@ app.add_typer(
         log_handler_id=_log_handler_id,
         load_runtime_config=_load_runtime_config,
         run_gateway=_run_gateway,
+        validate_startup_config=_validate_gateway_startup,
         prepare_webui_bundle=lambda config, mode: _prepare_webui_bundle_for_gateway(
             config,
             mode=mode,
