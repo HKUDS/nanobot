@@ -738,7 +738,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           <Button
             variant="outline"
             size="icon"
-            onClick={() => scrollToBottom(true, { force: true })}
+            onClick={() => scrollToBottom(false, { force: true })}
             className={cn(
               "h-8 w-8 rounded-full shadow-md",
               "bg-background/90 backdrop-blur",

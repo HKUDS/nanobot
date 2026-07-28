@@ -5,6 +5,7 @@ import type {
 
 type ThreadMotionMode =
   | "idle"
+  | "follow-latest"
   | "anchor-prompt"
   | "follow-output"
   | "follow-completion"
@@ -14,6 +15,7 @@ type ThreadMotionMode =
 
 type AutomaticThreadMotionMode =
   | "idle"
+  | "follow-latest"
   | "anchor-prompt"
   | "follow-output";
 
@@ -37,6 +39,11 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
 > = {
   idle: {
     "navigate-latest": "navigating-latest",
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
+  },
+  "follow-latest": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
@@ -350,7 +357,7 @@ export class ThreadMotionCoordinator {
   }
 
   private automaticMode(): AutomaticThreadMotionMode {
-    if (!this.turn.id) return "idle";
+    if (!this.turn.id) return "follow-latest";
     return this.promptPositioned && this.turn.hasOutput
       ? "follow-output"
       : "anchor-prompt";
@@ -406,6 +413,12 @@ export class ThreadMotionCoordinator {
     }
     if (this.mode === "follow-completion") {
       this.followGeometry(geometry);
+      return;
+    }
+    if (this.mode === "follow-latest") {
+      if (geometry.maxScrollTop - geometry.scrollTop > GEOMETRY_EPSILON_PX) {
+        this.camera.jumpTo(geometry.maxScrollTop);
+      }
       return;
     }
     if (this.isHistoryMode() || !this.turn.id) return;

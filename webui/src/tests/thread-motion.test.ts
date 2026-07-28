@@ -343,6 +343,43 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.followTo).toHaveBeenCalledWith(1_600);
   });
 
+  it("keeps an explicitly resumed idle thread pinned to its latest bottom without animating", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+
+    coordinator.resumeAutoFollow();
+    advanceFrame();
+    expect(camera.jumpTo).toHaveBeenLastCalledWith(1_400);
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+
+    camera.jumpTo.mockClear();
+    setGeometry({
+      scrollTop: 1_400,
+      scrollHeight: 2_000,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_500);
+    expect(camera.followTo).not.toHaveBeenCalled();
+
+    coordinator.takeUserControl();
+    camera.jumpTo.mockClear();
+    setGeometry({
+      scrollTop: 300,
+      scrollHeight: 2_100,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+  });
+
   it("treats scroll events as observations until explicit user intent takes control", () => {
     const {
       camera,
@@ -539,7 +576,17 @@ describe("ThreadMotionCoordinator", () => {
     setGeometry({ scrollTop: 1_800 });
     setCameraFollowing(false);
     expect(coordinator.observeScroll(true)).toBe("navigation");
-    expect(coordinator.snapshot().mode).toBe("idle");
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+
+    camera.jumpTo.mockClear();
+    setGeometry({
+      scrollTop: 1_800,
+      scrollHeight: 2_400,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_900);
   });
 
   it("pins a waiting prompt to the exact lower boundary across all layout changes", () => {
