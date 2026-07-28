@@ -11,6 +11,7 @@ from nanobot.agent.tools.filesystem import FileToolsConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.resource_links import ResourceView
 from nanobot.security.workspace_access import build_workspace_scope
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -107,6 +108,51 @@ def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
+
+
+def test_subagent_prompt_uses_restricted_resource_aliases(tmp_path):
+    agent_workspace = tmp_path / "agent"
+    aliases = tmp_path / "resources" / "view"
+    resource_view = ResourceView(
+        root=aliases,
+        agent=aliases / "agent",
+        media=aliases / "media",
+        package=aliases / "package",
+    )
+    manager = SubagentManager(
+        workspace=agent_workspace,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+        resource_view=resource_view,
+    )
+
+    prompt = manager._build_subagent_prompt(resource_view_mode="restricted")
+
+    assert f"Custom skills: `{resource_view.agent / 'skills'}`" in prompt
+    assert f"Media: `{resource_view.media}`" in prompt
+    assert f"Built-in skills: `{resource_view.package / 'skills'}`" in prompt
+    assert f"Agent workspace: `{resource_view.agent}`" not in prompt
+    assert f"Nanobot package: `{resource_view.package}`" not in prompt
+    assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
+
+
+def test_subagent_prompt_uses_agent_alias_for_full_history_path(tmp_path):
+    agent_workspace = tmp_path / "agent"
+    aliases = tmp_path / "resources" / "view"
+    resource_view = ResourceView(
+        root=aliases,
+        agent=aliases / "agent",
+    )
+    manager = SubagentManager(
+        workspace=agent_workspace,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+        resource_view=resource_view,
+    )
+
+    prompt = manager._build_subagent_prompt(resource_view_mode="full")
+
+    assert f"History log: {resource_view.agent / 'memory' / 'history.jsonl'}" in prompt
 
 
 @pytest.mark.asyncio

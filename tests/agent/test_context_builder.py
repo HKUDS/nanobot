@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.resource_links import ResourceView
 from nanobot.runtime_context import RuntimeContextBlock
 
 # ---------------------------------------------------------------------------
@@ -346,6 +347,65 @@ class TestBuildSystemPrompt:
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
 
+    def test_resource_aliases_are_absent_without_explicit_mode(self, tmp_path):
+        aliases = tmp_path / "resources" / "view"
+        resource_view = ResourceView(
+            root=aliases,
+            agent=aliases / "agent",
+            media=aliases / "media",
+            package=aliases / "package",
+        )
+
+        result = _builder(tmp_path, resource_view=resource_view).build_system_prompt()
+
+        assert "## Resource Aliases" not in result
+
+    def test_full_resource_aliases_show_roots_and_policy(self, tmp_path):
+        aliases = tmp_path / "resources" / "view"
+        resource_view = ResourceView(
+            root=aliases,
+            agent=aliases / "agent",
+            media=aliases / "media",
+            package=aliases / "package",
+        )
+
+        result = _builder(tmp_path, resource_view=resource_view).build_system_prompt(
+            resource_view_mode="full",
+        )
+
+        assert "## Resource Aliases" in result
+        assert f"Agent workspace: `{resource_view.agent}`" in result
+        assert f"Media: `{resource_view.media}`" in result
+        assert f"Nanobot package: `{resource_view.package}`" in result
+        assert f"Long-term memory: {resource_view.agent}/memory/MEMORY.md" in result
+        assert f"History log: {resource_view.agent}/memory/history.jsonl" in result
+        assert f"Custom skills: {resource_view.agent}/skills/" in result
+        assert "do not grant additional file or shell permissions" in result
+        assert "sandboxed shell may not expose an alias" in result
+        assert "paths relative to the current project workspace" in result
+
+    def test_restricted_resource_aliases_only_show_allowed_subtrees(self, tmp_path):
+        aliases = tmp_path / "resources" / "view"
+        resource_view = ResourceView(
+            root=aliases,
+            agent=aliases / "agent",
+            media=aliases / "media",
+            package=aliases / "package",
+        )
+
+        result = _builder(tmp_path, resource_view=resource_view).build_system_prompt(
+            resource_view_mode="restricted",
+        )
+
+        assert f"Custom skills: `{resource_view.agent / 'skills'}`" in result
+        assert f"Media: `{resource_view.media}`" in result
+        assert f"Built-in skills: `{resource_view.package / 'skills'}`" in result
+        assert f"Agent workspace: `{resource_view.agent}`" not in result
+        assert f"Nanobot package: `{resource_view.package}`" not in result
+        canonical_workspace = tmp_path.resolve()
+        assert f"History log: {canonical_workspace}/memory/history.jsonl" in result
+        assert f"History log: {resource_view.agent}/memory/history.jsonl" not in result
+
 
 # ---------------------------------------------------------------------------
 # build_messages
@@ -368,6 +428,25 @@ class TestBuildMessages:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
         assert "hello" in str(messages[1]["content"])
+
+    def test_resource_view_mode_is_forwarded_to_system_prompt(self, tmp_path):
+        aliases = tmp_path / "resources" / "view"
+        resource_view = ResourceView(
+            root=aliases,
+            agent=aliases / "agent",
+            media=aliases / "media",
+            package=aliases / "package",
+        )
+        builder = _builder(tmp_path, resource_view=resource_view)
+
+        messages = builder.build_messages(
+            [],
+            "hello",
+            resource_view_mode="restricted",
+        )
+
+        assert "## Resource Aliases" in messages[0]["content"]
+        assert f"Custom skills: `{resource_view.agent / 'skills'}`" in messages[0]["content"]
 
     def test_public_builder_preserves_assistant_role_compatibility(self, tmp_path):
         from nanobot.agent import ContextBuilder as PublicContextBuilder

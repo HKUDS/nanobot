@@ -1,5 +1,7 @@
 """Subagent manager for background task execution."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import time
@@ -13,6 +15,11 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.skills import (
+    ResourceViewMode,
+    SkillsLoader,
+    build_resource_aliases_section,
+)
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -28,6 +35,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.resource_links import ResourceView
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -97,6 +105,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        resource_view: ResourceView | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -147,6 +156,7 @@ class SubagentManager:
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+        self.resource_view = resource_view
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -366,7 +376,20 @@ class SubagentManager:
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             # Construct from the agent workspace; the bound scope below supplies the project cwd.
             tools = self._build_tools(tools_config=cfg)
-            system_prompt = self._build_subagent_prompt(workspace=root)
+            scope_restricted = (
+                workspace_scope.restrict_to_workspace
+                if workspace_scope is not None
+                else self.restrict_to_workspace
+            )
+            resource_view_mode: ResourceViewMode = (
+                "restricted"
+                if scope_restricted or bool(self.tools_config.exec.sandbox)
+                else "full"
+            )
+            system_prompt = self._build_subagent_prompt(
+                workspace=root,
+                resource_view_mode=resource_view_mode,
+            )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -516,22 +539,37 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
+    def _build_subagent_prompt(
+        self,
+        workspace: Path | None = None,
+        *,
+        resource_view_mode: ResourceViewMode | None = None,
+    ) -> str:
         """Build a focused system prompt for the subagent."""
-        from nanobot.agent.skills import SkillsLoader
-
         agent_workspace = self.workspace.expanduser().resolve()
         project_workspace = workspace.expanduser().resolve() if workspace else agent_workspace
+        history_root = agent_workspace
+        if (
+            resource_view_mode == "full"
+            and self.resource_view is not None
+            and self.resource_view.agent is not None
+        ):
+            history_root = self.resource_view.agent
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
+            resource_view=self.resource_view,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
             workspace=str(project_workspace),
             agent_workspace=str(agent_workspace),
-            history_log=str(agent_workspace / "memory" / "history.jsonl"),
+            history_log=str(history_root / "memory" / "history.jsonl"),
             skills_summary=skills_summary or "",
+            resource_aliases=build_resource_aliases_section(
+                self.resource_view,
+                resource_view_mode,
+            ),
         )
 
     async def cancel_by_session(self, session_key: str) -> int:

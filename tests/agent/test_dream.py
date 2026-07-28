@@ -5,6 +5,7 @@ import pytest
 from nanobot.agent.memory import MemoryStore
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.resource_links import ResourceView
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     default_workspace_scope,
@@ -61,6 +62,27 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, _ = result
         assert "skill-creator" in prompt
+
+    def test_prompt_uses_package_alias_for_skill_creator(self, tmp_path):
+        aliases = tmp_path / "resources" / "view"
+        resource_view = ResourceView(
+            root=aliases,
+            agent=aliases / "agent",
+            media=aliases / "media",
+            package=aliases / "package",
+        )
+        store = MemoryStore(tmp_path / "workspace", resource_view=resource_view)
+        store.append_history("test")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        expected = resource_view.package / "skills" / "skill-creator" / "SKILL.md"
+        assert str(expected) in prompt
+
+    def test_default_dream_prompt_class_call_remains_compatible(self):
+        assert "skill-creator" in MemoryStore.default_dream_prompt()
 
     def test_prompt_embeds_current_memory_file_contents(self, store):
         """Dream must see the real current file contents (Tier 4) so it edits the

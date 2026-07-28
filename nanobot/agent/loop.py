@@ -91,6 +91,7 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.skills import ResourceViewMode
     from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
         ChannelsConfig,
@@ -98,6 +99,8 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.resource_links import ResourceView
+    from nanobot.security.workspace_access import WorkspaceScope
 
 _T = TypeVar("_T")
 
@@ -267,6 +270,7 @@ class AgentLoop:
         restart_mode: str = "auto",
         local_trigger_store: Any | None = None,
         idle_compact_check_interval_seconds: int = 0,
+        resource_view: ResourceView | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -338,6 +342,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.restrict_to_workspace = restrict_to_workspace
+        self.resource_view = resource_view
         self.workspace_scopes = WorkspaceScopeResolver(
             default_workspace=workspace,
             default_restrict_to_workspace=restrict_to_workspace,
@@ -347,7 +352,12 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            resource_view=resource_view,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
         self.tools = ToolRegistry()
@@ -367,6 +377,7 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            resource_view=resource_view,
         )
         self._unified_session = unified_session
         self._running = False
@@ -686,7 +697,19 @@ class AgentLoop:
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
+            resource_view_mode=self._resource_view_mode_for_scope(scope),
         )
+
+    def _resource_view_mode_for_scope(
+        self,
+        scope: WorkspaceScope,
+    ) -> ResourceViewMode | None:
+        """Return the alias visibility supported by this turn's tool boundary."""
+        if self.resource_view is None:
+            return None
+        if scope.restrict_to_workspace or bool(self.exec_config.sandbox):
+            return "restricted"
+        return "full"
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         assert ctx.session is not None

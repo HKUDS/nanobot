@@ -10,6 +10,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.config.schema import Config
 from nanobot.nanobot import (
     STREAM_EVENT_REASONING_COMPLETED,
     STREAM_EVENT_REASONING_DELTA,
@@ -30,6 +31,7 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.nanobot import _prepare_resource_view as prepare_resource_view
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
@@ -37,6 +39,15 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.manager import FILE_MAX_MESSAGES
 from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
+
+
+@pytest.fixture(autouse=True)
+def _disable_sdk_resource_view_creation(monkeypatch) -> None:
+    """Keep facade tests from creating runtime links unless a test opts in."""
+    monkeypatch.setattr(
+        "nanobot.nanobot._prepare_resource_view",
+        lambda _config, _config_path: None,
+    )
 
 
 def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
@@ -136,6 +147,72 @@ def test_from_config_default_path():
         mock_prov.return_value.generation.max_tokens = 4096
         Nanobot.from_config()
         mock_load.assert_called_once_with(None)
+
+
+def test_from_config_scopes_resource_view_to_custom_config_without_global_mutation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.config import loader
+
+    instance_dir = tmp_path / "instance"
+    instance_dir.mkdir()
+    config_path = _write_config(instance_dir)
+    workspace = tmp_path / "workspace"
+    unrelated_config = tmp_path / "other" / "config.json"
+    monkeypatch.setattr(loader, "_current_config_path", unrelated_config)
+    resource_view = object()
+
+    with patch(
+        "nanobot.nanobot._prepare_resource_view",
+        return_value=resource_view,
+    ) as mock_prepare, patch("nanobot.nanobot.AgentLoop.from_config") as mock_loop:
+        bot = Nanobot.from_config(config_path, workspace=workspace)
+
+    prepared_config, prepared_path = mock_prepare.call_args.args
+    assert prepared_path == config_path.resolve()
+    assert prepared_config.workspace_path == workspace.resolve()
+    assert mock_loop.call_args.kwargs["resource_view"] is resource_view
+    assert loader.get_config_path() == unrelated_config
+    assert bot._loop is mock_loop.return_value
+
+
+def test_sdk_resource_view_failure_is_non_fatal(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot import resource_links
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+
+    def _fail(**_kwargs):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(resource_links, "ensure_resource_view", _fail)
+
+    assert prepare_resource_view(config, tmp_path / "config.json") is None
+
+
+def test_sdk_resource_view_prepares_fresh_workspace_before_linking(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot import resource_links
+
+    config = Config()
+    workspace = tmp_path / "fresh-workspace"
+    config.agents.defaults.workspace = str(workspace)
+    expected = SimpleNamespace(warnings=())
+
+    def _capture(**kwargs):
+        assert workspace.is_dir()
+        assert kwargs["agent_workspace"] == workspace
+        return expected
+
+    monkeypatch.setattr(resource_links, "ensure_resource_view", _capture)
+
+    assert prepare_resource_view(config, tmp_path / "config.json") is expected
 
 
 @pytest.mark.asyncio

@@ -1,21 +1,62 @@
 """Skills loader for agent capabilities."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import shutil
 from pathlib import Path
+from typing import Literal, TypeAlias
 
 import yaml
 
+from nanobot.resource_links import ResourceView
+from nanobot.utils.prompt_templates import render_template
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+ResourceViewMode: TypeAlias = Literal["full", "restricted"]
 
 # Opening ---, YAML body (group 1), closing --- on its own line; supports CRLF.
 _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
+
+
+def build_resource_aliases_section(
+    resource_view: ResourceView | None,
+    mode: ResourceViewMode | None,
+) -> str:
+    """Render healthy resource aliases without changing their access policy."""
+    if resource_view is None or mode is None:
+        return ""
+
+    aliases: list[tuple[str, str]] = []
+    if mode == "full":
+        if resource_view.agent is not None:
+            aliases.append(("Agent workspace", str(resource_view.agent)))
+        if resource_view.media is not None:
+            aliases.append(("Media", str(resource_view.media)))
+        if resource_view.package is not None:
+            aliases.append(("Nanobot package", str(resource_view.package)))
+    else:
+        if resource_view.agent is not None:
+            aliases.append(("Custom skills", str(resource_view.agent / "skills")))
+        if resource_view.media is not None:
+            aliases.append(("Media", str(resource_view.media)))
+        if resource_view.package is not None:
+            aliases.append(("Built-in skills", str(resource_view.package / "skills")))
+
+    if not aliases:
+        return ""
+    return render_template(
+        "agent/resource_aliases.md",
+        strip=True,
+        aliases=aliases,
+    )
 
 
 class SkillsLoader:
@@ -26,11 +67,19 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        *,
+        resource_view: ResourceView | None = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self.resource_view = resource_view
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -125,12 +174,32 @@ class SkillsLoader:
         if not all_skills:
             return ""
 
+        workspace_alias_root = (
+            self.resource_view.agent / "skills"
+            if self.resource_view is not None and self.resource_view.agent is not None
+            else None
+        )
+        builtin_alias_root = (
+            self.resource_view.package / "skills"
+            if self.resource_view is not None and self.resource_view.package is not None
+            else None
+        )
         sections: list[str] = []
         groups = (
-            ("Workspace skills", "workspace", self.workspace_skills),
-            ("Built-in skills", "builtin", self.builtin_skills),
+            (
+                "Workspace skills",
+                "workspace",
+                self.workspace_skills,
+                workspace_alias_root,
+            ),
+            (
+                "Built-in skills",
+                "builtin",
+                self.builtin_skills,
+                builtin_alias_root,
+            ),
         )
-        for label, source, root in groups:
+        for label, source, root, alias_root in groups:
             entries = [
                 entry
                 for entry in all_skills
@@ -139,7 +208,8 @@ class SkillsLoader:
             if not entries:
                 continue
 
-            lines = [f"### {label} (`{root.expanduser().resolve()}`)"]
+            display_root = alias_root or root.expanduser().resolve()
+            lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
                 meta = self._get_skill_meta(skill_name)

@@ -146,6 +146,7 @@ Defaults:
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
+| Resource path aliases | `<config-dir>/resources/<view-id>/` (best-effort, derived state) |
 
 The schema accepts both camelCase and snake_case keys, but saves config with camelCase aliases.
 
@@ -166,6 +167,10 @@ memory. Filesystem and search tools use the project as their ordinary boundary
 and receive only capability-specific read access to built-in/agent skills and
 the exact agent history file. Keep those cross-root capabilities read-only and
 explicit; do not treat the entire agent workspace as an allowed root.
+
+Resource path aliases are created outside the workspace and resolve to these
+same canonical targets. Authorization must continue to follow the resolved
+target; the alias root itself must never be treated as a blanket capability.
 
 ## Memory and Sessions
 

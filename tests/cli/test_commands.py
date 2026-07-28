@@ -365,7 +365,7 @@ def test_status_help_shows_workspace_and_config_options():
     assert "-c" in stripped_output
 
 
-def test_status_uses_explicit_config_and_workspace(tmp_path: Path):
+def test_status_uses_explicit_config_and_workspace(tmp_path: Path, monkeypatch):
     config_path = tmp_path / "instance" / "config.json"
     config_workspace = tmp_path / "config-workspace"
     override_workspace = tmp_path / "override-workspace"
@@ -373,6 +373,11 @@ def test_status_uses_explicit_config_and_workspace(tmp_path: Path):
     config.agents.defaults.workspace = str(config_workspace)
     config_path.parent.mkdir(parents=True)
     config_path.write_text(json.dumps(config.model_dump(mode="json", by_alias=True)))
+    monkeypatch.setattr(
+        cli_commands,
+        "_prepare_resource_view",
+        lambda _config: pytest.fail("status must not prepare runtime resource links"),
+    )
 
     result = runner.invoke(
         app,
@@ -385,6 +390,58 @@ def test_status_uses_explicit_config_and_workspace(tmp_path: Path):
     assert str(config_path.resolve(strict=False)) in compact_output
     assert str(override_workspace) in compact_output
     assert str(config_workspace) not in compact_output
+
+
+def test_prepare_resource_view_uses_active_config_and_workspace(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot import resource_links
+
+    config_path = (tmp_path / "instance" / "config.json").resolve()
+    workspace = (tmp_path / "workspace").resolve()
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    expected = SimpleNamespace(warnings=())
+    captured: dict[str, Path] = {}
+
+    monkeypatch.setattr(
+        "nanobot.config.loader.get_config_path",
+        lambda: config_path,
+    )
+
+    def _fake_ensure_resource_view(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(resource_links, "ensure_resource_view", _fake_ensure_resource_view)
+
+    assert cli_commands._prepare_resource_view(config) is expected
+    assert captured == {
+        "data_dir": config_path.parent,
+        "config_path": config_path,
+        "agent_workspace": workspace,
+    }
+
+
+def test_prepare_resource_view_failure_does_not_block_runtime(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot import resource_links
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(
+        "nanobot.config.loader.get_config_path",
+        lambda: config_path,
+    )
+
+    def _fail(**_kwargs):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(resource_links, "ensure_resource_view", _fail)
+
+    assert cli_commands._prepare_resource_view(Config()) is None
 
 
 def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
@@ -1442,10 +1499,15 @@ def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "default-workspace")
+    resource_view = object()
 
     with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
          patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
          patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
+         patch(
+             "nanobot.cli.commands._prepare_resource_view",
+             return_value=resource_view,
+         ) as mock_prepare_resource_view, \
          patch("nanobot.providers.factory.make_provider", return_value=_fake_provider()), \
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
@@ -1463,6 +1525,8 @@ def mock_agent_runtime(tmp_path):
             "config": config,
             "load_config": mock_load_config,
             "sync_templates": mock_sync_templates,
+            "prepare_resource_view": mock_prepare_resource_view,
+            "resource_view": resource_view,
             "from_config": mock_from_config,
             "agent_loop": agent_loop,
             "print_response": mock_print_response,
@@ -1490,6 +1554,9 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     )
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
     assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
+    assert mock_agent_runtime["from_config"].call_args.kwargs["resource_view"] is (
+        mock_agent_runtime["resource_view"]
+    )
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
@@ -1520,6 +1587,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._prepare_resource_view", lambda _config: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
@@ -1558,6 +1626,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._prepare_resource_view", lambda _config: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
@@ -1607,6 +1676,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._prepare_resource_view", lambda _config: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -1663,6 +1733,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._prepare_resource_view", lambda _config: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -1858,6 +1929,7 @@ def _patch_cli_command_runtime(
     session_manager=None,
     cron_service=None,
     get_cron_dir=None,
+    prepare_resource_view=None,
 ) -> None:
     provider_factory = make_provider or (lambda _config: _fake_provider())
 
@@ -1870,6 +1942,10 @@ def _patch_cli_command_runtime(
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
         sync_templates or (lambda _path: None),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.commands._prepare_resource_view",
+        prepare_resource_view or (lambda _config: None),
     )
     monkeypatch.setattr(
         "nanobot.providers.factory.make_provider",
@@ -2429,6 +2505,8 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
     pytest.importorskip("aiohttp")
+    resource_view = object()
+    seen["expected_resource_view"] = resource_view
 
     class _FakeApiApp:
         def __init__(self) -> None:
@@ -2441,6 +2519,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
             return cls(workspace=config.workspace_path, **extra)
         def __init__(self, **kwargs) -> None:
             seen["workspace"] = kwargs["workspace"]
+            seen["resource_view"] = kwargs["resource_view"]
 
         async def _connect_mcp(self) -> None:
             return None
@@ -2470,6 +2549,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         config,
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
+        prepare_resource_view=lambda _config: resource_view,
     )
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
@@ -2887,6 +2967,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     config.gateway.heartbeat.enabled = False
     bus = MagicMock()
     seen: dict[str, object] = {}
+    resource_view = object()
 
     _patch_cli_command_runtime(
         monkeypatch,
@@ -2894,6 +2975,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         message_bus=lambda: bus,
         session_manager=lambda _workspace: _FakeSessionManager(),
         cron_service=lambda _store_path: _FakeCronService(),
+        prepare_resource_view=lambda _config: resource_view,
     )
 
     class _FakeMemory:
@@ -2997,6 +3079,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
+    assert agent_kwargs["resource_view"] is resource_view
     assert "local_trigger_store" in agent_kwargs
     assert kwargs["store"] is agent_kwargs["local_trigger_store"]
     assert "bus" not in kwargs
@@ -3608,6 +3691,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
 
     assert result.exit_code == 0
     assert seen["workspace"] == override_workspace
+    assert seen["resource_view"] is seen["expected_resource_view"]
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0

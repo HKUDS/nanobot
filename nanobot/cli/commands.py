@@ -9,7 +9,10 @@ import time
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nanobot.resource_links import ResourceView
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -820,6 +823,26 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _prepare_resource_view(config: Config) -> "ResourceView | None":
+    """Best-effort creation of the path aliases used by an actual agent runtime."""
+    from nanobot.config.loader import get_config_path
+    from nanobot.resource_links import ensure_resource_view
+
+    config_path = get_config_path().expanduser().resolve(strict=False)
+    try:
+        view = ensure_resource_view(
+            data_dir=config_path.parent,
+            config_path=config_path,
+            agent_workspace=config.workspace_path,
+        )
+    except Exception as exc:
+        logger.warning("Could not prepare the nanobot resource view: {}", exc)
+        return None
+    for warning in view.warnings:
+        logger.warning("Resource view: {}", warning)
+    return view
+
+
 def _read_trigger_cli_message(message: str | None) -> str:
     """Read a trigger message from an argument or stdin."""
     if message and message.strip():
@@ -1346,6 +1369,7 @@ def serve(
         )
         raise typer.Exit(1)
     sync_workspace_templates(runtime_config.workspace_path)
+    resource_view = _prepare_resource_view(runtime_config)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
     try:
@@ -1354,6 +1378,7 @@ def serve(
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
+            resource_view=resource_view,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -1695,6 +1720,7 @@ def _run_gateway(
         except ValueError as exc:
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
+    resource_view = _prepare_resource_view(config)
     session_manager = SessionManager(config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.
@@ -1743,6 +1769,7 @@ def _run_gateway(
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
+        resource_view=resource_view,
     )
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
@@ -2270,6 +2297,7 @@ def agent(
     cron = CronService(cron_store_path)
 
     _set_nanobot_logs(logs)
+    resource_view = _prepare_resource_view(config)
 
     try:
         agent_loop = AgentLoop.from_config(
@@ -2277,6 +2305,7 @@ def agent(
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(config),
             hook_factories=[create_file_edit_activity_hook],
+            resource_view=resource_view,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")

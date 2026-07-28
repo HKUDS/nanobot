@@ -1,5 +1,7 @@
 """Context builder for assembling agent prompts."""
 
+from __future__ import annotations
+
 import base64
 import mimetypes
 import platform
@@ -7,12 +9,17 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.skills import (
+    ResourceViewMode,
+    SkillsLoader,
+    build_resource_aliases_section,
+)
 from nanobot.agent.tools import image_generation as image_generation_tools
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
+from nanobot.resource_links import ResourceView
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_END,
     RUNTIME_CONTEXT_MESSAGE_META,
@@ -61,11 +68,23 @@ class ContextBuilder:
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        *,
+        resource_view: ResourceView | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
-        self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self.resource_view = resource_view
+        self.memory = MemoryStore(workspace, resource_view=resource_view)
+        self.skills = SkillsLoader(
+            workspace,
+            disabled_skills=set(disabled_skills) if disabled_skills else None,
+            resource_view=resource_view,
+        )
 
     def build_system_prompt(
         self,
@@ -76,10 +95,24 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        resource_view_mode: ResourceViewMode | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
-        parts = [self._get_identity(channel=channel, workspace=root)]
+        parts = [
+            self._get_identity(
+                channel=channel,
+                workspace=root,
+                resource_view_mode=resource_view_mode,
+            )
+        ]
+
+        resource_aliases = build_resource_aliases_section(
+            self.resource_view,
+            resource_view_mode,
+        )
+        if resource_aliases:
+            parts.append(resource_aliases)
 
         bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
@@ -120,11 +153,24 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
+    def _get_identity(
+        self,
+        channel: str | None = None,
+        workspace: Path | None = None,
+        *,
+        resource_view_mode: ResourceViewMode | None = None,
+    ) -> str:
         """Get the core identity section."""
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
         agent_workspace_path = str(self.workspace.expanduser().resolve())
+        agent_resource_path = agent_workspace_path
+        if (
+            resource_view_mode == "full"
+            and self.resource_view is not None
+            and self.resource_view.agent is not None
+        ):
+            agent_resource_path = str(self.resource_view.agent)
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
@@ -132,6 +178,7 @@ class ContextBuilder:
             "agent/identity.md",
             workspace_path=workspace_path,
             agent_workspace_path=agent_workspace_path,
+            agent_resource_path=agent_resource_path,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
             channel=channel or "",
@@ -206,6 +253,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        resource_view_mode: ResourceViewMode | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -222,6 +270,7 @@ class ContextBuilder:
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,
+                    resource_view_mode=resource_view_mode,
                 ),
             },
             *history,

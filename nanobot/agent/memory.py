@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
+from nanobot.resource_links import ResourceView
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
@@ -83,9 +84,16 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        workspace: Path,
+        max_history_entries: int = _DEFAULT_MAX_HISTORY,
+        *,
+        resource_view: ResourceView | None = None,
+    ):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
+        self.resource_view = resource_view
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
@@ -547,13 +555,18 @@ class MemoryStore:
         return has_workspace_prompt_override(self.dream_prompt_file)
 
     @staticmethod
-    def default_dream_prompt() -> str:
+    def default_dream_prompt(resource_view: ResourceView | None = None) -> str:
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
+        skill_creator_path = BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"
+        if resource_view is not None and resource_view.package is not None:
+            skill_creator_path = (
+                resource_view.package / "skills" / "skill-creator" / "SKILL.md"
+            )
         return render_template(
             "agent/dream.md",
             strip=True,
-            skill_creator_path=str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"),
+            skill_creator_path=str(skill_creator_path),
         )
 
     def _dream_template(self) -> str:
@@ -570,7 +583,7 @@ class MemoryStore:
                     WORKSPACE_PROMPT_MAX_CHARS, original_chars,
                 )
             return text
-        return self.default_dream_prompt()
+        return self.default_dream_prompt(self.resource_view)
 
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.

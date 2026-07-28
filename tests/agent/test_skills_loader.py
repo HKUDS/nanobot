@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
+from nanobot.resource_links import ResourceView
 
 
 def _write_skill(
@@ -313,6 +314,41 @@ def test_build_skills_summary_groups_paths_by_root(tmp_path: Path) -> None:
     assert str(builtin_path) not in summary
     assert "`alpha/SKILL.md`" in summary
     assert "`beta/SKILL.md`" in summary
+
+
+def test_build_skills_summary_uses_alias_roots_but_keeps_canonical_entries(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace_skills = workspace / "skills"
+    workspace_skills.mkdir(parents=True)
+    workspace_path = _write_skill(workspace_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin_path = _write_skill(builtin, "beta", body="# Beta")
+    aliases = tmp_path / "resources" / "view"
+    resource_view = ResourceView(
+        root=aliases,
+        agent=aliases / "agent",
+        media=aliases / "media",
+        package=aliases / "package",
+    )
+
+    loader = SkillsLoader(
+        workspace,
+        builtin_skills_dir=builtin,
+        resource_view=resource_view,
+    )
+    entries = loader.list_skills(filter_unavailable=False)
+    summary = loader.build_skills_summary()
+
+    assert {entry["path"] for entry in entries} == {
+        str(workspace_path),
+        str(builtin_path),
+    }
+    assert f"`{resource_view.agent / 'skills'}`" in summary
+    assert f"`{resource_view.package / 'skills'}`" in summary
+    assert str(workspace_path) not in summary
+    assert str(builtin_path) not in summary
 
 
 def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:

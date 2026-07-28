@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.hooks import create_file_edit_activity_hook
@@ -39,6 +41,9 @@ from nanobot.sdk.types import (
 )
 from nanobot.utils.llm_runtime import LLMRuntime
 
+if TYPE_CHECKING:
+    from nanobot.resource_links import ResourceView
+
 __all__ = [
     "Nanobot",
     "RunResult",
@@ -59,6 +64,28 @@ __all__ = [
     "StreamEvent",
     "StreamEventType",
 ]
+
+
+def _prepare_resource_view(config: Config, config_path: Path) -> ResourceView | None:
+    """Best-effort resource aliases scoped to this SDK instance's config."""
+    from nanobot.resource_links import ensure_resource_view
+
+    try:
+        # CLI entry points synchronize workspace templates before this step.
+        # The SDK has no equivalent bootstrap phase, so ensure the link target
+        # exists before preparing its alias.
+        config.workspace_path.mkdir(parents=True, exist_ok=True)
+        view = ensure_resource_view(
+            data_dir=config_path.parent,
+            config_path=config_path,
+            agent_workspace=config.workspace_path,
+        )
+    except Exception as exc:
+        logger.warning("Could not prepare the nanobot resource view: {}", exc)
+        return None
+    for warning in view.warnings:
+        logger.warning("Resource view: {}", warning)
+    return view
 
 
 class Nanobot:
@@ -96,7 +123,7 @@ class Nanobot:
             model: Override the instance default model.
             model_preset: Override the instance default model preset.
         """
-        from nanobot.config.loader import load_config, resolve_config_env_vars
+        from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 
         ensure_single_model_selector(model=model, model_preset=model_preset)
         resolved: Path | None = None
@@ -105,6 +132,11 @@ class Nanobot:
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
 
+        effective_config_path = (
+            resolved
+            if resolved is not None
+            else get_config_path().expanduser().resolve(strict=False)
+        )
         config: Config = resolve_config_env_vars(load_config(resolved))
         if workspace is not None:
             config.agents.defaults.workspace = str(
@@ -117,10 +149,12 @@ class Nanobot:
         elif model_preset is not None:
             config.agents.defaults.model_preset = model_preset
 
+        resource_view = _prepare_resource_view(config, effective_config_path)
         loop = AgentLoop.from_config(
             config,
             image_generation_provider_configs=image_gen_provider_configs(config),
             hook_factories=[create_file_edit_activity_hook],
+            resource_view=resource_view,
         )
         return cls(loop, config=config)
 

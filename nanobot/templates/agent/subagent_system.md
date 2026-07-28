@@ -11,6 +11,10 @@ Current project workspace: {{ workspace }}
 Nanobot's agent workspace: {{ agent_workspace }}
 {% endif %}
 History log: {{ history_log }}
+{% if resource_aliases %}
+
+{{ resource_aliases }}
+{% endif %}
 {% if skills_summary %}
 
 ## Skills

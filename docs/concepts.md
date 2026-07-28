@@ -55,6 +55,35 @@ When no separate project is selected, one directory normally serves both roles.
 Selecting a project changes the working context for that chat; it does not create
 a second agent or relocate the configured agent workspace.
 
+### Resource Path Aliases
+
+When an agent runtime starts, nanobot makes a best-effort filesystem view under
+the active config directory:
+
+```text
+<config-dir>/resources/<view-id>/
+├── agent   -> <agent-workspace>
+├── media   -> <config-dir>/media
+└── package -> <installed-nanobot-package>
+```
+
+`<view-id>` is deterministic for the config, agent workspace, and installed
+package paths. Separate workspaces or Python environments therefore receive
+separate views instead of competing for a mutable `current` link. Project files
+are not linked into this view; relative paths continue to resolve from the
+effective project workspace.
+
+These links are convenient names, not a new permission boundary. Restricted
+file access still checks the resolved target, and a shell sandbox may not expose
+the aliases at all. Full-access prompts use the agent alias for profile, memory,
+history, and custom-skill paths; restricted prompts expose only alias subtrees
+that are already readable and retain canonical exact-file paths where required.
+Nanobot keeps canonical paths in config and runtime state, continues to accept
+real paths, and falls back to them when links are unavailable. Creating the view
+never blocks startup and never replaces an existing unowned file or directory.
+The `resources/` tree is derived state, so backup and indexing tools should skip
+it or preserve its links instead of following them into their targets.
+
 ## Config Format
 
 `config.json` accepts both camelCase and snake_case keys. The docs use camelCase because nanobot writes config back to disk with camelCase aliases, for example `apiKey`, `modelPresets`, `intervalS`, and `maxToolResultChars`.
