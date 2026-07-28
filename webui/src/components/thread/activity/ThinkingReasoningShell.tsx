@@ -47,8 +47,8 @@ export function ThinkingReasoningShell({
         </span>
         <ChevronDown
           className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground/60 transition-[transform,color] duration-200",
-            "group-hover:text-muted-foreground motion-reduce:transition-none",
+            "h-3 w-3 shrink-0 text-muted-foreground/60 transition-[transform,color] [transition-duration:600ms] ease-out",
+            "group-hover:text-muted-foreground motion-reduce:[transition-duration:220ms]",
             expanded && "rotate-180",
           )}
           strokeWidth={1.8}
@@ -58,7 +58,7 @@ export function ThinkingReasoningShell({
 
       <div
         className={cn(
-          "grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none",
+          "grid transition-[grid-template-rows,opacity] [transition-duration:600ms] ease-out motion-reduce:[transition-duration:220ms]",
           expanded
             ? "grid-rows-[1fr] opacity-100"
             : "pointer-events-none grid-rows-[0fr] opacity-0",
