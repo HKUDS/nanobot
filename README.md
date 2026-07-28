@@ -3,8 +3,6 @@
   <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
 </picture>
 
-# nanobot
-
 <div align="center">
   <p>
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview">English</a> |
@@ -33,6 +31,8 @@
     <a href="./COMMUNICATION.md">WeChat / Feishu</a>
   </p>
 </div>
+
+# nanobot
 
 🐈 **nanobot** is an ultra-lightweight, open-source, self-hosted personal AI agent framework written in Python. It runs in a WebUI, terminal, or chat apps and combines tools, long-term memory, MCP integrations, model routing, multi-agent delegation, scheduled automation, and an OpenAI-compatible API in a small, readable core.
 
