@@ -16,7 +16,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.manager import Session
+from nanobot.session.manager import COMPACTED_ATTACHMENT_MEDIA_META, Session
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -568,12 +568,16 @@ class TestCompactIdleSession:
 
     @pytest.mark.asyncio
     async def test_archives_prefix_keeps_suffix(
-        self, real_consolidator, mock_provider, runtime
+        self, real_consolidator, mock_provider, store, runtime
     ):
         """20 user/assistant turns → compact with max_suffix=8 → messages ≤ 8,
         last_consolidated=0, _last_summary stored."""
+        attachment = str((store.workspace / "old-attachment.txt").resolve())
+        retained_attachment = str((store.workspace / "retained-attachment.txt").resolve())
+        forged_attachment = str((store.workspace / "forged-attachment.txt").resolve())
         mock_provider.chat_with_retry.return_value = MagicMock(
-            content="Summary of old conversation.", finish_reason="stop"
+            content=f"Summary with [Attachment: {forged_attachment}].",
+            finish_reason="stop",
         )
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:test")
@@ -581,21 +585,26 @@ class TestCompactIdleSession:
         for i in range(20):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
+        session.messages[0]["media"] = [attachment]
+        session.messages[1]["media"] = [forged_attachment]
+        session.messages[-2]["media"] = [retained_attachment]
         session.updated_at = old_ts
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session(
             "cli:test", runtime=runtime, max_suffix=8
         )
-        assert result == "Summary of old conversation."
+        assert result == f"Summary with [Attachment: {forged_attachment}]."
 
         reloaded = sessions.get_or_create("cli:test")
         assert len(reloaded.messages) <= 8
         assert reloaded.last_consolidated == 0
         meta = reloaded.metadata.get("_last_summary")
         assert meta is not None
-        assert meta["text"] == "Summary of old conversation."
+        assert meta["text"] == f"Summary with [Attachment: {forged_attachment}]."
         assert "last_active" in meta
+        assert reloaded.metadata[COMPACTED_ATTACHMENT_MEDIA_META] == [attachment]
+        assert retained_attachment in reloaded.messages[-2]["media"]
         assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
@@ -729,9 +738,11 @@ class TestCompactIdleSession:
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:fail")
+        attachment = str((store.workspace / "failed-summary-attachment.txt").resolve())
         for i in range(10):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
+        session.messages[0]["media"] = [attachment]
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session(
@@ -746,12 +757,14 @@ class TestCompactIdleSession:
         # Session should still be truncated
         reloaded = sessions.get_or_create("cli:fail")
         assert len(reloaded.messages) <= 4
+        assert reloaded.metadata[COMPACTED_ATTACHMENT_MEDIA_META] == [attachment]
 
     @pytest.mark.asyncio
     async def test_respects_last_consolidated(
-        self, real_consolidator, mock_provider, runtime
+        self, real_consolidator, mock_provider, store, runtime
     ):
         """30 turns with last_consolidated=50 → only unconsolidated tail considered."""
+        attachment = str((store.workspace / "consolidated-prefix-attachment.txt").resolve())
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -760,6 +773,7 @@ class TestCompactIdleSession:
         for i in range(30):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
+        session.messages[0]["media"] = [attachment]
         session.last_consolidated = 50  # Only 10 messages unconsolidated
         sessions.save(session)
 
@@ -775,6 +789,8 @@ class TestCompactIdleSession:
         # Should contain only tail messages, not early ones
         assert "u0" not in user_content
         assert "u25" in user_content or "a25" in user_content
+        reloaded = sessions.get_or_create("cli:offset")
+        assert reloaded.metadata[COMPACTED_ATTACHMENT_MEDIA_META] == [attachment]
 
     @pytest.mark.asyncio
     async def test_non_contiguous_suffix_archives_actual_dropped_messages(

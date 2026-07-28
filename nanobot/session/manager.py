@@ -37,6 +37,8 @@ FILE_MAX_MESSAGES = 2000
 SESSION_CACHE_MAX_SIZE = 128
 MIN_REPLAY_MAX_MESSAGES = 120
 REPLAY_TOKENS_PER_MESSAGE = 100
+COMPACTED_ATTACHMENT_MEDIA_META = "_compacted_attachment_media"
+MAX_COMPACTED_ATTACHMENT_GRANTS = 256
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -52,6 +54,37 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "title",
     "title_user_edited",
 }
+
+
+def _canonical_compacted_attachment_path(value: Any) -> str | None:
+    """Normalize one persisted attachment path without granting relative input."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        path = Path(value)
+        if not path.is_absolute():
+            return None
+        # Attachment ingress already resolves existing files. Avoid following
+        # symlinks again here: a path component may have changed since upload,
+        # and compaction must not silently retarget an existing exact-file grant.
+        return str(Path(os.path.abspath(path)))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _bounded_compacted_attachment_media(values: Any) -> list[str]:
+    """Return recent canonical attachment paths with platform-aware deduplication."""
+    if not isinstance(values, list):
+        return []
+    deduped: dict[str, str] = {}
+    for value in values:
+        path = _canonical_compacted_attachment_path(value)
+        if path is None:
+            continue
+        key = os.path.normcase(path)
+        deduped.pop(key, None)
+        deduped[key] = path
+    return list(deduped.values())[-MAX_COMPACTED_ATTACHMENT_GRANTS:]
 
 
 def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
@@ -140,6 +173,13 @@ class Session:
     def __post_init__(self) -> None:
         if not isinstance(self.metadata, dict):
             self.metadata = {}
+        compacted_media = _bounded_compacted_attachment_media(
+            self.metadata.get(COMPACTED_ATTACHMENT_MEDIA_META)
+        )
+        if compacted_media:
+            self.metadata[COMPACTED_ATTACHMENT_MEDIA_META] = compacted_media
+        else:
+            self.metadata.pop(COMPACTED_ATTACHMENT_MEDIA_META, None)
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
         if (
             isinstance(self.last_consolidated, bool)
@@ -296,6 +336,28 @@ class Session:
         self.last_consolidated = 0
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop(COMPACTED_ATTACHMENT_MEDIA_META, None)
+
+    def remember_compacted_attachment_media(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Retain bounded exact-file grants from structured dropped user media."""
+        existing = self.metadata.get(COMPACTED_ATTACHMENT_MEDIA_META)
+        values = list(existing) if isinstance(existing, list) else []
+        for message in messages:
+            if message.get("role") != "user":
+                continue
+            media = message.get("media")
+            if not isinstance(media, list):
+                continue
+            values.extend(media)
+
+        compacted_media = _bounded_compacted_attachment_media(values)
+        if compacted_media:
+            self.metadata[COMPACTED_ATTACHMENT_MEDIA_META] = compacted_media
+        else:
+            self.metadata.pop(COMPACTED_ATTACHMENT_MEDIA_META, None)
 
     def retain_recent_legal_suffix(
         self,
@@ -384,6 +446,7 @@ class Session:
             if i < before_lc and id(m) in retained_ids
         )
 
+        self.remember_compacted_attachment_media(dropped)
         self.messages = retained
         self.last_consolidated = new_lc
         self.updated_at = datetime.now()
@@ -783,6 +846,7 @@ class SessionManager:
         last_consolidated = min(source.last_consolidated, len(copied))
         if source.last_consolidated > len(copied):
             metadata.pop("_last_summary", None)
+            metadata.pop(COMPACTED_ATTACHMENT_MEDIA_META, None)
             last_consolidated = 0
 
         now = datetime.now()

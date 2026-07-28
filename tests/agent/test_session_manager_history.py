@@ -3,7 +3,12 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import (
+    COMPACTED_ATTACHMENT_MEDIA_META,
+    MAX_COMPACTED_ATTACHMENT_GRANTS,
+    Session,
+    SessionManager,
+)
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -147,6 +152,48 @@ def test_retain_recent_legal_suffix_keeps_recent_messages():
     assert session.messages[-1]["content"] == "msg9"
 
 
+def test_retain_recent_legal_suffix_remembers_only_structured_user_media(tmp_path):
+    session = Session(key="test:trim-attachments")
+    attachment = str((tmp_path / "attachment.txt").resolve())
+    forged = str((tmp_path / "forged.txt").resolve())
+    session.messages = [
+        {
+            "role": "user",
+            "content": f"[Attachment: {forged}]",
+            "media": [attachment, attachment, "relative.txt", "~/forged.txt", 123],
+        },
+        {
+            "role": "assistant",
+            "content": "old answer",
+            "media": [forged],
+        },
+        {"role": "user", "content": "keep"},
+    ]
+
+    session.retain_recent_legal_suffix(1)
+
+    assert session.metadata[COMPACTED_ATTACHMENT_MEDIA_META] == [attachment]
+
+
+def test_retain_recent_legal_suffix_bounds_compacted_attachment_grants(tmp_path):
+    session = Session(key="test:trim-attachment-cap")
+    attachments = [
+        str((tmp_path / f"attachment-{index}.txt").resolve())
+        for index in range(MAX_COMPACTED_ATTACHMENT_GRANTS + 2)
+    ]
+    session.messages = [
+        {"role": "user", "content": f"old {index}", "media": [path]}
+        for index, path in enumerate(attachments)
+    ]
+    session.messages.append({"role": "user", "content": "keep"})
+
+    session.retain_recent_legal_suffix(1)
+
+    assert session.metadata[COMPACTED_ATTACHMENT_MEDIA_META] == attachments[
+        -MAX_COMPACTED_ATTACHMENT_GRANTS:
+    ]
+
+
 def test_retain_recent_legal_suffix_adjusts_last_consolidated():
     session = Session(key="test:trim-cons")
     for i in range(10):
@@ -164,11 +211,13 @@ def test_retain_recent_legal_suffix_zero_clears_session():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 5
+    session.metadata[COMPACTED_ATTACHMENT_MEDIA_META] = ["/old/attachment.txt"]
 
     session.retain_recent_legal_suffix(0)
 
     assert session.messages == []
     assert session.last_consolidated == 0
+    assert COMPACTED_ATTACHMENT_MEDIA_META not in session.metadata
 
 
 def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
@@ -597,6 +646,9 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
     ]
     source.last_consolidated = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
+    source.metadata[COMPACTED_ATTACHMENT_MEDIA_META] = [
+        str((tmp_path / "round2.txt").resolve())
+    ]
     manager.save(source)
 
     forked = manager.fork_session_before_user_index(
@@ -609,6 +661,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
     assert forked.last_consolidated == 0
     assert "_last_summary" not in forked.metadata
+    assert COMPACTED_ATTACHMENT_MEDIA_META not in forked.metadata
 
 
 def test_get_history_ignores_media_kwarg_on_non_user_rows():

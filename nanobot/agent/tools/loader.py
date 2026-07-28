@@ -85,7 +85,7 @@ class ToolLoader:
 
     def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
         registered: list[str] = []
-        builtin_names: set[str] = set()
+        protected_builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
         for source, is_plugin_source in sources:
             for tool_cls in source:
@@ -99,7 +99,7 @@ class ToolLoader:
                     if is_plugin_source:
                         tool = _LegacyErrorPrefixTool(tool)
                     if registry.has(tool.name):
-                        if is_plugin_source and tool.name in builtin_names:
+                        if is_plugin_source and tool.name in protected_builtin_names:
                             logger.warning(
                                 "Plugin %s skipped: conflicts with built-in tool %s",
                                 cls_label, tool.name,
@@ -111,8 +111,11 @@ class ToolLoader:
                         )
                     registry.register(tool)
                     registered.append(tool.name)
-                    if not is_plugin_source:
-                        builtin_names.add(tool.name)
+                    if (
+                        not is_plugin_source
+                        and not getattr(tool, "_plugin_override_allowed", False)
+                    ):
+                        protected_builtin_names.add(tool.name)
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
         return registered

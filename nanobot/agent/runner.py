@@ -95,6 +95,7 @@ class AgentRunSpec:
     stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
+    checkpoint_start: int | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
@@ -236,9 +237,10 @@ class AgentRunner:
         """Drain pending injections. Returns (should_continue, updated_cycles).
 
         If injections are found and we haven't exceeded _MAX_INJECTION_CYCLES,
-        append them to *messages* (and emit a checkpoint if *assistant_message*
-        and *iteration* are both provided) and return (True, cycles+1) so the
-        caller continues the iteration loop.  Otherwise return (False, cycles).
+        append them to *messages* and return (True, cycles+1) so the caller
+        continues the iteration loop. Real pending injections also checkpoint
+        the complete turn suffix after merging when *checkpoint_start* is set.
+        Otherwise return (False, cycles).
         """
         injections: list[dict[str, Any]] = []
         real_injection = False
@@ -253,9 +255,10 @@ class AgentRunner:
             return False, injection_cycles
         if real_injection:
             injection_cycles += 1
+        checkpoint_start = spec.checkpoint_start if real_injection else None
         if assistant_message is not None:
             messages.append(assistant_message)
-            if iteration is not None:
+            if iteration is not None and checkpoint_start is None:
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -268,6 +271,16 @@ class AgentRunner:
                     },
                 )
         self._append_injected_messages(messages, injections)
+        if checkpoint_start is not None:
+            await self._emit_checkpoint(
+                spec,
+                {
+                    "phase": "pending_injection",
+                    "iteration": iteration,
+                    "model": spec.runtime.model,
+                    "turn_suffix": deepcopy(messages[checkpoint_start:]),
+                },
+            )
         if real_injection:
             logger.info(
                 "Injected {} follow-up message(s) {} ({}/{})",

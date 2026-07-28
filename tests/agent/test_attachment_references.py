@@ -15,6 +15,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig, ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.session.manager import COMPACTED_ATTACHMENT_MEDIA_META
 from nanobot.utils.document import reference_non_image_attachments
 
 
@@ -90,6 +91,32 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     assert "2| nanobot,1" in result
 
 
+@pytest.mark.asyncio
+async def test_latin1_text_attachment_remains_readable_on_demand(
+    tmp_path: Path,
+) -> None:
+    attachment = tmp_path / "latin1.csv"
+    attachment.write_bytes("name,city\nAndré,Montréal\n".encode("latin-1"))
+
+    result = await ReadFileTool(workspace=tmp_path).execute(path=str(attachment))
+
+    assert "1| name,city" in result
+    assert "2| André,Montréal" in result
+
+
+@pytest.mark.asyncio
+async def test_non_text_binary_attachment_is_not_decoded_as_latin1(
+    tmp_path: Path,
+) -> None:
+    attachment = tmp_path / "payload.bin"
+    attachment.write_bytes(b"\xff\xfe\x00\x01")
+
+    result = await ReadFileTool(workspace=tmp_path).execute(path=str(attachment))
+
+    assert "Cannot read binary file" in result
+    assert "\xff" not in result
+
+
 @pytest.mark.parametrize("file_tools_enabled", [True, False])
 @pytest.mark.asyncio
 async def test_attachment_read_access_survives_session_reload(
@@ -103,7 +130,10 @@ async def test_attachment_read_access_survives_session_reload(
     attachment = custom_media_dir / "report.csv"
     attachment.write_text("name,value\nnanobot,7", encoding="utf-8")
     tools_config = ToolsConfig(
-        file=FileToolsConfig(enable=file_tools_enabled),
+        file=FileToolsConfig(
+            enable=file_tools_enabled,
+            allow_attachment_read=not file_tools_enabled,
+        ),
         restrict_to_workspace=True,
     )
 
@@ -160,6 +190,125 @@ async def test_attachment_read_access_survives_session_reload(
 
 
 @pytest.mark.asyncio
+async def test_compacted_attachment_grant_remains_readable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    attachment = tmp_path / "old-report.csv"
+    attachment.write_text("name,value\nold,13", encoding="utf-8")
+    tools_config = ToolsConfig(
+        file=FileToolsConfig(
+            enable=False,
+            allow_attachment_read=True,
+        ),
+        restrict_to_workspace=True,
+    )
+    loop = _make_loop(workspace, tools_config=tools_config)
+    session = loop.sessions.get_or_create("qq:compacted")
+    session.metadata[COMPACTED_ATTACHMENT_MEDIA_META] = [str(attachment)]
+    loop.sessions.save(session)
+    loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="read-compacted",
+                    name="read_file",
+                    arguments={"path": str(attachment)},
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(content="old report read", tool_calls=[], usage={}),
+    ])
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="qq",
+            sender_id="u",
+            chat_id="compacted",
+            content="read the compacted attachment",
+        )
+    )
+
+    assert response is not None
+    assert response.content == "old report read"
+    final_request = loop.provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+    tool_result = next(message for message in final_request if message["role"] == "tool")
+    assert "2| old,13" in tool_result["content"]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_attachment_read_does_not_poison_next_turn_file_state(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    attachment = tmp_path / "repeat.csv"
+    attachment.write_text("name,value\nrepeat,17", encoding="utf-8")
+    tools_config = ToolsConfig(
+        file=FileToolsConfig(
+            enable=False,
+            allow_attachment_read=True,
+        ),
+        restrict_to_workspace=True,
+    )
+    loop = _make_loop(workspace, tools_config=tools_config)
+    loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="read-ephemeral",
+                    name="read_file",
+                    arguments={"path": str(attachment)},
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(content="one-off read", tool_calls=[], usage={}),
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="read-normal",
+                    name="read_file",
+                    arguments={"path": str(attachment)},
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(content="normal read", tool_calls=[], usage={}),
+    ])
+
+    ephemeral_response = await loop.process_direct(
+        "read once",
+        session_key="sdk:file-state",
+        media=[str(attachment)],
+        ephemeral=True,
+    )
+    normal_response = await loop.process_direct(
+        "read normally",
+        session_key="sdk:file-state",
+        media=[str(attachment)],
+    )
+
+    assert ephemeral_response is not None
+    assert ephemeral_response.content == "one-off read"
+    assert normal_response is not None
+    assert normal_response.content == "normal read"
+    final_request = loop.provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+    tool_result = next(
+        message
+        for message in reversed(final_request)
+        if message.get("role") == "tool"
+    )
+    assert "2| repeat,17" in tool_result["content"]
+    assert "File unchanged" not in tool_result["content"]
+
+
+@pytest.mark.asyncio
 async def test_process_direct_canonicalizes_relative_local_attachment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,7 +322,10 @@ async def test_process_direct_canonicalizes_relative_local_attachment(
     monkeypatch.chdir(caller_dir)
 
     tools_config = ToolsConfig(
-        file=FileToolsConfig(enable=False),
+        file=FileToolsConfig(
+            enable=False,
+            allow_attachment_read=True,
+        ),
         restrict_to_workspace=True,
     )
     loop = _make_loop(workspace, tools_config=tools_config)
@@ -280,7 +432,10 @@ async def test_pending_attachment_is_readable_and_persisted_with_file_tools_disa
     second_attachment = custom_media_dir / "second.csv"
     second_attachment.write_text("name,value\nsecond,10", encoding="utf-8")
     tools_config = ToolsConfig(
-        file=FileToolsConfig(enable=False),
+        file=FileToolsConfig(
+            enable=False,
+            allow_attachment_read=True,
+        ),
         restrict_to_workspace=True,
     )
     loop = _make_loop(workspace, tools_config=tools_config)

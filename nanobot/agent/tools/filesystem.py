@@ -25,7 +25,9 @@ from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 class FileToolsConfig(Base):
     """Filesystem tools configuration."""
 
-    enable: bool = True  # general file tools; uploaded attachments keep narrow read access
+    enable: bool = True
+    # Explicit compatibility-safe opt-in when general filesystem tools are disabled.
+    allow_attachment_read: bool = False
 
 
 class _FsTool(Tool):
@@ -381,11 +383,25 @@ class ReadFileTool(_FsTool):
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
-                # Binary file - return error message
-                mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                if mime and mime.startswith("image/"):
-                    return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-                return ToolResult.error(f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported.")
+                # Preserve the legacy attachment extractor's Latin-1 fallback,
+                # but only for extensions it recognizes as text.
+                from nanobot.utils.document import _is_text_extension
+
+                if _is_text_extension(fp.suffix.lower()):
+                    text_content = raw.decode("latin-1")
+                else:
+                    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        return build_image_content_blocks(
+                            raw,
+                            mime,
+                            str(fp),
+                            f"(Image file: {path})",
+                        )
+                    return ToolResult.error(
+                        f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                        "Only supported text files and images can be read."
+                    )
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
@@ -480,11 +496,15 @@ class ReadFileTool(_FsTool):
 class AttachmentReadFileTool(ReadFileTool):
     """Read only trusted user attachments when general file tools are disabled."""
 
+    _plugin_override_allowed = True
     _scopes = {"core", "subagent"}
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
-        return not ctx.config.file.enable
+        return (
+            not ctx.config.file.enable
+            and ctx.config.file.allow_attachment_read
+        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:

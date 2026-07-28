@@ -144,7 +144,7 @@ def prepare_save_boundary(ctx: Any) -> None:
     if ctx.session is not None:
         clear_internal_continuation_state(ctx.session.metadata)
 
-    ctx.save_skip = _save_skip_for_turn(
+    ctx.save_skip = save_skip_for_turn(
         message_metadata=ctx.msg.metadata,
         initial_message_count=len(ctx.initial_messages),
         history_count=len(ctx.history),
@@ -178,7 +178,7 @@ def reset_goal_continuation_rounds(metadata: MutableMapping[str, Any]) -> None:
     metadata.pop(_GOAL_CONTINUATION_ROUNDS_KEY, None)
 
 
-def _save_skip_for_turn(
+def save_skip_for_turn(
     *,
     message_metadata: Mapping[str, Any] | None,
     initial_message_count: int,
@@ -196,6 +196,22 @@ def _save_skip_for_turn(
     if has_standalone_current and not input_persisted_early:
         return initial_message_count - 1
     return initial_message_count
+
+
+def _save_skip_for_turn(
+    *,
+    message_metadata: Mapping[str, Any] | None,
+    initial_message_count: int,
+    history_count: int,
+    input_persisted_early: bool,
+) -> int:
+    """Compatibility wrapper for the former private helper."""
+    return save_skip_for_turn(
+        message_metadata=message_metadata,
+        initial_message_count=initial_message_count,
+        history_count=history_count,
+        input_persisted_early=input_persisted_early,
+    )
 
 
 def _goal_continuation_available(

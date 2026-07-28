@@ -193,6 +193,7 @@ class Tool(ABC):
 
     config_key: str = ""
     _plugin_discoverable: bool = True
+    _plugin_override_allowed: bool = False
     _scopes: set[str] = {"core"}
 
     @classmethod

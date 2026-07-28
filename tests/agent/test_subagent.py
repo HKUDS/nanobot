@@ -80,6 +80,26 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
         "write_file",
     }
     assert general_file_tools.isdisjoint(tools.tool_names)
+    assert tools.get("read_file") is None
+
+
+def test_subagent_allows_explicit_attachment_reader_opt_in(tmp_path):
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+        tools_config=ToolsConfig(
+            file=FileToolsConfig(
+                enable=False,
+                allow_attachment_read=True,
+            )
+        ),
+    )
+
+    tools = sm._build_tools()
+
     assert isinstance(tools.get("read_file"), AttachmentReadFileTool)
 
 

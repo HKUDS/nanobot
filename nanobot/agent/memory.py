@@ -1194,6 +1194,11 @@ class Consolidator:
                     "last_active": last_active.isoformat(),
                 }
 
+            removed_messages = [
+                *session.messages[:session.last_consolidated],
+                *messages_to_remove,
+            ]
+            session.remember_compacted_attachment_media(removed_messages)
             session.messages = messages_to_keep
             session.last_consolidated = 0
             self.sessions.save(session)

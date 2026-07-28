@@ -1576,10 +1576,13 @@ injecting their contents into the model prompt. The agent can inspect supported 
 PDF, DOCX, XLSX, and PPTX files on demand with `read_file`, or pass the original path
 to another tool when exact file bytes are required. The deprecated
 `channels.extractDocumentText` setting is accepted for compatibility but ignored.
-Setting `tools.file.enable` to `false` disables general filesystem tools, but keeps
+Setting `tools.file.enable` to `false` disables all built-in file tools,
+including `read_file`, preserving the existing hard opt-out. To keep general
+filesystem tools disabled while allowing uploaded documents to be read on demand,
+also set `tools.file.allowAttachmentRead` to `true`. That explicit opt-in registers
 an attachment-scoped `read_file` that can only read exact files uploaded in the
-conversation. This narrow access also covers channel-specific media directories
-without granting directory, write, or shell access.
+conversation, including files in channel-specific media directories, without
+granting directory, write, or shell access.
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 

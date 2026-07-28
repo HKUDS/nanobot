@@ -842,6 +842,141 @@ def test_runner_merge_unions_pending_attachment_media() -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_injection_checkpoints_complete_merged_turn_suffix_without_assistant():
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import ATTACHMENT_MEDIA_MESSAGE_META
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    checkpoints: list[dict] = []
+
+    async def checkpoint_callback(payload):
+        checkpoints.append(payload)
+
+    async def injection_callback():
+        return [
+            {
+                "role": "user",
+                "content": "first pending message",
+                "_meta": {
+                    ATTACHMENT_MEDIA_MESSAGE_META: [
+                        "/media/first.txt",
+                    ],
+                },
+            },
+            {
+                "role": "user",
+                "content": "second pending message",
+                "_meta": {
+                    ATTACHMENT_MEDIA_MESSAGE_META: [
+                        "/media/second.txt",
+                        "/media/first.txt",
+                    ],
+                },
+            },
+        ]
+
+    spec = make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        checkpoint_callback=checkpoint_callback,
+        checkpoint_start=1,
+        injection_callback=injection_callback,
+    )
+    messages = [
+        {"role": "user", "content": "persisted history"},
+        {"role": "assistant", "content": "current turn state"},
+    ]
+
+    should_continue, injection_cycles = await AgentRunner()._try_drain_injections(
+        spec,
+        messages,
+        assistant_message=None,
+        injection_cycles=0,
+        phase="after tool execution",
+        iteration=3,
+    )
+
+    assert should_continue is True
+    assert injection_cycles == 1
+    assert checkpoints == [
+        {
+            "phase": "pending_injection",
+            "iteration": 3,
+            "model": "test-model",
+            "turn_suffix": [
+                {"role": "assistant", "content": "current turn state"},
+                {
+                    "role": "user",
+                    "content": "first pending message\n\nsecond pending message",
+                    "_meta": {
+                        ATTACHMENT_MEDIA_MESSAGE_META: [
+                            "/media/first.txt",
+                            "/media/second.txt",
+                        ],
+                    },
+                },
+            ],
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_goal_continuation_keeps_compact_checkpoint_shape():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    checkpoints: list[dict] = []
+
+    async def checkpoint_callback(payload):
+        checkpoints.append(payload)
+
+    spec = make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        checkpoint_callback=checkpoint_callback,
+        checkpoint_start=0,
+        injection_callback=AsyncMock(return_value=[]),
+        goal_active_predicate=lambda: True,
+    )
+    assistant_message = {"role": "assistant", "content": "keep working"}
+
+    should_continue, injection_cycles = await AgentRunner()._try_drain_injections(
+        spec,
+        [],
+        assistant_message=assistant_message,
+        injection_cycles=0,
+        phase="after final response",
+        iteration=2,
+        allow_goal_continue=True,
+    )
+
+    assert should_continue is True
+    assert injection_cycles == 0
+    assert checkpoints == [
+        {
+            "phase": "final_response",
+            "iteration": 2,
+            "model": "test-model",
+            "assistant_message": assistant_message,
+            "completed_tool_results": [],
+            "pending_tool_calls": [],
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_injection_cycles_capped_at_max():
     """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""
     from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
