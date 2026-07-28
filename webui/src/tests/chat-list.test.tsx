@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
 import type { ChatSummary } from "@/lib/types";
@@ -17,7 +17,35 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
   };
 }
 
+function rect({
+  left,
+  top,
+  width,
+  height,
+}: {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 describe("ChatList", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("orders chats by latest session activity by default", () => {
     const sessions = [
       session({
@@ -192,29 +220,68 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("visually distinguishes the selected topic", () => {
-    render(
+  it("slides one borderless highlight between selected topics", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.hasAttribute("data-chat-list-content")) {
+          return rect({ left: 0, top: 0, width: 300, height: 200 });
+        }
+        if (this.getAttribute("data-chat-row") === "websocket:active") {
+          return rect({ left: 8, top: 12, width: 284, height: 32 });
+        }
+        if (this.getAttribute("data-chat-row") === "websocket:inactive") {
+          return rect({ left: 8, top: 48, width: 284, height: 40 });
+        }
+        return rect({ left: 0, top: 0, width: 0, height: 0 });
+      },
+    );
+    const props = {
+      sessions: [
+        session({ chatId: "active", title: "Active topic" }),
+        session({ chatId: "inactive", title: "Inactive topic" }),
+      ],
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+
+    const { rerender } = render(
       <ChatList
-        sessions={[
-          session({ chatId: "active", title: "Active topic" }),
-          session({ chatId: "inactive", title: "Inactive topic" }),
-        ]}
+        {...props}
         activeKey="websocket:active"
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
       />,
     );
 
+    const highlight = screen.getByTestId("active-chat-highlight");
     const activeButton = screen.getByTitle("Active topic");
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    expect(activeButton.parentElement).toHaveClass(
+    expect(activeButton.parentElement).not.toHaveClass(
       "bg-sidebar-accent",
       "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
     );
-    expect(screen.getByTitle("Inactive topic")).not.toHaveAttribute("aria-current");
+    expect(highlight).toHaveClass(
+      "bg-sidebar-foreground/[0.055]",
+      "transition-[transform,width,height,opacity]",
+      "motion-reduce:transition-none",
+    );
+    expect(highlight).toHaveStyle(
+      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1",
+    );
+
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:inactive"
+      />,
+    );
+
+    expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
+    expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
+    expect(highlight).toHaveStyle(
+      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0); opacity: 1",
+    );
   });
 
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {
