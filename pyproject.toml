@@ -85,7 +85,7 @@ pdf = [
     "pypdf>=5.0.0,<6.0.0",
 ]
 olostep = [
-    "olostep>=0.1.0",
+    "olostep>=0.1.0; python_version < '3.14'",
 ]
 dev = [
     "pytest>=9.0.0,<10.0.0",

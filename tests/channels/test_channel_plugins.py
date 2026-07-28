@@ -2573,6 +2573,12 @@ def test_optional_dependency_metadata_for_enable():
     ]
     assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
     assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
+    assert deps["olostep"] == ["olostep>=0.1.0; python_version < '3.14'"]
+    expected_olostep_args = [] if sys.version_info >= (3, 14) else ["olostep>=0.1.0"]
+    assert optional_features.install_args_for_extra("olostep", deps["olostep"]) == (
+        expected_olostep_args,
+        "olostep support",
+    )
     channel_names = {
         "dingtalk",
         "discord",
