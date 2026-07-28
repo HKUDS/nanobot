@@ -20,10 +20,10 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     recent_message_start_index,
     safe_filename,
     strip_think,
