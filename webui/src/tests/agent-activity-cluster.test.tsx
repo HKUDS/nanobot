@@ -350,6 +350,31 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("keeps chevron color feedback faster than the drawer rotation", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "r-motion",
+          role: "assistant",
+          content: "",
+          reasoning: "checking motion",
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Thought" });
+    const chevron = button.querySelector("svg");
+    expect(chevron).toBeInTheDocument();
+    expect(chevron).toHaveClass("transition-colors", "duration-200");
+    expect(chevron?.parentElement).toHaveClass(
+      "transition-transform",
+      "[transition-duration:600ms]",
+    );
+  });
+
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
     render(
       <AgentActivityCluster

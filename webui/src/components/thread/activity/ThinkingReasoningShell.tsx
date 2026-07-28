@@ -45,15 +45,22 @@ export function ThinkingReasoningShell({
         >
           {label}
         </span>
-        <ChevronDown
+        <span
           className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground/60 transition-[transform,color] [transition-duration:600ms] ease-out",
-            "group-hover:text-muted-foreground motion-reduce:[transition-duration:220ms]",
+            "inline-flex shrink-0 transition-transform [transition-duration:600ms] ease-out",
+            "motion-reduce:[transition-duration:220ms]",
             expanded && "rotate-180",
           )}
-          strokeWidth={1.8}
-          aria-hidden
-        />
+        >
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 text-muted-foreground/60 transition-colors duration-200",
+              "group-hover:text-muted-foreground motion-reduce:transition-none",
+            )}
+            strokeWidth={1.8}
+            aria-hidden
+          />
+        </span>
       </button>
 
       <div
