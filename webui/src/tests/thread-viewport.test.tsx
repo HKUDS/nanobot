@@ -820,12 +820,11 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("gives direct scroll-to-bottom ownership of the latest target", () => {
-    const resumeAutoFollow = vi.spyOn(
+  it("gives smooth scroll-to-bottom navigation ownership of the latest target", () => {
+    const navigateLatestTo = vi.spyOn(
       ThreadMotionCoordinator.prototype,
-      "resumeAutoFollow",
-    );
-    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+      "navigateLatestTo",
+    ).mockReturnValue("started");
     const { container } = render(
       <ThreadViewport
         messages={messages}
@@ -845,8 +844,7 @@ describe("ThreadViewport", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
 
-    expect(resumeAutoFollow).toHaveBeenCalled();
-    expect(jumpTo).toHaveBeenCalledWith(1_800);
+    expect(navigateLatestTo).toHaveBeenCalledWith(1_800);
   });
 
   it("pins the waiting boundary across composer and grid-track growth", async () => {
@@ -1702,8 +1700,12 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("jumps to the bottom button target and pins later layout growth without animating", async () => {
+  it("animates the bottom button target and pins later layout growth", async () => {
     const resizeObserver = stubResizeObserver();
+    const navigateLatestTo = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "navigateLatestTo",
+    );
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
 
@@ -1726,10 +1728,12 @@ describe("ThreadViewport", () => {
         dispatchUserScroll(scroller);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
-      expect(scroller.scrollTop).toBe(1800);
+      navigateLatestTo.mockClear();
       jumpTo.mockClear();
       followTo.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+      expect(navigateLatestTo).toHaveBeenCalledWith(1800);
+      expect(scroller.scrollTop).toBe(300);
 
       const messageRegion = screen.getByTestId("thread-message-region");
       const messageContent = messageRegion.firstElementChild;
@@ -1746,12 +1750,30 @@ describe("ThreadViewport", () => {
       act(() => {
         contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
       });
+      await waitFor(() => expect(scroller.scrollTop).toBe(2400));
+
+      expect(jumpTo).not.toHaveBeenCalled();
+      expect(followTo).not.toHaveBeenCalled();
+
+      act(() => {
+        scroller.dispatchEvent(new Event("scroll"));
+      });
+      await flushAnimationFrame();
+      jumpTo.mockClear();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 3400,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
       await flushAnimationFrame();
 
-      expect(jumpTo).toHaveBeenCalledWith(2400);
-      expect(scroller.scrollTop).toBe(2400);
-      expect(followTo).not.toHaveBeenCalled();
+      expect(jumpTo).toHaveBeenCalledWith(2800);
+      expect(scroller.scrollTop).toBe(2800);
     } finally {
+      navigateLatestTo.mockRestore();
       jumpTo.mockRestore();
       followTo.mockRestore();
       resizeObserver.restore();

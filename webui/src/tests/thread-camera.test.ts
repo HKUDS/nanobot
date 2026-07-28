@@ -86,6 +86,24 @@ describe("ThreadCameraController", () => {
     expect(viewport.scrollTop).toBeLessThan(1_000);
   });
 
+  it("settles exactly when the viewport quantizes subpixel tail movement", () => {
+    const { camera, viewport, advance } = cameraHarness();
+    let quantizedTop = 0;
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      get: () => quantizedTop,
+      set: (value: number) => {
+        quantizedTop = Math.floor(value);
+      },
+    });
+
+    expect(camera.navigateTo(10)).toBe("started");
+    for (let frame = 0; frame < 60; frame += 1) advance(16);
+
+    expect(camera.isFollowing()).toBe(false);
+    expect(viewport.scrollTop).toBe(10);
+  });
+
   it("gives an immediate jump command priority over an active follow", () => {
     const { camera, viewport, scheduler, frames } = cameraHarness();
 

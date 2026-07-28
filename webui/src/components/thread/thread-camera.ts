@@ -186,12 +186,20 @@ export class ThreadCameraController {
     }
 
     const deltaSeconds = deltaMs / 1000;
-    const nextTop = easeOutChase(
+    const easedTop = easeOutChase(
       current,
       this.target,
       deltaSeconds,
       motion,
     );
+    // Some browsers quantize scrollTop writes to whole pixels. Keep the
+    // ease-out curve, but never let its subpixel tail round back to the same
+    // position forever.
+    const minimumStep = Math.min(1, Math.abs(remainingDistance));
+    const nextTop =
+      Math.abs(easedTop - current) < minimumStep
+        ? current + Math.sign(remainingDistance) * minimumStep
+        : easedTop;
     const settled = Math.abs(this.target - nextTop) <= motion.settleDistancePx;
     this.write(viewport, settled ? this.target : nextTop);
 
