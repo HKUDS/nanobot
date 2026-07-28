@@ -92,6 +92,32 @@ def test_load_config_error_does_not_expose_invalid_secret_value(tmp_path) -> Non
     assert secret not in str(exc_info.value)
 
 
+def test_load_config_error_redacts_untrusted_location_parts(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    secret = "should-never-appear-in-location"
+    server_name = f"https://user:{secret}@example.test"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "mcpServers": {
+                        server_name: {"toolTimeout": "not-a-number"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_config(config_path)
+
+    message = str(exc_info.value)
+    assert "tools.mcpServers.<redacted>.toolTimeout" in message
+    assert server_name not in message
+    assert secret not in message
+
+
 def test_load_config_error_does_not_trust_custom_validator_message(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     secret = "diagnostic-secret-should-not-print"

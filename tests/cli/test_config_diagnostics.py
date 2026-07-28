@@ -8,6 +8,18 @@ from nanobot.gateway import GatewayRuntime, GatewayStartOptions, GatewayStatus, 
 
 runner = CliRunner()
 
+_ANTHROPIC_BACKEND_CASES = (
+    ("anthropic", "anthropic", "claude-sonnet-4-5", "ANTHROPIC_API_KEY", "Anthropic"),
+    ("kimi_coding", "kimiCoding", "kimi-for-coding", "KIMI_CODING_API_KEY", "Kimi Coding"),
+    (
+        "minimax_anthropic",
+        "minimaxAnthropic",
+        "MiniMax-M2.7-highspeed",
+        "MINIMAX_API_KEY",
+        "MiniMax (Anthropic)",
+    ),
+)
+
 
 def _without_rendered_line_breaks(output: str) -> str:
     return "".join(output.splitlines())
@@ -81,6 +93,76 @@ def test_status_validates_bedrock_without_constructing_provider(
     assert result.exit_code == 0
     assert "Agent: ✓ provider/model configuration is ready" in result.stdout
     assert "Status does not call the model or verify network access" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("provider", "provider_key", "model", "env_name", "label"),
+    _ANTHROPIC_BACKEND_CASES,
+)
+def test_status_reports_missing_key_for_anthropic_backends(
+    tmp_path,
+    monkeypatch,
+    provider: str,
+    provider_key: str,
+    model: str,
+    env_name: str,
+    label: str,
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv(env_name, raising=False)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"model": model, "provider": provider}},
+                "providers": {provider_key: {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["status", "--config", str(config_path)])
+    output = _without_rendered_line_breaks(result.stdout)
+
+    assert result.exit_code == 0
+    assert f"Agent: ✗ No API key configured for provider '{provider}'." in output
+    assert f"{label}: not set" in output
+    assert "provider/model configuration is ready" not in output
+    assert 'Next: nanobot agent -m "Hello!"' not in output
+    assert "Settings → Models" in output
+
+
+@pytest.mark.parametrize(
+    ("provider", "provider_key", "model", "env_name", "label"),
+    _ANTHROPIC_BACKEND_CASES,
+)
+def test_status_accepts_resolved_key_for_anthropic_backends(
+    tmp_path,
+    monkeypatch,
+    provider: str,
+    provider_key: str,
+    model: str,
+    env_name: str,
+    label: str,
+) -> None:
+    monkeypatch.setenv(env_name, "test-api-key")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"model": model, "provider": provider}},
+                "providers": {provider_key: {"apiKey": f"${{{env_name}}}"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["status", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert "Agent: ✓ provider/model configuration is ready" in result.stdout
+    assert f"{label}: ✓" in result.stdout
+    assert 'nanobot agent -m "Hello!"' in result.stdout
 
 
 def test_status_reports_missing_provider_with_shortest_setup_routes(tmp_path) -> None:

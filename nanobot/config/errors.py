@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -16,6 +17,13 @@ ConfigErrorKind = Literal[
     "io_error",
 ]
 ConfigPathPart = str | int
+_SAFE_LOCATION_PART = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}")
+
+
+def _display_location_part(part: ConfigPathPart) -> str:
+    if isinstance(part, int):
+        return str(part)
+    return part if _SAFE_LOCATION_PART.fullmatch(part) else "<redacted>"
 
 
 @dataclass(frozen=True)
@@ -27,7 +35,12 @@ class ConfigIssue:
 
     @property
     def location(self) -> str:
-        return ".".join(str(part) for part in self.path) if self.path else "<root>"
+        # Pydantic locations can contain user-controlled mapping keys. Only
+        # render conventional config identifiers so credential-bearing URLs
+        # and other free-form values cannot leak through a redacted error.
+        if not self.path:
+            return "<root>"
+        return ".".join(_display_location_part(part) for part in self.path)
 
 
 class ConfigLoadError(ValueError):
