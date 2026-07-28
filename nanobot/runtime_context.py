@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 RUNTIME_CONTEXT_HISTORY_META = "_runtime_context"
 RUNTIME_CONTEXT_MESSAGE_META = "runtime_context"
-ATTACHMENT_MEDIA_MESSAGE_META = "attachment_media"
 RUNTIME_CONTEXT_INPUT_META = "_runtime_context_blocks"
 RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 RUNTIME_CONTEXT_END = "[/Runtime Context]"

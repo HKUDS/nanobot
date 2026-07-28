@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import dataclasses
 import inspect
 import os
@@ -29,21 +28,9 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools.context import (
-    RequestContext,
-    bind_attachment_paths,
-    bind_request_context,
-    extend_attachment_paths,
-    reset_attachment_paths,
-    reset_request_context,
-)
+from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
-from nanobot.agent.tools.file_state import (
-    FileStates,
-    FileStateStore,
-    bind_file_states,
-    reset_file_states,
-)
+from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
@@ -66,7 +53,6 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
-    ATTACHMENT_MEDIA_MESSAGE_META,
     RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -90,7 +76,6 @@ from nanobot.session.goal_state import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
-    COMPACTED_ATTACHMENT_MEDIA_META,
     Session,
     SessionManager,
     replay_max_messages_for_context,
@@ -101,7 +86,7 @@ from nanobot.session.model_selection import (
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
-from nanobot.utils.document import prepare_attachment_references
+from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -141,7 +126,6 @@ class TurnContext:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
-    attachment_paths: list[str] = field(default_factory=list)
 
     final_content: str | None = None
     all_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -823,28 +807,6 @@ class AgentLoop:
         budget = runtime.context_window_tokens - max(1, reserved_output) - 1024
         return budget if budget > 0 else max(128, runtime.context_window_tokens // 2)
 
-    @staticmethod
-    def _persisted_attachment_paths(session: Session | None) -> list[str]:
-        """Return trusted attachment paths retained with persisted user messages."""
-        if session is None:
-            return []
-        paths: dict[str, None] = {}
-        compacted_media = session.metadata.get(COMPACTED_ATTACHMENT_MEDIA_META)
-        if isinstance(compacted_media, list):
-            for value in compacted_media:
-                if isinstance(value, str) and value:
-                    paths.setdefault(value, None)
-        for message in session.messages:
-            if message.get("role") != "user":
-                continue
-            values = message.get("media")
-            if not isinstance(values, list):
-                continue
-            for value in values:
-                if isinstance(value, str) and value:
-                    paths.setdefault(value, None)
-        return list(paths)
-
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -869,8 +831,6 @@ class AgentLoop:
         turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
-        attachment_paths: list[str] | None = None,
-        checkpoint_start: int | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -884,7 +844,7 @@ class AgentLoop:
         self._sync_subagent_runtime_limits()
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
-            if session is None or ephemeral:
+            if session is None:
                 return
             self._set_runtime_checkpoint(session, payload)
 
@@ -902,26 +862,12 @@ class AgentLoop:
 
             async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
-                media = [
-                    path
-                    for path in (pending_msg.media or [])
-                    if isinstance(path, str) and path
-                ]
-                attachment_paths: list[str] = []
+                media = pending_msg.media if pending_msg.media else None
                 if media:
-                    content, original_media, media, attachment_paths = (
-                        self._prepare_message_media(content, media)
-                    )
-                    extend_attachment_paths(attachment_paths)
+                    content, media = self._prepare_message_media(content, media)
                     media = media or None
-                else:
-                    original_media = []
                 user_content = self.context._build_user_content(content, media)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
-                if original_media:
-                    row["_meta"] = {
-                        ATTACHMENT_MEDIA_MESSAGE_META: original_media,
-                    }
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
                 if pending_msg.channel != "system":
                     scope = self.workspace_scopes.for_turn(
@@ -947,9 +893,7 @@ class AgentLoop:
                     )
                     row["content"], marker = append_runtime_context(user_content, blocks)
                     if marker is not None:
-                        internal_meta = dict(row.get("_meta") or {})
-                        internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
-                        row["_meta"] = internal_meta
+                        row["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: marker}
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
@@ -1010,17 +954,7 @@ class AgentLoop:
             metadata=dict(metadata or {}),
             workspace=effective_scope.project_path,
         )
-        trusted_attachment_paths = [
-            *self._persisted_attachment_paths(session),
-            *(attachment_paths or []),
-        ]
-        file_states = (
-            FileStates()
-            if ephemeral
-            else self._file_state_store.for_session(active_session_key)
-        )
-        file_state_token = bind_file_states(file_states)
-        attachment_token = bind_attachment_paths(trusted_attachment_paths)
+        file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
         turn_scope_stack = ExitStack()
@@ -1076,7 +1010,6 @@ class AgentLoop:
                 stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
-                checkpoint_start=checkpoint_start,
                 injection_callback=_drain_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
@@ -1098,7 +1031,6 @@ class AgentLoop:
             turn_scope_stack.close()
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
-            reset_attachment_paths(attachment_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -1562,16 +1494,8 @@ class AgentLoop:
         msg = ctx.msg
 
         if ctx.kind is TurnKind.USER and msg.media:
-            new_content, normalized_media, _, attachment_paths = self._prepare_message_media(
-                msg.content,
-                msg.media,
-            )
-            ctx.attachment_paths = attachment_paths
-            ctx.msg = dataclasses.replace(
-                msg,
-                content=new_content,
-                media=normalized_media,
-            )
+            new_content, image_only = self._prepare_message_media(msg.content, msg.media)
+            ctx.msg = dataclasses.replace(msg, content=new_content, media=image_only)
             msg = ctx.msg
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
@@ -1584,35 +1508,25 @@ class AgentLoop:
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
-        if not ctx.ephemeral:
-            self._remember_unified_session_route(
-                ctx.session,
-                msg,
-                is_user_turn=ctx.original_user_text is not None,
-            )
+        self._remember_unified_session_route(
+            ctx.session,
+            msg,
+            is_user_turn=ctx.original_user_text is not None,
+        )
         await ctx.delivery.started()
-        if ctx.kind is TurnKind.USER and not ctx.ephemeral:
+        if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(ctx.session, msg)
 
-        if not ctx.ephemeral:
-            if self._restore_runtime_checkpoint(ctx.session):
-                self.sessions.save(ctx.session)
-            if self._restore_pending_user_turn(ctx.session):
-                self.sessions.save(ctx.session)
+        if self._restore_runtime_checkpoint(ctx.session):
+            self.sessions.save(ctx.session)
+        if self._restore_pending_user_turn(ctx.session):
+            self.sessions.save(ctx.session)
 
-    def _prepare_message_media(
-        self,
-        content: str,
-        media: list[str],
-    ) -> tuple[str, list[str], list[str], list[str]]:
-        return prepare_attachment_references(content, media)
+    def _prepare_message_media(self, content: str, media: list[str]) -> tuple[str, list[str]]:
+        return reference_non_image_attachments(content, media)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
-        if ctx.ephemeral:
-            # Ephemeral turns may read persisted history, but all mutations stay
-            # detached from the SessionManager cache and its on-disk session.
-            ctx.session = copy.deepcopy(ctx.session)
         ctx.pending_summary = pending
 
     async def _dispatch_command(self, ctx: TurnContext) -> bool:
@@ -1644,11 +1558,9 @@ class AgentLoop:
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
-            if cmd_ctx.raw.lower() != "/new" and not ctx.ephemeral:
+            if cmd_ctx.raw.lower() != "/new":
                 ctx.input_persisted_early = self._persist_user_message_early(
-                    ctx.msg,
-                    ctx.session,
-                    _command=True,
+                    ctx.msg, ctx.session, _command=True
                 )
                 ctx.session.add_message(
                     "assistant", result.content, _command=True
@@ -1692,7 +1604,7 @@ class AgentLoop:
             "extend_to_user": is_subagent,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
-        if is_subagent and not ctx.ephemeral:
+        if is_subagent:
             # Keep the durable internal delivery as an assistant record, but
             # present this completion to the model as fresh follow-up input.
             # Providers without assistant-prefill support drop trailing
@@ -1708,18 +1620,12 @@ class AgentLoop:
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(ctx)
-        if ctx.kind is TurnKind.USER and not ctx.ephemeral:
+        if ctx.kind is TurnKind.USER:
             ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
                 ctx.session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
-        ctx.save_skip = turn_continuation.save_skip_for_turn(
-            message_metadata=ctx.msg.metadata,
-            initial_message_count=len(ctx.initial_messages),
-            history_count=len(ctx.history),
-            input_persisted_early=ctx.input_persisted_early,
-        )
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
@@ -1752,8 +1658,6 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
             request_context=ctx.request_context,
-            attachment_paths=ctx.attachment_paths,
-            checkpoint_start=ctx.save_skip,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1764,6 +1668,8 @@ class AgentLoop:
             await turn_continuation.maybe_continue_turn(ctx)
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
+        turn_continuation.prepare_save_boundary(ctx)
+
         if (
             ctx.kind is TurnKind.USER
             and (ctx.final_content is None or not ctx.final_content.strip())
@@ -1781,27 +1687,24 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
-        ctx.delivery.record_latency(ctx.turn_latency_ms)
-        if ctx.ephemeral:
-            return
-
-        turn_continuation.prepare_save_boundary(ctx)
         self._save_turn(
             ctx.session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
         )
-        ctx.session.enforce_file_cap(
-            on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
-        )
-        self._schedule_background(
-            self.consolidator.maybe_consolidate_by_tokens(
-                ctx.session,
-                runtime=ctx.runtime,
-                replay_max_messages=replay_max_messages_for_context(
-                    ctx.runtime.context_window_tokens
-                ),
+        ctx.delivery.record_latency(ctx.turn_latency_ms)
+        if not ctx.ephemeral:
+            ctx.session.enforce_file_cap(
+                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
             )
-        )
+            self._schedule_background(
+                self.consolidator.maybe_consolidate_by_tokens(
+                    ctx.session,
+                    runtime=ctx.runtime,
+                    replay_max_messages=replay_max_messages_for_context(
+                        ctx.runtime.context_window_tokens
+                    ),
+                )
+            )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
@@ -1892,11 +1795,6 @@ class AgentLoop:
                 if isinstance(internal_meta, dict)
                 else None
             )
-            attachment_media_meta = (
-                internal_meta.get(ATTACHMENT_MEDIA_MESSAGE_META)
-                if isinstance(internal_meta, dict)
-                else None
-            )
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
@@ -1934,14 +1832,6 @@ class AgentLoop:
                     entry["content"] = filtered
                 if isinstance(runtime_context_meta, dict):
                     entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
-                if isinstance(attachment_media_meta, list):
-                    attachment_media = [
-                        path
-                        for path in attachment_media_meta
-                        if isinstance(path, str) and path
-                    ]
-                    if attachment_media:
-                        entry["media"] = attachment_media
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "assistant":
@@ -1981,55 +1871,8 @@ class AgentLoop:
 
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
         """Persist the latest in-flight turn state into session metadata."""
-        previous = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
-        if "turn_suffix" not in payload and isinstance(previous, dict):
-            recovery_prefix = previous.get("turn_suffix")
-            if not isinstance(recovery_prefix, list):
-                recovery_prefix = previous.get("recovery_prefix")
-            if isinstance(recovery_prefix, list):
-                payload = {
-                    **payload,
-                    "recovery_prefix": copy.deepcopy(recovery_prefix),
-                }
-        payload = self._sanitize_runtime_checkpoint(payload)
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save(session)
-
-    def _sanitize_runtime_checkpoint(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Strip volatile multimodal payloads before checkpoint persistence."""
-        sanitized = dict(payload)
-        for key in (
-            "turn_suffix",
-            "recovery_prefix",
-            "completed_tool_results",
-        ):
-            messages = sanitized.get(key)
-            if not isinstance(messages, list):
-                continue
-            sanitized[key] = [
-                self._sanitize_checkpoint_message(message)
-                for message in messages
-                if isinstance(message, dict)
-            ]
-        return sanitized
-
-    def _sanitize_checkpoint_message(
-        self,
-        message: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Return one checkpoint message in its durable history shape."""
-        entry = copy.deepcopy(message)
-        content = entry.get("content")
-        role = entry.get("role")
-        if role in {"user", "tool"} and isinstance(content, list):
-            entry["content"] = self._sanitize_persisted_blocks(
-                content,
-                should_truncate_text=role == "tool",
-            )
-        return entry
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True
@@ -2051,8 +1894,6 @@ class AgentLoop:
             message.get("tool_calls"),
             message.get("reasoning_content"),
             message.get("thinking_blocks"),
-            message.get("media"),
-            message.get("_meta"),
         )
 
     def _restore_runtime_checkpoint(self, session: Session) -> bool:
@@ -2063,76 +1904,51 @@ class AgentLoop:
         if not isinstance(checkpoint, dict):
             return False
 
+        assistant_message = checkpoint.get("assistant_message")
+        completed_tool_results = checkpoint.get("completed_tool_results") or []
+        pending_tool_calls = checkpoint.get("pending_tool_calls") or []
+
         restored_messages: list[dict[str, Any]] = []
-        turn_suffix = checkpoint.get("turn_suffix")
-        recovery_prefix = checkpoint.get("recovery_prefix")
-        if isinstance(turn_suffix, list):
-            restored_messages.extend(
-                copy.deepcopy(message)
-                for message in turn_suffix
-                if isinstance(message, dict)
-            )
-        else:
-            if isinstance(recovery_prefix, list):
-                restored_messages.extend(
-                    copy.deepcopy(message)
-                    for message in recovery_prefix
-                    if isinstance(message, dict)
-                )
-
-            assistant_message = checkpoint.get("assistant_message")
-            completed_tool_results = checkpoint.get("completed_tool_results") or []
-            pending_tool_calls = checkpoint.get("pending_tool_calls") or []
-            current_messages: list[dict[str, Any]] = []
-            if isinstance(assistant_message, dict):
-                restored = dict(assistant_message)
+        if isinstance(assistant_message, dict):
+            restored = dict(assistant_message)
+            restored.setdefault("timestamp", datetime.now().isoformat())
+            restored_messages.append(restored)
+        for message in completed_tool_results:
+            if isinstance(message, dict):
+                restored = dict(message)
                 restored.setdefault("timestamp", datetime.now().isoformat())
-                current_messages.append(restored)
-            for message in completed_tool_results:
-                if isinstance(message, dict):
-                    restored = dict(message)
-                    restored.setdefault("timestamp", datetime.now().isoformat())
-                    current_messages.append(restored)
-            for tool_call in pending_tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                tool_id = tool_call.get("id")
-                name = ((tool_call.get("function") or {}).get("name")) or "tool"
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_id,
-                        "name": name,
-                        "content": "Error: Task interrupted before this tool finished.",
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-            prefix_overlap = self._checkpoint_overlap(restored_messages, current_messages)
-            restored_messages.extend(current_messages[prefix_overlap:])
+                restored_messages.append(restored)
+        for tool_call in pending_tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_id = tool_call.get("id")
+            name = ((tool_call.get("function") or {}).get("name")) or "tool"
+            restored_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "name": name,
+                    "content": "Error: Task interrupted before this tool finished.",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
-        overlap = self._checkpoint_overlap(session.messages, restored_messages)
-        self._save_turn(session, restored_messages, overlap)
-
-        self._clear_pending_user_turn(session)
-        self._clear_runtime_checkpoint(session)
-        return True
-
-    def _checkpoint_overlap(
-        self,
-        existing_messages: list[dict[str, Any]],
-        restored_messages: list[dict[str, Any]],
-    ) -> int:
-        """Return the largest existing-tail/restored-prefix overlap."""
-        max_overlap = min(len(existing_messages), len(restored_messages))
+        overlap = 0
+        max_overlap = min(len(session.messages), len(restored_messages))
         for size in range(max_overlap, 0, -1):
-            existing = existing_messages[-size:]
+            existing = session.messages[-size:]
             restored = restored_messages[:size]
             if all(
                 self._checkpoint_message_key(left) == self._checkpoint_message_key(right)
                 for left, right in zip(existing, restored)
             ):
-                return size
-        return 0
+                overlap = size
+                break
+        session.messages.extend(restored_messages[overlap:])
+
+        self._clear_pending_user_turn(session)
+        self._clear_runtime_checkpoint(session)
+        return True
 
     def _restore_pending_user_turn(self, session: Session) -> bool:
         """Close a turn that only persisted the user message before crashing."""

@@ -5,14 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.tools.context import (
-    RequestContext,
-    bind_attachment_paths,
-    current_attachment_paths,
-    extend_attachment_paths,
-    request_context,
-    reset_attachment_paths,
-)
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
@@ -26,30 +19,6 @@ def _runtime(model: str = "test-model") -> LLMRuntime:
     provider = MagicMock(spec=LLMProvider)
     provider.generation = GenerationSettings()
     return LLMRuntime.capture(provider, model, context_window_tokens=128_000)
-
-
-@pytest.mark.asyncio
-async def test_attachment_paths_use_task_local_snapshots(tmp_path) -> None:
-    first = tmp_path / "first.txt"
-    second = tmp_path / "second.txt"
-    child_started = asyncio.Event()
-    release_child = asyncio.Event()
-
-    token = bind_attachment_paths([first])
-    try:
-        async def child_paths() -> frozenset:
-            child_started.set()
-            await release_child.wait()
-            return current_attachment_paths()
-
-        child = asyncio.create_task(child_paths())
-        await child_started.wait()
-        extend_attachment_paths([second])
-        assert current_attachment_paths() == frozenset({first, second})
-        release_child.set()
-        assert await child == frozenset({first})
-    finally:
-        reset_attachment_paths(token)
 
 
 @pytest.mark.asyncio

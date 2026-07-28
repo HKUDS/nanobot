@@ -32,22 +32,6 @@ def _make_bot(channel):
     return bot
 
 
-def test_relative_media_dir_is_stored_as_absolute_path(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    from nanobot.bus.queue import MessageBus
-    from nanobot.channels.qq.runtime import QQChannel, QQConfig
-
-    monkeypatch.chdir(tmp_path)
-    channel = QQChannel(
-        QQConfig(app_id="app", secret="secret", media_dir="relative-media"),
-        MessageBus(),
-    )
-
-    assert channel._media_root == (tmp_path / "relative-media").resolve()
-
-
 @pytest.mark.asyncio
 async def test_bot_connect_dns_error_accounts_for_sdk_pacing():
     import asyncio

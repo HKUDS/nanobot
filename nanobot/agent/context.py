@@ -20,7 +20,6 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.utils.document import is_image_file
 from nanobot.utils.helpers import (
     detect_image_mime,
     load_bundled_template,
@@ -250,7 +249,7 @@ class ContextBuilder:
         images = []
         for path in media:
             p = Path(path)
-            if not p.is_file() or not is_image_file(path):
+            if not p.is_file():
                 continue
             raw = p.read_bytes()
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]

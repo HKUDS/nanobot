@@ -96,6 +96,16 @@ class TestReadDedup:
         # Images should always return full content blocks, not a stub
         assert isinstance(second, list)
 
+    @pytest.mark.asyncio
+    async def test_known_text_extension_falls_back_to_latin1(self, tool, tmp_path):
+        f = tmp_path / "legacy.csv"
+        f.write_bytes("name\ncafé".encode("latin-1"))
+
+        result = await tool.execute(path=str(f))
+
+        assert "1| name" in result
+        assert "2| café" in result
+
 
 # ---------------------------------------------------------------------------
 # Cross-session isolation (issue #3571)

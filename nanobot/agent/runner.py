@@ -20,7 +20,6 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import (
-    ATTACHMENT_MEDIA_MESSAGE_META,
     RUNTIME_CONTEXT_MESSAGE_META,
     detach_runtime_context,
     reattach_runtime_context,
@@ -95,7 +94,6 @@ class AgentRunSpec:
     stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
-    checkpoint_start: int | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
@@ -160,26 +158,6 @@ class AgentRunner:
                 merged = dict(messages[-1])
                 left_meta = merged.get("_meta")
                 right_meta = injection.get("_meta")
-                internal_meta = dict(left_meta) if isinstance(left_meta, dict) else {}
-                if isinstance(right_meta, dict):
-                    for key, value in right_meta.items():
-                        internal_meta.setdefault(key, value)
-                attachment_media: list[str] = []
-                for meta in (left_meta, right_meta):
-                    values = (
-                        meta.get(ATTACHMENT_MEDIA_MESSAGE_META)
-                        if isinstance(meta, dict)
-                        else None
-                    )
-                    if not isinstance(values, list):
-                        continue
-                    for path in values:
-                        if isinstance(path, str) and path and path not in attachment_media:
-                            attachment_media.append(path)
-                if attachment_media:
-                    internal_meta[ATTACHMENT_MEDIA_MESSAGE_META] = attachment_media
-                if internal_meta:
-                    merged["_meta"] = internal_meta
                 left_marker = (
                     left_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
                     if isinstance(left_meta, dict)
@@ -211,6 +189,10 @@ class AgentRunner:
                             [*left_sources, *right_sources],
                             context_blocks,
                         )
+                        internal_meta = dict(left_meta) if isinstance(left_meta, dict) else {}
+                        if isinstance(right_meta, dict):
+                            for key, value in right_meta.items():
+                                internal_meta.setdefault(key, value)
                         internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
                         merged["_meta"] = internal_meta
                     merged["content"] = merged_content
@@ -237,10 +219,9 @@ class AgentRunner:
         """Drain pending injections. Returns (should_continue, updated_cycles).
 
         If injections are found and we haven't exceeded _MAX_INJECTION_CYCLES,
-        append them to *messages* and return (True, cycles+1) so the caller
-        continues the iteration loop. Real pending injections also checkpoint
-        the complete turn suffix after merging when *checkpoint_start* is set.
-        Otherwise return (False, cycles).
+        append them to *messages* (and emit a checkpoint if *assistant_message*
+        and *iteration* are both provided) and return (True, cycles+1) so the
+        caller continues the iteration loop.  Otherwise return (False, cycles).
         """
         injections: list[dict[str, Any]] = []
         real_injection = False
@@ -255,10 +236,9 @@ class AgentRunner:
             return False, injection_cycles
         if real_injection:
             injection_cycles += 1
-        checkpoint_start = spec.checkpoint_start if real_injection else None
         if assistant_message is not None:
             messages.append(assistant_message)
-            if iteration is not None and checkpoint_start is None:
+            if iteration is not None:
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -271,16 +251,6 @@ class AgentRunner:
                     },
                 )
         self._append_injected_messages(messages, injections)
-        if checkpoint_start is not None:
-            await self._emit_checkpoint(
-                spec,
-                {
-                    "phase": "pending_injection",
-                    "iteration": iteration,
-                    "model": spec.runtime.model,
-                    "turn_suffix": deepcopy(messages[checkpoint_start:]),
-                },
-            )
         if real_injection:
             logger.info(
                 "Injected {} follow-up message(s) {} ({}/{})",

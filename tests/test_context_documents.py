@@ -1,8 +1,8 @@
 """Tests for context builder media handling.
 
-The ContextBuilder._build_user_content method receives all persisted media but
-should only encode images. Document contents are read on demand through
-``read_file``.
+The ContextBuilder._build_user_content method should ONLY handle images.
+The processing layer turns non-image media into attachment path references;
+document contents are read on demand through ``read_file``.
 """
 
 from __future__ import annotations
@@ -35,19 +35,11 @@ def test_build_user_content_with_image_returns_list(tmp_path: Path) -> None:
     assert "text" in types
 
 
-def test_build_user_content_ignores_non_image_files(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+def test_build_user_content_ignores_non_image_files(tmp_path: Path) -> None:
     """Non-image files should be silently skipped — extraction is not context builder's job."""
     builder = _make_builder(tmp_path)
     txt = tmp_path / "notes.txt"
     txt.write_text("some text", encoding="utf-8")
-
-    def fail_full_read(_path: Path) -> bytes:
-        raise AssertionError("document content must not be read while building context")
-
-    monkeypatch.setattr(Path, "read_bytes", fail_full_read)
     result = builder._build_user_content("summarize", [str(txt)])
     assert result == "summarize"
 

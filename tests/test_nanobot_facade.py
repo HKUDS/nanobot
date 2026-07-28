@@ -454,8 +454,6 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     assert result.content == "done"
     assert result.usage["total_tokens"] == 3
     assert result.usage["provider_tokens"] == 3
-    bot._loop.sessions.invalidate("sdk:default")
-    assert bot._loop.sessions.get_or_create("sdk:default").messages == []
 
 
 @pytest.mark.asyncio

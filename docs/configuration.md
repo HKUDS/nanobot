@@ -1572,17 +1572,11 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
 Non-image attachments are included in the user message as local path references, without
-injecting their contents into the model prompt. The agent can inspect supported text,
-PDF, DOCX, XLSX, and PPTX files on demand with `read_file`, or pass the original path
-to another tool when exact file bytes are required. The deprecated
+injecting their contents into the model prompt. When file tools are enabled, the agent
+can inspect supported text, PDF, DOCX, XLSX, and PPTX files on demand with `read_file`,
+or pass the original path to another tool when exact file bytes are required. The deprecated
 `channels.extractDocumentText` setting is accepted for compatibility but ignored.
-Setting `tools.file.enable` to `false` disables all built-in file tools,
-including `read_file`, preserving the existing hard opt-out. To keep general
-filesystem tools disabled while allowing uploaded documents to be read on demand,
-also set `tools.file.allowAttachmentRead` to `true`. That explicit opt-in registers
-an attachment-scoped `read_file` that can only read exact files uploaded in the
-conversation, including files in channel-specific media directories, without
-granting directory, write, or shell access.
+Normal tool workspace and media access rules still apply to attachment paths.
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 
