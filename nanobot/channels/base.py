@@ -248,7 +248,15 @@ class BaseChannel(ABC):
         permission_id = authorization_id if authorization_id is not None else sender_id
         if not self.is_allowed(permission_id):
             if is_dm:
-                code = generate_code(self.name, str(sender_id))
+                try:
+                    code = generate_code(self.name, str(sender_id))
+                except OSError:
+                    # Transient pairing-store I/O failure: skip the pairing
+                    # reply for this message rather than crash the handler.
+                    self.logger.warning(
+                        "Pairing store unavailable; dropping DM from {}", sender_id
+                    )
+                    return
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
