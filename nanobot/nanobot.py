@@ -11,6 +11,7 @@ from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
+from nanobot.extensions.host import ExtensionHost
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
@@ -77,6 +78,9 @@ class Nanobot:
         self.sessions = SessionClient(loop)
         self.memory = MemoryClient(loop)
         self.runtime = RuntimeClient(loop)
+        self._extensions = ExtensionHost(loop, lambda: config) if config else None
+        self._extensions_started = False
+        self._extensions_lock = asyncio.Lock()
 
     @classmethod
     def from_config(
@@ -153,6 +157,7 @@ class Nanobot:
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
         """
+        await self._ensure_extensions()
         capture = SDKCaptureHook()
         per_run_hooks = [capture, *(hooks or [])]
         runtime = self._loop.runtime_resolver.resolve_override(
@@ -193,6 +198,7 @@ class Nanobot:
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
+        await self._ensure_extensions()
         override_runtime = self._loop.runtime_resolver.resolve_override(
             model=model,
             model_preset=model_preset,
@@ -316,7 +322,20 @@ class Nanobot:
 
     async def aclose(self) -> None:
         """Release resources held by this instance (MCP connections, etc.)."""
-        await self._loop.close_mcp()
+        try:
+            if self._extensions is not None:
+                await self._extensions.close()
+                self._extensions_started = False
+        finally:
+            await self._loop.close_mcp()
+
+    async def _ensure_extensions(self) -> None:
+        if self._extensions is None or self._extensions_started:
+            return
+        async with self._extensions_lock:
+            if not self._extensions_started:
+                await self._extensions.reload()
+                self._extensions_started = True
 
     async def __aenter__(self) -> Nanobot:
         return self

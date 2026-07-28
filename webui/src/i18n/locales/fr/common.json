@@ -58,7 +58,8 @@
     "automations": "Automatisations",
     "skills": {
       "title": "Compétences"
-    }
+    },
+    "extensions": "Extensions"
   },
   "settings": {
     "backToChat": "Retour au chat",
@@ -1247,5 +1248,51 @@
       "usePath": "Utiliser le chemin",
       "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine."
     }
+  },
+  "extensions": {
+    "backToChat": "Retour au chat",
+    "title": "Extensions",
+    "searchInstalled": "Rechercher des extensions",
+    "empty": {
+      "installed": "Aucune extension installée."
+    },
+    "installKind": "Source d’installation",
+    "source": {
+      "git": "Dépôt Git",
+      "local": "Dossier local"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/chemin/absolu/vers/extension",
+    "installAction": "Installer",
+    "details": {
+      "identity": "Identité",
+      "source": "Source",
+      "license": "Licence",
+      "homepage": "Page d’accueil",
+      "dependencies": "Dépendances",
+      "permissions": "Autorisations",
+      "diagnostics": "Diagnostics"
+    },
+    "permissionGranted": "Accordée",
+    "permissionPending": "Non accordée",
+    "revokePermissions": "Révoquer les autorisations",
+    "grantPermissions": "Accorder les autorisations",
+    "noPermissions": "Aucune autorisation hôte demandée.",
+    "revokeTrust": "Révoquer la confiance",
+    "trust": "Faire confiance",
+    "disable": "Désactiver",
+    "enable": "Activer",
+    "uninstall": "Désinstaller",
+    "uninstallTitle": "Désinstaller l’extension ?",
+    "uninstallDescription": "Cela supprime {{name}} et ses fichiers installés de nanobot.",
+    "cancel": "Annuler",
+    "status": {
+      "active": "Active",
+      "disabled": "Désactivée",
+      "untrusted": "Non approuvée",
+      "inactive": "Inactive"
+    },
+    "none": "Aucun",
+    "loading": "Chargement des extensions…"
   }
 }

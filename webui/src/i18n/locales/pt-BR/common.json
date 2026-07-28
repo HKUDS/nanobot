@@ -58,7 +58,8 @@
     "automations": "Automações",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "extensions": "Extensões"
   },
   "settings": {
     "backToChat": "Voltar para a conversa",
@@ -1261,5 +1262,51 @@
       "usePath": "Usar caminho",
       "absolutePathRequired": "Informe um caminho absoluto de pasta nesta máquina."
     }
+  },
+  "extensions": {
+    "backToChat": "Voltar ao chat",
+    "title": "Extensões",
+    "searchInstalled": "Buscar extensões",
+    "empty": {
+      "installed": "Nenhuma extensão instalada."
+    },
+    "installKind": "Origem da instalação",
+    "source": {
+      "git": "Repositório Git",
+      "local": "Pasta local"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/caminho/absoluto/para/extensão",
+    "installAction": "Instalar",
+    "details": {
+      "identity": "Identidade",
+      "source": "Origem",
+      "license": "Licença",
+      "homepage": "Página inicial",
+      "dependencies": "Dependências",
+      "permissions": "Permissões",
+      "diagnostics": "Diagnósticos"
+    },
+    "permissionGranted": "Concedida",
+    "permissionPending": "Não concedida",
+    "revokePermissions": "Revogar permissões",
+    "grantPermissions": "Conceder permissões",
+    "noPermissions": "Nenhuma permissão do host solicitada.",
+    "revokeTrust": "Revogar confiança",
+    "trust": "Confiar",
+    "disable": "Desativar",
+    "enable": "Ativar",
+    "uninstall": "Desinstalar",
+    "uninstallTitle": "Desinstalar extensão?",
+    "uninstallDescription": "Isso remove {{name}} e seus arquivos instalados do nanobot.",
+    "cancel": "Cancelar",
+    "status": {
+      "active": "Ativa",
+      "disabled": "Desativada",
+      "untrusted": "Não confiável",
+      "inactive": "Inativa"
+    },
+    "none": "Nenhum",
+    "loading": "Carregando extensões…"
   }
 }

@@ -58,7 +58,8 @@
     "automations": "Otomasi",
     "skills": {
       "title": "Skill"
-    }
+    },
+    "extensions": "Ekstensi"
   },
   "settings": {
     "backToChat": "Kembali ke chat",
@@ -1247,5 +1248,51 @@
       "usePath": "Gunakan path",
       "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
+  },
+  "extensions": {
+    "backToChat": "Kembali ke chat",
+    "title": "Ekstensi",
+    "searchInstalled": "Cari ekstensi",
+    "empty": {
+      "installed": "Belum ada ekstensi terpasang."
+    },
+    "installKind": "Sumber instalasi",
+    "source": {
+      "git": "Repositori Git",
+      "local": "Folder lokal"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/jalur/absolut/ke/ekstensi",
+    "installAction": "Pasang",
+    "details": {
+      "identity": "Identitas",
+      "source": "Sumber",
+      "license": "Lisensi",
+      "homepage": "Beranda",
+      "dependencies": "Dependensi",
+      "permissions": "Izin",
+      "diagnostics": "Diagnostik"
+    },
+    "permissionGranted": "Diberikan",
+    "permissionPending": "Belum diberikan",
+    "revokePermissions": "Cabut izin",
+    "grantPermissions": "Berikan izin",
+    "noPermissions": "Tidak meminta izin host.",
+    "revokeTrust": "Cabut kepercayaan",
+    "trust": "Percayai",
+    "disable": "Nonaktifkan",
+    "enable": "Aktifkan",
+    "uninstall": "Copot",
+    "uninstallTitle": "Copot ekstensi?",
+    "uninstallDescription": "Tindakan ini menghapus {{name}} dan berkas terpasangnya dari nanobot.",
+    "cancel": "Batal",
+    "status": {
+      "active": "Aktif",
+      "disabled": "Nonaktif",
+      "untrusted": "Belum dipercaya",
+      "inactive": "Tidak aktif"
+    },
+    "none": "Tidak ada",
+    "loading": "Memuat ekstensi…"
   }
 }

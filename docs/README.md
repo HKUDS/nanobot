@@ -33,6 +33,7 @@ Pick the row that matches what you want to accomplish next:
 | Add model fallbacks | [Configure Model Fallback](./guides/configure-model-fallback.md) |
 | Enable web search | [Configure Web Search](./guides/configure-web-search.md) |
 | Add an MCP tool server | [Configure MCP Tools](./guides/configure-mcp-tools.md) |
+| Install and govern an extension | [Extensions](./extensions.md) |
 | Generate images | [Image Generation](./image-generation.md) |
 | Schedule work or create a local trigger | [Automations](./automations.md) |
 | Understand and manage long-term memory | [Memory](./memory.md) |
@@ -79,6 +80,7 @@ These pages explain implementation and extension points. You do not need them to
 | Understand source ownership and runtime flow | [Architecture](./architecture.md) |
 | Set up a development environment | [Development](./development.md) and [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Add a channel package | [Channel Package Guide](./channel-package-guide.md) |
+| Publish an extension package | [Extension Authoring](./extension-authoring.md) |
 | Build the WebUI source | [WebUI Development](../webui/README.md) |
 
 If a command or screen no longer matches these docs, please [open an issue](https://github.com/HKUDS/nanobot/issues) with your nanobot version, operating system, and the page that needs correction.

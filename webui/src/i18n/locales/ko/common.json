@@ -58,7 +58,8 @@
     "automations": "자동화",
     "skills": {
       "title": "스킬"
-    }
+    },
+    "extensions": "확장 기능"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -1247,5 +1248,51 @@
       "usePath": "경로 사용",
       "absolutePathRequired": "이 머신의 절대 폴더 경로를 입력하세요."
     }
+  },
+  "extensions": {
+    "backToChat": "채팅으로 돌아가기",
+    "title": "확장",
+    "searchInstalled": "확장 검색",
+    "empty": {
+      "installed": "설치된 확장이 없습니다."
+    },
+    "installKind": "설치 소스",
+    "source": {
+      "git": "Git 저장소",
+      "local": "로컬 폴더"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/확장/절대/경로",
+    "installAction": "설치",
+    "details": {
+      "identity": "식별 정보",
+      "source": "소스",
+      "license": "라이선스",
+      "homepage": "홈페이지",
+      "dependencies": "종속성",
+      "permissions": "권한",
+      "diagnostics": "진단"
+    },
+    "permissionGranted": "허용됨",
+    "permissionPending": "허용되지 않음",
+    "revokePermissions": "권한 취소",
+    "grantPermissions": "권한 허용",
+    "noPermissions": "호스트 권한을 요청하지 않습니다.",
+    "revokeTrust": "신뢰 취소",
+    "trust": "신뢰",
+    "disable": "비활성화",
+    "enable": "활성화",
+    "uninstall": "제거",
+    "uninstallTitle": "확장을 제거할까요?",
+    "uninstallDescription": "nanobot에서 {{name}} 및 설치된 파일을 제거합니다.",
+    "cancel": "취소",
+    "status": {
+      "active": "활성",
+      "disabled": "비활성",
+      "untrusted": "신뢰 안 함",
+      "inactive": "중지됨"
+    },
+    "none": "없음",
+    "loading": "확장 로드 중…"
   }
 }

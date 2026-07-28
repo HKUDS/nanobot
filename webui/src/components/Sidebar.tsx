@@ -4,6 +4,7 @@ import {
   Brain,
   CalendarClock,
   Menu,
+  PackageOpen,
   Search,
   Settings,
   SquarePen,
@@ -36,10 +37,11 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenApps: () => void;
   onOpenSkills: () => void;
+  onOpenExtensions: () => void;
   onOpenAutomations: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | null;
+  activeUtility?: "apps" | "skills" | "extensions" | "automations" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -168,6 +170,13 @@ export function Sidebar(props: SidebarProps) {
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "skills"}
           icon={<Brain className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.extensions")}
+          onClick={props.onOpenExtensions}
+          active={props.activeUtility === "extensions"}
+          icon={<PackageOpen className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}

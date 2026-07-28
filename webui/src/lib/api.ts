@@ -7,6 +7,7 @@ import type {
   ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
+  ExtensionsPayload,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -56,6 +57,7 @@ const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
 const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
 const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
+const EXTENSION_VALUES_HEADER = "X-Nanobot-Extension-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -293,6 +295,45 @@ export async function fetchSkills(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchExtensions(
+  token: string,
+  base: string = "",
+): Promise<ExtensionsPayload> {
+  return request<ExtensionsPayload>(
+    `${base}/api/extensions`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export type ExtensionAction =
+  | "install"
+  | "enable"
+  | "disable"
+  | "trust"
+  | "untrust"
+  | "permissions"
+  | "uninstall";
+
+export async function runExtensionAction(
+  token: string,
+  action: ExtensionAction,
+  values: Record<string, unknown>,
+  base: string = "",
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    `${base}/api/extensions/${action}`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [EXTENSION_VALUES_HEADER]: encodeURIComponent(JSON.stringify(values)),
+      },
+    },
   );
 }
 

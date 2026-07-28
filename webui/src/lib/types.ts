@@ -734,6 +734,51 @@ export interface CliAppsPayload {
   };
 }
 
+export interface ExtensionDependencyInfo {
+  kind: string;
+  name: string;
+  specifier: string;
+  optional: boolean;
+}
+
+export interface ExtensionPermissionInfo {
+  name: string;
+  reason: string;
+}
+
+export interface ExtensionInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  homepage: string;
+  license: string;
+  location: string | null;
+  enabled: boolean;
+  trusted: boolean;
+  active: boolean;
+  requested_permissions: string[];
+  granted_permissions: string[];
+  source: string;
+  source_ref: string;
+  integrity: string;
+  installed_at: string;
+  dependencies: ExtensionDependencyInfo[];
+  permissions: ExtensionPermissionInfo[];
+}
+
+export interface ExtensionDiagnosticInfo {
+  extension_id: string;
+  code: string;
+  message: string;
+  severity: string;
+}
+
+export interface ExtensionsPayload {
+  extensions: ExtensionInfo[];
+  diagnostics: ExtensionDiagnosticInfo[];
+}
+
 export interface NanobotFeatureInfo {
   name: string;
   display_name: string;

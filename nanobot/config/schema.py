@@ -403,9 +403,15 @@ class ToolsConfig(Base):
             "webuiAllowRemotePackageInstall",
             "webui_allow_remote_package_install",
         ),
-    )  # allow non-local WebUI clients to install optional Python packages
+    )  # allow non-local WebUI clients to install optional support and extension packages
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+
+
+class ExtensionsConfig(Base):
+    """Global switch for external extension activation."""
+
+    enabled: bool = True
 
 
 class Config(BaseSettings):
@@ -418,6 +424,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    extensions: ExtensionsConfig = Field(default_factory=ExtensionsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),

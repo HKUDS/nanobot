@@ -25,21 +25,43 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._owners: dict[str, str] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: Tool, *, owner: str = "nanobot.core") -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
+        self._owners[tool.name] = owner
         self._cached_definitions = None
+
+    def register_if_absent(self, tool: Tool, *, owner: str = "nanobot.core") -> bool:
+        """Register a tool without replacing an existing capability."""
+        if tool.name in self._tools:
+            return False
+        self.register(tool, owner=owner)
+        return True
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+        self._owners.pop(name, None)
         self._cached_definitions = None
+
+    def unregister_owner(self, owner: str) -> None:
+        """Remove all tools registered by one extension."""
+        for name in [
+            name for name, registered_owner in self._owners.items()
+            if registered_owner == owner
+        ]:
+            self.unregister(name)
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
+
+    def owner(self, name: str) -> str | None:
+        """Return the extension ID that registered a tool."""
+        return self._owners.get(name)
 
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""

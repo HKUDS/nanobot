@@ -58,7 +58,8 @@
     "automations": "Automations",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "extensions": "Extensions"
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -1261,5 +1262,51 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "extensions": {
+    "backToChat": "Back to chat",
+    "title": "Extensions",
+    "searchInstalled": "Search extensions",
+    "empty": {
+      "installed": "No extensions installed."
+    },
+    "installKind": "Installation source",
+    "source": {
+      "git": "Git repository",
+      "local": "Local folder"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/absolute/path/to/extension",
+    "installAction": "Install",
+    "details": {
+      "identity": "Identity",
+      "source": "Source",
+      "license": "License",
+      "homepage": "Homepage",
+      "dependencies": "Dependencies",
+      "permissions": "Permissions",
+      "diagnostics": "Diagnostics"
+    },
+    "permissionGranted": "Granted",
+    "permissionPending": "Not granted",
+    "revokePermissions": "Revoke permissions",
+    "grantPermissions": "Grant permissions",
+    "noPermissions": "No host permissions requested.",
+    "revokeTrust": "Revoke trust",
+    "trust": "Trust",
+    "disable": "Disable",
+    "enable": "Enable",
+    "uninstall": "Uninstall",
+    "uninstallTitle": "Uninstall extension?",
+    "uninstallDescription": "This removes {{name}} and its installed files from nanobot.",
+    "cancel": "Cancel",
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "untrusted": "Untrusted",
+      "inactive": "Inactive"
+    },
+    "none": "None",
+    "loading": "Loading extensions…"
   }
 }

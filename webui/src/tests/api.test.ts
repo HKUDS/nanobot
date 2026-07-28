@@ -9,6 +9,7 @@ import {
   deleteSession,
   fetchFilePreview,
   fetchFilePreviewAvailability,
+  fetchExtensions,
   fetchAutomations,
   fetchApiService,
   fetchCliApps,
@@ -32,6 +33,7 @@ import {
   disableNanobotFeature,
   enableNanobotFeature,
   runAutomationAction,
+  runExtensionAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
@@ -79,6 +81,31 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("reads extension status and encodes extension mutation values", async () => {
+    await fetchExtensions("tok");
+    await runExtensionAction("tok", "install", {
+      source: "本地扩展",
+      kind: "local",
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/extensions",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+    const [, init] = vi.mocked(fetch).mock.calls[1];
+    const headers = new Headers(init?.headers);
+    expect(init?.method).toBe("POST");
+    expect(headers.get("Authorization")).toBe("Bearer tok");
+    expect(
+      JSON.parse(
+        decodeURIComponent(headers.get("X-Nanobot-Extension-Values") ?? ""),
+      ),
+    ).toEqual({ source: "本地扩展", kind: "local" });
   });
 
   it("passes pagination params when fetching a WebUI thread page", async () => {

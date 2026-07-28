@@ -18,6 +18,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
+| Manage extension packages | `nanobot extensions list` | Install, inspect, trust, enable, and remove native nanobot packages |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
 | Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OpenAI Codex, xAI subscription, and GitHub Copilot providers |
@@ -247,6 +248,39 @@ nanobot channels status
 ```
 
 See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
+
+## Extensions
+
+Extension installation, trust, permission grants, and enablement are separate
+operations:
+
+| Command | Description |
+|---|---|
+| `nanobot extensions list` | Show installed packages and activation policy |
+| `nanobot extensions inspect <id>` | Show identity, dependencies, requested permissions, and diagnostics |
+| `nanobot extensions install <url> --kind git [--ref <ref>]` | Install from a Git branch, tag, or commit |
+| `nanobot extensions install <path> --kind local` | Install from a local package directory |
+| `nanobot extensions permissions <id> [permissions...]` | Replace the exact granted permission set; omit values to revoke all |
+| `nanobot extensions trust <id>` | Approve executing the installed package |
+| `nanobot extensions untrust <id>` | Revoke trust and stop activation |
+| `nanobot extensions enable <id>` | Allow activation when every other gate passes |
+| `nanobot extensions disable <id>` | Stop activation without uninstalling |
+| `nanobot extensions uninstall <id>` | Remove the user-scope package after confirmation |
+| `nanobot extensions uninstall <id> --yes` | Remove without an interactive confirmation |
+
+Example:
+
+```bash
+nanobot extensions install https://github.com/acme/nanobot-review.git
+nanobot extensions inspect acme.review
+nanobot extensions permissions acme.review workspace.read
+nanobot extensions trust acme.review
+nanobot extensions enable acme.review
+```
+
+Installed packages live under `~/.nanobot/extensions/`. They do not execute
+until trusted. See [Extensions](./extensions.md) for the safety model and
+[Extension Authoring](./extension-authoring.md) for the native package contract.
 
 ## Optional Features
 

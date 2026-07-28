@@ -170,6 +170,8 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        extension_service: Any | None = None,
+        allow_remote_package_install: bool = False,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -190,6 +192,7 @@ class GatewayHTTPHandler:
         self._log = log
         self._runtime_surface = runtime_surface
 
+        from nanobot.webui.extensions_routes import WebUIExtensionsRouter
         from nanobot.webui.settings_api import runtime_capabilities as _rc
         from nanobot.webui.settings_routes import WebUISettingsRouter
 
@@ -205,6 +208,14 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
+        )
+        self.extensions_routes = WebUIExtensionsRouter(
+            service=extension_service,
+            check_api_token=self.check_api_token,
+            json_response=_http_json_response,
+            error_response=_http_error,
+            allow_remote_package_install=allow_remote_package_install,
+            logger=self._log,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -247,6 +258,9 @@ class GatewayHTTPHandler:
 
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
+        if response is not None:
+            return response
+        response = await self.extensions_routes.dispatch(connection, request, got)
         if response is not None:
             return response
 

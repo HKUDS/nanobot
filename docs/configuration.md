@@ -27,6 +27,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Configure model fallback | [`guides/configure-model-fallback.md`](./guides/configure-model-fallback.md) |
 | Add an OpenAI-compatible provider | [`guides/configure-openai-compatible-provider.md`](./guides/configure-openai-compatible-provider.md) |
 | Add Langfuse observability | [`guides/configure-langfuse-observability.md`](./guides/configure-langfuse-observability.md) |
+| Install and govern extensions | [`extensions.md`](./extensions.md) |
 | Secure a local AI agent | [`guides/secure-local-ai-agent.md`](./guides/secure-local-ai-agent.md) |
 | Deploy the gateway | [`guides/deploy-nanobot-gateway.md`](./guides/deploy-nanobot-gateway.md) |
 
@@ -45,6 +46,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Configure web search and fetch | [Web Tools](#web-tools) |
 | Enable image generation | [Image Generation](#image-generation) |
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
+| Enable or disable external extensions | [Extensions](#extensions) |
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
 | Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
@@ -64,6 +66,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
+| Enable external extension packages | `extensions.enabled` | `nanobot extensions list`, then inspect the package | [Extensions](#extensions), [Extension guide](./extensions.md) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Use the same explicit paths with `nanobot status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
@@ -1997,7 +2000,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to read-only bind into the `"bwrap"` sandbox with `--ro-bind-try`, such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while bwrap is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
 | `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to read-write bind into the `"bwrap"` sandbox with `--bind-try`, for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
-| `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
+| `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install optional support or extension packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin may install packages into this environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
@@ -2232,6 +2235,30 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 | Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+
+## Extensions
+
+Use the WebUI **Extensions** page or `nanobot extensions` commands for normal
+installation and trust decisions. Extension support can be disabled globally:
+
+```json
+{
+  "extensions": {
+    "enabled": true
+  }
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `extensions.enabled` | `true` | Enable external extension discovery and activation |
+
+Installed packages and their trust, permission, and activation state live
+under `~/.nanobot/extensions/`. Managing an extension does not rewrite
+`config.json`.
+
+See [Extensions](./extensions.md) for the safe install flow and
+[Extension Authoring](./extension-authoring.md) for the package contract.
 
 ## Disabled Skills
 

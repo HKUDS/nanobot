@@ -327,21 +327,71 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
-  it("places Automations after Skills in the main sidebar", async () => {
+  it("places Extensions between Skills and Automations in the main sidebar", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
     const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    const extensionsButton = within(sidebar).getByRole("button", {
+      name: "Extensions",
+    });
     const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
 
     expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(
-      skillsButton.compareDocumentPosition(automationsButton) &
+      skillsButton.compareDocumentPosition(extensionsButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      extensionsButton.compareDocumentPosition(automationsButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("opens Extensions as a standalone utility", async () => {
+    mockFetchRoutes({
+      "/api/extensions": {
+        extensions: [{
+          id: "nanobot.shell",
+          name: "Shell",
+          version: "1",
+          description: "Run shell commands.",
+          homepage: "",
+          license: "",
+          location: null,
+          enabled: true,
+          trusted: true,
+          active: true,
+          requested_permissions: [],
+          granted_permissions: [],
+          source: "native",
+          source_ref: "",
+          integrity: "",
+          installed_at: "",
+          dependencies: [],
+          permissions: [],
+        }],
+        diagnostics: [],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Extensions" }));
+
+    expect(await screen.findByRole("heading", { name: "Extensions" })).toBeInTheDocument();
+    expect(await screen.findByText("Shell")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Extensions" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(window.location.hash).toBe("#/extensions");
+    expect(document.title).toBe("Extensions · nanobot");
   });
 
   it("restores the Settings route after a restart fallback hash", async () => {

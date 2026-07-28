@@ -58,7 +58,8 @@
     "automations": "Tự động hóa",
     "skills": {
       "title": "Kỹ năng"
-    }
+    },
+    "extensions": "Tiện ích"
   },
   "settings": {
     "backToChat": "Quay lại chat",
@@ -1247,5 +1248,51 @@
       "usePath": "Dùng đường dẫn",
       "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này."
     }
+  },
+  "extensions": {
+    "backToChat": "Quay lại trò chuyện",
+    "title": "Tiện ích",
+    "searchInstalled": "Tìm tiện ích",
+    "empty": {
+      "installed": "Chưa cài tiện ích nào."
+    },
+    "installKind": "Nguồn cài đặt",
+    "source": {
+      "git": "Kho Git",
+      "local": "Thư mục cục bộ"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/đường/dẫn/tuyệt/đối/đến/tiện-ích",
+    "installAction": "Cài đặt",
+    "details": {
+      "identity": "Danh tính",
+      "source": "Nguồn",
+      "license": "Giấy phép",
+      "homepage": "Trang chủ",
+      "dependencies": "Phụ thuộc",
+      "permissions": "Quyền",
+      "diagnostics": "Chẩn đoán"
+    },
+    "permissionGranted": "Đã cấp",
+    "permissionPending": "Chưa cấp",
+    "revokePermissions": "Thu hồi quyền",
+    "grantPermissions": "Cấp quyền",
+    "noPermissions": "Không yêu cầu quyền máy chủ.",
+    "revokeTrust": "Thu hồi tin cậy",
+    "trust": "Tin cậy",
+    "disable": "Tắt",
+    "enable": "Bật",
+    "uninstall": "Gỡ cài đặt",
+    "uninstallTitle": "Gỡ tiện ích?",
+    "uninstallDescription": "Thao tác này xóa {{name}} và các tệp đã cài khỏi nanobot.",
+    "cancel": "Hủy",
+    "status": {
+      "active": "Đang hoạt động",
+      "disabled": "Đã tắt",
+      "untrusted": "Chưa tin cậy",
+      "inactive": "Không hoạt động"
+    },
+    "none": "Không có",
+    "loading": "Đang tải tiện ích…"
   }
 }

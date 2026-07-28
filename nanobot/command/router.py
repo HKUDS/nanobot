@@ -64,16 +64,57 @@ class CommandRouter:
         self._priority: dict[str, Handler] = {}
         self._exact: dict[str, Handler] = {}
         self._prefix: list[tuple[str, Handler]] = []
+        self._owners: dict[tuple[str, str], str] = {}
 
-    def priority(self, cmd: str, handler: Handler) -> None:
+    def priority(
+        self,
+        cmd: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._priority[cmd] = handler
+        self._owners[("priority", cmd)] = owner
 
-    def exact(self, cmd: str, handler: Handler) -> None:
+    def exact(
+        self,
+        cmd: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._exact[cmd] = handler
+        self._owners[("exact", cmd)] = owner
 
-    def prefix(self, pfx: str, handler: Handler) -> None:
+    def prefix(
+        self,
+        pfx: str,
+        handler: Handler,
+        *,
+        owner: str = "nanobot.core",
+    ) -> None:
         self._prefix.append((pfx, handler))
         self._prefix.sort(key=lambda p: len(p[0]), reverse=True)
+        self._owners[("prefix", pfx)] = owner
+
+    def owner(self, tier: str, command: str) -> str | None:
+        """Return the extension that owns one command registration."""
+        return self._owners.get((tier, command))
+
+    def unregister_owner(self, owner: str) -> None:
+        """Remove all command tiers registered by one extension."""
+        for (tier, command), registered_owner in list(self._owners.items()):
+            if registered_owner != owner:
+                continue
+            if tier == "priority":
+                self._priority.pop(command, None)
+            elif tier == "exact":
+                self._exact.pop(command, None)
+            else:
+                self._prefix = [
+                    item for item in self._prefix if item[0] != command
+                ]
+            self._owners.pop((tier, command), None)
 
     def is_priority(self, text: str) -> bool:
         return normalize_command_text(text).lower() in self._priority

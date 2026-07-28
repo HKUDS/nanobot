@@ -108,6 +108,16 @@ def test_suggest_name_updates_after_register_and_unregister() -> None:
     assert registry._suggest_name("read-file") == "readFile"
 
 
+def test_registry_tracks_and_removes_tool_owner() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("custom"), owner="acme.tools")
+
+    assert registry.owner("custom") == "acme.tools"
+
+    registry.unregister("custom")
+    assert registry.owner("custom") is None
+
+
 def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
@@ -310,6 +320,19 @@ def test_register_invalidates_cache() -> None:
     second = registry.get_definitions()
     assert first is not second
     assert len(second) == 2
+
+
+def test_register_if_absent_preserves_existing_tool_and_owner() -> None:
+    registry = ToolRegistry()
+    existing = _FakeTool("read_file")
+    registry.register(existing, owner="extension.example")
+
+    assert not registry.register_if_absent(
+        _FakeTool("read_file"),
+        owner="nanobot.mcp.example",
+    )
+    assert registry.get("read_file") is existing
+    assert registry.owner("read_file") == "extension.example"
 
 
 def test_unregister_invalidates_cache() -> None:

@@ -1437,6 +1437,17 @@ def test_make_provider_rejects_auto_dynamic_custom_prefix_without_api_base():
         make_provider(config)
 
 
+class _FakeExtensionHost:
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def reload(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""
@@ -1450,6 +1461,7 @@ def mock_agent_runtime(tmp_path):
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
          patch("nanobot.cron.service.CronService"), \
+         patch("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost), \
          patch("nanobot.cli.commands.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
         agent_loop.channels_config = None
@@ -1538,6 +1550,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1580,6 +1593,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1630,6 +1644,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -1686,6 +1701,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr(
         "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -1861,6 +1877,7 @@ def _patch_cli_command_runtime(
 ) -> None:
     provider_factory = make_provider or (lambda _config: _fake_provider())
 
+    monkeypatch.setattr("nanobot.extensions.host.ExtensionHost", _FakeExtensionHost)
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         set_config_path or (lambda _path: None),
@@ -2443,10 +2460,10 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
             seen["workspace"] = kwargs["workspace"]
 
         async def _connect_mcp(self) -> None:
-            return None
+            seen["mcp_connected"] = True
 
         async def close_mcp(self) -> None:
-            return None
+            seen["mcp_closed"] = True
 
     def _fake_create_app(
         agent_loop,
@@ -3612,6 +3629,21 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
     assert seen["api_key"] == "secret"
+
+
+def test_serve_preserves_mcp_lifecycle(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    seen: dict[str, object] = {}
+    _patch_serve_runtime(monkeypatch, Config(), seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+    api_app = seen["api_app"]
+    asyncio.run(api_app.on_startup[0](api_app))
+    asyncio.run(api_app.on_cleanup[0](api_app))
+
+    assert result.exit_code == 0
+    assert seen["mcp_connected"] is True
+    assert seen["mcp_closed"] is True
 
 
 def test_trigger_cli_queues_message_in_workspace(

@@ -58,7 +58,8 @@
     "automations": "自动任务",
     "skills": {
       "title": "技能"
-    }
+    },
+    "extensions": "扩展"
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -1261,5 +1262,51 @@
       "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
     }
+  },
+  "extensions": {
+    "backToChat": "返回聊天",
+    "title": "扩展",
+    "searchInstalled": "搜索扩展",
+    "empty": {
+      "installed": "尚未安装扩展。"
+    },
+    "installKind": "安装来源",
+    "source": {
+      "git": "Git 仓库",
+      "local": "本地文件夹"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/扩展的绝对路径",
+    "installAction": "安装",
+    "details": {
+      "identity": "标识",
+      "source": "来源",
+      "license": "许可证",
+      "homepage": "主页",
+      "dependencies": "依赖",
+      "permissions": "权限",
+      "diagnostics": "诊断"
+    },
+    "permissionGranted": "已授予",
+    "permissionPending": "未授予",
+    "revokePermissions": "撤销权限",
+    "grantPermissions": "授予权限",
+    "noPermissions": "未请求宿主权限。",
+    "revokeTrust": "撤销信任",
+    "trust": "信任",
+    "disable": "停用",
+    "enable": "启用",
+    "uninstall": "卸载",
+    "uninstallTitle": "卸载扩展？",
+    "uninstallDescription": "这会从 nanobot 中移除 {{name}} 及其已安装文件。",
+    "cancel": "取消",
+    "status": {
+      "active": "运行中",
+      "disabled": "已停用",
+      "untrusted": "未信任",
+      "inactive": "未运行"
+    },
+    "none": "无",
+    "loading": "正在加载扩展…"
   }
 }

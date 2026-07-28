@@ -58,7 +58,8 @@
     "automations": "自動タスク",
     "skills": {
       "title": "スキル"
-    }
+    },
+    "extensions": "拡張機能"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -1247,5 +1248,51 @@
       "usePath": "パスを使用",
       "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
+  },
+  "extensions": {
+    "backToChat": "チャットに戻る",
+    "title": "拡張機能",
+    "searchInstalled": "拡張機能を検索",
+    "empty": {
+      "installed": "拡張機能はインストールされていません。"
+    },
+    "installKind": "インストール元",
+    "source": {
+      "git": "Git リポジトリ",
+      "local": "ローカルフォルダー"
+    },
+    "installGitPlaceholder": "https://github.com/acme/extension.git",
+    "installLocalPlaceholder": "/拡張機能への絶対パス",
+    "installAction": "インストール",
+    "details": {
+      "identity": "識別情報",
+      "source": "ソース",
+      "license": "ライセンス",
+      "homepage": "ホームページ",
+      "dependencies": "依存関係",
+      "permissions": "権限",
+      "diagnostics": "診断"
+    },
+    "permissionGranted": "許可済み",
+    "permissionPending": "未許可",
+    "revokePermissions": "権限を取り消す",
+    "grantPermissions": "権限を許可",
+    "noPermissions": "ホスト権限は要求されていません。",
+    "revokeTrust": "信頼を取り消す",
+    "trust": "信頼する",
+    "disable": "無効化",
+    "enable": "有効化",
+    "uninstall": "アンインストール",
+    "uninstallTitle": "拡張機能をアンインストールしますか？",
+    "uninstallDescription": "{{name}} とインストール済みファイルを nanobot から削除します。",
+    "cancel": "キャンセル",
+    "status": {
+      "active": "有効",
+      "disabled": "無効",
+      "untrusted": "未信頼",
+      "inactive": "停止中"
+    },
+    "none": "なし",
+    "loading": "拡張機能を読み込み中…"
   }
 }
