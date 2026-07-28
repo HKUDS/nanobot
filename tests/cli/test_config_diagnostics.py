@@ -8,6 +8,10 @@ from nanobot.cli.commands import app
 runner = CliRunner()
 
 
+def _without_rendered_line_breaks(output: str) -> str:
+    return "".join(output.splitlines())
+
+
 def _write_ready_config(config_path, *, channels: dict | None = None) -> None:
     config_path.write_text(
         json.dumps(
@@ -241,7 +245,7 @@ def test_gateway_provider_setup_failure_points_to_shortest_routes(
     assert "Settings → Models" in result.stdout
     assert "nanobot onboard --wizard" in result.stdout
     assert "nanobot status --config" in result.stdout
-    assert config_path.name in result.stdout
+    assert config_path.name in _without_rendered_line_breaks(result.stdout)
     assert "Traceback" not in result.stdout
     assert not workspace.exists()
 
@@ -289,7 +293,7 @@ def test_runtime_config_validation_is_redacted_and_actionable(
     assert summary in result.stdout
     assert "channels.websocket.port" in result.stdout
     assert retry_command in result.stdout
-    assert config_path.name in result.stdout
+    assert config_path.name in _without_rendered_line_breaks(result.stdout)
     assert invalid_value not in result.stdout
     assert "input_value" not in result.stdout
     assert "errors.pydantic.dev" not in result.stdout
