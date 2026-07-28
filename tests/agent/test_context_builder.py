@@ -244,38 +244,38 @@ class TestBundledToolContract:
 
 
 # ---------------------------------------------------------------------------
-# _build_user_content
+# build_user_content
 # ---------------------------------------------------------------------------
 
 
 class TestBuildUserContent:
     def test_no_media_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", None)
+        result = builder.build_user_content("hello", None)
         assert result == "hello"
 
     def test_empty_media_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [])
+        result = builder.build_user_content("hello", [])
         assert result == "hello"
 
     def test_nonexistent_media_file_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", ["/nonexistent/image.png"])
+        result = builder.build_user_content("hello", ["/nonexistent/image.png"])
         assert result == "hello"
 
     def test_non_image_file_returns_string(self, tmp_path):
         txt = tmp_path / "doc.txt"
         txt.write_text("not an image", encoding="utf-8")
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(txt)])
+        result = builder.build_user_content("hello", [str(txt)])
         assert result == "hello"
 
     def test_valid_image_returns_list(self, tmp_path):
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(png)])
+        result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
         assert len(result) == 2
         assert result[0]["type"] == "image_url"
@@ -287,7 +287,7 @@ class TestBuildUserContent:
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(png)])
+        result = builder.build_user_content("hello", [str(png)])
         assert "_meta" in result[0]
         assert "path" in result[0]["_meta"]
 

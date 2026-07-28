@@ -209,7 +209,7 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
-        user_content = self._build_user_content(current_message, media)
+        user_content = self.build_user_content(current_message, image_paths=media)
         blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
         merged, runtime_context_meta = append_runtime_context(user_content, blocks)
         messages = [
@@ -241,27 +241,33 @@ class ContextBuilder:
         messages.append(current)
         return messages
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
-        if not media:
+    def build_user_content(
+        self,
+        text: str,
+        image_paths: list[str] | None,
+    ) -> str | list[dict[str, Any]]:
+        """Build user message content from prefiltered image paths."""
+        if not image_paths:
             return text
 
-        images = []
-        for path in media:
+        image_blocks = []
+        for path in image_paths:
             p = Path(path)
             if not p.is_file():
                 continue
             raw = p.read_bytes()
+            # Re-detect from the bytes used for the request: the file may have
+            # changed since attachment routing, and the data URL needs its MIME.
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({
+            image_blocks.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
                 "_meta": {"path": str(p)},
             })
 
-        if not images:
+        if not image_blocks:
             return text
-        return images + [{"type": "text", "text": text}]
+        return image_blocks + [{"type": "text", "text": text}]
