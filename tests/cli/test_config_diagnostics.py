@@ -37,11 +37,45 @@ def test_status_reports_ready_provider_and_next_step(tmp_path) -> None:
     result = runner.invoke(app, ["status", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert "Agent: ✓ provider/model setup is ready" in result.stdout
+    assert "Agent: ✓ provider/model configuration is ready" in result.stdout
     assert "Ollama:" in result.stdout
     assert "Model: ollama/llama3.2" in result.stdout
     assert 'nanobot agent -m "Hello!"' in result.stdout
     assert "Status does not call the model" in result.stdout
+
+
+def test_status_validates_bedrock_without_constructing_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nanobot.providers.bedrock_provider import BedrockProvider
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": "bedrock/amazon.nova-lite-v1:0",
+                        "provider": "bedrock",
+                    }
+                },
+                "providers": {"bedrock": {"region": "us-east-1"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _unexpected_init(*_args, **_kwargs) -> None:
+        pytest.fail("status must not construct a provider client")
+
+    monkeypatch.setattr(BedrockProvider, "__init__", _unexpected_init)
+
+    result = runner.invoke(app, ["status", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert "Agent: ✓ provider/model configuration is ready" in result.stdout
+    assert "Status does not call the model or verify network access" in result.stdout
 
 
 def test_status_reports_missing_provider_with_shortest_setup_routes(tmp_path) -> None:
@@ -68,7 +102,7 @@ def test_status_readiness_does_not_validate_channel_configuration(tmp_path) -> N
     result = runner.invoke(app, ["status", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert "Agent: ✓ provider/model setup is ready" in result.stdout
+    assert "Agent: ✓ provider/model configuration is ready" in result.stdout
     assert "channels.websocket" not in result.stdout
 
 
@@ -115,6 +149,29 @@ def test_status_reports_missing_env_var_at_field(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "providers.openrouter.apiKey" in result.stdout
     assert name in result.stdout
+    assert "OpenRouter: not set" in result.stdout
+    assert "OpenRouter: ✓" not in result.stdout
+
+
+def test_webui_reports_malformed_environment_config_without_traceback(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "missing.json"
+    invalid_value = "sensitive-not-json"
+    monkeypatch.setenv("NANOBOT_PROVIDERS", invalid_value)
+
+    result = runner.invoke(
+        app,
+        ["webui", "--config", str(config_path), "--yes", "--no-open"],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "Environment-based configuration could not be parsed" in result.stdout
+    assert "nanobot status --config" in result.stdout
+    assert invalid_value not in result.stdout
+    assert not config_path.exists()
 
 
 @pytest.mark.parametrize(

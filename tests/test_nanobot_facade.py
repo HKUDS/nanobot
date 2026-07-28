@@ -74,6 +74,26 @@ def test_from_config_missing_file():
         Nanobot.from_config("/nonexistent/config.json")
 
 
+def test_from_config_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nanobot.config.errors import ConfigLoadError
+
+    name = "NANOBOT_TEST_SDK_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        Nanobot.from_config(config_path)
+
+    assert exc_info.value.path == config_path.resolve()
+
+
 def test_from_config_creates_instance(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)

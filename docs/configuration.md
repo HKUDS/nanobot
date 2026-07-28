@@ -90,7 +90,9 @@ Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` 
 
 Any string value in `config.json` can use `${VAR_NAME}`. Resolution runs once at startup, in memory only — resolved values are never written back to disk, so editing config through `nanobot onboard` or the WebUI preserves the placeholder.
 
-If a referenced variable is unset, nanobot fails fast at startup with `ValueError: Environment variable 'NAME' referenced in config is not set`.
+If a referenced variable is unset, nanobot fails fast and reports the exact config field
+and variable name without echoing the field value. Run `nanobot status` with the same
+`--config` path to inspect the problem.
 
 ### More examples
 

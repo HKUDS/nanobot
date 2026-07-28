@@ -33,7 +33,10 @@ def load_model_preset_catalog(
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return configured_model_presets(
-        resolve_config_env_vars(load_config(config_path)),
+        resolve_config_env_vars(
+            load_config(config_path),
+            config_path=config_path,
+        ),
     )
 
 

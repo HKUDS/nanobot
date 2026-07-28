@@ -13,6 +13,24 @@ def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
     assert config.agents.defaults.model
 
 
+def test_load_config_reports_malformed_environment_safely(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "missing.json"
+    invalid_value = "sensitive-not-json"
+    monkeypatch.setenv("NANOBOT_PROVIDERS", invalid_value)
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_config(config_path)
+
+    error = exc_info.value
+    assert error.kind == "invalid_schema"
+    assert error.path == config_path
+    assert "complex NANOBOT_* values use valid JSON" in str(error)
+    assert invalid_value not in str(error)
+
+
 def test_load_config_invalid_json_fails_fast(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text("{broken json", encoding="utf-8")

@@ -21,6 +21,16 @@ class ProviderSnapshot:
     model_preset: str | None = None
 
 
+@dataclass(frozen=True)
+class _ProviderSetup:
+    resolved: ModelPresetConfig
+    model: str
+    provider_name: str
+    provider_config: ProviderConfig | None
+    spec: ProviderSpec | None
+    backend: str
+
+
 def _resolve_model_preset(
     config: Config,
     *,
@@ -40,13 +50,13 @@ def _provider_extra_headers(
     return headers or None
 
 
-def _make_provider_core(
+def _resolve_provider_setup(
     config: Config,
     *,
     preset: ModelPresetConfig,
     model: str | None = None,
-) -> LLMProvider:
-    """Create a plain LLM provider without failover wrapping."""
+) -> _ProviderSetup:
+    """Resolve and validate provider configuration without constructing a client."""
     model = model or preset.model
     provider_name = config.get_provider_name(model, preset=preset)
     p = config.get_provider(model, preset=preset)
@@ -86,6 +96,51 @@ def _make_provider_core(
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
+
+    return _ProviderSetup(
+        resolved=preset,
+        model=model,
+        provider_name=provider_name,
+        provider_config=p,
+        spec=spec,
+        backend=backend,
+    )
+
+
+def validate_provider_setup(
+    config: Config,
+    *,
+    preset_name: str | None = None,
+    preset: ModelPresetConfig | None = None,
+    model: str | None = None,
+) -> None:
+    """Validate local provider/model settings without loading a provider client."""
+    resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
+    _resolve_provider_setup(
+        config,
+        preset=resolved,
+        model=model,
+    )
+
+
+def _make_provider_core(
+    config: Config,
+    *,
+    preset: ModelPresetConfig,
+    model: str | None = None,
+) -> LLMProvider:
+    """Create a plain LLM provider without failover wrapping."""
+    setup = _resolve_provider_setup(
+        config,
+        preset=preset,
+        model=model,
+    )
+    resolved = setup.resolved
+    model = setup.model
+    provider_name = setup.provider_name
+    p = setup.provider_config
+    spec = setup.spec
+    backend = setup.backend
 
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -317,6 +372,9 @@ def load_provider_snapshot(
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return build_provider_snapshot(
-        resolve_config_env_vars(load_config(config_path)),
+        resolve_config_env_vars(
+            load_config(config_path),
+            config_path=config_path,
+        ),
         preset_name=preset_name,
     )

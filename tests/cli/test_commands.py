@@ -1833,12 +1833,10 @@ def _test_provider_snapshot(provider: object, config: Config) -> ProviderSnapsho
 
 
 def _patch_webui_provider_ready(monkeypatch) -> None:
-    provider = _fake_provider()
-
-    def _snapshot(config: Config, **_kwargs) -> ProviderSnapshot:
-        return _test_provider_snapshot(provider, config)
-
-    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _snapshot)
+    monkeypatch.setattr(
+        "nanobot.providers.factory.validate_provider_setup",
+        lambda _config: None,
+    )
 
 
 def _patch_gateway_ports_free(monkeypatch) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
+from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
 from nanobot.config.schema import Config, _resolve_tool_config_refs
@@ -50,6 +51,15 @@ def load_config(config_path: Path | None = None) -> Config:
     if not path.exists():
         try:
             config = Config()
+        except SettingsError as exc:
+            raise ConfigLoadError(
+                path,
+                kind="invalid_schema",
+                summary=(
+                    "Environment-based configuration could not be parsed. "
+                    "Check that complex NANOBOT_* values use valid JSON."
+                ),
+            ) from exc
         except ValidationError as exc:
             raise ConfigLoadError(
                 path,

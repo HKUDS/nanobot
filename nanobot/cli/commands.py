@@ -957,11 +957,11 @@ def _load_webui_setup_config(config_path: Path) -> Config:
 
 
 def _provider_setup_error(config: Config) -> str | None:
-    """Return the provider setup error, or None when the current model can start."""
-    from nanobot.providers.factory import build_provider_snapshot
+    """Return a local provider/model configuration error, or None."""
+    from nanobot.providers.factory import validate_provider_setup
 
     try:
-        build_provider_snapshot(config)
+        validate_provider_setup(config)
     except ValueError as exc:
         return str(exc)
     return None
@@ -1479,7 +1479,10 @@ def webui(
         setup_config.agents.defaults.workspace = workspace
 
     try:
-        resolved_setup_config = resolve_config_env_vars(setup_config.model_copy(deep=True))
+        resolved_setup_config = resolve_config_env_vars(
+            setup_config.model_copy(deep=True),
+            config_path=config_path,
+        )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -2738,7 +2741,7 @@ def status(
 
     if config_path.exists():
         from nanobot.config.errors import ConfigLoadError
-        from nanobot.config.loader import resolve_config_env_vars
+        from nanobot.config.loader import resolve_config_env_vars, resolve_env_refs
         from nanobot.providers.registry import PROVIDERS
 
         _model, _preset_tag = _model_display(loaded)
@@ -2761,7 +2764,7 @@ def status(
                 _print_model_setup_steps(config_path)
             else:
                 provider_ready = True
-                console.print("Agent: [green]✓ provider/model setup is ready[/green]")
+                console.print("Agent: [green]✓ provider/model configuration is ready[/green]")
 
         # Check API keys from registry
         for spec in PROVIDERS:
@@ -2772,12 +2775,12 @@ def status(
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
-                if p.api_base:
+                if resolve_env_refs(p.api_base or ""):
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
-                has_key = bool(p.api_key)
+                has_key = bool(resolve_env_refs(p.api_key or ""))
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
 
         if provider_ready:

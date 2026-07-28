@@ -23,7 +23,7 @@ This separates failures into layers:
 | Layer | What it proves |
 |---|---|
 | `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace, environment references, and whether the active provider/model can start |
+| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
 | `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
 | `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
 
@@ -35,7 +35,8 @@ WebUI **Settings → Models** or the CLI setup wizard, then prints the command t
 ## How to Read `nanobot status`
 
 `nanobot status` does not call a model. It checks the selected config and workspace,
-resolves environment references, and verifies that the active provider/model can be constructed.
+resolves environment references, and validates the local settings required by the active
+provider/model without constructing a provider client.
 
 The output has this shape:
 
@@ -45,7 +46,7 @@ nanobot Status
 Config: /path/to/config.json ✓
 Workspace: /path/to/workspace ✓
 Model: provider/model-name (preset: primary)
-Agent: ✓ provider/model setup is ready
+Agent: ✓ provider/model configuration is ready
 Provider A: not set
 Provider B: ✓
 Local Provider: ✓ http://localhost:11434/v1
@@ -59,7 +60,7 @@ Read it like this:
 | `Config` | It points to the config file you meant to use and shows `✓`. | Run `nanobot onboard`, or pass `--config` to `nanobot agent`, `gateway`, or `serve` when testing a non-default instance. |
 | `Workspace` | It points to the workspace you meant to use and shows `✓`. | Run `nanobot onboard`, create the folder, fix permissions, or pass `--workspace` on commands that support it. |
 | `Model` | It shows the active model or the preset name you expect. | Set `agents.defaults.modelPreset` to the intended preset, or check `/model` if you changed models during a chat session. |
-| `Agent` | It says `provider/model setup is ready`. | Follow the printed WebUI or CLI setup route, then run `nanobot status` again. |
+| `Agent` | It says `provider/model configuration is ready`. | Follow the printed WebUI or CLI setup route, then run `nanobot status` again. |
 | Provider rows | The provider used by the active preset shows `✓`, an OAuth marker, or a local URL. | Configure only the active provider first. It is normal for unused providers to say `not set`. |
 
 If `nanobot status` looks right but `nanobot agent -m "Hello!"` fails, the install and config paths are probably fine. Continue with [Provider and Model Problems](#provider-and-model-problems).
