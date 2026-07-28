@@ -24,24 +24,34 @@ def map_finish_reason(status: str | None) -> str:
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
+def _to_dict(obj: Any) -> dict[str, Any]:
+    if isinstance(obj, dict):
+        return obj
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        res = dump()
+        if isinstance(res, dict):
+            return res
+    if hasattr(obj, "__dict__"):
+        return vars(obj)
+    return {}
+
+
 def _usage_from_response_obj(response: Any) -> dict[str, int]:
     usage_raw = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
     if not usage_raw:
         return {}
-    if not isinstance(usage_raw, dict):
-        dump = getattr(usage_raw, "model_dump", None)
-        usage_raw = dump() if callable(dump) else vars(usage_raw)
-    prompt_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0)
+    usage_dict = _to_dict(usage_raw)
+    prompt_tokens = int(usage_dict.get("input_tokens") or usage_dict.get("prompt_tokens") or 0)
     completion_tokens = int(
-        usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0
+        usage_dict.get("output_tokens") or usage_dict.get("completion_tokens") or 0
     )
-    total_tokens = int(usage_raw.get("total_tokens") or prompt_tokens + completion_tokens)
+    total_tokens = int(usage_dict.get("total_tokens") or prompt_tokens + completion_tokens)
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
-
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
     parsed = parse_tool_arguments(args_raw)
@@ -255,65 +265,52 @@ async def consume_sse_with_reasoning(
 def _extract_reasoning_summary_from_output(output: Any) -> str | None:
     parts: list[str] = []
     for item in output or []:
-        if not isinstance(item, dict):
-            dump = getattr(item, "model_dump", None)
-            item = dump() if callable(dump) else vars(item)
-        if item.get("type") != "reasoning":
+        item_dict = _to_dict(item)
+        if item_dict.get("type") != "reasoning":
             continue
-        for summary in item.get("summary") or []:
-            if not isinstance(summary, dict):
-                dump = getattr(summary, "model_dump", None)
-                summary = dump() if callable(dump) else vars(summary)
-            if summary.get("type") == "summary_text" and summary.get("text"):
-                parts.append(summary["text"])
+        for summary in item_dict.get("summary") or []:
+            summary_dict = _to_dict(summary)
+            if summary_dict.get("type") == "summary_text" and summary_dict.get("text"):
+                parts.append(summary_dict["text"])
     return "".join(parts) or None
-
 
 def parse_response_output(response: Any) -> LLMResponse:
     """Parse an SDK ``Response`` object into an ``LLMResponse``."""
-    if not isinstance(response, dict):
-        dump = getattr(response, "model_dump", None)
-        response = dump() if callable(dump) else vars(response)
+    response_dict = _to_dict(response)
 
-    output = response.get("output") or []
+    output = response_dict.get("output") or []
     content_parts: list[str] = []
     tool_calls: list[ToolCallRequest] = []
     reasoning_content: str | None = None
 
     for item in output:
-        if not isinstance(item, dict):
-            dump = getattr(item, "model_dump", None)
-            item = dump() if callable(dump) else vars(item)
+        item_dict = _to_dict(item)
 
-        item_type = item.get("type")
+        item_type = item_dict.get("type")
         if item_type == "message":
-            for block in item.get("content") or []:
-                if not isinstance(block, dict):
-                    dump = getattr(block, "model_dump", None)
-                    block = dump() if callable(dump) else vars(block)
-                if block.get("type") == "output_text":
-                    content_parts.append(block.get("text") or "")
+            for block in item_dict.get("content") or []:
+                block_dict = _to_dict(block)
+                if block_dict.get("type") == "output_text":
+                    content_parts.append(block_dict.get("text") or "")
         elif item_type == "reasoning":
-            for s in item.get("summary") or []:
-                if not isinstance(s, dict):
-                    dump = getattr(s, "model_dump", None)
-                    s = dump() if callable(dump) else vars(s)
-                if s.get("type") == "summary_text" and s.get("text"):
-                    reasoning_content = (reasoning_content or "") + s["text"]
+            for s in item_dict.get("summary") or []:
+                s_dict = _to_dict(s)
+                if s_dict.get("type") == "summary_text" and s_dict.get("text"):
+                    reasoning_content = (reasoning_content or "") + s_dict["text"]
         elif item_type == "function_call":
-            call_id = item.get("call_id") or ""
-            item_id = item.get("id") or "fc_0"
-            args_raw = _tool_arguments_source(item.get("arguments"))
-            args = _parse_tool_call_arguments(args_raw, item.get("name"))
+            call_id = item_dict.get("call_id") or ""
+            item_id = item_dict.get("id") or "fc_0"
+            args_raw = _tool_arguments_source(item_dict.get("arguments"))
+            args = _parse_tool_call_arguments(args_raw, item_dict.get("name"))
             tool_calls.append(ToolCallRequest(
                 id=f"{call_id}|{item_id}",
-                name=item.get("name") or "",
+                name=item_dict.get("name") or "",
                 arguments=args,
             ))
 
-    usage = _usage_from_response_obj(response)
+    usage = _usage_from_response_obj(response_dict)
 
-    status = response.get("status")
+    status = response_dict.get("status")
     finish_reason = map_finish_reason(status)
 
     return LLMResponse(

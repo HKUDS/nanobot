@@ -12,6 +12,7 @@ from nanobot.providers.openai_responses.converters import (
     split_tool_call_id,
 )
 from nanobot.providers.openai_responses.parsing import (
+    _extract_reasoning_summary_from_output,
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
@@ -523,6 +524,25 @@ class TestParseResponseOutput:
         assert result.usage["completion_tokens"] == 50
         assert result.usage["total_tokens"] == 150
 
+    def test_parse_response_output_and_extract_summary_handle_primitive_items(self):
+        """parse_response_output and _extract_reasoning_summary_from_output must safely handle non-dict primitive items.
+
+        Prevents TypeError: vars() argument must have __dict__ attribute when SSE or SDK outputs contain string or
+        primitive list items without __dict__ or model_dump methods.
+        """
+        resp = {
+            "output": [
+                "raw string item",
+                123,
+                {"type": "reasoning", "summary": ["raw summary string", 456]},
+                {"type": "message", "content": ["raw text block", {"type": "output_text", "text": "hello"}]},
+            ],
+            "status": "completed",
+            "usage": 100,
+        }
+        result = parse_response_output(resp)
+        assert result.content == "hello"
+        assert _extract_reasoning_summary_from_output(["primitive", 123]) is None
 
 # ======================================================================
 # parsing - consume_sse
