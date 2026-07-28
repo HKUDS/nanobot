@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
-  Download,
   ExternalLink,
   Loader2,
+  Plus,
   Search,
   ShieldAlert,
 } from "lucide-react";
@@ -476,9 +476,16 @@ function MarketplaceSkillRow({
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
   const { t } = useTranslation();
+  const actionLabel = t(
+    isInstalling
+      ? "settings.skills.marketplaceInstalling"
+      : installed
+        ? "settings.skills.marketplaceInstalled"
+        : "settings.skills.marketplaceInstall",
+  );
 
   return (
-    <div className="flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
+    <div className="group flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
       {skill.rank ? (
         <span className="w-6 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/65 sm:w-7 sm:text-[12px]">
           #{skill.rank}
@@ -523,47 +530,31 @@ function MarketplaceSkillRow({
       {skill.provider === "skills_sh" ? <TrendSparkline values={trend} /> : null}
       <Button
         type="button"
-        aria-label={`${t(
-          isInstalling
-            ? "settings.skills.marketplaceInstalling"
-            : installed
-              ? "settings.skills.marketplaceInstalled"
-              : "settings.skills.marketplaceInstall",
-        )} ${skill.name}`}
-        size="sm"
-        variant={installed ? "secondary" : "default"}
+        aria-label={`${actionLabel} ${skill.name}`}
+        size="icon"
+        variant="ghost"
         disabled={installed || installBusy || !skill.install_supported}
         onClick={() => onSelect(skill)}
         className={cn(
-          "min-w-[82px] rounded-full px-2.5 sm:min-w-[92px] sm:px-3",
-          installed && "text-emerald-700",
+          "h-9 w-9 shrink-0 rounded-full bg-muted/70 text-muted-foreground transition-[opacity,color,background-color,transform] hover:scale-[1.03] hover:bg-foreground hover:text-background focus-visible:bg-foreground focus-visible:text-background focus-visible:opacity-100 sm:opacity-[0.55] sm:group-hover:opacity-100",
+          installed &&
+            "bg-emerald-500/10 text-emerald-700 disabled:opacity-100 dark:text-emerald-300",
         )}
         title={
           !skill.install_supported
             ? t("settings.skills.marketplaceNpxRequired", {
                 defaultValue: "Node.js with npx is required",
               })
-            : undefined
+            : `${actionLabel} ${skill.name}`
         }
       >
         {isInstalling ? (
-          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
         ) : installed ? (
-          <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          <Check className="h-4 w-4" aria-hidden />
         ) : (
-          <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          <Plus className="h-4 w-4" aria-hidden />
         )}
-        {isInstalling
-          ? t("settings.skills.marketplaceInstalling", {
-              defaultValue: "Installing",
-            })
-          : installed
-            ? t("settings.skills.marketplaceInstalled", {
-                defaultValue: "Installed",
-              })
-            : t("settings.skills.marketplaceInstall", {
-                defaultValue: "Install",
-              })}
       </Button>
     </div>
   );
