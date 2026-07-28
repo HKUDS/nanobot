@@ -293,22 +293,22 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("encodes skills.sh search queries", async () => {
+  it("encodes marketplace search queries and provider", async () => {
     await searchMarketplaceSkills("tok", "React & testing");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/search?q=React+%26+testing",
+      "/api/webui/skills/search?q=React+%26+testing&provider=all",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
     );
   });
 
-  it("fetches the skills.sh 24-hour leaderboard", async () => {
-    await fetchTrendingMarketplaceSkills("tok");
+  it("fetches a provider marketplace leaderboard", async () => {
+    await fetchTrendingMarketplaceSkills("tok", "skillhub");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/trending",
+      "/api/webui/skills/trending?provider=skillhub",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -329,11 +329,17 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("encodes skills.sh install coordinates", async () => {
-    await installMarketplaceSkill("tok", "vercel-labs/agent-skills", "react-testing");
+  it("encodes provider install coordinates", async () => {
+    await installMarketplaceSkill(
+      "tok",
+      "skillhub",
+      "@tencent/skills",
+      "ima-skills",
+      "1.1.8",
+    );
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/install?source=vercel-labs%2Fagent-skills&skill=react-testing",
+      "/api/webui/skills/install?provider=skillhub&source=%40tencent%2Fskills&skill=ima-skills&version=1.1.8",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

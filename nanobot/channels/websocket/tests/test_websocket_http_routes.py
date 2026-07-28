@@ -671,10 +671,19 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         "trends": {"acme/agent-skills/react-testing": [2, 4, 3, 8]},
     })
 
-    async def install(source: str, skill_id: str, workspace: Path) -> dict[str, Any]:
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
         assert source == "acme/agent-skills"
         assert skill_id == "react-testing"
         assert workspace == tmp_path
+        assert provider == "skills_sh"
+        assert version == ""
         skill_dir = workspace / "skills" / skill_id
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
@@ -711,7 +720,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert search_response.status_code == 200
         assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
-        search.assert_awaited_once_with("react", tmp_path)
+        search.assert_awaited_once_with("react", tmp_path, provider="all")
 
         trending_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trending",
@@ -719,7 +728,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert trending_response.status_code == 200
         assert trending_response.json()["period"] == "24h"
-        trending.assert_awaited_once_with(tmp_path)
+        trending.assert_awaited_once_with(tmp_path, provider="all")
 
         trends_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trends"

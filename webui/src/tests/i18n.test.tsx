@@ -78,6 +78,29 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.skills.views",
   "settings.skills.installedTab",
   "settings.skills.discoverTab",
+  "settings.skills.marketplaceSearchFailed",
+  "settings.skills.marketplaceInstallFailed",
+  "settings.skills.marketplaceSearchPlaceholder",
+  "settings.skills.marketplaceSearchLabel",
+  "settings.skills.marketplaceSearching",
+  "settings.skills.marketplaceProviderFilter",
+  "settings.skills.marketplaceProviderAll",
+  "settings.skills.marketplaceTrendingTitle",
+  "settings.skills.marketplaceTrendingDescription",
+  "settings.skills.marketplaceViewAll",
+  "settings.skills.marketplaceTrendingUnavailable",
+  "settings.skills.marketplaceEmpty",
+  "settings.skills.marketplaceConfirmTitle",
+  "settings.skills.marketplaceConfirmDescription",
+  "settings.skills.marketplaceConfirmInstall",
+  "settings.skills.marketplaceOpen",
+  "settings.skills.marketplaceInstalls24h",
+  "settings.skills.marketplaceInstalls",
+  "settings.skills.marketplaceNpxRequired",
+  "settings.skills.marketplaceInstalling",
+  "settings.skills.marketplaceInstalled",
+  "settings.skills.marketplaceInstall",
+  "settings.skills.marketplaceNoTrend",
   "settings.nanobotFeatures.disable",
   "settings.nanobotFeatures.ready",
   "settings.nanobotFeatures.missingDependency",
@@ -442,6 +465,10 @@ describe("webui i18n", () => {
     expect(settings.overview.workspace).toBe("工作区");
     expect(settings.skills.installedTab).toBe("已安装");
     expect(settings.skills.discoverTab).toBe("发现");
+    expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
+    expect(settings.skills.marketplaceProviderAll).toBe("全部");
+    expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
+    expect(settings.skills.marketplaceTrendingTitle).toBe("各市场热门技能");
   });
 
   it("keeps Brazilian Portuguese settings overview copy localized", () => {

@@ -28,7 +28,11 @@ import {
   searchMarketplaceSkills,
 } from "@/lib/api";
 import { notifySkillsChanged } from "@/lib/skill-events";
-import type { MarketplaceSkillSummary, SkillSummary } from "@/lib/types";
+import type {
+  MarketplaceProvider,
+  MarketplaceSkillSummary,
+  SkillSummary,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -42,7 +46,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
   const [loading, setLoading] = useState(false);
   const [trendingLoading, setTrendingLoading] = useState(true);
   const [error, setError] = useState("");
-  const [installSupported, setInstallSupported] = useState<boolean | null>(null);
+  const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
   const [installing, setInstalling] = useState("");
   const installedNames = useMemo(
@@ -53,11 +57,10 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
   useEffect(() => {
     let cancelled = false;
     setTrendingLoading(true);
-    fetchTrendingMarketplaceSkills(token)
+    fetchTrendingMarketplaceSkills(token, provider)
       .then((payload) => {
         if (cancelled) return;
         setTrending(payload.skills);
-        setInstallSupported(payload.install_supported);
       })
       .catch(() => {
         if (!cancelled) setTrending([]);
@@ -68,11 +71,13 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [provider, token]);
 
   useEffect(() => {
     const skills = query.trim().length < 2 ? trending : results;
-    const unresolved = skills.filter((skill) => !(skill.id in trends));
+    const unresolved = skills.filter(
+      (skill) => skill.provider === "skills_sh" && !(skill.id in trends),
+    );
     if (!unresolved.length) return;
 
     let cancelled = false;
@@ -101,11 +106,10 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      searchMarketplaceSkills(token, normalized)
+      searchMarketplaceSkills(token, normalized, provider)
         .then((payload) => {
           if (cancelled) return;
           setResults(payload.skills);
-          setInstallSupported(payload.install_supported);
         })
         .catch((reason: unknown) => {
           if (cancelled) return;
@@ -127,14 +131,20 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, t, token]);
+  }, [provider, query, t, token]);
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
-    setInstalling(skill.skill_id);
+    setInstalling(skill.id);
     setError("");
     try {
-      const payload = await installMarketplaceSkill(token, skill.source, skill.skill_id);
+      const payload = await installMarketplaceSkill(
+        token,
+        skill.provider,
+        skill.source,
+        skill.skill_id,
+        skill.version,
+      );
       notifySkillsChanged(payload);
       setResults((current) =>
         current.map((item) =>
@@ -161,33 +171,36 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
 
   return (
     <section className="space-y-4">
-      <div className="relative">
-        <Search
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden
-        />
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("settings.skills.marketplaceSearchPlaceholder", {
-            defaultValue: "Search skills.sh",
-          })}
-          aria-label={t("settings.skills.marketplaceSearchLabel", {
-            defaultValue: "Search skills.sh",
-          })}
-          className="h-11 rounded-[14px] bg-settings-surface pl-9"
-        />
-        {loading ? (
-          <span
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            role="status"
-            aria-label={t("settings.skills.marketplaceSearching", {
-              defaultValue: "Searching",
+      <div className="space-y-2">
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("settings.skills.marketplaceSearchPlaceholder", {
+              defaultValue: "Search skills",
             })}
-          >
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          </span>
-        ) : null}
+            aria-label={t("settings.skills.marketplaceSearchLabel", {
+              defaultValue: "Search skills",
+            })}
+            className="h-11 rounded-[14px] bg-settings-surface pl-9"
+          />
+          {loading ? (
+            <span
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              role="status"
+              aria-label={t("settings.skills.marketplaceSearching", {
+                defaultValue: "Searching",
+              })}
+            >
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            </span>
+          ) : null}
+        </div>
+        <ProviderFilter value={provider} onChange={setProvider} />
       </div>
 
       {error ? (
@@ -198,22 +211,22 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
 
       {query.trim().length < 2 ? (
         <section className="overflow-hidden rounded-[22px] bg-settings-surface">
-            <div className="flex flex-col items-start gap-2 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-              <div>
-                <h2 className="text-[14px] font-semibold">
-                  {t("settings.skills.marketplaceTrendingTitle", {
-                    defaultValue: "Trending today",
-                  })}
-                </h2>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">
-                  {t("settings.skills.marketplaceTrendingDescription", {
-                    defaultValue:
-                      "Most installed across sources in 24h · curves show the 8-week trend",
-                  })}
-                </p>
-              </div>
+          <div className="flex flex-col items-start gap-2 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div>
+              <h2 className="text-[14px] font-semibold">
+                {t("settings.skills.marketplaceTrendingTitle", {
+                  defaultValue: "Trending by marketplace",
+                })}
+              </h2>
+              <p className="mt-0.5 text-[12px] text-muted-foreground">
+                {t("settings.skills.marketplaceTrendingDescription", {
+                  defaultValue: "Each marketplace keeps its own ranking and install metrics.",
+                })}
+              </p>
+            </div>
+            {provider !== "all" ? (
               <a
-                href="https://skills.sh/trending"
+                href={providerUrl(provider)}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -221,26 +234,26 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
                 {t("settings.skills.marketplaceViewAll", { defaultValue: "View all" })}
                 <ExternalLink className="h-3 w-3" aria-hidden />
               </a>
+            ) : null}
+          </div>
+          {trendingLoading ? (
+            <TrendingSkeleton />
+          ) : trending.length ? (
+            <MarketplaceSkillGroups
+              skills={trending}
+              installedNames={installedNames}
+              installing={installing}
+              trends={trends}
+              grouped={provider === "all"}
+              onSelect={setSelected}
+            />
+          ) : (
+            <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
+              {t("settings.skills.marketplaceTrendingUnavailable", {
+                defaultValue: "Trending skills are temporarily unavailable.",
+              })}
             </div>
-            {trendingLoading ? (
-              <TrendingSkeleton />
-            ) : trending.length ? (
-              <MarketplaceSkillList
-                skills={trending}
-                installedNames={installedNames}
-                installing={installing}
-                installSupported={installSupported}
-                metric="24h"
-                trends={trends}
-                onSelect={setSelected}
-              />
-            ) : (
-              <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
-                {t("settings.skills.marketplaceTrendingUnavailable", {
-                  defaultValue: "Trending skills are temporarily unavailable.",
-                })}
-              </div>
-            )}
+          )}
         </section>
       ) : !loading && results.length === 0 && !error ? (
         <div className="rounded-[22px] bg-settings-surface px-5 py-12 text-center text-sm text-muted-foreground">
@@ -251,13 +264,12 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
         </div>
       ) : (
         <div className="overflow-hidden rounded-[22px] bg-settings-surface">
-          <MarketplaceSkillList
+          <MarketplaceSkillGroups
             skills={results}
             installedNames={installedNames}
             installing={installing}
-            installSupported={installSupported}
-            metric="total"
             trends={trends}
+            grouped={provider === "all"}
             onSelect={setSelected}
           />
         </div>
@@ -284,13 +296,16 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
               <span className="block">
                 {t("settings.skills.marketplaceConfirmDescription", {
                   source: selected?.source ?? "",
+                  provider: selected ? providerLabel(selected.provider) : "",
                   defaultValue:
-                    "This third-party skill comes from {{source}} and may include instructions or executable scripts.",
+                    "This third-party skill comes from {{provider}} ({{source}}) and may include instructions or executable scripts.",
                 })}
               </span>
-              <code className="block rounded-md bg-muted px-2 py-1 text-[12px] text-foreground">
-                {selected?.source}
-              </code>
+              <span className="flex flex-wrap items-center gap-2 rounded-md bg-muted px-2 py-1.5 text-[12px] text-foreground">
+                {selected ? <ProviderMark provider={selected.provider} /> : null}
+                <code>{selected?.source}</code>
+                {selected?.version ? <span>v{selected.version}</span> : null}
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -313,20 +328,118 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
   );
 }
 
+function ProviderFilter({
+  value,
+  onChange,
+}: {
+  value: MarketplaceProvider;
+  onChange: (provider: MarketplaceProvider) => void;
+}) {
+  const { t } = useTranslation();
+  const providers: MarketplaceProvider[] = ["all", "skills_sh", "skillhub"];
+  return (
+    <div
+      className="flex w-fit items-center gap-0.5 rounded-full bg-settings-surface p-1"
+      role="tablist"
+      aria-label={t("settings.skills.marketplaceProviderFilter", {
+        defaultValue: "Skill source",
+      })}
+    >
+      {providers.map((provider) => (
+        <button
+          key={provider}
+          type="button"
+          role="tab"
+          aria-selected={value === provider}
+          onClick={() => onChange(provider)}
+          className={cn(
+            "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+            value === provider && "bg-background text-foreground shadow-sm",
+          )}
+        >
+          {provider !== "all" ? <ProviderDot provider={provider} /> : null}
+          {provider === "all"
+            ? t("settings.skills.marketplaceProviderAll", { defaultValue: "All" })
+            : providerLabel(provider)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MarketplaceSkillGroups({
+  skills,
+  installedNames,
+  installing,
+  trends,
+  grouped,
+  onSelect,
+}: {
+  skills: MarketplaceSkillSummary[];
+  installedNames: Set<string>;
+  installing: string;
+  trends: Record<string, number[]>;
+  grouped: boolean;
+  onSelect: (skill: MarketplaceSkillSummary) => void;
+}) {
+  const providers: Array<Exclude<MarketplaceProvider, "all">> = [
+    "skills_sh",
+    "skillhub",
+  ];
+  if (!grouped) {
+    return (
+      <MarketplaceSkillList
+        skills={skills}
+        installedNames={installedNames}
+        installing={installing}
+        trends={trends}
+        onSelect={onSelect}
+      />
+    );
+  }
+  return (
+    <div>
+      {providers.map((provider) => {
+        const providerSkills = skills.filter((skill) => skill.provider === provider);
+        if (!providerSkills.length) return null;
+        return (
+          <section key={provider} className="border-t border-border/45 first:border-t-0">
+            <div className="flex items-center justify-between px-5 pb-1 pt-3.5">
+              <ProviderMark provider={provider} />
+              <a
+                href={providerUrl(provider)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={`Open ${providerLabel(provider)}`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            </div>
+            <MarketplaceSkillList
+              skills={providerSkills}
+              installedNames={installedNames}
+              installing={installing}
+              trends={trends}
+              onSelect={onSelect}
+            />
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function MarketplaceSkillList({
   skills,
   installedNames,
   installing,
-  installSupported,
-  metric,
   trends,
   onSelect,
 }: {
   skills: MarketplaceSkillSummary[];
   installedNames: Set<string>;
   installing: string;
-  installSupported: boolean | null;
-  metric: "total" | "24h";
   trends: Record<string, number[]>;
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
@@ -337,10 +450,8 @@ function MarketplaceSkillList({
           key={skill.id}
           skill={skill}
           installed={skill.installed || installedNames.has(skill.skill_id)}
-          isInstalling={installing === skill.skill_id}
+          isInstalling={installing === skill.id}
           installBusy={Boolean(installing)}
-          installSupported={installSupported}
-          metric={metric}
           trend={trends[skill.id]}
           onSelect={onSelect}
         />
@@ -354,8 +465,6 @@ function MarketplaceSkillRow({
   installed,
   isInstalling,
   installBusy,
-  installSupported,
-  metric,
   trend,
   onSelect,
 }: {
@@ -363,8 +472,6 @@ function MarketplaceSkillRow({
   installed: boolean;
   isInstalling: boolean;
   installBusy: boolean;
-  installSupported: boolean | null;
-  metric: "total" | "24h";
   trend?: number[];
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
@@ -388,17 +495,20 @@ function MarketplaceSkillRow({
             rel="noreferrer"
             aria-label={t("settings.skills.marketplaceOpen", {
               name: skill.name,
-              defaultValue: "Open {{name}} on skills.sh",
+              provider: providerLabel(skill.provider),
+              defaultValue: "Open {{name}} on {{provider}}",
             })}
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>
         </div>
-        <p className="mt-1 truncate text-[12px] text-muted-foreground">
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
+          <ProviderMark provider={skill.provider} compact />
           {skill.source}
-          <span className="mx-1.5">·</span>
-          {metric === "24h"
+          {skill.version ? <span>· v{skill.version}</span> : null}
+          <span>·</span>
+          {skill.metric === "installs_24h"
             ? t("settings.skills.marketplaceInstalls24h", {
                 count: skill.installs,
                 formattedCount: skill.installs.toLocaleString(),
@@ -409,21 +519,28 @@ function MarketplaceSkillRow({
                 formattedCount: skill.installs.toLocaleString(),
                 defaultValue: "{{formattedCount}} installs",
               })}
-        </p>
+        </div>
       </div>
-      <TrendSparkline values={trend} />
+      {skill.provider === "skills_sh" ? <TrendSparkline values={trend} /> : null}
       <Button
         type="button"
+        aria-label={`${t(
+          isInstalling
+            ? "settings.skills.marketplaceInstalling"
+            : installed
+              ? "settings.skills.marketplaceInstalled"
+              : "settings.skills.marketplaceInstall",
+        )} ${skill.name}`}
         size="sm"
         variant={installed ? "secondary" : "default"}
-        disabled={installed || installBusy || installSupported === false}
+        disabled={installed || installBusy || !skill.install_supported}
         onClick={() => onSelect(skill)}
         className={cn(
           "min-w-[82px] rounded-full px-2.5 sm:min-w-[92px] sm:px-3",
           installed && "text-emerald-700",
         )}
         title={
-          installSupported === false
+          !skill.install_supported
             ? t("settings.skills.marketplaceNpxRequired", {
                 defaultValue: "Node.js with npx is required",
               })
@@ -451,6 +568,50 @@ function MarketplaceSkillRow({
       </Button>
     </div>
   );
+}
+
+function ProviderMark({
+  provider,
+  compact = false,
+}: {
+  provider: Exclude<MarketplaceProvider, "all">;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 font-medium",
+        compact ? "text-[11px] text-muted-foreground" : "text-[12px] text-foreground/75",
+      )}
+    >
+      <ProviderDot provider={provider} />
+      {providerLabel(provider)}
+    </span>
+  );
+}
+
+function ProviderDot({
+  provider,
+}: {
+  provider: Exclude<MarketplaceProvider, "all">;
+}) {
+  return (
+    <span
+      className={cn(
+        "h-1.5 w-1.5 shrink-0 rounded-full",
+        provider === "skillhub" ? "bg-[#006EFF]" : "bg-foreground/55",
+      )}
+      aria-hidden
+    />
+  );
+}
+
+function providerLabel(provider: Exclude<MarketplaceProvider, "all">): string {
+  return provider === "skillhub" ? "SkillHub" : "skills.sh";
+}
+
+function providerUrl(provider: Exclude<MarketplaceProvider, "all">): string {
+  return provider === "skillhub" ? "https://skillhub.cn" : "https://skills.sh/trending";
 }
 
 function TrendSparkline({ values }: { values?: number[] }) {

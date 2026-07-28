@@ -860,26 +860,36 @@ class GatewayHTTPHandler:
     async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        query = _query_first(_parse_query(request.path), "q") or ""
+        params = _parse_query(request.path)
+        query = _query_first(params, "q") or ""
+        provider = _query_first(params, "provider") or "all"
         try:
-            payload = await search_marketplace_skills(query, self.skills_workspace_path)
+            payload = await search_marketplace_skills(
+                query,
+                self.skills_workspace_path,
+                provider=provider,
+            )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
         except Exception:
-            self._log.exception("skills.sh search failed")
-            return _http_error(500, "skills.sh search failed")
+            self._log.exception("skills marketplace search failed")
+            return _http_error(500, "skills marketplace search failed")
         return _http_json_response(payload)
 
     async def _handle_webui_skills_trending(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
+        provider = _query_first(_parse_query(request.path), "provider") or "all"
         try:
-            payload = await trending_marketplace_skills(self.skills_workspace_path)
+            payload = await trending_marketplace_skills(
+                self.skills_workspace_path,
+                provider=provider,
+            )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
         except Exception:
-            self._log.exception("skills.sh trending lookup failed")
-            return _http_error(500, "skills.sh trending lookup failed")
+            self._log.exception("skills marketplace trending lookup failed")
+            return _http_error(500, "skills marketplace trending lookup failed")
         return _http_json_response(payload)
 
     async def _handle_webui_skill_trends(self, request: WsRequest) -> Response:
@@ -904,13 +914,17 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote skill installation is disabled")
 
         query = _parse_query(request.path)
+        provider = _query_first(query, "provider") or "skills_sh"
         source = _query_first(query, "source") or ""
         skill_id = _query_first(query, "skill") or ""
+        version = _query_first(query, "version") or ""
         try:
             action = await install_marketplace_skill(
                 source,
                 skill_id,
                 self.skills_workspace_path,
+                provider=provider,
+                version=version,
             )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)

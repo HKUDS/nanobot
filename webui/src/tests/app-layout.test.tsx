@@ -606,42 +606,84 @@ describe("App layout", () => {
           { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
         ],
       },
-      "/api/webui/skills/trending": {
-        period: "24h",
+      "/api/webui/skills/trending?provider=all": {
+        period: "mixed",
+        provider: "all",
         install_supported: true,
-        skills: [{
-          id: "vercel-labs/skills/find-skills",
-          skill_id: "find-skills",
-          name: "find-skills",
-          source: "vercel-labs/skills",
-          installs: 14_481,
-          url: "https://skills.sh/vercel-labs/skills/find-skills",
-          installed: false,
-          rank: 18,
-        }],
+        skills: [
+          {
+            id: "vercel-labs/skills/find-skills",
+            skill_id: "find-skills",
+            name: "find-skills",
+            source: "vercel-labs/skills",
+            provider: "skills_sh",
+            installs: 14_481,
+            url: "https://skills.sh/vercel-labs/skills/find-skills",
+            installed: false,
+            install_supported: true,
+            metric: "installs_24h",
+            rank: 18,
+          },
+          {
+            id: "skillhub:ima-skills",
+            skill_id: "ima-skills",
+            name: "ima-skills",
+            source: "@tencent-adm/ima-skills",
+            provider: "skillhub",
+            installs: 11_831,
+            downloads: 142_525,
+            url: "https://skillhub.cn/tencent-adm/ima-skills",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+            version: "1.1.8",
+            verified: true,
+            rank: 1,
+          },
+        ],
       },
       "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills": {
         trends: {
           "vercel-labs/skills/find-skills": [20, 32, 28, 45, 41, 50, 62, 58],
         },
       },
-      "/api/webui/skills/search?q=React": {
+      "/api/webui/skills/search?q=React&provider=all": {
         query: "React",
+        provider: "all",
         install_supported: true,
-        skills: [{
-          id: "acme/agent-skills/react-testing",
-          skill_id: "react-testing",
-          name: "React Testing",
-          source: "acme/agent-skills",
-          installs: 42,
-          url: "https://skills.sh/acme/agent-skills/react-testing",
-          installed: false,
-        }],
+        skills: [
+          {
+            id: "acme/agent-skills/react-testing",
+            skill_id: "react-testing",
+            name: "React Testing",
+            source: "acme/agent-skills",
+            provider: "skills_sh",
+            installs: 42,
+            url: "https://skills.sh/acme/agent-skills/react-testing",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+          },
+          {
+            id: "skillhub:react",
+            skill_id: "react",
+            name: "React",
+            source: "@ivangdavila/react",
+            provider: "skillhub",
+            installs: 693,
+            downloads: 7_718,
+            url: "https://skillhub.cn/ivangdavila/react",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+            version: "1.0.4",
+          },
+        ],
       },
       "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
         trends: { "acme/agent-skills/react-testing": [] },
       },
-      "/api/webui/skills/install?source=acme%2Fagent-skills&skill=react-testing": {
+      "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing": {
         skills: [
           {
             name: "react-testing",
@@ -667,18 +709,23 @@ describe("App layout", () => {
     const discoverTab = await screen.findByRole("tab", { name: "Discover" });
     expect(discoverTab.querySelector("svg")).toBeNull();
     fireEvent.click(discoverTab);
-    expect(await screen.findByRole("heading", { name: "Trending today" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Trending by marketplace" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(screen.getAllByText("SkillHub").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("skills.sh").length).toBeGreaterThan(0);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
     expect(
       await screen.findByRole("img", { name: "8-week install trend" }),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Search skills.sh" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), {
       target: { value: "React" },
     });
 
     expect(await screen.findByText("React Testing")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install React Testing" }));
     expect(
       await screen.findByRole("heading", { name: "Install React Testing?" }),
     ).toBeInTheDocument();
@@ -686,13 +733,15 @@ describe("App layout", () => {
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/skills/install?source=acme%2Fagent-skills&skill=react-testing",
+        "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing",
         expect.objectContaining({
           headers: { Authorization: expect.any(String) },
         }),
       );
     });
-    expect(await screen.findByRole("button", { name: "Installed" })).toBeDisabled();
+    expect(
+      await screen.findByRole("button", { name: "Installed React Testing" }),
+    ).toBeDisabled();
 
     fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
     expect(screen.getByText("react-testing")).toBeInTheDocument();

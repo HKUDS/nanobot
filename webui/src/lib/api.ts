@@ -10,6 +10,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
@@ -343,9 +344,10 @@ export async function deleteSkill(
 export async function searchMarketplaceSkills(
   token: string,
   query: string,
+  provider: MarketplaceProvider = "all",
   base: string = "",
 ): Promise<SkillsSearchPayload> {
-  const params = new URLSearchParams({ q: query });
+  const params = new URLSearchParams({ q: query, provider });
   return request<SkillsSearchPayload>(
     `${base}/api/webui/skills/search?${params}`,
     token,
@@ -356,10 +358,12 @@ export async function searchMarketplaceSkills(
 
 export async function fetchTrendingMarketplaceSkills(
   token: string,
+  provider: MarketplaceProvider = "all",
   base: string = "",
 ): Promise<SkillsTrendingPayload> {
+  const params = new URLSearchParams({ provider });
   return request<SkillsTrendingPayload>(
-    `${base}/api/webui/skills/trending`,
+    `${base}/api/webui/skills/trending?${params}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,
@@ -383,11 +387,14 @@ export async function fetchMarketplaceSkillTrends(
 
 export async function installMarketplaceSkill(
   token: string,
+  provider: Exclude<MarketplaceProvider, "all">,
   source: string,
   skill: string,
+  version: string = "",
   base: string = "",
 ): Promise<SkillInstallPayload> {
-  const params = new URLSearchParams({ source, skill });
+  const params = new URLSearchParams({ provider, source, skill });
+  if (version) params.set("version", version);
   return request<SkillInstallPayload>(
     `${base}/api/webui/skills/install?${params}`,
     token,
