@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -51,6 +52,66 @@ class ExecSessionInfo:
     owner_session_key: str | None = None
 
 
+class _BoundedOutputBuffer:
+    """Keep the first and most recent characters within a fixed budget."""
+
+    def __init__(self, max_chars: int) -> None:
+        self.max_chars = max_chars
+        self._content = ""
+        self._tail: deque[str] = deque()
+        self._tail_chars = 0
+        self._total_chars = 0
+        self._truncated = False
+
+    @property
+    def has_output(self) -> bool:
+        return self._total_chars > 0
+
+    @property
+    def retained_chars(self) -> int:
+        return len(self._content) + self._tail_chars
+
+    def append(self, text: str) -> None:
+        if not text:
+            return
+        self._total_chars += len(text)
+        if not self._truncated:
+            combined = self._content + text
+            if len(combined) <= self.max_chars:
+                self._content = combined
+                return
+            head_chars = self.max_chars // 2
+            tail_chars = self.max_chars - head_chars
+            self._content = combined[:head_chars]
+            self._tail.append(combined[-tail_chars:])
+            self._tail_chars = tail_chars
+            self._truncated = True
+            return
+
+        tail_chars = self.max_chars - len(self._content)
+        self._tail.append(text)
+        self._tail_chars += len(text)
+        while self._tail_chars > tail_chars:
+            excess = self._tail_chars - tail_chars
+            first = self._tail[0]
+            if len(first) <= excess:
+                self._tail.popleft()
+                self._tail_chars -= len(first)
+            else:
+                self._tail[0] = first[excess:]
+                self._tail_chars -= excess
+
+    def drain(self) -> tuple[str, int]:
+        output = self._content + "".join(self._tail)
+        truncated_chars = self._total_chars - len(output)
+        self._content = ""
+        self._tail.clear()
+        self._tail_chars = 0
+        self._total_chars = 0
+        self._truncated = False
+        return output, truncated_chars
+
+
 class _ExecSession:
     def __init__(
         self,
@@ -73,30 +134,27 @@ class _ExecSession:
         # timeout None/0 means no limit; an infinite deadline is never reached.
         self.deadline = time.monotonic() + timeout if timeout else float("inf")
         self.last_access = time.monotonic()
-        self._chunks: list[str] = []
+        self._stdout = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
+        self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._timed_out = False
-        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, ""))
-        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, "STDERR:\n"))
+        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
+        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
 
     async def _read_stream(
         self,
         stream: asyncio.StreamReader | None,
-        prefix: str,
+        buffer: _BoundedOutputBuffer,
     ) -> None:
         if stream is None:
             return
-        first = True
         while True:
             chunk = await stream.read(4096)
             if not chunk:
                 break
             text = chunk.decode("utf-8", errors="replace")
-            if prefix and first:
-                text = prefix + text
-                first = False
             async with self._lock:
-                self._chunks.append(text)
+                buffer.append(text)
 
     async def write(self, chars: str) -> str | None:
         if self.process.returncode is not None:
@@ -157,10 +215,14 @@ class _ExecSession:
             await self._wait_for_buffered_output()
 
         async with self._lock:
-            output = "".join(self._chunks)
-            self._chunks.clear()
+            stdout, stdout_truncated = self._stdout.drain()
+            stderr, stderr_truncated = self._stderr.drain()
 
-        output, truncated = _truncate_output(output, max_output_chars)
+        output_parts = [stdout] if stdout else []
+        if stderr:
+            output_parts.append(f"STDERR:\n{stderr}")
+        output = "\n".join(output_parts)
+        output, response_truncated = _truncate_output(output, max_output_chars)
         return _SessionPoll(
             output=output,
             done=self.process.returncode is not None,
@@ -169,7 +231,7 @@ class _ExecSession:
             timed_out=self._timed_out,
             terminated=terminated,
             stdin_closed=stdin_closed,
-            truncated_chars=truncated,
+            truncated_chars=stdout_truncated + stderr_truncated + response_truncated,
         )
 
     async def kill(self) -> None:
@@ -195,7 +257,7 @@ class _ExecSession:
         deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
         while time.monotonic() < deadline:
             async with self._lock:
-                if self._chunks:
+                if self._stdout.has_output or self._stderr.has_output:
                     return
             await asyncio.sleep(0.01)
 
@@ -403,20 +465,16 @@ def clamp_session_int(value: int | None, default: int, minimum: int, maximum: in
 def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
     if len(output) <= max_output_chars:
         return output, 0
-    half = max_output_chars // 2
+    head_chars = max_output_chars // 2
+    tail_chars = max_output_chars - head_chars
     omitted = len(output) - max_output_chars
-    return (
-        output[:half]
-        + f"\n\n... ({omitted:,} chars truncated) ...\n\n"
-        + output[-half:],
-        omitted,
-    )
+    return output[:head_chars] + output[-tail_chars:], omitted
 
 
 def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
     parts = [poll.output] if poll.output else []
     if poll.truncated_chars:
-        parts.append(f"(output truncated by {poll.truncated_chars:,} chars)")
+        parts.append(f"({poll.truncated_chars:,} chars truncated from output)")
     if poll.timed_out:
         parts.append("Error: Command timed out; session was terminated.")
     if poll.terminated and not poll.timed_out:
@@ -587,7 +645,9 @@ class WriteStdinTool(Tool):
         max_output_chars: int,
     ) -> str:
         deadline = time.monotonic() + (wait_timeout_ms / 1000)
-        aggregate: list[str] = []
+        aggregate = _BoundedOutputBuffer(max_output_chars)
+        upstream_truncated = 0
+        search_overlap = ""
         first = True
         poll: _SessionPoll | None = None
 
@@ -604,15 +664,20 @@ class WriteStdinTool(Tool):
                 owner_session_key=current_request_session_key(),
             )
             first = False
+            upstream_truncated += poll.truncated_chars
             if poll.output:
                 aggregate.append(poll.output)
-                joined = "".join(aggregate)
-                if wait_for in joined:
-                    poll.output = joined
+                searchable = search_overlap + poll.output
+                if wait_for in searchable:
+                    poll.output, aggregate_truncated = aggregate.drain()
+                    poll.truncated_chars = upstream_truncated + aggregate_truncated
                     result = format_session_poll(session_id, poll)
                     return ToolResult.error(result) if poll.timed_out else result
+                overlap_chars = max(0, len(wait_for) - 1)
+                search_overlap = searchable[-overlap_chars:] if overlap_chars else ""
             if poll.done or remaining_ms <= 0:
-                poll.output = "".join(aggregate)
+                poll.output, aggregate_truncated = aggregate.drain()
+                poll.truncated_chars = upstream_truncated + aggregate_truncated
                 result = format_session_poll(session_id, poll)
                 if wait_for not in poll.output:
                     result += f"\nWait target not observed: {wait_for!r}"
