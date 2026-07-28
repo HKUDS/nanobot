@@ -53,11 +53,25 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
     () => new Set(installedSkills.map((skill) => skill.name)),
     [installedSkills],
   );
+  const visibleTrending = useMemo(
+    () =>
+      provider === "all"
+        ? trending
+        : trending.filter((skill) => skill.provider === provider),
+    [provider, trending],
+  );
+  const visibleResults = useMemo(
+    () =>
+      provider === "all"
+        ? results
+        : results.filter((skill) => skill.provider === provider),
+    [provider, results],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setTrendingLoading(true);
-    fetchTrendingMarketplaceSkills(token, provider)
+    fetchTrendingMarketplaceSkills(token)
       .then((payload) => {
         if (cancelled) return;
         setTrending(payload.skills);
@@ -71,7 +85,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
     return () => {
       cancelled = true;
     };
-  }, [provider, token]);
+  }, [token]);
 
   useEffect(() => {
     const skills = query.trim().length < 2 ? trending : results;
@@ -106,7 +120,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      searchMarketplaceSkills(token, normalized, provider)
+      searchMarketplaceSkills(token, normalized)
         .then((payload) => {
           if (cancelled) return;
           setResults(payload.skills);
@@ -118,7 +132,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
             reason instanceof Error
               ? reason.message
               : t("settings.skills.marketplaceSearchFailed", {
-                  defaultValue: "Could not search skills.sh.",
+                  defaultValue: "Could not search skill marketplaces.",
                 }),
           );
         })
@@ -131,7 +145,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [provider, query, t, token]);
+  }, [query, t, token]);
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
@@ -238,9 +252,9 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
           </div>
           {trendingLoading ? (
             <TrendingSkeleton />
-          ) : trending.length ? (
+          ) : visibleTrending.length ? (
             <MarketplaceSkillGroups
-              skills={trending}
+              skills={visibleTrending}
               installedNames={installedNames}
               installing={installing}
               trends={trends}
@@ -255,7 +269,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
             </div>
           )}
         </section>
-      ) : !loading && results.length === 0 && !error ? (
+      ) : !loading && visibleResults.length === 0 && !error ? (
         <div className="rounded-[22px] bg-settings-surface px-5 py-12 text-center text-sm text-muted-foreground">
           {t("settings.skills.marketplaceEmpty", {
             query: query.trim(),
@@ -265,7 +279,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
       ) : (
         <div className="overflow-hidden rounded-[22px] bg-settings-surface">
           <MarketplaceSkillGroups
-            skills={results}
+            skills={visibleResults}
             installedNames={installedNames}
             installing={installing}
             trends={trends}

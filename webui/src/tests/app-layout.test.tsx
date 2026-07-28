@@ -717,6 +717,18 @@ describe("App layout", () => {
     expect(screen.getAllByText("SkillHub")).toHaveLength(2);
     expect(screen.getAllByText("skills.sh")).toHaveLength(2);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "SkillHub" }));
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(screen.queryByText("find-skills")).not.toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(
+        ([input]) =>
+          String(input) === "/api/webui/skills/trending?provider=skillhub",
+      ),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    expect(screen.getByText("find-skills")).toBeInTheDocument();
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(
       await screen.findByRole("img", { name: "8-week install trend" }),
     ).toBeInTheDocument();
