@@ -275,7 +275,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (el) {
       const top = Math.max(0, el.scrollHeight - el.clientHeight);
       if (smooth) {
-        threadMotionRef.current?.animateTo(top);
+        threadMotionRef.current?.navigateLatestTo(top);
       } else {
         threadMotionRef.current?.jumpTo(top);
       }
@@ -289,7 +289,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     (smooth = false, options?: { force?: boolean }) => {
       const force = options?.force ?? false;
       if (!force && threadMotionRef.current?.isAutoFollowPaused()) return;
-      threadMotionRef.current?.resumeAutoFollow();
+      if (!smooth) threadMotionRef.current?.resumeAutoFollow();
       scrollToBottomNow(smooth);
     },
     [scrollToBottomNow],

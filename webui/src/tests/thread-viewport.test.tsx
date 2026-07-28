@@ -11,6 +11,7 @@ import {
   windowMessages,
 } from "@/components/thread/ThreadViewport";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
+import { ThreadMotionCoordinator } from "@/components/thread/thread-motion";
 import type { UIMessage } from "@/lib/types";
 
 const messages: UIMessage[] = [
@@ -817,6 +818,33 @@ describe("ThreadViewport", () => {
     } finally {
       resizeObserver.restore();
     }
+  });
+
+  it("gives smooth scroll-to-bottom navigation ownership of the latest target", () => {
+    const navigateLatestTo = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "navigateLatestTo",
+    ).mockReturnValue("started");
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2_400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+
+    expect(navigateLatestTo).toHaveBeenCalledWith(1_800);
   });
 
   it("pins the waiting boundary across composer and grid-track growth", async () => {

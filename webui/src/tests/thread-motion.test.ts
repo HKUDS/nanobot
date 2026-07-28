@@ -465,6 +465,83 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.snapshot().mode).toBe("browsing-history");
   });
 
+  it("retargets smooth latest navigation before resuming automatic follow", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setCameraFollowing,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    coordinator.takeUserControl();
+    camera.followTo.mockClear();
+    camera.navigateTo.mockClear();
+
+    expect(coordinator.navigateLatestTo(1_400)).toBe("started");
+    expect(coordinator.snapshot().mode).toBe("navigating-latest");
+
+    setGeometry({
+      scrollTop: 900,
+      scrollHeight: 2_100,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.navigateTo.mock.calls).toEqual([[1_400], [1_600]]);
+    expect(camera.followTo).not.toHaveBeenCalled();
+
+    setGeometry({ scrollTop: 1_600 });
+    setCameraFollowing(false);
+    expect(coordinator.observeScroll(true)).toBe("navigation");
+    expect(coordinator.snapshot().mode).toBe("follow-output");
+
+    advanceFrame();
+    expect(camera.followTo).toHaveBeenCalledWith(1_600);
+  });
+
+  it("keeps latest navigation through completion and final layout growth", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setCameraFollowing,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    coordinator.takeUserControl();
+    coordinator.navigateLatestTo(1_400);
+    camera.followTo.mockClear();
+    camera.navigateTo.mockClear();
+
+    coordinator.completeTurn();
+    setGeometry({
+      scrollTop: 1_000,
+      scrollHeight: 2_300,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.navigateTo).toHaveBeenCalledWith(1_800);
+    expect(camera.followTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("navigating-latest");
+
+    setGeometry({ scrollTop: 1_800 });
+    setCameraFollowing(false);
+    expect(coordinator.observeScroll(true)).toBe("navigation");
+    expect(coordinator.snapshot().mode).toBe("idle");
+  });
+
   it("pins a waiting prompt to the exact lower boundary across all layout changes", () => {
     const {
       camera,

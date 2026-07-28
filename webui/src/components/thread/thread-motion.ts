@@ -8,6 +8,7 @@ type ThreadMotionMode =
   | "anchor-prompt"
   | "follow-output"
   | "follow-completion"
+  | "navigating-latest"
   | "navigating-history"
   | "browsing-history";
 
@@ -17,6 +18,7 @@ type AutomaticThreadMotionMode =
   | "follow-output";
 
 type ThreadMotionEvent =
+  | "navigate-latest"
   | "navigate-history"
   | "navigation-settled"
   | "user-scroll"
@@ -34,25 +36,38 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
   >
 > = {
   idle: {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
   "anchor-prompt": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "turn-completed": "follow-completion",
   },
   "follow-output": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "turn-completed": "follow-completion",
   },
   "follow-completion": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "composer-input": "idle",
   },
+  "navigating-latest": {
+    "navigate-latest": "navigating-latest",
+    "navigate-history": "navigating-history",
+    "navigation-settled": "current-automatic-mode",
+    "user-scroll": "browsing-history",
+    "boundary-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
+  },
   "navigating-history": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "navigation-settled": "browsing-history",
     "user-scroll": "browsing-history",
@@ -60,6 +75,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "resume-follow": "current-automatic-mode",
   },
   "browsing-history": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "resume-follow": "current-automatic-mode",
   },
@@ -242,8 +258,18 @@ export class ThreadMotionCoordinator {
     this.camera.jumpTo(top);
   }
 
-  animateTo(top: number): ThreadCameraFollowResult | null {
-    return this.camera.navigateTo(top);
+  /**
+   * Explicitly navigate to the live tail while allowing authoritative layout
+   * frames to retarget that destination as streamed output continues to grow.
+   */
+  navigateLatestTo(top: number): ThreadCameraFollowResult | null {
+    this.camera.cancel();
+    this.transition("navigate-latest");
+    const result = this.camera.navigateTo(top);
+    if (!result || result === "settled") {
+      this.settleLatestNavigation();
+    }
+    return result;
   }
 
   navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
@@ -272,6 +298,15 @@ export class ThreadMotionCoordinator {
    */
   observeScroll(nearBottom: boolean): ThreadScrollOwner {
     switch (this.mode) {
+      case "navigating-latest":
+        if (!this.camera.isFollowing()) {
+          if (nearBottom) {
+            this.settleLatestNavigation();
+          } else {
+            this.invalidateGeometry();
+          }
+        }
+        return "navigation";
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
@@ -308,7 +343,8 @@ export class ThreadMotionCoordinator {
 
   private isHistoryMode(): boolean {
     return (
-      this.mode === "navigating-history"
+      this.mode === "navigating-latest"
+      || this.mode === "navigating-history"
       || this.mode === "browsing-history"
     );
   }
@@ -343,6 +379,11 @@ export class ThreadMotionCoordinator {
     }
   }
 
+  private settleLatestNavigation(): void {
+    if (!this.transition("navigation-settled")) return;
+    this.invalidateGeometry();
+  }
+
   private readonly flushGeometry = (): void => {
     this.measurementFrameId = null;
     if (!this.geometryDirty) return;
@@ -356,6 +397,13 @@ export class ThreadMotionCoordinator {
     if (!geometry) return;
     this.onGeometry?.(geometry);
 
+    if (this.mode === "navigating-latest") {
+      const result = this.camera.navigateTo(geometry.maxScrollTop);
+      if (!result || result === "settled") {
+        this.settleLatestNavigation();
+      }
+      return;
+    }
     if (this.mode === "follow-completion") {
       this.followGeometry(geometry);
       return;
