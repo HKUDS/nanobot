@@ -714,8 +714,8 @@ describe("App layout", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
-    expect(screen.getAllByText("SkillHub").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("skills.sh").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SkillHub")).toHaveLength(2);
+    expect(screen.getAllByText("skills.sh")).toHaveLength(2);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
     expect(
       await screen.findByRole("img", { name: "8-week install trend" }),

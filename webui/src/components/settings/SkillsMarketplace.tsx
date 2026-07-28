@@ -504,7 +504,6 @@ function MarketplaceSkillRow({
           </a>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
-          <ProviderMark provider={skill.provider} compact />
           {skill.source}
           {skill.version ? <span>· v{skill.version}</span> : null}
           <span>·</span>
@@ -572,18 +571,11 @@ function MarketplaceSkillRow({
 
 function ProviderMark({
   provider,
-  compact = false,
 }: {
   provider: Exclude<MarketplaceProvider, "all">;
-  compact?: boolean;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 font-medium",
-        compact ? "text-[11px] text-muted-foreground" : "text-[12px] text-foreground/75",
-      )}
-    >
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
       <ProviderDot provider={provider} />
       {providerLabel(provider)}
     </span>
