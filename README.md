@@ -46,7 +46,7 @@
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
-| Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) · [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot) |
+| Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
 
 ## What can nanobot do?
 
@@ -222,6 +222,20 @@ If nanobot worked for you, a star on GitHub is the simplest way to support the p
 - Want to run locally? See [Ollama](./docs/providers.md#ollama), [vLLM or another local OpenAI-compatible server](./docs/providers.md#vllm-or-other-local-openai-compatible-server), and the full [provider reference](./docs/configuration.md#providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
+
+## ☁️ Deploy
+
+**Render — one click**
+
+Deploy nanobot's gateway and bundled WebUI from the repository's ready-to-use Blueprint:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
+
+Render will ask for the model credential and WebUI access secret, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service.
+
+**Self-host**
+
+Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.md) for Docker, Docker Compose, Linux services, and macOS LaunchAgent setup.
 
 ## 🌐 WebUI
 
