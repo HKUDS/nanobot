@@ -321,3 +321,44 @@ def test_settings_context_window_refreshes_runtime_state(
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
     assert loop.llm_runtime().context_window_tokens == 262_144
+
+
+def test_from_config_uses_snapshot_loader_for_preset_switch_with_injected_provider(
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.model_preset = "default"
+    config.model_presets = {
+        "default": ModelPresetConfig(model="base-model", provider="openai"),
+        "fast": ModelPresetConfig(model="fast-model", provider="deepseek"),
+    }
+    initial_provider = _provider("base-model")
+    default_provider = _provider("base-model")
+    fast_provider = _provider("fast-model")
+    loaded_presets: list[str | None] = []
+
+    def loader(*, preset_name: str | None = None) -> ProviderSnapshot:
+        loaded_presets.append(preset_name)
+        provider = fast_provider if preset_name == "fast" else default_provider
+        model = "fast-model" if preset_name == "fast" else "base-model"
+        return ProviderSnapshot(
+            provider=provider,
+            model=model,
+            context_window_tokens=32_768,
+            signature=(model, preset_name),
+        )
+
+    loop = AgentLoop.from_config(
+        config,
+        provider=initial_provider,
+        provider_snapshot_loader=loader,
+    )
+
+    runtime = loop.runtime_resolver.resolve_preset("fast")
+
+    assert runtime.provider is fast_provider
+    assert runtime.model == "fast-model"
+    assert runtime.model_preset == "fast"
+    assert loop.provider is default_provider
+    assert loaded_presets == ["default", "fast"]

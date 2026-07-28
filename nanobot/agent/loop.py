@@ -452,7 +452,9 @@ class AgentLoop:
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
         provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
         preset_snapshot_loader = extra.pop("preset_snapshot_loader", None)
-        if preset_snapshot_loader is None and explicit_provider is None:
+        if preset_snapshot_loader is None and (
+            explicit_provider is None or provider_snapshot_loader is not None
+        ):
             preset_snapshot_loader = preset_helpers.make_preset_snapshot_loader(
                 config,
                 provider_snapshot_loader,
