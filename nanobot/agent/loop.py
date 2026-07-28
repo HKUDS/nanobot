@@ -9,6 +9,7 @@ import dataclasses
 import inspect
 import os
 import time
+import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
@@ -394,7 +395,9 @@ class AgentLoop:
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
@@ -1206,7 +1209,7 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
@@ -2108,7 +2111,7 @@ class AgentLoop:
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         try:
             async with lock:
                 kwargs: dict[str, Any] = {
@@ -2139,3 +2142,11 @@ class AgentLoop:
         finally:
             await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
             self.runtime_event_publisher.clear_turn(session_key)
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the shared lock while allowing idle session entries to expire."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
