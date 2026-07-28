@@ -3,7 +3,7 @@ import {
   Check,
   ExternalLink,
   Loader2,
-  Plus,
+  PackagePlus,
   Search,
   ShieldAlert,
 } from "lucide-react";
@@ -553,7 +553,7 @@ function MarketplaceSkillRow({
         ) : installed ? (
           <Check className="h-4 w-4" aria-hidden />
         ) : (
-          <Plus className="h-4 w-4" aria-hidden />
+          <PackagePlus className="h-4 w-4" aria-hidden />
         )}
       </Button>
     </div>
