@@ -77,6 +77,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });

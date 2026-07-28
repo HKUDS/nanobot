@@ -1251,6 +1251,10 @@
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
       "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    },
+    "turnRejected": {
+      "title": "Message was not sent",
+      "body": "The gateway rejected this message. Review its text or attachments, then try again."
     }
   },
   "workspace": {

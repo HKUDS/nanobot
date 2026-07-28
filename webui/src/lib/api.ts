@@ -185,6 +185,7 @@ export async function fetchWebuiThread(
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
+    cache: "no-store",
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);

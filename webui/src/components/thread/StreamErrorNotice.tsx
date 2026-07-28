@@ -67,6 +67,11 @@ function resolveCopy(
         title: t("errors.workspaceScopeRejected.title"),
         body: t("errors.workspaceScopeRejected.body"),
       };
+    case "turn_rejected":
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
+      };
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will
       // complain here until we add a corresponding i18n branch.

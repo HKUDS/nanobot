@@ -1238,6 +1238,10 @@
     "workspaceScopeRejected": {
       "title": "El espacio de trabajo no cambió",
       "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
+    },
+    "turnRejected": {
+      "title": "El mensaje no se envió",
+      "body": "El gateway rechazó este mensaje. Revisa el texto o los archivos adjuntos e inténtalo de nuevo."
     }
   },
   "workspace": {

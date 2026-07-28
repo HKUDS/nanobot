@@ -738,6 +738,7 @@ export default function App() {
       } else {
         client.updateUrl(url);
       }
+      client.updateMaxFrameBytes(boot.limits?.transport.max_frame_bytes);
       setState((current) =>
         current.status === "ready" && current.client === client
           ? {
@@ -769,6 +770,7 @@ export default function App() {
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
             url,
+            maxFrameBytes: boot.limits?.transport.max_frame_bytes,
             socketFactory: runtimeHost.socketFactory,
             onReauth: async () => {
               try {
@@ -1206,6 +1208,7 @@ function Shell({
   useEffect(() => {
     return client.onError((error) => {
       if (error.kind !== "workspace_scope_rejected") return;
+      if (error.chatId && error.chatId !== activeChatIdRef.current) return;
       setWorkspaceError(t("errors.workspaceScopeRejected.body"));
       void refreshWorkspaces();
     });

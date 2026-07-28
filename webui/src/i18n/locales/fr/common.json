@@ -1237,6 +1237,10 @@
     "workspaceScopeRejected": {
       "title": "L’espace de travail n’a pas changé",
       "body": "La passerelle a refusé le projet ou le mode d’accès demandé ; Nanobot a conservé l’espace de travail précédent."
+    },
+    "turnRejected": {
+      "title": "Le message n’a pas été envoyé",
+      "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
     }
   },
   "workspace": {

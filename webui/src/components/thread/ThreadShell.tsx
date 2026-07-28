@@ -31,6 +31,7 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
+import type { CanonicalRunSnapshot } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
@@ -44,13 +45,65 @@ import type {
 import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
 import { useClient } from "@/providers/ClientProvider";
 
-type MessageShape = Pick<UIMessage, "role" | "kind" | "content">;
+type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
+
+interface PendingCanonicalHydrate {
+  historyLineage: number;
+  historyVersion: number;
+  runGeneration: number;
+  uiBaseline: MessageShape[];
+  uiLineage: number | null;
+  uiRevision: number;
+}
+
+interface PendingHistoryLineageCommit {
+  lineage: number;
+  messages: UIMessage[];
+}
+
+interface PendingCanonicalCommit {
+  canonicalSnapshot: CanonicalRunSnapshot;
+  completedTurnIds: string[];
+  expectedUiRevision: number;
+  historyLineage: number;
+  historyVersion: number;
+  hydrate: PendingCanonicalHydrate;
+  messages: UIMessage[];
+  previousMessages: UIMessage[];
+}
 
 function sameMessageShape(a: MessageShape, b: MessageShape): boolean {
   return (
     a.role === b.role
     && (a.kind ?? "") === (b.kind ?? "")
     && a.content === b.content
+    && (!a.turnId || !b.turnId || a.turnId === b.turnId)
+  );
+}
+
+function snapshotPreservesMessage(
+  current: MessageShape,
+  candidate: MessageShape,
+  allowCompletedTurnReplacement: boolean,
+): boolean {
+  if (sameMessageShape(current, candidate)) return true;
+  if (
+    allowCompletedTurnReplacement
+    && current.role === "assistant"
+    && candidate.role === current.role
+    && (candidate.kind ?? "") === (current.kind ?? "")
+    && !!current.turnId
+    && candidate.turnId === current.turnId
+  ) {
+    return true;
+  }
+  return (
+    current.role === "assistant"
+    && current.isStreaming === true
+    && candidate.role === current.role
+    && (candidate.kind ?? "") === (current.kind ?? "")
+    && (!current.turnId || !candidate.turnId || candidate.turnId === current.turnId)
+    && candidate.content.startsWith(current.content)
   );
 }
 
@@ -64,28 +117,44 @@ function durableMessageShape(message: UIMessage): MessageShape | null {
     role: message.role,
     kind: message.kind,
     content: message.content,
+    isStreaming: message.isStreaming,
+    turnId: message.turnId,
   };
 }
 
-function preservesDurableMessages(current: UIMessage[], snapshot: UIMessage[]): boolean {
-  // Canonical history refreshes can race with live websocket messages after fork/send.
-  // Never accept a refreshed snapshot that drops a user/assistant message already shown.
-  const expected = current
+function durableMessageShapes(messages: UIMessage[]): MessageShape[] {
+  return messages
     .map(durableMessageShape)
     .filter((message): message is MessageShape => message !== null);
-  if (expected.length === 0) return true;
-  const candidates = snapshot
-    .map(durableMessageShape)
-    .filter((message): message is MessageShape => message !== null);
+}
 
+function preservesMessageShapes(
+  expected: MessageShape[],
+  candidates: MessageShape[],
+  allowCompletedTurnReplacement: boolean,
+): boolean {
   let cursor = 0;
+  let previousCandidate: MessageShape | null = null;
   for (const message of expected) {
+    if (
+      allowCompletedTurnReplacement
+      && previousCandidate?.role === "assistant"
+      && message.role === "assistant"
+      && !!message.turnId
+      && message.turnId === previousCandidate.turnId
+    ) {
+      // A delayed websocket delta can briefly create a second bubble after an
+      // HTTP completion snapshot. The completed replay is authoritative for
+      // that turn, so both local fragments may map to its single assistant row.
+      continue;
+    }
     let found = false;
     while (cursor < candidates.length) {
       const candidate = candidates[cursor];
       cursor += 1;
-      if (sameMessageShape(message, candidate)) {
+      if (snapshotPreservesMessage(message, candidate, allowCompletedTurnReplacement)) {
         found = true;
+        previousCandidate = candidate;
         break;
       }
     }
@@ -94,11 +163,55 @@ function preservesDurableMessages(current: UIMessage[], snapshot: UIMessage[]): 
   return true;
 }
 
-function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boolean {
+function preservesDurableMessages(
+  current: UIMessage[],
+  snapshot: UIMessage[],
+  allowCompletedTurnReplacement = false,
+): boolean {
+  // Canonical history refreshes can race with live websocket messages after fork/send.
+  // Never accept a refreshed snapshot that drops a user/assistant message already shown.
+  const expected = durableMessageShapes(current);
+  if (expected.length === 0) return true;
+  return preservesMessageShapes(
+    expected,
+    durableMessageShapes(snapshot),
+    allowCompletedTurnReplacement,
+  );
+}
+
+function resetDropsPostRequestDurableTail(
+  baseline: MessageShape[],
+  current: UIMessage[],
+  snapshot: UIMessage[],
+): boolean {
+  const currentDurable = durableMessageShapes(current);
+  let stablePrefixLength = 0;
+  while (
+    stablePrefixLength < baseline.length
+    && stablePrefixLength < currentDurable.length
+    && sameMessageShape(baseline[stablePrefixLength], currentDurable[stablePrefixLength])
+  ) {
+    stablePrefixLength += 1;
+  }
+  const postRequestTail = currentDurable.slice(stablePrefixLength);
+  if (postRequestTail.length === 0) return false;
+  return !preservesMessageShapes(
+    postRequestTail,
+    durableMessageShapes(snapshot),
+    true,
+  );
+}
+
+function isStaleThreadSnapshot(
+  current: UIMessage[],
+  snapshot: UIMessage[],
+  allowCompletedTurnReplacement = false,
+): boolean {
   if (current.length === 0) return false;
   if (snapshot.length === 0) return true;
-  if (!preservesDurableMessages(current, snapshot)) return true;
+  if (!preservesDurableMessages(current, snapshot, allowCompletedTurnReplacement)) return true;
   if (snapshot.length >= current.length) return false;
+  if (allowCompletedTurnReplacement) return false;
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
@@ -112,6 +225,30 @@ function latestActiveTurnId(messages: UIMessage[]): string | null {
     if (message.role === "user" && message.turnId) return message.turnId;
   }
   return null;
+}
+
+function completedAssistantTurnIds(messages: UIMessage[]): string[] {
+  return Array.from(new Set(
+    messages
+      .filter((message) => message.role === "assistant" && !!message.turnId)
+      .map((message) => message.turnId as string),
+  ));
+}
+
+function canonicalRunSnapshot(
+  messages: UIMessage[],
+  hasPendingToolCalls: boolean,
+  activeTurnId: string | null,
+): CanonicalRunSnapshot {
+  return {
+    observedTurnIds: Array.from(new Set(
+      messages
+        .filter((message) => message.role === "user" && !!message.turnId)
+        .map((message) => message.turnId as string),
+    )),
+    hasPendingToolCalls,
+    activeTurnId,
+  };
 }
 
 const FILE_PREVIEW_DEFAULT_WIDTH = 544;
@@ -432,6 +569,10 @@ export function ThreadShell({
     hasMoreBefore,
     userMessageOffset,
     hasPendingToolCalls,
+    completedTurnIds,
+    continuity: historyContinuity,
+    lineage: historyLineage,
+    activeTurnId: historyActiveTurnId,
     refresh: refreshHistory,
     version: historyVersion,
     forkBoundaryMessageCount,
@@ -474,9 +615,16 @@ export function ThreadShell({
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
   const skipLayoutCacheRef = useRef(false);
-  const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
-  const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
+  const pendingCanonicalHydrateRef = useRef<Map<string, PendingCanonicalHydrate>>(new Map());
+  const pendingCanonicalCommitRef = useRef<Map<string, PendingCanonicalCommit>>(new Map());
+  const pendingHistoryLineageCommitRef = useRef<Map<string, PendingHistoryLineageCommit>>(
+    new Map(),
+  );
+  const completedCanonicalHydrateVersionRef = useRef<Map<string, number>>(new Map());
+  const committedHistoryLineageRef = useRef<Map<string, number>>(new Map());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
+  const uiRevisionRef = useRef(0);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -497,10 +645,24 @@ export function ThreadShell({
     send,
     transcribeAudio,
     stop,
+    reconcileTurnComplete,
     setMessages,
     streamError,
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+
+  useLayoutEffect(() => {
+    if (currentUiMessagesRef.current === messages) return;
+    currentUiMessagesRef.current = messages;
+    uiRevisionRef.current += 1;
+    if (!chatId) return;
+    const lineageCommit = pendingHistoryLineageCommitRef.current.get(chatId);
+    if (!lineageCommit) return;
+    pendingHistoryLineageCommitRef.current.delete(chatId);
+    if (lineageCommit.messages === messages) {
+      committedHistoryLineageRef.current.set(chatId, lineageCommit.lineage);
+    }
+  }, [chatId, messages]);
 
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
@@ -685,47 +847,196 @@ export function ThreadShell({
   useEffect(() => {
     if (!chatId || loading) return;
     const cached = messageCacheRef.current.get(chatId);
-    const appliedVersion = appliedHistoryVersionRef.current.get(chatId) ?? 0;
-    const hasPendingCanonicalHydrate = pendingCanonicalHydrateRef.current.has(chatId);
-    const hasNewCanonicalHistory = hasPendingCanonicalHydrate && historyVersion > appliedVersion;
+    const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
+    const hasNewCanonicalHistory = (
+      pendingCanonicalHydrate !== undefined
+      && historyVersion > pendingCanonicalHydrate.historyVersion
+    );
     // When the user switches away and back, keep the local in-memory thread
     // state (including not-yet-persisted messages) instead of replacing it with
     // whatever the history endpoint currently knows about. Once a fresh
     // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
     // so rendering converges to the same shape as a manual refresh.
-    setMessages((prev) => {
-      const normalizedHistory = projectWebuiThreadMessages(historical);
-      const keepLiveMessages = (messagesToKeep: UIMessage[]) => {
-        const projected = projectWebuiThreadMessages(messagesToKeep);
-        messageCacheRef.current.set(chatId, projected);
-        return projected;
-      };
-      if (hasNewCanonicalHistory && historical.length > 0) {
-        if (isStaleThreadSnapshot(prev, normalizedHistory)) return keepLiveMessages(prev);
-        pendingCanonicalHydrateRef.current.delete(chatId);
-        appliedHistoryVersionRef.current.set(chatId, historyVersion);
-        messageCacheRef.current.set(chatId, normalizedHistory);
-        return normalizedHistory;
+    const normalizedHistory = projectWebuiThreadMessages(historical);
+    const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(current);
+    if (hasNewCanonicalHistory && pendingCanonicalHydrate) {
+      // Transcript replay strips streaming metadata and uses persisted ids.
+      // Never adopt it while the turn is active: even if no assistant delta
+      // arrived locally yet, the next resumed delta must create/continue the
+      // live cursor rather than append to an immutable replay row.
+      if (hasPendingToolCalls) {
+        setMessages((current) => keepLiveMessages(current));
+        return;
       }
+      const authoritativeReset = (
+        pendingCanonicalHydrate.uiLineage !== null
+        && historyLineage !== pendingCanonicalHydrate.uiLineage
+        && (
+          historyContinuity === "reset"
+          || (
+            historyContinuity === "overlap"
+            && historyLineage === pendingCanonicalHydrate.historyLineage
+          )
+        )
+      );
+      const responseUiRevision = uiRevisionRef.current;
+      const resetDropsRenderedTail = (
+        authoritativeReset
+        && responseUiRevision !== pendingCanonicalHydrate.uiRevision
+        && resetDropsPostRequestDurableTail(
+          pendingCanonicalHydrate.uiBaseline,
+          messages,
+          normalizedHistory,
+        )
+      );
+      if (
+        authoritativeReset
+          ? resetDropsRenderedTail
+          : isStaleThreadSnapshot(messages, normalizedHistory, true)
+      ) {
+        setMessages((current) => keepLiveMessages(current));
+        return;
+      }
+      const canonicalCompletedTurnIds = Array.from(new Set([
+        ...completedTurnIds,
+        ...completedAssistantTurnIds(normalizedHistory),
+      ]));
+      const canonicalSnapshot = canonicalRunSnapshot(
+        normalizedHistory,
+        hasPendingToolCalls,
+        historyActiveTurnId,
+      );
+      if (!client.canReconcileCanonicalCompletion(
+        chatId,
+        pendingCanonicalHydrate.runGeneration,
+        canonicalCompletedTurnIds,
+        canonicalSnapshot,
+      )) {
+        setMessages((current) => keepLiveMessages(current));
+        return;
+      }
+      pendingCanonicalCommitRef.current.set(chatId, {
+        canonicalSnapshot,
+        completedTurnIds: canonicalCompletedTurnIds,
+        expectedUiRevision: responseUiRevision + 1,
+        historyLineage,
+        historyVersion,
+        hydrate: pendingCanonicalHydrate,
+        messages: normalizedHistory,
+        previousMessages: messages,
+      });
+      setMessages((current) => {
+        if (current !== messages) return current;
+        if (
+          authoritativeReset
+            ? resetDropsRenderedTail
+            : isStaleThreadSnapshot(current, normalizedHistory, true)
+        ) {
+          return keepLiveMessages(current);
+        }
+        return normalizedHistory;
+      });
+      return;
+    }
+    const adoptsNormalizedHistory = cached && cached.length > 0
+      ? (
+          normalizedHistory.length > cached.length
+          && !isStaleThreadSnapshot(messages, normalizedHistory)
+        )
+      : !isStaleThreadSnapshot(messages, normalizedHistory);
+    if (adoptsNormalizedHistory) {
+      pendingHistoryLineageCommitRef.current.set(chatId, {
+        lineage: historyLineage,
+        messages: normalizedHistory,
+      });
+    }
+    setMessages((current) => {
       if (cached && cached.length > 0) {
         if (
           normalizedHistory.length > cached.length
-          && !isStaleThreadSnapshot(prev, normalizedHistory)
+          && !isStaleThreadSnapshot(current, normalizedHistory)
         ) {
-          messageCacheRef.current.set(chatId, normalizedHistory);
-          appliedHistoryVersionRef.current.set(chatId, historyVersion);
           return normalizedHistory;
         }
-        if (isStaleThreadSnapshot(prev, cached)) return keepLiveMessages(prev);
-        return cached;
+        return isStaleThreadSnapshot(current, cached) ? keepLiveMessages(current) : cached;
       }
-      if (isStaleThreadSnapshot(prev, normalizedHistory)) return keepLiveMessages(prev);
-      appliedHistoryVersionRef.current.set(chatId, historyVersion);
-      if (normalizedHistory.length > 0) messageCacheRef.current.set(chatId, normalizedHistory);
-      return normalizedHistory;
+      return isStaleThreadSnapshot(current, normalizedHistory)
+        ? keepLiveMessages(current)
+        : normalizedHistory;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, chatId, historical, historyVersion]);
+  }, [
+    loading,
+    chatId,
+    client,
+    completedTurnIds,
+    historical,
+    historyVersion,
+    historyContinuity,
+    historyLineage,
+    historyActiveTurnId,
+    hasPendingToolCalls,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!chatId) return;
+    const commit = pendingCanonicalCommitRef.current.get(chatId);
+    if (!commit) return;
+    if (
+      commit.historyVersion !== historyVersion
+      || commit.historyLineage !== historyLineage
+      || commit.messages !== messages
+    ) {
+      pendingCanonicalCommitRef.current.delete(chatId);
+      return;
+    }
+    if (pendingCanonicalHydrateRef.current.get(chatId) !== commit.hydrate) {
+      pendingCanonicalCommitRef.current.delete(chatId);
+      return;
+    }
+    if (uiRevisionRef.current !== commit.expectedUiRevision) {
+      pendingCanonicalCommitRef.current.delete(chatId);
+      const fallback = messageCacheRef.current.get(chatId) ?? commit.previousMessages;
+      messageCacheRef.current.set(chatId, fallback);
+      setMessages((current) => current === commit.messages ? fallback : current);
+      return;
+    }
+    if (!client.reconcileCanonicalCompletion(
+      chatId,
+      commit.hydrate.runGeneration,
+      commit.completedTurnIds,
+      commit.canonicalSnapshot,
+    )) {
+      pendingCanonicalCommitRef.current.delete(chatId);
+      const fallback = messageCacheRef.current.get(chatId) ?? commit.previousMessages;
+      messageCacheRef.current.set(chatId, fallback);
+      setMessages((current) => current === commit.messages ? fallback : current);
+      return;
+    }
+    pendingCanonicalHydrateRef.current.delete(chatId);
+    pendingCanonicalCommitRef.current.delete(chatId);
+    committedHistoryLineageRef.current.set(chatId, historyLineage);
+    completedCanonicalHydrateVersionRef.current.set(chatId, historyVersion);
+  }, [chatId, client, historyLineage, historyVersion, messages, setMessages]);
+
+  useEffect(() => {
+    if (!chatId || hasPendingToolCalls) return;
+    if (completedCanonicalHydrateVersionRef.current.get(chatId) !== historyVersion) return;
+    completedCanonicalHydrateVersionRef.current.delete(chatId);
+    reconcileTurnComplete();
+  }, [chatId, hasPendingToolCalls, historyVersion, messages, reconcileTurnComplete]);
+
+  const refreshCanonicalHistory = useCallback(() => {
+    if (!chatId) return;
+    pendingCanonicalHydrateRef.current.set(chatId, {
+      historyLineage,
+      historyVersion,
+      runGeneration: client.getRunGeneration(chatId),
+      uiBaseline: durableMessageShapes(currentUiMessagesRef.current ?? []),
+      uiLineage: committedHistoryLineageRef.current.get(chatId) ?? null,
+      uiRevision: uiRevisionRef.current,
+    });
+    refreshHistory();
+  }, [chatId, client, historyLineage, historyVersion, refreshHistory]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -735,10 +1046,30 @@ export function ThreadShell({
       // A turn-end thread refresh can arrive while the viewport is easing the
       // final layout change. User-driven scrolling already disables following,
       // so keep an active programmatic follow alive across canonical hydration.
-      pendingCanonicalHydrateRef.current.add(chatId);
-      refreshHistory();
+      refreshCanonicalHistory();
     });
-  }, [chatId, client, refreshHistory]);
+  }, [chatId, client, refreshCanonicalHistory]);
+
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      refreshCanonicalHistory();
+    };
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => document.removeEventListener("visibilitychange", refreshOnReturn);
+  }, [refreshCanonicalHistory]);
+
+  useEffect(() => {
+    let refreshOnNextOpen = client.status !== "open";
+    return client.onStatus((status) => {
+      if (status !== "open") {
+        refreshOnNextOpen = true;
+        return;
+      }
+      if (refreshOnNextOpen) refreshCanonicalHistory();
+      refreshOnNextOpen = false;
+    });
+  }, [client, refreshCanonicalHistory]);
 
   useEffect(() => {
     if (chatId) return;
@@ -944,8 +1275,8 @@ export function ThreadShell({
       const forkedChatId = await onForkChat(chatId, beforeUserIndex);
       if (!forkedChatId) return;
       messageCacheRef.current.delete(forkedChatId);
-      appliedHistoryVersionRef.current.delete(forkedChatId);
-      pendingCanonicalHydrateRef.current.add(forkedChatId);
+      pendingCanonicalHydrateRef.current.delete(forkedChatId);
+      completedCanonicalHydrateVersionRef.current.delete(forkedChatId);
     },
     [chatId, onForkChat],
   );

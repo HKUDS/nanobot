@@ -540,6 +540,8 @@ export function useNanobotStream(
   ) => SubmittedTurn | null;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
+  /** Mark an accepted canonical snapshot as the definitive end of the active turn. */
+  reconcileTurnComplete: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
   /** Latest transport-level fault raised since the last ``dismissStreamError``.
    * ``null`` when there is nothing to show. */
@@ -580,10 +582,6 @@ export function useNanobotStream(
    * the loading spinner alive across tool-call boundaries without needing
    * backend changes. */
   const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return client.onError((err) => setStreamError(err));
-  }, [client]);
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
@@ -653,6 +651,66 @@ export function useNanobotStream(
     activeAssistantRef.current = null;
     return !!closedStreamId;
   }, []);
+
+  const applyStreamError = useCallback((err: StreamError) => {
+    // One multiplexed client serves every thread. A correlated send fault
+    // belongs only to its target chat. An uncorrelated transport close can
+    // still be shown in the mounted thread, but cannot roll back any turn.
+    if (!chatId || (err.chatId && err.chatId !== chatId)) return;
+    setStreamError(err);
+    if (!err.turnId) return;
+
+    const rejectedTurnId = err.turnId;
+    pendingStreamEventsRef.current = pendingStreamEventsRef.current.filter(
+      (event) => event.turn.turnId !== rejectedTurnId,
+    );
+    sideChannelTurnIdsRef.current.delete(rejectedTurnId);
+    cancelStreamEndTimer();
+    setMessages((prev) => {
+      const rejectedRows = prev.filter((message) => message.turnId === rejectedTurnId);
+      if (rejectedRows.length === 0) return prev;
+      const rejectedIds = new Set(rejectedRows.map((message) => message.id));
+      const rejectedSegments = new Set(
+        rejectedRows
+          .map((message) => message.activitySegmentId)
+          .filter((segmentId): segmentId is string => typeof segmentId === "string"),
+      );
+      if (
+        activeAssistantRef.current
+        && rejectedIds.has(activeAssistantRef.current.id)
+      ) {
+        activeAssistantRef.current = null;
+      }
+      if (buffer.current && rejectedIds.has(buffer.current.messageId)) {
+        buffer.current = null;
+      }
+      for (const id of rejectedIds) closedAssistantStreamIdsRef.current.delete(id);
+      if (
+        activitySegmentRef.current
+        && rejectedSegments.has(activitySegmentRef.current)
+      ) {
+        activitySegmentRef.current = null;
+      }
+      if (
+        fileEditSegmentRef.current
+        && rejectedSegments.has(fileEditSegmentRef.current)
+      ) {
+        fileEditSegmentRef.current = null;
+      }
+      return prev.filter((message) => message.turnId !== rejectedTurnId);
+    });
+
+    const remainingStartedAt = client.getRunStartedAt(chatId);
+    const hasRemainingRun = (
+      remainingStartedAt !== null
+      || client.hasUnsettledRun(chatId)
+    );
+    setRunStartedAt(remainingStartedAt);
+    setIsStreaming(hasRemainingRun);
+    if (!hasRemainingRun) suppressStreamUntilTurnEndRef.current = false;
+  }, [cancelStreamEndTimer, chatId, client]);
+
+  useEffect(() => client.onError(applyStreamError), [applyStreamError, client]);
 
   const resolveActiveAssistantIndex = useCallback((
     prev: UIMessage[],
@@ -849,6 +907,15 @@ export function useNanobotStream(
     return () => document.removeEventListener("visibilitychange", flushOnReturn);
   }, [flushPendingStreamEvents]);
 
+  useEffect(() => {
+    return client.onStatus((status) => {
+      if (status !== "reconnecting" && status !== "closed") return;
+      // A transport drop does not prove the backend turn completed. Keep the
+      // semantic running state intact so queued guidance is not flushed early.
+      cancelStreamEndTimer();
+    });
+  }, [cancelStreamEndTimer, client]);
+
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
@@ -883,6 +950,31 @@ export function useNanobotStream(
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "error") {
+        if (ev.detail === "message_too_big") {
+          applyStreamError({
+            kind: "message_too_big",
+            chatId,
+            turnId: ev.turn_id,
+          });
+        } else if (ev.detail === "workspace_scope_rejected") {
+          applyStreamError({
+            kind: "workspace_scope_rejected",
+            reason: ev.reason,
+            chatId,
+            turnId: ev.turn_id,
+          });
+        } else if (ev.turn_id) {
+          applyStreamError({
+            kind: "turn_rejected",
+            detail: ev.detail,
+            reason: ev.reason,
+            chatId,
+            turnId: ev.turn_id,
+          });
+        }
+        return;
+      }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (
         streamEndTimerRef.current !== null
@@ -1187,8 +1279,7 @@ export function useNanobotStream(
         });
         return;
       }
-      // ``attached`` / ``error`` frames aren't actionable here; the client
-      // shell handles them separately.
+      // ``attached`` frames aren't actionable here.
     };
 
     const unsub = client.onChat(chatId, handle);
@@ -1202,6 +1293,7 @@ export function useNanobotStream(
       cancelStreamEndTimer();
     };
   }, [
+    applyStreamError,
     cancelStreamEndTimer,
     chatId,
     client,
@@ -1271,12 +1363,16 @@ export function useNanobotStream(
       });
       if (!sideChannel) setIsStreaming(true);
       const wireMedia = hasAttachments ? images!.map((i) => i.media) : undefined;
-      const wireOptions = { ...options, turnId };
-      delete wireOptions.quotedContext;
-      delete wireOptions.sideChannel;
-      delete wireOptions.finalizeActiveTurn;
-      delete wireOptions.continueActiveTurn;
-      client.sendMessage(chatId, outboundContent, wireMedia, wireOptions);
+      const clientOptions = {
+        ...options,
+        turnId,
+        ...((sideChannel || continueActiveTurn) ? { startsNewRun: false } : {}),
+      };
+      delete clientOptions.quotedContext;
+      delete clientOptions.sideChannel;
+      delete clientOptions.finalizeActiveTurn;
+      delete clientOptions.continueActiveTurn;
+      client.sendMessage(chatId, outboundContent, wireMedia, clientOptions);
       return { turnId, userMessageId, sideChannel };
     },
     [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
@@ -1297,6 +1393,18 @@ export function useNanobotStream(
     client.sendMessage(chatId, "/stop");
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
 
+  const reconcileTurnComplete = useCallback(() => {
+    cancelStreamEndTimer();
+    clearPendingStreamWork();
+    buffer.current = null;
+    activeAssistantRef.current = null;
+    closedAssistantStreamIdsRef.current.clear();
+    clearActivitySegment();
+    suppressStreamUntilTurnEndRef.current = false;
+    setRunStartedAt(null);
+    setIsStreaming(false);
+  }, [cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
+
   const transcribeAudio = useCallback(
     (dataUrl: string, options?: { durationMs?: number }) =>
       client.transcribeAudio(dataUrl, options),
@@ -1312,6 +1420,7 @@ export function useNanobotStream(
     send,
     transcribeAudio,
     stop,
+    reconcileTurnComplete,
     setMessages,
     streamError,
     dismissStreamError,

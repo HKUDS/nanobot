@@ -1251,6 +1251,10 @@
     "workspaceScopeRejected": {
       "title": "工作区未更改",
       "body": "网关拒绝了请求的项目或访问权限，Nanobot 已继续使用之前的工作区。"
+    },
+    "turnRejected": {
+      "title": "消息未发送",
+      "body": "网关拒绝了这条消息。请检查消息内容或附件后重试。"
     }
   },
   "workspace": {

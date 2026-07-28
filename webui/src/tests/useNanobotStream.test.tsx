@@ -3,15 +3,20 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
-import type { InboundEvent, GoalStateWsPayload } from "@/lib/types";
+import type { StreamError } from "@/lib/nanobot-client";
+import type { ConnectionStatus, InboundEvent, GoalStateWsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
 
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
+  const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+  const errorHandlers = new Set<(error: StreamError) => void>();
   const runStartedAtByChatId = new Map<string, number>();
+  const unsettledRunByChatId = new Map<string, boolean>();
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  let status: ConnectionStatus = "open";
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
     if (ev.event === "turn_end") {
@@ -38,16 +43,28 @@ function fakeClient() {
 
   return {
     client: {
-      status: "open" as const,
+      get status() {
+        return status;
+      },
       defaultChatId: null as string | null,
-      onStatus: () => () => {},
-      onError: () => () => {},
+      onStatus(handler: (nextStatus: ConnectionStatus) => void) {
+        statusHandlers.add(handler);
+        handler(status);
+        return () => statusHandlers.delete(handler);
+      },
+      onError(handler: (error: StreamError) => void) {
+        errorHandlers.add(handler);
+        return () => errorHandlers.delete(handler);
+      },
       getRunStartedAt(chatId: string) {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
       },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
+      },
+      hasUnsettledRun(chatId: string) {
+        return unsettledRunByChatId.get(chatId) === true;
       },
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
@@ -71,6 +88,16 @@ function fakeClient() {
       recordGoalStateSnapshot(chatId, ev);
       const set = handlers.get(chatId);
       set?.forEach((h) => h(ev));
+    },
+    emitStatus(nextStatus: ConnectionStatus) {
+      status = nextStatus;
+      statusHandlers.forEach((handler) => handler(status));
+    },
+    emitError(error: StreamError) {
+      errorHandlers.forEach((handler) => handler(error));
+    },
+    setUnsettled(chatId: string, unsettled: boolean) {
+      unsettledRunByChatId.set(chatId, unsettled);
     },
   };
 }
@@ -178,6 +205,64 @@ describe("useNanobotStream", () => {
       }
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the turn pending on disconnect without breaking a resumed stream", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reconnect", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-reconnect", {
+        event: "goal_status",
+        chat_id: "chat-reconnect",
+        status: "running",
+        started_at: 1_700,
+      });
+      fake.emit("chat-reconnect", {
+        event: "delta",
+        chat_id: "chat-reconnect",
+        text: "partial",
+      });
+    });
+    await flushStreamFrame();
+    const assistantId = result.current.messages[0].id;
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => fake.emitStatus("reconnecting"));
+    expect(result.current.runStartedAt).toBe(1_700);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages[0]).toMatchObject({
+      id: assistantId,
+      content: "partial",
+      isStreaming: true,
+    });
+
+    act(() => {
+      fake.emitStatus("open");
+      fake.emit("chat-reconnect", {
+        event: "goal_status",
+        chat_id: "chat-reconnect",
+        status: "running",
+        started_at: 1_800,
+      });
+      fake.emit("chat-reconnect", {
+        event: "delta",
+        chat_id: "chat-reconnect",
+        text: " resumed",
+      });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.runStartedAt).toBe(1_800);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages[0]).toMatchObject({
+      id: assistantId,
+      content: "partial resumed",
+      isStreaming: true,
+    });
   });
 
   it("flushes pending delta text before turn_end finalizes the turn", () => {
@@ -1596,6 +1681,224 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("removes only the optimistic turn named by a correlated rejection", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reject-one", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let first: ReturnType<typeof result.current.send> = null;
+    let second: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      first = result.current.send("first");
+      second = result.current.send("second");
+    });
+    fake.setUnsettled("chat-reject-one", true);
+
+    act(() => {
+      fake.emitError({
+        kind: "turn_rejected",
+        detail: "message_rejected",
+        chatId: "chat-reject-one",
+        turnId: first!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: second!.userMessageId,
+        turnId: second!.turnId,
+        content: "second",
+      }),
+    ]);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.streamError).toMatchObject({
+      kind: "turn_rejected",
+      turnId: first!.turnId,
+    });
+  });
+
+  it("falls back to the previous running turn when the newer turn is rejected", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reject-new", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let first: ReturnType<typeof result.current.send> = null;
+    let second: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      first = result.current.send("first");
+      fake.emit("chat-reject-new", {
+        event: "goal_status",
+        chat_id: "chat-reject-new",
+        status: "running",
+        started_at: 1234,
+        turn_id: first!.turnId,
+      });
+      second = result.current.send("second");
+    });
+
+    act(() => {
+      fake.emitError({
+        kind: "turn_rejected",
+        detail: "attachment_rejected",
+        chatId: "chat-reject-new",
+        turnId: second!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: first!.userMessageId,
+        turnId: first!.turnId,
+      }),
+    ]);
+    expect(result.current.runStartedAt).toBe(1234);
+    expect(result.current.isStreaming).toBe(true);
+  });
+
+  it("ends the spinner and drops pending stream work when the only turn is rejected", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reject-only", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let submitted: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      submitted = result.current.send("only");
+      fake.emit("chat-reject-only", {
+        event: "delta",
+        chat_id: "chat-reject-only",
+        turn_id: submitted!.turnId,
+        text: "must not survive",
+      });
+    });
+
+    act(() => {
+      fake.emitError({
+        kind: "turn_rejected",
+        detail: "access_denied",
+        chatId: "chat-reject-only",
+        turnId: submitted!.turnId,
+      });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.runStartedAt).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("applies a correlated rejection replayed through the chat event queue", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-replayed-reject", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let submitted: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      submitted = result.current.send("queued optimistic row");
+    });
+
+    act(() => {
+      fake.emit("chat-replayed-reject", {
+        event: "error",
+        detail: "message_rejected",
+        reason: "policy",
+        chat_id: "chat-replayed-reject",
+        turn_id: submitted!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.streamError).toMatchObject({
+      kind: "turn_rejected",
+      chatId: "chat-replayed-reject",
+      turnId: submitted!.turnId,
+    });
+  });
+
+  it("does not show or apply an error correlated to another chat", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-visible", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let submitted: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      submitted = result.current.send("stay");
+    });
+
+    act(() => {
+      fake.emitError({
+        kind: "turn_rejected",
+        detail: "message_rejected",
+        chatId: "chat-background",
+        turnId: submitted!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].content).toBe("stay");
+    expect(result.current.streamError).toBeNull();
+  });
+
+  it("shows an uncorrelated 1009 fault without rolling back the current turn", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-generic-1009", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    act(() => {
+      result.current.send("stay visible");
+      fake.emitError({ kind: "message_too_big" });
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({ role: "user", content: "stay visible" }),
+    ]);
+    expect(result.current.streamError).toEqual({ kind: "message_too_big" });
+  });
+
+  it("removes rejected side-channel guidance without stopping the main run", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-side-reject", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let main: ReturnType<typeof result.current.send> = null;
+    let side: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      main = result.current.send("main");
+      fake.emit("chat-side-reject", {
+        event: "goal_status",
+        chat_id: "chat-side-reject",
+        status: "running",
+        started_at: 9876,
+        turn_id: main!.turnId,
+      });
+      side = result.current.send("guidance", undefined, { sideChannel: true });
+    });
+
+    act(() => {
+      fake.emitError({
+        kind: "turn_rejected",
+        detail: "message_rejected",
+        chatId: "chat-side-reject",
+        turnId: side!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: main!.userMessageId,
+        turnId: main!.turnId,
+      }),
+    ]);
+    expect(result.current.runStartedAt).toBe(9876);
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("adds optimistic user file attachments as media", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-send", EMPTY_MESSAGES), {
@@ -1801,6 +2104,7 @@ describe("useNanobotStream", () => {
     const call = fake.client.sendMessage.mock.calls.at(-1)!;
     const turnId = call[3]?.turnId;
     expect(call[3]).not.toHaveProperty("sideChannel");
+    expect(call[3]).toMatchObject({ startsNewRun: false });
     expect(result.current.isStreaming).toBe(false);
 
     act(() => {
@@ -1956,6 +2260,7 @@ describe("useNanobotStream", () => {
 
     const guideCall = fake.client.sendMessage.mock.calls.at(-1)!;
     expect(guideCall[3]).not.toHaveProperty("continueActiveTurn");
+    expect(guideCall[3]).toMatchObject({ startsNewRun: false });
     expect(result.current.messages.map((message) => message.content)).toEqual([
       "research this",
       "Initial findings",

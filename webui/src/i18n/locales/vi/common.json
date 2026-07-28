@@ -1237,6 +1237,10 @@
     "workspaceScopeRejected": {
       "title": "Workspace không thay đổi",
       "body": "Gateway đã từ chối dự án hoặc chế độ truy cập được yêu cầu, nên Nanobot giữ workspace trước đó."
+    },
+    "turnRejected": {
+      "title": "Tin nhắn chưa được gửi",
+      "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     }
   },
   "workspace": {

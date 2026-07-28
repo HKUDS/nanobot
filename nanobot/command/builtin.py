@@ -14,7 +14,7 @@ from typing import Literal
 from nanobot import __version__
 from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
-from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -178,6 +178,21 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
     return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
+
+
+def builtin_command_starts_agent_turn(text: str) -> bool:
+    """Return whether WebUI ingress should expect a normal agent lifecycle."""
+    normalized = normalize_command_text(text)
+    command, separator, args = normalized.partition(" ")
+    spec = next(
+        (item for item in BUILTIN_COMMAND_SPECS if item.command == command.lower()),
+        None,
+    )
+    if spec is None or (separator and not spec.accepts_args):
+        return True
+    if spec.lifecycle == "agent_turn":
+        return True
+    return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:

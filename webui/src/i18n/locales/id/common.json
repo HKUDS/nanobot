@@ -1237,6 +1237,10 @@
     "workspaceScopeRejected": {
       "title": "Workspace tidak berubah",
       "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai workspace sebelumnya."
+    },
+    "turnRejected": {
+      "title": "Pesan tidak terkirim",
+      "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
     }
   },
   "workspace": {

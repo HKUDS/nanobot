@@ -1,30 +1,103 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
+import type { CanonicalRunSnapshot } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { CliAppsPayload, SettingsPayload, UIMessage } from "@/lib/types";
+import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
 function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
+  const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
   const runtimeModelHandlers = new Set<
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   const runStartedAtByChatId = new Map<string, number>();
+  const runGenerationByChatId = new Map<string, number>();
+  const latestRunTurnIdByChatId = new Map<string, string>();
+  const completedTurnIdsByChatId = new Map<string, Set<string>>();
   const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
+  let status: ConnectionStatus = "open";
+  const advanceRunGeneration = (chatId: string, turnId?: string) => {
+    runGenerationByChatId.set(chatId, (runGenerationByChatId.get(chatId) ?? 0) + 1);
+    if (turnId) latestRunTurnIdByChatId.set(chatId, turnId);
+    else latestRunTurnIdByChatId.delete(chatId);
+  };
+  const sendMessage = vi.fn((
+    chatId: string,
+    _content: string,
+    _media?: unknown,
+    options?: { turnId?: string; startsNewRun?: boolean },
+  ) => {
+    if (options?.turnId && options.startsNewRun !== false) {
+      advanceRunGeneration(chatId, options.turnId);
+    }
+  });
+  const canReconcileCanonicalCompletion = vi.fn((
+    chatId: string,
+    expectedRunGeneration: number,
+    completedTurnIds: readonly string[],
+    snapshot?: CanonicalRunSnapshot,
+  ) => {
+    const existingFences = completedTurnIdsByChatId.get(chatId);
+    const prospectiveFences = new Set(completedTurnIds);
+    const observedTurnIds = new Set(snapshot?.observedTurnIds ?? []);
+    const isRepresented = (turnId: string) => (
+      prospectiveFences.has(turnId)
+      || existingFences?.has(turnId) === true
+      || (
+        snapshot?.hasPendingToolCalls === false
+        && observedTurnIds.has(turnId)
+      )
+    );
+    const currentGeneration = runGenerationByChatId.get(chatId) ?? 0;
+    const latestTurnId = latestRunTurnIdByChatId.get(chatId);
+    return (
+      currentGeneration === expectedRunGeneration
+      || (typeof latestTurnId === "string" && isRepresented(latestTurnId))
+    );
+  });
+  const reconcileCanonicalCompletion = vi.fn((
+    chatId: string,
+    expectedRunGeneration: number,
+    completedTurnIds: readonly string[],
+    snapshot?: CanonicalRunSnapshot,
+  ) => {
+    if (!canReconcileCanonicalCompletion(
+      chatId,
+      expectedRunGeneration,
+      completedTurnIds,
+      snapshot,
+    )) {
+      return false;
+    }
+    const fences = completedTurnIdsByChatId.get(chatId) ?? new Set<string>();
+    for (const turnId of completedTurnIds) fences.add(turnId);
+    completedTurnIdsByChatId.set(chatId, fences);
+    runStartedAtByChatId.delete(chatId);
+    return true;
+  });
   return {
-    status: "open" as const,
+    get status() {
+      return status;
+    },
     defaultChatId: null as string | null,
-    onStatus: () => () => {},
+    onStatus: (handler: (nextStatus: ConnectionStatus) => void) => {
+      statusHandlers.add(handler);
+      handler(status);
+      return () => {
+        statusHandlers.delete(handler);
+      };
+    },
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {
@@ -34,6 +107,9 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
+    canReconcileCanonicalCompletion,
+    reconcileCanonicalCompletion,
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
@@ -61,12 +137,19 @@ function makeClient() {
     _emitError(err: { kind: string }) {
       for (const h of errorHandlers) h(err);
     },
+    _emitStatus(nextStatus: ConnectionStatus) {
+      status = nextStatus;
+      for (const h of statusHandlers) h(status);
+    },
     _emitChat(chatId: string, ev: import("@/lib/types").InboundEvent) {
+      const turnId = "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : null;
+      if (turnId && completedTurnIdsByChatId.get(chatId)?.has(turnId)) return;
       if (
         ev.event === "goal_status"
         && ev.status === "running"
         && typeof ev.started_at === "number"
       ) {
+        advanceRunGeneration(chatId, ev.turn_id);
         runStartedAtByChatId.set(chatId, ev.started_at);
       } else if (
         (ev.event === "goal_status" && ev.status === "idle")
@@ -85,7 +168,7 @@ function makeClient() {
     _emitSessionUpdate(chatId: string, scope?: string) {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
     },
-    sendMessage: vi.fn(),
+    sendMessage,
     sendSystemCommand: vi.fn().mockResolvedValue(undefined),
     newChat: vi.fn(),
     forkChat: vi.fn(),
@@ -135,7 +218,7 @@ function session(chatId: string, modelPreset?: string | null) {
 }
 
 function transcriptFromSimpleMessages(
-  rows: Array<{ role: "user" | "assistant"; content: string }>,
+  rows: Array<{ role: "user" | "assistant"; content: string; turnId?: string }>,
 ): { schemaVersion: number; messages: UIMessage[] } {
   return {
     schemaVersion: 3,
@@ -143,6 +226,7 @@ function transcriptFromSimpleMessages(
       id: `m-${i}`,
       role: m.role,
       content: m.content,
+      ...(m.turnId ? { turnId: m.turnId } : {}),
       createdAt: 1000 + i,
     })),
   };
@@ -1493,6 +1577,1215 @@ describe("ThreadShell", () => {
     expect(screen.getByText("first fork question")).toBeInTheDocument();
     expect(screen.getByText("first fork answer")).toBeInTheDocument();
     expect(screen.getByText("second fork question")).toBeInTheDocument();
+  });
+
+  it("recovers a truncated streamed answer after reconnecting", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Aresume-chat/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "partial answer completed while away" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("resume-chat")}
+          title="Resume chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("resume-chat", {
+        event: "goal_status",
+        chat_id: "resume-chat",
+        status: "running",
+        started_at: 1_700,
+      });
+      client._emitChat("resume-chat", {
+        event: "delta",
+        chat_id: "resume-chat",
+        text: "partial answer",
+      });
+    });
+    await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    expect(historyCalls).toBe(1);
+
+    act(() => client._emitStatus("reconnecting"));
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    act(() => client._emitStatus("open"));
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    await waitFor(() =>
+      expect(screen.getByText("partial answer completed while away")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("partial answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("refreshes after opening when mounted while the socket is reconnecting", async () => {
+    const client = makeClient();
+    client._emitStatus("reconnecting");
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Amount-during-reconnect/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(transcriptFromSimpleMessages(
+            historyCalls === 1
+              ? [{ role: "user", content: "question before reconnect" }]
+              : [
+                  { role: "user", content: "question before reconnect" },
+                  { role: "assistant", content: "answer completed before open" },
+                ],
+          ));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("mount-during-reconnect")}
+          title="Mount during reconnect"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("question before reconnect")).toBeInTheDocument());
+    expect(historyCalls).toBe(1);
+
+    act(() => client._emitStatus("open"));
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    await waitFor(() =>
+      expect(screen.getByText("answer completed before open")).toBeInTheDocument(),
+    );
+  });
+
+  it("adopts a disjoint authoritative latest-window reset after overlap falls out", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const canonicalTurnId = "turn-new-window";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Awindow-reset-chat/webui-thread")) {
+          historyCalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [
+                    {
+                      role: "assistant",
+                      content: "row from the expired latest window",
+                      turnId: "turn-old-window",
+                    },
+                  ]
+                : [
+                    {
+                      role: "user",
+                      content: "question in the new latest window",
+                      turnId: canonicalTurnId,
+                    },
+                    {
+                      role: "assistant",
+                      content: "answer in the new latest window",
+                      turnId: canonicalTurnId,
+                    },
+                  ],
+            ),
+            has_pending_tool_calls: false,
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("window-reset-chat")}
+          title="Window reset"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("row from the expired latest window")).toBeInTheDocument(),
+    );
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() =>
+      expect(screen.getByText("answer in the new latest window")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("row from the expired latest window")).not.toBeInTheDocument();
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledWith(
+      "window-reset-chat",
+      expect.any(Number),
+      expect.arrayContaining([canonicalTurnId]),
+      {
+        observedTurnIds: [canonicalTurnId],
+        hasPendingToolCalls: false,
+        activeTurnId: null,
+      },
+    );
+  });
+
+  it("recovers an uncommitted reset lineage on the next foreground hydrate", async () => {
+    const client = makeClient();
+    let chatACalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Alineage-chat-a/webui-thread")) {
+          chatACalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              chatACalls === 1
+                ? [{ role: "assistant", content: "committed old lineage" }]
+                : [{ role: "assistant", content: "disjoint new lineage" }],
+            ),
+            has_pending_tool_calls: false,
+          });
+        }
+        if (url.includes("websocket%3Alineage-chat-b/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "other lineage chat" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Chat ${chatId}`}
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+    );
+    const { rerender } = render(view("lineage-chat-a"));
+
+    await waitFor(() => expect(screen.getByText("committed old lineage")).toBeInTheDocument());
+    rerender(view("lineage-chat-b"));
+    await waitFor(() => expect(screen.getByText("other lineage chat")).toBeInTheDocument());
+    rerender(view("lineage-chat-a"));
+    await waitFor(() => expect(chatACalls).toBe(2));
+
+    expect(screen.getByText("committed old lineage")).toBeInTheDocument();
+    expect(screen.queryByText("disjoint new lineage")).not.toBeInTheDocument();
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(chatACalls).toBe(3));
+    await waitFor(() => expect(screen.getByText("disjoint new lineage")).toBeInTheDocument());
+    expect(screen.queryByText("committed old lineage")).not.toBeInTheDocument();
+  });
+
+  it("does not reset away a durable UI tail that arrives after the request", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    let resolveRefresh:
+      | ((value: ReturnType<typeof httpJson>) => void)
+      | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        if (!String(input).includes("websocket%3Areset-tail-race/webui-thread")) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: async () => ({}),
+          });
+        }
+        historyCalls += 1;
+        if (historyCalls === 1) {
+          return Promise.resolve(httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "old canonical row" },
+          ])));
+        }
+        return new Promise((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("reset-tail-race")}
+          title="Reset tail race"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("old canonical row")).toBeInTheDocument());
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(historyCalls).toBe(2));
+
+    act(() => {
+      client._emitChat("reset-tail-race", {
+        event: "message",
+        chat_id: "reset-tail-race",
+        text: "local durable row after request",
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByText("local durable row after request")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      resolveRefresh?.(httpJson({
+        ...transcriptFromSimpleMessages([
+          { role: "assistant", content: "disjoint canonical reset row" },
+        ]),
+        has_pending_tool_calls: false,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("old canonical row")).toBeInTheDocument();
+    expect(screen.getByText("local durable row after request")).toBeInTheDocument();
+    expect(screen.queryByText("disjoint canonical reset row")).not.toBeInTheDocument();
+  });
+
+  it("safely commits an empty canonical reset for a rejected local turn", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Aempty-reset-chat/webui-thread")) {
+          historyCalls += 1;
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("empty-reset-chat")}
+          title="Empty reset"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(historyCalls).toBe(1));
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "rejected local turn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(screen.getByText("rejected local turn")).toBeInTheDocument());
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    await waitFor(() =>
+      expect(screen.queryByText("rejected local turn")).not.toBeInTheDocument(),
+    );
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledWith(
+      "empty-reset-chat",
+      expect.any(Number),
+      [],
+      {
+        observedTurnIds: [],
+        hasPendingToolCalls: false,
+        activeTurnId: null,
+      },
+    );
+  });
+
+  it("runs canonical reconciliation once when React replays state calculations", async () => {
+    const client = makeClient();
+    const turnId = "turn-strict-canonical";
+    let canonicalComplete = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Astrict-canonical/webui-thread")) {
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              canonicalComplete
+                ? [
+                    { role: "user", content: "strict question", turnId },
+                    { role: "assistant", content: "strict canonical answer", turnId },
+                  ]
+                : [{ role: "user", content: "strict question", turnId }],
+            ),
+            has_pending_tool_calls: !canonicalComplete,
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <StrictMode>
+          <ThreadShell
+            session={session("strict-canonical")}
+            title="Strict canonical"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />
+        </StrictMode>,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("strict question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("strict-canonical", {
+        event: "goal_status",
+        chat_id: "strict-canonical",
+        status: "running",
+        started_at: 2_100,
+        turn_id: turnId,
+      });
+      client._emitChat("strict-canonical", {
+        event: "delta",
+        chat_id: "strict-canonical",
+        text: "strict partial",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("strict partial")).toBeInTheDocument());
+    client.reconcileCanonicalCompletion.mockClear();
+    const reconcileAfterCommit = client.reconcileCanonicalCompletion.getMockImplementation();
+    client.reconcileCanonicalCompletion.mockImplementation((...args) => {
+      expect(screen.getByText("strict canonical answer")).toBeInTheDocument();
+      return reconcileAfterCommit?.(...args) ?? false;
+    });
+    canonicalComplete = true;
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(screen.getByText("strict canonical answer")).toBeInTheDocument());
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
+    expect(client.canReconcileCanonicalCompletion).toHaveBeenCalled();
+  });
+
+  it("rolls back a committed candidate when the final lifecycle recheck loses", async () => {
+    const client = makeClient();
+    const turnId = "turn-layout-recheck";
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Alayout-recheck/webui-thread")) {
+          historyCalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "layout question", turnId }]
+                : [
+                    { role: "user", content: "layout question", turnId },
+                    { role: "assistant", content: "layout canonical answer", turnId },
+                  ],
+            ),
+            has_pending_tool_calls: historyCalls === 1,
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("layout-recheck")}
+          title="Layout recheck"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("layout question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("layout-recheck", {
+        event: "goal_status",
+        chat_id: "layout-recheck",
+        status: "running",
+        started_at: 2_200,
+        turn_id: turnId,
+      });
+      client._emitChat("layout-recheck", {
+        event: "delta",
+        chat_id: "layout-recheck",
+        text: "layout partial",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("layout partial")).toBeInTheDocument());
+
+    const reconcileAfterReject = client.reconcileCanonicalCompletion.getMockImplementation();
+    client.reconcileCanonicalCompletion
+      .mockImplementationOnce(() => false)
+      .mockImplementation((...args) => reconcileAfterReject?.(...args) ?? false);
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    await waitFor(() =>
+      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByText("layout partial")).toBeInTheDocument();
+    expect(screen.queryByText("layout canonical answer")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(historyCalls).toBe(3));
+    await waitFor(() => expect(screen.getByText("layout canonical answer")).toBeInTheDocument());
+    expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts the first reconnect refresh after switching away and back", async () => {
+    const client = makeClient();
+    const oldTurnId = "turn-old";
+    let newTurnId = "";
+    let chatACalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-version-a/webui-thread")) {
+          chatACalls += 1;
+          const rows = chatACalls <= 2
+            ? [
+                { role: "user" as const, content: "old question", turnId: oldTurnId },
+                { role: "assistant" as const, content: "old answer", turnId: oldTurnId },
+              ]
+            : [
+                { role: "user" as const, content: "old question", turnId: oldTurnId },
+                { role: "assistant" as const, content: "old answer", turnId: oldTurnId },
+                { role: "user" as const, content: "new question", turnId: newTurnId },
+                {
+                  role: "assistant" as const,
+                  content: "partial answer completed",
+                  turnId: newTurnId,
+                },
+              ];
+          return httpJson({
+            ...transcriptFromSimpleMessages(rows),
+            has_pending_tool_calls: false,
+          });
+        }
+        if (url.includes("websocket%3Achat-version-b/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "other chat" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Chat ${chatId}`}
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+    );
+    const { rerender } = render(view("chat-version-a"));
+
+    await waitFor(() => expect(screen.getByText("old answer")).toBeInTheDocument());
+    act(() => client._emitSessionUpdate("chat-version-a"));
+    await waitFor(() => expect(chatACalls).toBe(2));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "new question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledTimes(1));
+    newTurnId = (
+      client.sendMessage.mock.calls[0]?.[3] as { turnId?: string } | undefined
+    )?.turnId ?? "";
+    expect(newTurnId).not.toBe("");
+    act(() => {
+      client._emitChat("chat-version-a", {
+        event: "goal_status",
+        chat_id: "chat-version-a",
+        status: "running",
+        started_at: 2_000,
+        turn_id: newTurnId,
+      });
+      client._emitChat("chat-version-a", {
+        event: "delta",
+        chat_id: "chat-version-a",
+        text: "partial answer",
+        turn_id: newTurnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
+
+    rerender(view("chat-version-b"));
+    await waitFor(() => expect(screen.getByText("other chat")).toBeInTheDocument());
+    rerender(view("chat-version-a"));
+    await waitFor(() => expect(chatACalls).toBe(3));
+    expect(screen.getByText("partial answer")).toBeInTheDocument();
+    expect(screen.queryByText("partial answer completed")).not.toBeInTheDocument();
+
+    act(() => client._emitStatus("reconnecting"));
+    act(() => client._emitStatus("open"));
+
+    await waitFor(() => expect(chatACalls).toBe(4));
+    await waitFor(() =>
+      expect(screen.getByText("partial answer completed")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("partial answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("does not let an older completed snapshot clear a run that starts in flight", async () => {
+    const client = makeClient();
+    const oldTurnId = "turn-before-refresh";
+    let historyCalls = 0;
+    let resolveRefresh:
+      | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
+      | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes("websocket%3Arun-generation-chat/webui-thread")) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: async () => ({}),
+          });
+        }
+        historyCalls += 1;
+        if (historyCalls === 1) {
+          return Promise.resolve(httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "old question", turnId: oldTurnId },
+            { role: "assistant", content: "old answer", turnId: oldTurnId },
+          ])));
+        }
+        return new Promise((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("run-generation-chat")}
+          title="Run generation chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("old answer")).toBeInTheDocument());
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(historyCalls).toBe(2));
+
+    const newTurnId = "turn-started-during-refresh";
+    act(() => {
+      client._emitChat("run-generation-chat", {
+        event: "goal_status",
+        chat_id: "run-generation-chat",
+        status: "running",
+        started_at: 3_000,
+        turn_id: newTurnId,
+      });
+    });
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "queued for the new run" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRefresh?.(httpJson({
+        ...transcriptFromSimpleMessages([
+          { role: "user", content: "old question", turnId: oldTurnId },
+          { role: "assistant", content: "old answer", turnId: oldTurnId },
+        ]),
+        has_pending_tool_calls: false,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("fences websocket frames that arrive after canonical completion", async () => {
+    const client = makeClient();
+    const turnId = "turn-http-won";
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Alate-frame-chat/webui-thread")) {
+          historyCalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question", turnId }]
+                : [
+                    { role: "user", content: "question", turnId },
+                    { role: "assistant", content: "canonical complete answer", turnId },
+                  ],
+            ),
+            has_pending_tool_calls: false,
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("late-frame-chat")}
+          title="Late frame chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("late-frame-chat", {
+        event: "goal_status",
+        chat_id: "late-frame-chat",
+        status: "running",
+        started_at: 4_000,
+        turn_id: turnId,
+      });
+      client._emitChat("late-frame-chat", {
+        event: "delta",
+        chat_id: "late-frame-chat",
+        text: "partial",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("partial")).toBeInTheDocument());
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() =>
+      expect(screen.getByText("canonical complete answer")).toBeInTheDocument(),
+    );
+
+    act(() => {
+      client._emitChat("late-frame-chat", {
+        event: "delta",
+        chat_id: "late-frame-chat",
+        text: " delayed duplicate",
+        turn_id: turnId,
+      });
+      client._emitChat("late-frame-chat", {
+        event: "turn_end",
+        chat_id: "late-frame-chat",
+        turn_id: turnId,
+      });
+      client._emitSessionUpdate("late-frame-chat");
+    });
+
+    await waitFor(() => expect(historyCalls).toBe(3));
+    expect(screen.getAllByText("canonical complete answer")).toHaveLength(1);
+    expect(screen.queryByText(" delayed duplicate")).not.toBeInTheDocument();
+    expect(screen.queryByText("canonical complete answer delayed duplicate")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("does not revive a canonically completed run after switching chats", async () => {
+    const client = makeClient();
+    const turnId = "turn-visibility-complete";
+    let chatACalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Avisibility-complete-a/webui-thread")) {
+          chatACalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages(
+              chatACalls === 1
+                ? [{ role: "user", content: "question", turnId }]
+                : [
+                    { role: "user", content: "question", turnId },
+                    { role: "assistant", content: "completed while hidden", turnId },
+                  ],
+            ),
+            has_pending_tool_calls: false,
+          });
+        }
+        if (url.includes("websocket%3Avisibility-complete-b/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "other thread" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Chat ${chatId}`}
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+    );
+    const { rerender } = render(view("visibility-complete-a"));
+
+    await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("visibility-complete-a", {
+        event: "goal_status",
+        chat_id: "visibility-complete-a",
+        status: "running",
+        started_at: 5_000,
+        turn_id: turnId,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(screen.getByText("completed while hidden")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(client.getRunStartedAt("visibility-complete-a")).toBeNull();
+
+    rerender(view("visibility-complete-b"));
+    await waitFor(() => expect(screen.getByText("other thread")).toBeInTheDocument());
+    rerender(view("visibility-complete-a"));
+    await waitFor(() => expect(screen.getByText("completed while hidden")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("uses explicit completion ids when a completed turn has no assistant row", async () => {
+    const client = makeClient();
+    const turnId = "turn-empty-answer";
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Aempty-answer/webui-thread")) {
+          historyCalls += 1;
+          return httpJson({
+            ...transcriptFromSimpleMessages([
+              { role: "user", content: "stop", turnId },
+            ]),
+            has_pending_tool_calls: historyCalls === 1,
+            completed_turn_ids: historyCalls === 1 ? [] : [turnId],
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("empty-answer")}
+          title="Empty answer"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("stop")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("empty-answer", {
+        event: "goal_status",
+        chat_id: "empty-answer",
+        status: "running",
+        started_at: 5_000,
+        turn_id: turnId,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    await waitFor(() => expect(client.reconcileCanonicalCompletion).toHaveBeenCalledWith(
+      "empty-answer",
+      expect.any(Number),
+      expect.arrayContaining([turnId]),
+      expect.objectContaining({
+        observedTurnIds: [turnId],
+        hasPendingToolCalls: false,
+      }),
+    ));
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("converges after reconnecting before the first assistant delta", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const turnId = "turn-resume-before-delta";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Abefore-delta-chat/webui-thread")) {
+          historyCalls += 1;
+          const transcript = transcriptFromSimpleMessages(
+            historyCalls === 1
+              ? [{ role: "user", content: "question", turnId }]
+              : [
+                  { role: "user", content: "question", turnId },
+                  {
+                    role: "assistant",
+                    content: historyCalls === 2
+                      ? "missed prefix"
+                      : "missed prefix resumed suffix",
+                    turnId,
+                  },
+                ],
+          );
+          return httpJson({
+            ...transcript,
+            has_pending_tool_calls: historyCalls === 2,
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("before-delta-chat")}
+          title="Before delta chat"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("before-delta-chat", {
+        event: "goal_status",
+        chat_id: "before-delta-chat",
+        status: "running",
+        started_at: 1_700,
+        turn_id: turnId,
+      });
+    });
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "queued guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => client._emitStatus("reconnecting"));
+    act(() => client._emitStatus("open"));
+    await waitFor(() => expect(historyCalls).toBe(2));
+    expect(screen.queryByText("missed prefix")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => {
+      client._emitChat("before-delta-chat", {
+        event: "delta",
+        chat_id: "before-delta-chat",
+        text: "resumed suffix",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("resumed suffix")).toBeInTheDocument());
+
+    act(() => client._emitStatus("reconnecting"));
+    act(() => client._emitStatus("open"));
+    await waitFor(() => expect(historyCalls).toBe(3));
+    await waitFor(() =>
+      expect(screen.getByText("missed prefix resumed suffix")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("resumed suffix")).not.toBeInTheDocument();
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "before-delta-chat",
+      "queued guidance",
+    ));
+  });
+
+  it("keeps the live answer cursor when a resumed turn is still running", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const turnId = "turn-active-resume";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Aactive-resume-chat/webui-thread")) {
+          historyCalls += 1;
+          const transcript = transcriptFromSimpleMessages(
+            historyCalls === 1
+              ? [{ role: "user", content: "question", turnId }]
+              : [
+                  { role: "user", content: "question", turnId },
+                  {
+                    role: "assistant",
+                    content: historyCalls === 2
+                      ? "partial answer missed"
+                      : "partial answer missed resumed",
+                    turnId,
+                  },
+                ],
+          );
+          return httpJson(
+            historyCalls === 1
+              ? transcript
+              : { ...transcript, has_pending_tool_calls: historyCalls === 2 },
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("active-resume-chat")}
+          title="Active resume chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("active-resume-chat", {
+        event: "goal_status",
+        chat_id: "active-resume-chat",
+        status: "running",
+        started_at: 1_700,
+        turn_id: turnId,
+      });
+      client._emitChat("active-resume-chat", {
+        event: "delta",
+        chat_id: "active-resume-chat",
+        text: "partial answer",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "queued guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("queued guidance")).toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => client._emitStatus("reconnecting"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    act(() => client._emitStatus("open"));
+    await waitFor(() => expect(historyCalls).toBe(2));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => {
+      client._emitChat("active-resume-chat", {
+        event: "delta",
+        chat_id: "active-resume-chat",
+        text: " resumed",
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("partial answer resumed")).toBeInTheDocument());
+    expect(screen.queryByText(" resumed")).not.toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => client._emitStatus("reconnecting"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    act(() => client._emitStatus("open"));
+
+    await waitFor(() => expect(historyCalls).toBe(3));
+    await waitFor(() =>
+      expect(screen.getByText("partial answer missed resumed")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("partial answer resumed")).not.toBeInTheDocument();
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "active-resume-chat",
+      "queued guidance",
+    ));
+  });
+
+  it("refreshes the current thread when the page returns to the foreground", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Avisible-chat/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "answer completed in background" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("visible-chat")}
+            title="Visible chat"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+      await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+      expect(historyCalls).toBe(1);
+
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "hidden",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(historyCalls).toBe(1);
+
+      await act(async () => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(historyCalls).toBe(2));
+      await waitFor(() =>
+        expect(screen.getByText("answer completed in background")).toBeInTheDocument(),
+      );
+    } finally {
+      if (visibilityDescriptor) {
+        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      } else {
+        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+      }
+    }
   });
 
   it("does not refetch thread history on turn_end", async () => {

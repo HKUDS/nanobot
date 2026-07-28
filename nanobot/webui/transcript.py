@@ -25,6 +25,7 @@ from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
+WEBUI_TRANSCRIPT_INCOMPLETE_KEY = "transcript_incomplete"
 _MAX_TRANSCRIPT_FILE_BYTES = 8 * 1024 * 1024
 _TARGET_ACTIVE_TRANSCRIPT_BYTES = _MAX_TRANSCRIPT_FILE_BYTES // 2
 _TRANSCRIPT_SEGMENT_MANIFEST_VERSION = 2
@@ -149,6 +150,12 @@ class _TranscriptChunkRef(NamedTuple):
     start_ordinal: int
     turn_count: int
     user_count: int
+
+
+class _SessionBackfillTurn(NamedTuple):
+    user_event: dict[str, Any]
+    assistant_signature: tuple[str, ...]
+    assistant_records: tuple[dict[str, Any], ...]
 
 
 def _record_json_line(record: dict[str, Any]) -> str:
@@ -665,7 +672,7 @@ class WebUITranscriptRecorder:
         phase: str | None = None,
         include_source: bool = False,
         transcript_overrides: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> bool:
         self.prepare_event(
             chat_id,
             event,
@@ -676,7 +683,7 @@ class WebUITranscriptRecorder:
         record = dict(event)
         if transcript_overrides:
             record.update(transcript_overrides)
-        self.append(chat_id, record)
+        return self.append(chat_id, record)
 
     def append_user_message(
         self,
@@ -687,9 +694,9 @@ class WebUITranscriptRecorder:
         media_paths: list[str] | None = None,
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
-    ) -> None:
+    ) -> bool:
         if text.strip() == "/stop" and not media_paths:
-            return
+            return False
         payload = build_user_transcript_event(
             chat_id,
             text,
@@ -698,15 +705,17 @@ class WebUITranscriptRecorder:
             mcp_presets=mcp_presets,
         )
         if payload is None:
-            return
-        self.prepare_and_append(chat_id, payload, metadata=metadata, phase="user")
+            return False
+        return self.prepare_and_append(chat_id, payload, metadata=metadata, phase="user")
 
-    def append(self, chat_id: str, event: dict[str, Any]) -> None:
+    def append(self, chat_id: str, event: dict[str, Any]) -> bool:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
             append_transcript_object(f"websocket:{chat_id}", dup)
         except (OSError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
+            return False
+        return True
 
     def _next_turn_seq(self, chat_id: str, turn_id: str) -> int:
         key = (chat_id, turn_id)
@@ -921,32 +930,69 @@ def _assistant_text_signature(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _session_assistant_event(
+    session_key: str,
+    message: dict[str, Any],
+) -> dict[str, Any] | None:
+    if message.get("role") != "assistant" or is_hidden_history_message(message):
+        return None
+    message = public_history_message(message)
+    content = message.get("content")
+    text = content if isinstance(content, str) else ""
+    media = message.get("media")
+    media_paths = [str(path) for path in media] if isinstance(media, list) else []
+    media_paths = [path for path in media_paths if path]
+    if not text.strip() and not media_paths:
+        return None
+    chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
+    event: dict[str, Any] = {
+        "event": "message",
+        "chat_id": chat_id,
+        "text": text,
+    }
+    if media_paths:
+        event["media"] = media_paths
+    latency_ms = message.get("latency_ms")
+    if isinstance(latency_ms, int | float) and latency_ms >= 0:
+        event["latency_ms"] = int(latency_ms)
+    return event
+
+
 def _session_backfill_turns(
     session_key: str,
     session_messages: list[dict[str, Any]],
-) -> list[tuple[dict[str, Any], tuple[str, ...]]]:
-    turns: list[tuple[dict[str, Any], tuple[str, ...]]] = []
+) -> list[_SessionBackfillTurn]:
+    turns: list[_SessionBackfillTurn] = []
     current_user: dict[str, Any] | None = None
-    assistant_texts: list[str] = []
+    assistant_records: list[dict[str, Any]] = []
 
     def flush() -> None:
-        if current_user is None:
+        if current_user is None or not assistant_records:
             return
-        signature = tuple(text for text in assistant_texts if text)
-        if signature:
-            turns.append((current_user, signature))
+        signature = tuple(
+            text
+            for record in assistant_records
+            if (text := _assistant_text_signature(record.get("text")))
+        )
+        turns.append(
+            _SessionBackfillTurn(
+                current_user,
+                signature,
+                tuple(dict(record) for record in assistant_records),
+            )
+        )
 
     for message in session_messages:
         role = message.get("role")
         if role == "user":
             flush()
             current_user = _session_user_event(session_key, message)
-            assistant_texts = []
+            assistant_records = []
             continue
         if role == "assistant" and current_user is not None:
-            text = _assistant_text_signature(message.get("content"))
-            if text:
-                assistant_texts.append(text)
+            record = _session_assistant_event(session_key, message)
+            if record is not None:
+                assistant_records.append(record)
     flush()
     return turns
 
@@ -976,7 +1022,7 @@ def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]
 
 
 def _find_unique_session_turn(
-    session_turns: list[tuple[dict[str, Any], tuple[str, ...]]],
+    session_turns: list[_SessionBackfillTurn],
     signature: tuple[str, ...],
     start: int,
 ) -> int | None:
@@ -984,12 +1030,107 @@ def _find_unique_session_turn(
         return None
     found: int | None = None
     for index in range(start, len(session_turns)):
-        if session_turns[index][1] != signature:
+        if session_turns[index].assistant_signature != signature:
             continue
         if found is not None:
             return None
         found = index
     return found
+
+
+def _user_recovery_signature(event: dict[str, Any]) -> str:
+    fields = {
+        key: event[key]
+        for key in ("text", "media_paths", "cli_apps", "mcp_presets")
+        if key in event
+    }
+    return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _find_unique_session_turn_by_user(
+    session_turns: list[_SessionBackfillTurn],
+    user_event: dict[str, Any],
+) -> _SessionBackfillTurn | None:
+    signature = _user_recovery_signature(user_event)
+    matches = [
+        turn
+        for turn in session_turns
+        if _user_recovery_signature(turn.user_event) == signature
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _is_recoverable_answer_record(record: dict[str, Any]) -> bool:
+    event = record.get("event")
+    if event in {"delta", "stream_end"}:
+        return True
+    return event == "message" and record.get("kind") not in {
+        "tool_hint",
+        "progress",
+        "reasoning",
+    }
+
+
+def recover_incomplete_turns_from_session(
+    lines: list[dict[str, Any]],
+    session_messages: list[dict[str, Any]] | None,
+    *,
+    session_key: str,
+) -> list[dict[str, Any]]:
+    """Recover marked transcript answers only when one durable session turn matches."""
+    if not lines or not session_messages:
+        return lines
+    session_turns = _session_backfill_turns(session_key, session_messages)
+    if not session_turns:
+        return lines
+
+    recovered: list[dict[str, Any]] = []
+    for turn in _split_transcript_turns(lines):
+        turn_end = turn[-1] if turn else None
+        if (
+            not isinstance(turn_end, dict)
+            or turn_end.get("event") != "turn_end"
+            or turn_end.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is not True
+        ):
+            recovered.extend(turn)
+            continue
+
+        user_events = [record for record in turn if record.get("event") == "user"]
+        if len(user_events) != 1:
+            recovered.extend(turn)
+            continue
+        session_turn = _find_unique_session_turn_by_user(session_turns, user_events[0])
+        if session_turn is None or not session_turn.assistant_records:
+            recovered.extend(turn)
+            continue
+
+        stable_end_ms = _valid_created_at_ms(turn_end.get("created_at_ms"))
+        turn_id = turn_end.get("turn_id")
+        answer_records: list[dict[str, Any]] = []
+        for index, source in enumerate(session_turn.assistant_records):
+            answer = dict(source)
+            if isinstance(turn_id, str) and turn_id:
+                answer["turn_id"] = turn_id
+                answer["turn_phase"] = "answer"
+            if stable_end_ms is not None:
+                answer["created_at_ms"] = max(
+                    0,
+                    stable_end_ms - len(session_turn.assistant_records) + index,
+                )
+            answer_records.append(answer)
+
+        # Session history is the durable source of the completed answer. Keep
+        # traces/reasoning/file edits, but replace any partial answer fragments.
+        recovered.extend(
+            record
+            for record in turn[:-1]
+            if not _is_recoverable_answer_record(record)
+        )
+        recovered.extend(answer_records)
+        completed_end = dict(turn_end)
+        completed_end.pop(WEBUI_TRANSCRIPT_INCOMPLETE_KEY, None)
+        recovered.append(completed_end)
+    return recovered
 
 
 def _with_backfilled_user(
@@ -1972,8 +2113,36 @@ def fork_boundary_message_count(lines: list[dict[str, Any]]) -> int | None:
     return None
 
 
-def has_pending_tool_calls(lines: list[dict[str, Any]]) -> bool:
+def has_pending_tool_calls(
+    lines: list[dict[str, Any]],
+    *,
+    active_turn_started_at: float | None = None,
+    active_turn_id: str | None = None,
+    active_turn_transcript_persistence_failed: bool = False,
+) -> bool:
     """Return True when the selected transcript tail looks like an unfinished turn."""
+    # An older canonical turn can remain unsafe even after a later turn
+    # completes. Recovery removes this marker only after matching durable
+    # session history, so no later turn_end may hide it.
+    if any(
+        rec.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
+        for rec in lines
+    ):
+        return True
+    if active_turn_started_at is not None:
+        if active_turn_transcript_persistence_failed:
+            return True
+        if active_turn_id is None:
+            return True
+        for rec in reversed(lines):
+            transcript_turn_id = rec.get("turn_id")
+            if not isinstance(transcript_turn_id, str) or not transcript_turn_id:
+                continue
+            if transcript_turn_id != active_turn_id:
+                return True
+            return rec.get("event") != "turn_end"
+        return True
+
     for rec in reversed(lines):
         ev = rec.get("event")
         if ev == "turn_end":
@@ -1995,6 +2164,24 @@ def has_pending_tool_calls(lines: list[dict[str, Any]]) -> bool:
     return False
 
 
+def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:
+    """Return stable identities for turns with an explicitly persisted completion."""
+    completed: list[str] = []
+    seen: set[str] = set()
+    for rec in lines:
+        if (
+            rec.get("event") != "turn_end"
+            or rec.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
+        ):
+            continue
+        turn_id = rec.get("turn_id")
+        if not isinstance(turn_id, str) or not turn_id or turn_id in seen:
+            continue
+        seen.add(turn_id)
+        completed.append(turn_id)
+    return completed
+
+
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -2002,6 +2189,9 @@ def build_webui_thread_response(
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
     session_messages: list[dict[str, Any]] | None = None,
+    active_turn_started_at: float | None = None,
+    active_turn_id: str | None = None,
+    active_turn_transcript_persistence_failed: bool = False,
     limit: int | None = None,
     direction: str | None = None,
     before: str | None = None,
@@ -2013,9 +2203,14 @@ def build_webui_thread_response(
         lines, page = _select_transcript_page(session_key, limit=limit, before=before)
     else:
         lines = read_transcript_lines(session_key)
-    if not lines:
+    if not lines and active_turn_started_at is None:
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
+    lines = recover_incomplete_turns_from_session(
+        lines,
+        session_messages,
+        session_key=session_key,
+    )
     fork_boundary = fork_boundary_message_count(lines)
     msgs = replay_transcript_to_ui_messages(
         lines,
@@ -2027,7 +2222,16 @@ def build_webui_thread_response(
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
         "messages": msgs,
-        "has_pending_tool_calls": has_pending_tool_calls(lines),
+        "completed_turn_ids": completed_turn_ids(lines),
+        "has_pending_tool_calls": has_pending_tool_calls(
+            lines,
+            active_turn_started_at=active_turn_started_at,
+            active_turn_id=active_turn_id,
+            active_turn_transcript_persistence_failed=(
+                active_turn_transcript_persistence_failed
+            ),
+        ),
+        "active_turn_id": active_turn_id,
     }
     if page is not None:
         page["loaded_message_count"] = len(msgs)

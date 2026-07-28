@@ -1082,6 +1082,7 @@ export interface InboundTurnMetadata {
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
+  | { event: "message_accepted"; chat_id: string; turn_id: string }
   | ({
       event: "message";
       chat_id: string;
@@ -1149,14 +1150,14 @@ export type InboundEvent =
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
     } & InboundTurnMetadata)
-  | {
+  | ({
       event: "goal_status";
       chat_id: string;
       /** Turn executing (user message through agent loop). */
       status: "running" | "idle";
       /** Server ``time.time()`` when ``status`` is ``running``. */
       started_at?: number;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "goal_state";
       chat_id: string;
@@ -1175,7 +1176,14 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
-  | { event: "error"; chat_id?: string; detail?: string; reason?: string };
+  | {
+      event: "error";
+      chat_id?: string;
+      detail?: string;
+      reason?: string;
+      /** Present when this error rejects a specific outbound WebUI turn. */
+      turn_id?: string;
+    };
 
 /** Base64-encoded file attached to an outbound ``message`` envelope.
  *
@@ -1224,7 +1232,11 @@ export interface WebuiThreadPersistedPayload {
   savedAt?: string;
   messages: UIMessage[];
   fork_boundary_message_count?: number;
+  /** Turn ids backed by an explicit persisted ``turn_end`` event. */
+  completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;
+  /** Exact active turn when supplied by a current gateway. */
+  active_turn_id?: string | null;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
 }

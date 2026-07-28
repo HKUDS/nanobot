@@ -42,7 +42,10 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -51,9 +54,42 @@ TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
 TITLE_GENERATION_REASONING_EFFORT = "none"
 
-# Wall-clock turn start per ``chat_id`` (websocket only). Survives browser refresh while the
-# gateway process stays up; cleared on idle/stop and implicitly dropped on restart.
+# Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
+# while the gateway process stays up and is implicitly dropped on restart.
 _WEBSOCKET_TURN_WALL_STARTED_AT: dict[str, float] = {}
+_WEBSOCKET_TURN_IDS: dict[str, str] = {}
+_WEBSOCKET_TURN_OWNERS: dict[str, str] = {}
+
+
+@dataclass(frozen=True)
+class _WebsocketTurn:
+    started_at: float
+    turn_id: str | None
+    transcript_persistence_failed: bool = False
+
+
+# All in-flight lifecycle owners per chat, in admission order. The three maps
+# above remain the latest-owner projection consumed by the HTTP API.
+_WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
+
+
+def _sync_websocket_turn_projection(chat_id: str) -> None:
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if not turns:
+        _WEBSOCKET_ACTIVE_TURNS.pop(chat_id, None)
+        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
+        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
+        _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+        return
+
+    owner = next(reversed(turns))
+    turn = turns[owner]
+    _WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = turn.started_at
+    _WEBSOCKET_TURN_OWNERS[chat_id] = owner
+    if turn.turn_id is None:
+        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
+    else:
+        _WEBSOCKET_TURN_IDS[chat_id] = turn.turn_id
 
 
 def mark_webui_session(session: Session, metadata: dict[str, Any]) -> bool:
@@ -203,6 +239,96 @@ def websocket_turn_wall_started_at(chat_id: str) -> float | None:
     return _WEBSOCKET_TURN_WALL_STARTED_AT.get(chat_id)
 
 
+def websocket_turn_id(chat_id: str) -> str | None:
+    """Return the WebUI identity of the active turn, when one was provided."""
+    return _WEBSOCKET_TURN_IDS.get(chat_id)
+
+
+def register_queued_websocket_turn_if_idle(
+    chat_id: str,
+    turn_id: str | None,
+) -> str | None:
+    """Track an accepted WebUI turn while it waits for AgentLoop admission."""
+    if websocket_turn_wall_started_at(chat_id) is not None:
+        return None
+    owner = uuid4().hex
+    _WEBSOCKET_ACTIVE_TURNS.setdefault(chat_id, {})[owner] = _WebsocketTurn(
+        started_at=time.time(),
+        turn_id=turn_id,
+    )
+    _sync_websocket_turn_projection(chat_id)
+    return owner
+
+
+def websocket_turn_owner_is_registered(
+    chat_id: str,
+    owner: str,
+    turn_id: str | None,
+) -> bool:
+    """Return whether websocket ingress registered this owner for the turn."""
+    turn = _WEBSOCKET_ACTIVE_TURNS.get(chat_id, {}).get(owner)
+    return turn is not None and turn.turn_id == turn_id
+
+
+def websocket_turn_transcript_persistence_failed(
+    chat_id: str,
+    owner: str | None = None,
+) -> bool:
+    """Return whether one active owner has an incomplete canonical transcript."""
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if not turns:
+        return False
+    selected_owner = owner or next(reversed(turns))
+    turn = turns.get(selected_owner)
+    return turn.transcript_persistence_failed if turn is not None else False
+
+
+def mark_websocket_turn_transcript_persistence_failed(
+    chat_id: str,
+    owner: str | None,
+) -> bool:
+    """Keep a turn active when any canonical display event could not be written."""
+    if not owner:
+        return False
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if turns is None or owner not in turns:
+        return False
+    turns[owner] = replace(turns[owner], transcript_persistence_failed=True)
+    return True
+
+
+def clear_websocket_turn_if_current(
+    chat_id: str,
+    owner: str | None,
+    *,
+    preserve_persistence_failure: bool = False,
+) -> bool:
+    """Clear one lifecycle owner without disturbing concurrent turns for the chat."""
+    if not owner:
+        return False
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if turns is not None:
+        if owner not in turns:
+            return False
+        if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
+            return False
+        turns.pop(owner)
+        _sync_websocket_turn_projection(chat_id)
+        return True
+
+    # Compatibility for callers/tests that populated the legacy projection
+    # directly before the multi-owner registry existed.
+    if (
+        chat_id in _WEBSOCKET_TURN_WALL_STARTED_AT
+        and _WEBSOCKET_TURN_OWNERS.get(chat_id) == owner
+    ):
+        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
+        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
+        _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+        return True
+    return False
+
+
 def build_bus_progress_callback(
     bus: MessageBus,
     msg: InboundMessage,
@@ -229,9 +355,17 @@ async def publish_turn_run_status(
         else:
             t0 = time.time()
         started_at_event = t0
-        _WEBSOCKET_TURN_WALL_STARTED_AT[cid] = t0
-    else:
-        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(cid, None)
+        owner = msg.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+        if not isinstance(owner, str) or not owner:
+            owner = uuid4().hex
+            msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
+        turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
+        current_turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+        turns = _WEBSOCKET_ACTIVE_TURNS.setdefault(cid, {})
+        # Re-registration makes this owner the latest projection.
+        turns.pop(owner, None)
+        turns[owner] = _WebsocketTurn(started_at=t0, turn_id=current_turn_id)
+        _sync_websocket_turn_projection(cid)
     await bus.publish_outbound(
         outbound_message_for_event(
             channel=msg.channel,
@@ -254,25 +388,50 @@ class WebuiTurnRoutePolicy:
         route: TurnRoute,
     ) -> TurnRoute:
         """Make an independently dispatched late subagent result visible in WebUI."""
+        routed = route
         if (
-            msg.channel != "system"
-            or msg.sender_id != "subagent"
-            or msg.metadata.get("injected_event") != "subagent_result"
-            or route.channel != "websocket"
+            msg.channel == "system"
+            and msg.sender_id == "subagent"
+            and msg.metadata.get("injected_event") == "subagent_result"
+            and route.channel == "websocket"
         ):
-            return route
+            session = self.sessions.get_or_create(session_key)
+            if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
+                metadata = dict(route.metadata)
+                metadata.update({
+                    WEBUI_SESSION_METADATA_KEY: True,
+                    "_wants_stream": True,
+                    WEBUI_TURN_METADATA_KEY: f"subagent:{uuid4().hex}",
+                })
+                routed = replace(route, metadata=metadata, publish_lifecycle=True)
 
-        session = self.sessions.get_or_create(session_key)
-        if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
-            return route
+        if routed.channel == "websocket" and routed.publish_lifecycle:
+            metadata = dict(routed.metadata)
+            turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
+            current_turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+            queued_owner = metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            owner = (
+                queued_owner
+                if (
+                    msg.channel == "websocket"
+                    and isinstance(queued_owner, str)
+                    and websocket_turn_owner_is_registered(
+                        str(msg.chat_id),
+                        queued_owner,
+                        current_turn_id,
+                    )
+                )
+                else uuid4().hex
+            )
+            metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
+            routed = replace(routed, metadata=metadata)
+            # Direct websocket turns publish their final idle transition from
+            # the original input message. Carry the same server-owned identity
+            # there, overwriting any untrusted client-supplied value.
+            if msg.channel == "websocket":
+                msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
 
-        metadata = dict(route.metadata)
-        metadata.update({
-            WEBUI_SESSION_METADATA_KEY: True,
-            "_wants_stream": True,
-            WEBUI_TURN_METADATA_KEY: f"subagent:{uuid4().hex}",
-        })
-        return replace(route, metadata=metadata, publish_lifecycle=True)
+        return routed
 
 
 def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:

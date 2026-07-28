@@ -217,6 +217,7 @@ vi.mock("@/lib/nanobot-client", () => {
     attach = attachSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
+    updateMaxFrameBytes = vi.fn();
   }
 
   return { NanobotClient: MockClient };

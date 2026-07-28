@@ -474,6 +474,18 @@ class GatewayHTTPHandler:
         if direction is not None and direction not in {"latest"}:
             return _http_error(400, "invalid direction")
         before = _query_first(query, "before")
+        from nanobot.session.webui_turns import (
+            websocket_turn_id,
+            websocket_turn_transcript_persistence_failed,
+            websocket_turn_wall_started_at,
+        )
+
+        chat_id = decoded_key.split(":", 1)[1]
+        active_turn_started_at = websocket_turn_wall_started_at(chat_id)
+        active_turn_id = websocket_turn_id(chat_id)
+        active_turn_transcript_persistence_failed = (
+            websocket_turn_transcript_persistence_failed(chat_id)
+        )
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -483,6 +495,11 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages=session_messages,
+            active_turn_started_at=active_turn_started_at,
+            active_turn_id=active_turn_id,
+            active_turn_transcript_persistence_failed=(
+                active_turn_transcript_persistence_failed
+            ),
             limit=limit,
             direction=direction,
             before=before,

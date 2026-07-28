@@ -32,6 +32,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import builtin_command_starts_agent_turn
 from nanobot.config.schema import Base
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -43,7 +44,14 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.goal_state import goal_state_ws_blob
-from nanobot.session.webui_turns import websocket_turn_wall_started_at
+from nanobot.session.webui_turns import (
+    clear_websocket_turn_if_current,
+    mark_websocket_turn_transcript_persistence_failed,
+    register_queued_websocket_turn_if_idle,
+    websocket_turn_id,
+    websocket_turn_transcript_persistence_failed,
+    websocket_turn_wall_started_at,
+)
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -57,6 +65,11 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
+from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
 
@@ -317,7 +330,12 @@ class WebSocketChannel(BaseChannel):
         t0 = websocket_turn_wall_started_at(chat_id)
         if t0 is None:
             return
-        await self.send_goal_status(chat_id, "running", started_at=t0)
+        await self.send_goal_status(
+            chat_id,
+            "running",
+            started_at=t0,
+            turn_id=websocket_turn_id(chat_id),
+        )
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay persisted or actively running per-chat state after subscribe."""
@@ -633,17 +651,40 @@ class WebSocketChannel(BaseChannel):
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
                 return
+            raw_turn_id = envelope.get("turn_id")
+            turn_id = raw_turn_id if isinstance(raw_turn_id, str) and raw_turn_id else None
+            rejection_fields = {
+                "chat_id": cid,
+                **({"turn_id": turn_id} if turn_id else {}),
+            }
+            # The allowlist can change while an authenticated websocket stays
+            # open. Reject the exact application turn before hydration,
+            # transcript persistence, or an acceptance ACK; BaseChannel's
+            # silent authorization return must not look like successful ingress.
+            if not self.is_allowed(client_id):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="access_denied",
+                    **rejection_fields,
+                )
+                return
             if not isinstance(content, str):
-                await self._send_event(connection, "error", detail="missing content")
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="missing content",
+                    **rejection_fields,
+                )
                 return
             message_rejection = self._ingress.validate_text(content)
             if message_rejection is not None:
                 await self._send_event(
                     connection,
                     "error",
-                    chat_id=cid,
                     detail="message_rejected",
                     reason=message_rejection,
+                    **rejection_fields,
                 )
                 return
 
@@ -656,6 +697,7 @@ class WebSocketChannel(BaseChannel):
                         "error",
                         detail="attachment_rejected",
                         reason="malformed",
+                        **rejection_fields,
                     )
                     return
                 media_paths, reason = self._media.store_inbound_attachments(raw_media)
@@ -665,12 +707,18 @@ class WebSocketChannel(BaseChannel):
                         "error",
                         detail="attachment_rejected",
                         reason=reason,
+                        **rejection_fields,
                     )
                     return
 
             # Allow media-only turns (content may be empty when attachments are present).
             if not content.strip() and not media_paths:
-                await self._send_event(connection, "error", detail="missing content")
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="missing content",
+                    **rejection_fields,
+                )
                 return
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
@@ -686,8 +734,21 @@ class WebSocketChannel(BaseChannel):
                     controls_available=self._workspace_controls_available(connection),
                 ),
                 chat_id=cid,
+                turn_id=turn_id,
             )
             if scope is None:
+                return
+
+            # Hydration and scope resolution can yield. Re-check immediately
+            # before transcript/bus mutation so a mid-flight revocation cannot
+            # fall through BaseChannel's silent deny and still receive an ACK.
+            if not self.is_allowed(client_id):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="access_denied",
+                    **rejection_fields,
+                )
                 return
 
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
@@ -702,29 +763,48 @@ class WebSocketChannel(BaseChannel):
                 metadata["mcp_presets"] = mcp_presets
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._workspaces.persist_scope(cid, scope)
-            if metadata.get("webui") is True and self.is_allowed(client_id):
-                self._transcripts.append_user_message(
-                    cid,
-                    content,
+            is_webui = metadata.get("webui") is True
+            queued_owner = None
+            if is_webui and builtin_command_starts_agent_turn(content):
+                queued_owner = register_queued_websocket_turn_if_idle(cid, turn_id)
+                if queued_owner is not None:
+                    metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
+            accepted = False
+            try:
+                if is_webui:
+                    self._transcripts.append_user_message(
+                        cid,
+                        content,
+                        metadata=metadata,
+                        media_paths=media_paths or None,
+                        cli_apps=cli_apps or None,
+                        mcp_presets=mcp_presets or None,
+                    )
+                if is_webui and connection in self._webui_connections:
+                    quote = webui_quote_runtime_context({
+                        WEBUI_QUOTE_METADATA: envelope.get("quoted_context"),
+                    })
+                    if quote is not None:
+                        metadata[RUNTIME_CONTEXT_INPUT_META] = [quote]
+                await self._handle_message(
+                    sender_id=client_id,
+                    chat_id=cid,
+                    content=content,
+                    media=media_paths or None,
                     metadata=metadata,
-                    media_paths=media_paths or None,
-                    cli_apps=cli_apps or None,
-                    mcp_presets=mcp_presets or None,
+                    is_dm=False,
                 )
-            if metadata.get("webui") is True and connection in self._webui_connections:
-                quote = webui_quote_runtime_context({
-                    WEBUI_QUOTE_METADATA: envelope.get("quoted_context"),
-                })
-                if quote is not None:
-                    metadata[RUNTIME_CONTEXT_INPUT_META] = [quote]
-            await self._handle_message(
-                sender_id=client_id,
-                chat_id=cid,
-                content=content,
-                media=media_paths or None,
-                metadata=metadata,
-                is_dm=False,
-            )
+                accepted = True
+            finally:
+                if not accepted and queued_owner is not None:
+                    clear_websocket_turn_if_current(cid, queued_owner)
+            if is_webui and turn_id:
+                await self._send_event(
+                    connection,
+                    "message_accepted",
+                    chat_id=cid,
+                    turn_id=turn_id,
+                )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
 
@@ -734,6 +814,7 @@ class WebSocketChannel(BaseChannel):
         resolver: Callable[[], Any],
         *,
         chat_id: str | None = None,
+        turn_id: str | None = None,
     ) -> Any | None:
         try:
             return resolver()
@@ -744,6 +825,7 @@ class WebSocketChannel(BaseChannel):
                 detail="workspace_scope_rejected",
                 reason=exc.message,
                 **({"chat_id": chat_id} if chat_id else {}),
+                **({"turn_id": turn_id} if turn_id else {}),
             )
             return None
 
@@ -782,6 +864,37 @@ class WebSocketChannel(BaseChannel):
             self.logger.exception("send failed{}", label)
             raise
 
+    def _persist_turn_transcript_event(
+        self,
+        chat_id: str,
+        event: dict[str, Any],
+        *,
+        metadata: dict[str, Any] | None,
+        phase: str,
+        include_source: bool = False,
+        transcript_overrides: dict[str, Any] | None = None,
+    ) -> bool:
+        """Persist one canonical turn event and retain unsafe owners on failure."""
+        persisted = self._transcripts.prepare_and_append(
+            chat_id,
+            event,
+            metadata=metadata,
+            phase=phase,
+            include_source=include_source,
+            transcript_overrides=transcript_overrides,
+        )
+        if (
+            not persisted
+            and phase in {"answer", "complete"}
+            and (metadata or {}).get("webui") is True
+        ):
+            owner = (metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            mark_websocket_turn_transcript_persistence_failed(
+                chat_id,
+                owner if isinstance(owner, str) else None,
+            )
+        return persisted
+
     async def send(self, msg: OutboundMessage) -> None:
         event = outbound_event_from_message(msg)
         progress_event = event if isinstance(event, ProgressEvent) else None
@@ -818,21 +931,38 @@ class WebSocketChannel(BaseChannel):
                 await self.send_goal_state(msg.chat_id, event.goal_state or {"active": False})
             return
         if isinstance(event, GoalStatusEvent):
-            if conns:
-                if event.status in ("running", "idle"):
+            turn_id = (msg.metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+            current_turn_id = turn_id if isinstance(turn_id, str) else None
+            turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            current_turn_owner = turn_owner if isinstance(turn_owner, str) else None
+            try:
+                if conns and event.status in ("running", "idle"):
                     await self.send_goal_status(
                         msg.chat_id,
                         event.status,
                         started_at=event.started_at,
+                        turn_id=current_turn_id,
+                    )
+            finally:
+                if event.status == "idle":
+                    # Cancellation/direct runs may have no turn_end, so idle is
+                    # still terminal. A failed canonical completion write is
+                    # the one case that must remain pending for safe resume.
+                    clear_websocket_turn_if_current(
+                        msg.chat_id,
+                        current_turn_owner,
+                        preserve_persistence_failure=True,
                     )
             return
         # Signal that the agent has fully finished processing the current turn.
         if isinstance(event, TurnEndEvent):
+            turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
             await self.send_turn_end(
                 msg.chat_id,
                 latency_ms=event.latency_ms,
                 goal_state=event.goal_state,
                 metadata=msg.metadata,
+                turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self.send_session_updated(msg.chat_id, scope="thread")
             return
@@ -884,7 +1014,7 @@ class WebSocketChannel(BaseChannel):
         elif progress_event:
             payload["kind"] = "progress"
         phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
-        self._transcripts.prepare_and_append(
+        self._persist_turn_transcript_event(
             msg.chat_id,
             payload,
             metadata=msg.metadata,
@@ -922,7 +1052,7 @@ class WebSocketChannel(BaseChannel):
         }
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._transcripts.prepare_and_append(
+        self._persist_turn_transcript_event(
             chat_id,
             body,
             metadata=meta,
@@ -950,7 +1080,7 @@ class WebSocketChannel(BaseChannel):
         }
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._transcripts.prepare_and_append(
+        self._persist_turn_transcript_event(
             chat_id,
             body,
             metadata=meta,
@@ -974,7 +1104,7 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "edits": edits,
         }
-        self._transcripts.prepare_and_append(
+        self._persist_turn_transcript_event(
             chat_id,
             payload,
             metadata=metadata,
@@ -1026,7 +1156,7 @@ class WebSocketChannel(BaseChannel):
             body["resuming"] = True
         if stream_end and merge_next:
             body["merge_next"] = True
-        self._transcripts.prepare_and_append(
+        self._persist_turn_transcript_event(
             chat_id,
             body,
             metadata=meta,
@@ -1045,6 +1175,7 @@ class WebSocketChannel(BaseChannel):
         *,
         goal_state: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        turn_owner: str | None = None,
     ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1053,12 +1184,27 @@ class WebSocketChannel(BaseChannel):
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
-        self._transcripts.prepare_and_append(
+        canonical_webui_turn = (metadata or {}).get("webui") is True
+        prior_persistence_failure = (
+            canonical_webui_turn
+            and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
+        )
+        persisted = self._persist_turn_transcript_event(
             chat_id,
             body,
             metadata=metadata,
             phase="complete",
+            transcript_overrides=(
+                {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
+                if prior_persistence_failure
+                else None
+            ),
         )
+        if persisted:
+            # A successful completion either has a complete transcript or now
+            # carries a durable incomplete marker. The HTTP replay path can
+            # recover the latter from session history after a gateway restart.
+            clear_websocket_turn_if_current(chat_id, turn_owner)
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:
             return
@@ -1081,6 +1227,7 @@ class WebSocketChannel(BaseChannel):
         status: str,
         *,
         started_at: float | None = None,
+        turn_id: str | None = None,
     ) -> None:
         """Notify subscribed clients that a turn started or finished (wall-clock hint)."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1093,6 +1240,8 @@ class WebSocketChannel(BaseChannel):
         }
         if status == "running" and started_at is not None:
             body["started_at"] = started_at
+        if turn_id:
+            body["turn_id"] = turn_id
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_status ")

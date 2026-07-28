@@ -1237,6 +1237,10 @@
     "workspaceScopeRejected": {
       "title": "工作區未變更",
       "body": "閘道拒絕要求的專案或存取模式，因此 Nanobot 繼續使用先前的工作區。"
+    },
+    "turnRejected": {
+      "title": "訊息未傳送",
+      "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
     }
   },
   "workspace": {
