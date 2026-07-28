@@ -3,9 +3,24 @@ import socket
 from unittest.mock import patch
 
 import pytest
+from loguru import logger
 
 from nanobot.config.loader import load_config, save_config
 from nanobot.security.network import validate_url_target
+
+
+@pytest.fixture
+def warning_messages():
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+        format="{message}",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -127,7 +142,10 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
     assert "max_messages" not in saved["agents"]["defaults"]
 
 
-def test_load_config_rewrites_legacy_model_fields_to_default_preset(tmp_path) -> None:
+def test_load_config_rewrites_legacy_model_fields_to_default_preset(
+    tmp_path,
+    warning_messages,
+) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps({
@@ -151,9 +169,29 @@ def test_load_config_rewrites_legacy_model_fields_to_default_preset(tmp_path) ->
     assert "model" not in saved["agents"]["defaults"]
     assert saved["modelPresets"]["default"]["model"] == "openai/gpt-4.1"
     assert saved["modelPresets"]["default"]["temperature"] == 0
+    migration_warnings = [
+        message
+        for message in warning_messages
+        if "Migrated legacy model configuration" in message
+    ]
+    assert len(migration_warnings) == 1
+    assert "Legacy settings were converted to named model presets" in migration_warnings[0]
+    assert "Review the rewritten file before downgrading" in migration_warnings[0]
+
+    load_config(config_path)
+
+    migration_warnings = [
+        message
+        for message in warning_messages
+        if "Migrated legacy model configuration" in message
+    ]
+    assert len(migration_warnings) == 1
 
 
-def test_load_config_prefers_existing_default_preset_over_legacy_fields(tmp_path) -> None:
+def test_load_config_prefers_existing_default_preset_over_legacy_fields(
+    tmp_path,
+    warning_messages,
+) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps({
@@ -185,11 +223,17 @@ def test_load_config_prefers_existing_default_preset_over_legacy_fields(tmp_path
     assert "model" not in saved["agents"]["defaults"]
     assert "provider" not in saved["agents"]["defaults"]
     assert "maxTokens" not in saved["agents"]["defaults"]
+    assert any(
+        "Existing modelPresets.default took precedence; conflicting "
+        "legacy agents.defaults fields were removed" in message
+        for message in warning_messages
+    )
 
 
 def test_load_config_does_not_migrate_legacy_model_fields_from_environment(
     tmp_path,
     monkeypatch,
+    warning_messages,
 ) -> None:
     monkeypatch.setenv(
         "NANOBOT_AGENTS",
@@ -207,9 +251,25 @@ def test_load_config_does_not_migrate_legacy_model_fields_from_environment(
     assert config.resolve_default_preset().model == "anthropic/claude-opus-4-5"
     assert config.resolve_default_preset().provider == "auto"
     assert config.resolve_default_preset().max_tokens == 8192
+    assert any(
+        "Ignoring unsupported legacy model settings from NANOBOT_AGENTS" in message
+        for message in warning_messages
+    )
+
+    load_config(tmp_path / "another-missing-config.json")
+
+    environment_warnings = [
+        message
+        for message in warning_messages
+        if "Ignoring unsupported legacy model settings from NANOBOT_AGENTS" in message
+    ]
+    assert len(environment_warnings) == 1
 
 
-def test_load_config_migrates_inline_fallback_to_named_preset(tmp_path) -> None:
+def test_load_config_migrates_inline_fallback_to_named_preset(
+    tmp_path,
+    warning_messages,
+) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps({
@@ -233,6 +293,10 @@ def test_load_config_migrates_inline_fallback_to_named_preset(tmp_path) -> None:
     assert config.agents.defaults.fallback_models == ["claude-sonnet-4"]
     assert saved["agents"]["defaults"]["fallbackModels"] == ["claude-sonnet-4"]
     assert saved["modelPresets"]["claude-sonnet-4"]["provider"] == "anthropic"
+    assert any(
+        "Legacy settings were converted to named model presets." in message
+        for message in warning_messages
+    )
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:

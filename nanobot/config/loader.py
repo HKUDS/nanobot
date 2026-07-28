@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
@@ -16,6 +17,7 @@ from nanobot.utils.helpers import _write_text_atomic
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 _schema_refs_ready = False
+_warned_legacy_model_env = False
 
 
 def set_config_path(path: Path) -> None:
@@ -67,6 +69,7 @@ def load_config(config_path: Path | None = None) -> Config:
                 summary="Environment-based configuration is invalid.",
                 issues=validation_issues(exc),
             ) from exc
+        _warn_unsupported_legacy_model_env(path)
         _apply_ssrf_whitelist(config)
         return config
 
@@ -110,6 +113,7 @@ def load_config(config_path: Path | None = None) -> Config:
             ),
         )
 
+    legacy_model_migration = _legacy_model_migration_kind(data)
     data, migrated = _migrate_config(data)
     try:
         config = Config.model_validate(data)
@@ -124,7 +128,21 @@ def load_config(config_path: Path | None = None) -> Config:
 
     if migrated:
         _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+        if legacy_model_migration:
+            detail = (
+                "Existing modelPresets.default took precedence; conflicting "
+                "legacy agents.defaults fields were removed."
+                if legacy_model_migration == "conflict"
+                else "Legacy settings were converted to named model presets."
+            )
+            logger.warning(
+                "Migrated legacy model configuration in {}. {} "
+                "Review the rewritten file before downgrading nanobot.",
+                path,
+                detail,
+            )
 
+    _warn_unsupported_legacy_model_env(path)
     _apply_ssrf_whitelist(config)
     return config
 
@@ -330,6 +348,69 @@ _LEGACY_MODEL_FIELD_ALIASES = {
     "temperature": ("temperature",),
     "reasoningEffort": ("reasoningEffort", "reasoning_effort"),
 }
+
+
+def _legacy_model_migration_kind(data: dict[str, Any]) -> str | None:
+    """Classify a pending model migration without exposing configured values."""
+    if not _needs_legacy_model_migration(data):
+        return None
+
+    agents = data.get("agents")
+    defaults = agents.get("defaults") if isinstance(agents, dict) else None
+    presets = data.get("modelPresets", data.get("model_presets"))
+    has_legacy_fields = isinstance(defaults, dict) and any(
+        alias in defaults
+        for aliases in _LEGACY_MODEL_FIELD_ALIASES.values()
+        for alias in aliases
+    )
+    if has_legacy_fields and isinstance(presets, dict) and "default" in presets:
+        return "conflict"
+    return "migrated"
+
+
+def _has_unsupported_legacy_model_env() -> bool:
+    for env_name in ("NANOBOT_AGENTS", "NANOBOT_AGENTS__DEFAULTS"):
+        raw = os.environ.get(env_name)
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        data = (
+            {"agents": parsed}
+            if env_name == "NANOBOT_AGENTS"
+            else {"agents": {"defaults": parsed}}
+        )
+        if isinstance(parsed, dict) and _needs_legacy_model_migration(data):
+            return True
+
+    legacy_suffixes = {
+        alias.upper()
+        for aliases in _LEGACY_MODEL_FIELD_ALIASES.values()
+        for alias in aliases
+    }
+    prefix = "NANOBOT_AGENTS__DEFAULTS__"
+    for env_name in os.environ:
+        upper_name = env_name.upper()
+        if not upper_name.startswith(prefix):
+            continue
+        suffix = upper_name[len(prefix):]
+        if suffix in legacy_suffixes:
+            return True
+    return False
+
+
+def _warn_unsupported_legacy_model_env(config_path: Path) -> None:
+    global _warned_legacy_model_env
+    if _warned_legacy_model_env or not _has_unsupported_legacy_model_env():
+        return
+    logger.warning(
+        "Ignoring unsupported legacy model settings from NANOBOT_AGENTS. "
+        "Move them to modelPresets in {}.",
+        config_path,
+    )
+    _warned_legacy_model_env = True
 
 
 def _pop_alias(mapping: dict[str, Any], aliases: tuple[str, ...]) -> tuple[bool, Any]:

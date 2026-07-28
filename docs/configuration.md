@@ -1348,7 +1348,7 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 Model presets let you name a complete model configuration and select one per session with `/model <preset>`. Configure all model, provider, generation, context-window, and image-input settings under top-level `modelPresets`; `agents.defaults` only selects preset names.
 
-On first load, nanobot migrates legacy model fields from `agents.defaults` and inline fallback objects in `config.json` into named presets, then atomically rewrites the file. If a concrete `modelPresets.default` and legacy direct fields both exist, the concrete preset wins and the legacy fields are removed. Legacy model fields supplied through nested `NANOBOT_AGENTS` environment settings are not supported.
+On first load, nanobot migrates legacy model fields from `agents.defaults` and inline fallback objects in `config.json` into named presets, then atomically rewrites the file and logs a warning. If a concrete `modelPresets.default` and legacy direct fields both exist, the concrete preset wins and the warning explains that the conflicting legacy fields were removed. Legacy model fields supplied through nested `NANOBOT_AGENTS` environment settings are not supported and produce a warning with instructions to move them into `modelPresets`.
 
 ```json
 {
