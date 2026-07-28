@@ -794,7 +794,7 @@ def _model_display(config: Config) -> tuple[str, str]:
     """Return (resolved_model_name, preset_tag) for display strings."""
     resolved = config.resolve_preset()
     name = config.agents.defaults.model_preset
-    tag = f" (preset: {name})" if name else ""
+    tag = f" (preset: {name})" if name != "default" else ""
     return resolved.model, tag
 
 
@@ -2969,11 +2969,13 @@ def _set_oauth_provider_as_main(
 
     config = load_config(resolved_config_path)
     selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
-    config.agents.defaults.model_preset = None
-    config.agents.defaults.provider = provider_name
-    config.agents.defaults.model = selected_model
+    default_preset = config.resolve_default_preset().model_copy(
+        update={"provider": provider_name, "model": selected_model}
+    )
     if provider_name == "xai_grok" and selected_model == "xai-grok/grok-4.5":
-        config.agents.defaults.context_window_tokens = 500_000
+        default_preset.context_window_tokens = 500_000
+    config.model_presets["default"] = default_preset
+    config.agents.defaults.model_preset = "default"
     save_config(config, resolved_config_path)
 
     saved_path = resolved_config_path or get_config_path()

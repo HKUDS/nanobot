@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
@@ -19,6 +19,7 @@ class ProviderSnapshot:
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
     model_preset: str | None = None
+    supports_image_input: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -205,37 +206,15 @@ def _make_provider_core(
         )
 
     provider.generation = preset.to_generation_settings()
+    provider.supports_image_input = preset.supports_image_input
     return provider
 
 
-def _inline_fallback_preset(
-    primary: ModelPresetConfig,
-    fallback: InlineFallbackConfig,
-) -> ModelPresetConfig:
-    return ModelPresetConfig(
-        model=fallback.model,
-        provider=fallback.provider,
-        max_tokens=fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens,
-        context_window_tokens=(
-            fallback.context_window_tokens
-            if fallback.context_window_tokens is not None
-            else primary.context_window_tokens
-        ),
-        temperature=(
-            fallback.temperature if fallback.temperature is not None else primary.temperature
-        ),
-        reasoning_effort=fallback.reasoning_effort,
-    )
-
-
-def _resolve_fallback_presets(config: Config, primary: ModelPresetConfig) -> list[ModelPresetConfig]:
-    presets: list[ModelPresetConfig] = []
-    for fallback in config.agents.defaults.fallback_models:
-        if isinstance(fallback, str):
-            presets.append(config.model_presets[fallback])
-        else:
-            presets.append(_inline_fallback_preset(primary, fallback))
-    return presets
+def _resolve_fallback_presets(config: Config, _primary: ModelPresetConfig) -> list[ModelPresetConfig]:
+    return [
+        config.model_presets[name]
+        for name in config.agents.defaults.fallback_models
+    ]
 
 
 def make_provider(
@@ -277,6 +256,7 @@ def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> Pr
         context_window_tokens=preset.context_window_tokens,
         signature=("unconfigured", setup_error, preset.model),
         generation=provider.generation,
+        supports_image_input=preset.supports_image_input,
     )
 
 
@@ -310,6 +290,7 @@ def provider_signature(
             fallback.temperature,
             fallback.reasoning_effort,
             fallback.context_window_tokens,
+            fallback.supports_image_input,
             getattr(fp, "proxy", None) if fp else None,
             fp.thinking_style if fp else None,
         )
@@ -331,6 +312,7 @@ def provider_signature(
         resolved.temperature,
         resolved.reasoning_effort,
         resolved.context_window_tokens,
+        resolved.supports_image_input,
         getattr(p, "proxy", None) if p else None,
         p.thinking_style if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
@@ -360,6 +342,7 @@ def build_provider_snapshot(
         signature=provider_signature(config, preset=resolved),
         generation=resolved.to_generation_settings(),
         model_preset=selected_preset,
+        supports_image_input=resolved.supports_image_input,
     )
 
 

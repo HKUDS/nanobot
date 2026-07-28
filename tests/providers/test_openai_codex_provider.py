@@ -236,8 +236,8 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
     config = Config.model_validate({
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "model": "openai-codex/gpt-5.6-sol",
                 "provider": "openai_codex",
             },

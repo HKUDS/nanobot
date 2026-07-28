@@ -788,6 +788,7 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens
         kwargs["reasoning_effort"] = generation.reasoning_effort
+        kwargs["supports_image_input"] = spec.runtime.supports_image_input
         return kwargs
 
     async def _request_model(

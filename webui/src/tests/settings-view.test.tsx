@@ -3004,7 +3004,7 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
   });
 
-  it("does not expose the synthetic default configuration as a WebUI preset", async () => {
+  it("exposes the concrete default configuration as an editable preset", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {
       ...base,
@@ -3070,11 +3070,11 @@ describe("SettingsView Apps catalog", () => {
 
     expect((await screen.findAllByText("MiniMax-M3")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("fast").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(screen.queryByText("openai-codex/gpt-5.5")).not.toBeInTheDocument();
+    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.getByText("openai-codex/gpt-5.5")).toBeInTheDocument();
   });
 
-  it("does not expose the synthetic default preset in the overview summary", async () => {
+  it("keeps the default preset suffix out of the overview summary", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {
       ...base,

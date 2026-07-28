@@ -299,7 +299,7 @@ class AgentLoop:
         initial_context_window = (
             context_window_tokens
             if context_window_tokens is not None
-            else defaults.context_window_tokens
+            else ModelPresetConfig(model=initial_model).context_window_tokens
         )
         configured_presets = model_presets or {}
         self.runtime_resolver = ModelRuntimeResolver(
@@ -445,15 +445,18 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
-        provider = extra.pop("provider", None) or make_provider(config)
+        explicit_provider = extra.pop("provider", None)
+        provider = explicit_provider or make_provider(config)
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
         provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
-        preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
-            config,
-            provider_snapshot_loader,
-        )
+        preset_snapshot_loader = extra.pop("preset_snapshot_loader", None)
+        if preset_snapshot_loader is None and explicit_provider is None:
+            preset_snapshot_loader = preset_helpers.make_preset_snapshot_loader(
+                config,
+                provider_snapshot_loader,
+            )
         return cls(
             bus=bus,
             provider=provider,
@@ -1616,6 +1619,7 @@ class AgentLoop:
             "max_messages": replay_max_messages,
             "max_tokens": self._replay_token_budget(runtime),
             "extend_to_user": is_subagent,
+            "include_media": True,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         if is_subagent:

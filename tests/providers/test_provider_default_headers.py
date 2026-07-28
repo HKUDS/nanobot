@@ -35,6 +35,10 @@ def test_provider_signature_tracks_default_extra_headers() -> None:
             },
         },
         "modelPresets": {
+            "default": {
+                "provider": "auto",
+                "model": "anthropic/claude-opus-4-5",
+            },
             "primary": {
                 "provider": "kimi_coding",
                 "model": "kimi-for-coding",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -46,6 +46,7 @@ def _fallback(
     context_window_tokens: int = 65_536,
     temperature: float = 0.1,
     reasoning_effort: str | None = None,
+    supports_image_input: bool | None = None,
 ) -> ModelPresetConfig:
     return ModelPresetConfig(
         model=model,
@@ -54,6 +55,7 @@ def _fallback(
         context_window_tokens=context_window_tokens,
         temperature=temperature,
         reasoning_effort=reasoning_effort,
+        supports_image_input=supports_image_input,
     )
 
 
@@ -93,33 +95,35 @@ def test_fallback_models_default_empty() -> None:
     assert defaults.fallback_models == []
 
 
-def test_fallback_models_accept_preset_refs_and_inline_configs() -> None:
-    from nanobot.config.schema import Config, InlineFallbackConfig
+def test_fallback_models_accept_preset_refs() -> None:
+    from nanobot.config.schema import Config
 
     config = Config.model_validate({
         "agents": {
             "defaults": {
-                "fallbackModels": [
-                    "deep",
-                    {
-                        "provider": "openai",
-                        "model": "gpt-4.1",
-                        "maxTokens": 4096,
-                    },
-                ]
+                "fallbackModels": ["deep"]
             }
         },
         "modelPresets": {
+            "default": {"provider": "openai", "model": "gpt-4.1"},
             "deep": {"provider": "anthropic", "model": "claude-opus-4-7"}
         },
     })
 
-    assert config.agents.defaults.fallback_models[0] == "deep"
-    assert config.agents.defaults.fallback_models[1] == InlineFallbackConfig(
-        provider="openai",
-        model="gpt-4.1",
-        max_tokens=4096,
-    )
+    assert config.agents.defaults.fallback_models == ["deep"]
+
+
+def test_fallback_models_reject_inline_configs_after_schema_migration() -> None:
+    from nanobot.config.schema import Config
+
+    with pytest.raises(ValueError):
+        Config.model_validate({
+            "agents": {
+                "defaults": {
+                    "fallbackModels": [{"provider": "openai", "model": "gpt-4.1"}]
+                }
+            }
+        })
 
 
 def test_fallback_model_preset_ref_must_exist() -> None:
@@ -128,7 +132,7 @@ def test_fallback_model_preset_ref_must_exist() -> None:
     with pytest.raises(ValueError, match="fallback_models.*not found"):
         Config.model_validate({
             "agents": {"defaults": {"fallbackModels": ["missing"]}},
-            "modelPresets": {},
+            "modelPresets": {"default": {"model": "primary"}},
         })
 
 
@@ -144,6 +148,7 @@ def test_provider_signature_tracks_fallback_presets_and_provider_config() -> Non
             }
         },
         "modelPresets": {
+            "default": {"model": "primary", "provider": "openai"},
             "fast": {"model": "openai/gpt-4.1", "provider": "openai"},
             "deep": {"model": "anthropic/claude-sonnet-4-6", "provider": "anthropic"},
         },
@@ -190,6 +195,7 @@ def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
             }
         },
         "modelPresets": {
+            "default": {"model": "primary", "provider": "openai"},
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
@@ -213,36 +219,49 @@ def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
     assert snapshot.context_window_tokens == 64000
 
 
-def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
+def test_provider_signature_tracks_fallback_image_capability() -> None:
     from nanobot.config.schema import Config
     from nanobot.providers.factory import provider_signature
 
-    config = Config.model_validate({
+    base = {
         "agents": {
             "defaults": {
                 "modelPreset": "fast",
-                "fallbackModels": [
-                    {"provider": "openai", "model": "gpt-4.1"}
-                ],
+                "fallbackModels": ["fallback"],
             }
         },
         "modelPresets": {
+            "default": {"model": "primary"},
             "fast": {
                 "model": "anthropic/claude-opus-4-5",
                 "provider": "anthropic",
                 "reasoningEffort": "high",
-            }
+            },
+            "fallback": {
+                "provider": "openai",
+                "model": "gpt-4.1",
+                "supportsImageInput": False,
+            },
         },
         "providers": {
             "anthropic": {"apiKey": "primary-key"},
             "openai": {"apiKey": "fallback-key"},
         },
-    })
+    }
+    changed = {
+        **base,
+        "modelPresets": {
+            **base["modelPresets"],
+            "fallback": {
+                **base["modelPresets"]["fallback"],
+                "supportsImageInput": True,
+            },
+        },
+    }
 
-    signature = provider_signature(config)
-    fallback_signatures = signature[-1]
-
-    assert fallback_signatures[0][13] is None
+    assert provider_signature(Config.model_validate(base)) != provider_signature(
+        Config.model_validate(changed)
+    )
 
 
 # -- FallbackProvider tests --
@@ -332,6 +351,204 @@ class TestFallbackOnPrimaryError:
             in line
             for line in logs
         )
+
+    @pytest.mark.asyncio
+    async def test_primary_and_fallback_apply_their_own_image_capability(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider("primary", _error_response())
+        primary.supports_image_input = True
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[
+                _fallback("fallback-a", supports_image_input=False)
+            ],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=image_messages, model="primary-model")
+
+        assert result.content == "fallback ok"
+        primary_content = primary.chat_calls[0]["messages"][0]["content"]
+        fallback_content = fallback.chat_calls[0]["messages"][0]["content"]
+        assert any(block.get("type") == "image_url" for block in primary_content)
+        assert all(block.get("type") != "image_url" for block in fallback_content)
+
+    @pytest.mark.asyncio
+    async def test_text_only_primary_does_not_remove_images_from_vision_fallback(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider("primary", _error_response())
+        primary.supports_image_input = False
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[
+                _fallback("fallback-a", supports_image_input=True)
+            ],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=image_messages, model="primary-model")
+
+        assert result.content == "fallback ok"
+        primary_content = primary.chat_calls[0]["messages"][0]["content"]
+        fallback_content = fallback.chat_calls[0]["messages"][0]["content"]
+        assert all(block.get("type") != "image_url" for block in primary_content)
+        assert any(block.get("type") == "image_url" for block in fallback_content)
+
+    @pytest.mark.asyncio
+    async def test_explicit_vision_rejection_advances_to_vision_fallback(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "image input is not supported",
+                finish_reason="error",
+                error_kind="invalid_request",
+                error_status_code=400,
+            ),
+        )
+        primary.supports_image_input = True
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[
+                _fallback("fallback-a", supports_image_input=True)
+            ],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+
+        result = await fb.chat(messages=image_messages, model="primary-model")
+
+        assert result.content == "fallback ok"
+        fallback_content = fallback.chat_calls[0]["messages"][0]["content"]
+        assert any(block.get("type") == "image_url" for block in fallback_content)
+        assert fb._primary_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_primary_retries_without_images_through_retry_wrapper(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider("primary")
+        primary.chat = AsyncMock(side_effect=[
+            _make_response(
+                "image input is not supported",
+                finish_reason="error",
+                error_kind="invalid_request",
+            ),
+            _make_response("primary text fallback ok"),
+        ])
+        fallback_factory = MagicMock()
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a", supports_image_input=True)],
+            provider_factory=fallback_factory,
+        )
+
+        result = await fb.chat_with_retry(
+            messages=image_messages,
+            model="primary-model",
+        )
+
+        assert result.content == "primary text fallback ok"
+        assert primary.chat.await_count == 2
+        retry_content = primary.chat.await_args_list[1].kwargs["messages"][0]["content"]
+        assert all(block.get("type") != "image_url" for block in retry_content)
+        fallback_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_streaming_vision_rejection_advances_to_text_fallback(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider("primary")
+        primary.supports_image_input = True
+        primary.chat_stream = AsyncMock(return_value=_make_response(
+            "image input is not supported",
+            finish_reason="error",
+            error_kind="invalid_request",
+            error_status_code=400,
+        ))
+        fallback = _FakeProvider("fallback")
+        fallback.chat_stream = AsyncMock(return_value=_make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[
+                _fallback("fallback-a", supports_image_input=False)
+            ],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+
+        result = await fb.chat_stream(
+            messages=image_messages,
+            model="primary-model",
+            on_content_delta=AsyncMock(),
+        )
+
+        assert result.content == "fallback ok"
+        fallback_content = fallback.chat_stream.await_args.kwargs["messages"][0]["content"]
+        assert all(block.get("type") != "image_url" for block in fallback_content)
+
+    @pytest.mark.asyncio
+    async def test_auto_capability_does_not_retry_after_streaming_content(self) -> None:
+        image_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            }],
+        }]
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "model does not support images",
+                finish_reason="error",
+                error_kind="invalid_request",
+            ),
+        )
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(),
+        )
+
+        result = await fb.chat_stream(
+            messages=image_messages,
+            model="primary-model",
+            on_content_delta=AsyncMock(),
+        )
+
+        assert result.finish_reason == "error"
+        assert len(primary.chat_stream_calls) == 1
 
 
 class TestNoFallbackWhenContentStreamed:

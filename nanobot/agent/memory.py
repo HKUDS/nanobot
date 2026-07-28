@@ -19,10 +19,12 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
+    image_placeholder_text,
     recent_message_start_index,
     strip_think,
     truncate_text,
@@ -695,13 +697,57 @@ class MemoryStore:
     def _format_messages(messages: list[dict]) -> str:
         lines = []
         for message in messages:
-            if not message.get("content"):
+            content = message.get("content") or ""
+            media = message.get("media")
+            media_paths = (
+                [
+                    path.replace("\r", " ").replace("\n", " ")
+                    for path in media[:16]
+                    if isinstance(path, str) and path
+                ]
+                if isinstance(media, list)
+                else []
+            )
+            content = content_with_media_breadcrumbs(
+                message.get("role"),
+                content,
+                media_paths,
+            )
+            if not content:
                 continue
             tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+                f"[{message.get('timestamp', '?')[:16]}] "
+                f"{message['role'].upper()}{tools}: {content}"
             )
         return "\n".join(lines)
+
+    @staticmethod
+    def _media_manifest(messages: list[dict]) -> str:
+        paths: list[str] = []
+        seen: set[str] = set()
+        for message in messages:
+            media = message.get("media")
+            if not isinstance(media, list):
+                continue
+            for raw_path in media:
+                if not isinstance(raw_path, str) or not raw_path:
+                    continue
+                path = raw_path.replace("\r", " ").replace("\n", " ")
+                if path in seen:
+                    continue
+                seen.add(path)
+                paths.append(path)
+                if len(paths) >= 64:
+                    break
+            if len(paths) >= 64:
+                break
+        if not paths:
+            return ""
+        return "Archived attachments:\n" + "\n".join(
+            f"- {image_placeholder_text(path)}"
+            for path in paths
+        )
 
     def raw_archive(
         self,
@@ -712,10 +758,11 @@ class MemoryStore:
     ) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
-        formatted = truncate_text(
-            self._format_messages(public_history_messages(messages)),
-            limit,
-        )
+        formatted = self._format_messages(public_history_messages(messages))
+        manifest = self._media_manifest(messages)
+        if manifest:
+            formatted = f"{manifest}\n\n{formatted}"
+        formatted = truncate_text(formatted, limit)
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
             f"{formatted}",
@@ -1020,6 +1067,11 @@ class Consolidator:
             self.store.raw_archive(messages, session_key=session_key)
             return None
         summary = response.content or "[no summary]"
+        manifest = MemoryStore._media_manifest(messages)
+        if manifest:
+            # Keep the deterministic manifest before generated prose so normal
+            # archive truncation preserves attachment references first.
+            summary = f"{manifest}\n\n{summary}"
         self.store.append_history(
             summary,
             max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,

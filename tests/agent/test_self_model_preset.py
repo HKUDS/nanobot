@@ -378,13 +378,14 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
 
     from nanobot.config.schema import Config
     config = Config.model_validate({
-        "agents": {"defaults": {"model": "openai/gpt-4.1", "workspace": str(tmp_path)}},
+        "agents": {"defaults": {"workspace": str(tmp_path)}},
+        "modelPresets": {"default": {"model": "openai/gpt-4.1"}},
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
     assert loop.model == "openai/gpt-4.1"
-    assert loop.model_preset is None
+    assert loop.model_preset == "default"
     assert "default" in loop.model_presets
     assert loop.model_presets["default"].model == "openai/gpt-4.1"
 
@@ -394,8 +395,11 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
 
     from nanobot.config.schema import Config
     config = Config.model_validate({
-        "agents": {"defaults": {"model": "openai/gpt-4.1", "workspace": str(tmp_path)}},
-        "model_presets": {"fast": {"model": "openai/gpt-4.1-mini"}},
+        "agents": {"defaults": {"workspace": str(tmp_path)}},
+        "model_presets": {
+            "default": {"model": "openai/gpt-4.1"},
+            "fast": {"model": "openai/gpt-4.1-mini"},
+        },
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):

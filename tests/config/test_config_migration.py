@@ -35,8 +35,8 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
 
     config = load_config(config_path)
 
-    assert config.agents.defaults.max_tokens == 1234
-    assert config.agents.defaults.context_window_tokens == 200_000
+    assert config.resolve_default_preset().max_tokens == 1234
+    assert config.resolve_default_preset().context_window_tokens == 200_000
     assert not hasattr(config.agents.defaults, "memory_window")
 
 
@@ -60,9 +60,12 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     defaults = saved["agents"]["defaults"]
+    default_preset = saved["modelPresets"]["default"]
 
-    assert defaults["maxTokens"] == 2222
-    assert defaults["contextWindowTokens"] == 200_000
+    assert default_preset["maxTokens"] == 2222
+    assert default_preset["contextWindowTokens"] == 200_000
+    assert "maxTokens" not in defaults
+    assert "contextWindowTokens" not in defaults
     assert "memoryWindow" not in defaults
 
 
@@ -105,7 +108,7 @@ def test_load_config_ignores_legacy_max_messages(tmp_path, field_name) -> None:
 
     config = load_config(config_path)
 
-    assert config.agents.defaults.max_tokens == 1234
+    assert config.resolve_default_preset().max_tokens == 1234
     assert not hasattr(config.agents.defaults, "max_messages")
 
 
@@ -122,6 +125,58 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
 
     assert "maxMessages" not in saved["agents"]["defaults"]
     assert "max_messages" not in saved["agents"]["defaults"]
+
+
+def test_load_config_rewrites_legacy_model_fields_to_default_preset(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "agents": {
+                "defaults": {
+                    "model": "openai/gpt-4.1",
+                    "provider": "openai",
+                    "temperature": 0,
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert config.agents.defaults.model_preset == "default"
+    assert config.resolve_default_preset().model == "openai/gpt-4.1"
+    assert saved["agents"]["defaults"]["modelPreset"] == "default"
+    assert "model" not in saved["agents"]["defaults"]
+    assert saved["modelPresets"]["default"]["model"] == "openai/gpt-4.1"
+    assert saved["modelPresets"]["default"]["temperature"] == 0
+
+
+def test_load_config_migrates_inline_fallback_to_named_preset(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "agents": {
+                "defaults": {
+                    "model": "openai/gpt-4.1",
+                    "provider": "openai",
+                    "fallbackModels": [{
+                        "model": "anthropic/claude-sonnet-4",
+                        "provider": "anthropic",
+                    }],
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert config.agents.defaults.fallback_models == ["claude-sonnet-4"]
+    assert saved["agents"]["defaults"]["fallbackModels"] == ["claude-sonnet-4"]
+    assert saved["modelPresets"]["claude-sonnet-4"]["provider"] == "anthropic"
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
@@ -296,3 +351,14 @@ def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
 
     assert load_config(camel_path).tools.webui_allow_remote_package_install is True
     assert load_config(snake_path).tools.webui_allow_remote_package_install is True
+
+
+def test_load_config_does_not_rewrite_unrelated_partial_config(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    raw = '{"channels":{"telegram":{"enabled":false}}}'
+    config_path.write_text(raw, encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.resolve_default_preset().model == "anthropic/claude-opus-4-5"
+    assert config_path.read_text(encoding="utf-8") == raw

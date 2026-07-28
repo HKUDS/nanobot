@@ -109,7 +109,7 @@ class TestResolveConfig:
         )
 
         config = load_config(config_path)
-        config.agents.defaults.max_tokens = 1234
+        config.resolve_default_preset().max_tokens = 1234
         save_config(config, config_path)
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))

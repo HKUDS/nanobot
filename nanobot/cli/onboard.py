@@ -755,15 +755,13 @@ def _handle_model_preset_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
     """Handle the 'model_preset' field with a list of existing presets."""
-    preset_names = sorted(_MODEL_PRESET_CACHE)
-    choices = [_CLEAR_CHOICE] + preset_names
-    default_choice = str(current_value) if current_value else _CLEAR_CHOICE
+    preset_names = sorted(_MODEL_PRESET_CACHE) or ["default"]
+    choices = preset_names
+    default_choice = str(current_value) if current_value else "default"
     new_value = _select_with_back(field_display, choices, default=default_choice)
     if new_value is _BACK_PRESSED:
         return
-    if new_value == _CLEAR_CHOICE:
-        setattr(working_model, field_name, None)
-    elif new_value is not None:
+    if new_value is not None:
         setattr(working_model, field_name, new_value)
 
 
@@ -792,8 +790,6 @@ def _handle_fallback_models_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
     """Handle the 'fallback_models' field with preset-aware list management."""
-    from nanobot.config.schema import InlineFallbackConfig
-
     items: list[Any] = list(current_value) if isinstance(current_value, list) else []
     preset_names = sorted(_MODEL_PRESET_CACHE)
 
@@ -802,10 +798,7 @@ def _handle_fallback_models_field(
         console.print(f"[bold]{field_display}[/bold]")
         if items:
             for idx, item in enumerate(items, 1):
-                if isinstance(item, InlineFallbackConfig):
-                    console.print(f"  {idx}. {item.model} - {item.provider} inline")
-                else:
-                    console.print(f"  {idx}. {item}")
+                console.print(f"  {idx}. {item}")
         else:
             console.print("  [dim]empty[/dim]")
         console.print()

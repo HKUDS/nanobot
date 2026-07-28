@@ -26,7 +26,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
@@ -121,7 +121,9 @@ class SubagentManager:
             self._compat_runtime = LLMRuntime.capture(
                 provider,
                 model or provider.get_default_model(),
-                context_window_tokens=defaults.context_window_tokens,
+                context_window_tokens=ModelPresetConfig(
+                    model=model or provider.get_default_model()
+                ).context_window_tokens,
             )
         self.workspace = workspace
         self.bus = bus
@@ -161,7 +163,7 @@ class SubagentManager:
         context_window_tokens = (
             self._compat_runtime.context_window_tokens
             if self._compat_runtime is not None
-            else AgentDefaults().context_window_tokens
+            else ModelPresetConfig(model=model).context_window_tokens
         )
         self._compat_runtime = LLMRuntime.capture(
             provider,

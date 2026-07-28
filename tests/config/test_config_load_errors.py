@@ -10,7 +10,7 @@ from nanobot.config.schema import ApiConfig
 def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
     config = load_config(tmp_path / "missing.json")
 
-    assert config.agents.defaults.model
+    assert config.resolve_default_preset().model
 
 
 def test_load_config_reports_malformed_environment_safely(

@@ -79,20 +79,6 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
-class InlineFallbackConfig(Base):
-    """One inline fallback model configuration."""
-
-    model: str
-    provider: str
-    max_tokens: int | None = None
-    context_window_tokens: int | None = None
-    temperature: float | None = None
-    reasoning_effort: str | None = None
-
-
-FallbackCandidate = str | InlineFallbackConfig
-
-
 class ModelPresetConfig(Base):
     """A named set of model + generation parameters for quick switching."""
 
@@ -103,6 +89,7 @@ class ModelPresetConfig(Base):
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    supports_image_input: bool | None = None
 
     def to_generation_settings(self) -> Any:
         from nanobot.providers.base import GenerationSettings
@@ -117,16 +104,9 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model_preset: str | None = None  # Active preset name — takes precedence over fields below
-    model: str = "anthropic/claude-opus-4-5"
-    provider: str = (
-        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    )
-    max_tokens: int = 8192
-    context_window_tokens: int = 200_000
+    model_preset: str = "default"
     context_block_limit: int | None = None
-    temperature: float = 0.1
-    fallback_models: list[FallbackCandidate] = Field(default_factory=list)
+    fallback_models: list[str] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
     fail_on_tool_error: bool = True
@@ -139,7 +119,6 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("toolHintMaxLength"),
         serialization_alias="toolHintMaxLength",
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
-    reasoning_effort: str | None = None  # low / medium / high / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
@@ -419,7 +398,12 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
-        default_factory=dict,
+        default_factory=lambda: {
+            "default": ModelPresetConfig(
+                label="Default",
+                model="anthropic/claude-opus-4-5",
+            )
+        },
         validation_alias=AliasChoices("modelPresets", "model_presets"),
         serialization_alias="modelPresets",
     )
@@ -431,33 +415,26 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
-        if "default" in self.model_presets:
-            raise ValueError("model_preset name 'default' is reserved for agents.defaults")
+        if "default" not in self.model_presets:
+            raise ValueError("model_presets must define a 'default' preset")
         name = self.agents.defaults.model_preset
-        if name and name != "default" and name not in self.model_presets:
+        if name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
         dream_name = self.agents.defaults.dream.model_override
-        if dream_name and dream_name != "default" and dream_name not in self.model_presets:
+        if dream_name and dream_name not in self.model_presets:
             raise ValueError(f"Dream model preset {dream_name!r} not found in model_presets")
         for fallback in self.agents.defaults.fallback_models:
-            if isinstance(fallback, str) and fallback not in self.model_presets:
+            if fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
         return self
 
     def resolve_default_preset(self) -> ModelPresetConfig:
-        """Return the implicit `default` preset from agents.defaults fields."""
-        d = self.agents.defaults
-        return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
-            context_window_tokens=d.context_window_tokens,
-            temperature=d.temperature, reasoning_effort=d.reasoning_effort,
-        )
+        """Return the concrete ``default`` model preset."""
+        return self.model_presets["default"]
 
     def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
-        """Return effective model params from a named preset or the implicit default."""
-        name = self.agents.defaults.model_preset if name is None else name
-        if not name or name == "default":
-            return self.resolve_default_preset()
+        """Return effective model params from a named preset."""
+        name = self.agents.defaults.model_preset if name is None else (name or "default")
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found in model_presets")
         return self.model_presets[name]

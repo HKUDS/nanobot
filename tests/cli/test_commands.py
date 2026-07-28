@@ -451,14 +451,14 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
+    config.resolve_default_preset().model = "github-copilot/gpt-5.3-codex"
 
     assert config.get_provider_name() == "github_copilot"
 
 
 def test_config_matches_openai_codex_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-5.6-sol"
+    config.resolve_default_preset().model = "openai-codex/gpt-5.6-sol"
 
     assert config.get_provider_name() == "openai_codex"
 
@@ -676,9 +676,9 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
     assert "Set openai-codex as the main provider" in result.stdout
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
-    assert saved.agents.defaults.provider == "openai_codex"
-    assert saved.agents.defaults.model == "openai-codex/gpt-5.6-sol"
-    assert saved.agents.defaults.model_preset is None
+    assert saved.resolve_default_preset().provider == "openai_codex"
+    assert saved.resolve_default_preset().model == "openai-codex/gpt-5.6-sol"
+    assert saved.agents.defaults.model_preset == "default"
     assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
 
 
@@ -705,9 +705,9 @@ def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
     assert "Set github-copilot as the main provider" in result.stdout
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
-    assert saved.agents.defaults.provider == "github_copilot"
-    assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
-    assert saved.agents.defaults.model_preset is None
+    assert saved.resolve_default_preset().provider == "github_copilot"
+    assert saved.resolve_default_preset().model == "github-copilot/gpt-5.4-mini"
+    assert saved.agents.defaults.model_preset == "default"
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
@@ -734,10 +734,10 @@ def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
     assert "Set xai-grok as the main provider" in result.stdout
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
-    assert saved.agents.defaults.provider == "xai_grok"
-    assert saved.agents.defaults.model == "xai-grok/grok-4.5"
-    assert saved.agents.defaults.context_window_tokens == 500_000
-    assert saved.agents.defaults.model_preset is None
+    assert saved.resolve_default_preset().provider == "xai_grok"
+    assert saved.resolve_default_preset().model == "xai-grok/grok-4.5"
+    assert saved.resolve_default_preset().context_window_tokens == 500_000
+    assert saved.agents.defaults.model_preset == "default"
     assert make_provider(saved).__class__.__name__ == "XAIGrokProvider"
 
 
@@ -765,8 +765,8 @@ def test_provider_login_model_implies_set_main_provider(tmp_path):
     assert "Set github-copilot as the main provider" in result.stdout
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
-    assert saved.agents.defaults.provider == "github_copilot"
-    assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
+    assert saved.resolve_default_preset().provider == "github_copilot"
+    assert saved.resolve_default_preset().model == "github-copilot/gpt-5.4-mini"
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
@@ -899,7 +899,7 @@ def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeyp
 
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
-    config.agents.defaults.model = "ollama/llama3.2"
+    config.resolve_default_preset().model = "ollama/llama3.2"
 
     assert config.get_provider_name() == "ollama"
     assert config.get_api_base() == "http://localhost:11434/v1"
@@ -907,8 +907,8 @@ def test_config_matches_explicit_ollama_prefix_without_api_key():
 
 def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
     config = Config()
-    config.agents.defaults.provider = "ollama"
-    config.agents.defaults.model = "llama3.2"
+    config.resolve_default_preset().provider = "ollama"
+    config.resolve_default_preset().model = "llama3.2"
 
     assert config.get_provider_name() == "ollama"
     assert config.get_api_base() == "http://localhost:11434/v1"
@@ -917,8 +917,8 @@ def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
 def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "volcengineCodingPlan",
                     "model": "doubao-1-5-pro",
                 }
@@ -938,8 +938,8 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
 def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api_base():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "lm_studio",
                     "model": "local-model",
                 }
@@ -960,8 +960,8 @@ def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api
 def test_config_accepts_atomic_chat_without_api_key_and_uses_default_localhost_api_base():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "atomic_chat",
                     "model": "local-model",
                 }
@@ -993,8 +993,8 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
 def test_config_explicit_longcat_provider_resolves_provider_name():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "longcat",
                     "model": "LongCat-Flash-Chat",
                 }
@@ -1014,7 +1014,9 @@ def test_config_explicit_longcat_provider_resolves_provider_name():
 def test_config_auto_detects_longcat_from_model_keyword():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "longcat/LongCat-Flash-Chat"}},
+            "modelPresets": {
+                "default": {"provider": "auto", "model": "longcat/LongCat-Flash-Chat"}
+            },
             "providers": {"longcat": {"apiKey": "test-key"}},
         }
     )
@@ -1025,8 +1027,8 @@ def test_config_auto_detects_longcat_from_model_keyword():
 def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "xiaomi_mimo",
                     "model": "MiniMax-M1-80k",
                 }
@@ -1046,7 +1048,9 @@ def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():
 def test_config_auto_detects_xiaomi_mimo_from_model_keyword():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "mimo/MiniMax-M1-80k"}},
+            "modelPresets": {
+                "default": {"provider": "auto", "model": "mimo/MiniMax-M1-80k"}
+            },
             "providers": {"xiaomiMimo": {"apiKey": "test-key"}},
         }
     )
@@ -1058,8 +1062,8 @@ def test_config_auto_detects_xiaomi_mimo_from_model_keyword():
 def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "minimax_anthropic",
                     "model": "MiniMax-M2.7-highspeed",
                 }
@@ -1080,7 +1084,7 @@ def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
 def test_config_auto_detects_ollama_from_local_api_base():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "modelPresets": {"default": {"provider": "auto", "model": "llama3.2"}},
             "providers": {"ollama": {"apiBase": "http://localhost:11434/v1"}},
         }
     )
@@ -1092,7 +1096,7 @@ def test_config_auto_detects_ollama_from_local_api_base():
 def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "modelPresets": {"default": {"provider": "auto", "model": "llama3.2"}},
             "providers": {
                 "vllm": {"apiBase": "http://localhost:8000"},
                 "ollama": {"apiBase": "http://localhost:11434/v1"},
@@ -1107,7 +1111,7 @@ def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
 def test_config_falls_back_to_vllm_when_ollama_not_configured():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "modelPresets": {"default": {"provider": "auto", "model": "llama3.2"}},
             "providers": {
                 "vllm": {"apiBase": "http://localhost:8000"},
             },
@@ -1133,8 +1137,8 @@ def test_make_provider_uses_github_copilot_backend():
 
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "github-copilot",
                     "model": "github-copilot/gpt-4.1",
                 }
@@ -1152,8 +1156,8 @@ def test_openai_codex_proxy_config_affects_provider_and_signature():
     def config_with_proxy(proxy: str) -> Config:
         return Config.model_validate(
             {
-                "agents": {
-                    "defaults": {
+                "modelPresets": {
+                    "default": {
                         "provider": "openai-codex",
                         "model": "openai-codex/gpt-5.5",
                     }
@@ -1177,8 +1181,8 @@ def test_openai_codex_proxy_config_affects_provider_and_signature():
 def test_provider_proxy_rejects_unsupported_backend():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "anthropic",
                     "model": "anthropic/claude-opus-4-5",
                 }
@@ -1253,7 +1257,9 @@ def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
 def test_make_provider_passes_extra_headers_to_custom_provider():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "custom", "model": "gpt-4o-mini"}},
+            "modelPresets": {
+                "default": {"provider": "custom", "model": "gpt-4o-mini"}
+            },
             "providers": {
                 "custom": {
                     "apiKey": "test-key",
@@ -1281,7 +1287,9 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
 def test_make_provider_treats_dynamic_custom_provider_as_direct():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "my-company-api", "model": "gpt-4o-mini"}},
+            "modelPresets": {
+                "default": {"provider": "my-company-api", "model": "gpt-4o-mini"}
+            },
             "providers": {
                 "my-company-api": {
                     "apiBase": "https://example.com/v1",
@@ -1305,7 +1313,12 @@ def test_make_provider_treats_dynamic_custom_provider_as_direct():
 def test_make_provider_strips_dynamic_custom_route_prefix_from_request_model():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "my-company-api/gpt-4o-mini"}},
+            "modelPresets": {
+                "default": {
+                    "provider": "auto",
+                    "model": "my-company-api/gpt-4o-mini",
+                }
+            },
             "providers": {
                 "my-company-api": {
                     "apiBase": "https://example.com/v1",
@@ -1343,8 +1356,8 @@ def test_make_provider_strips_dynamic_custom_route_prefix_from_request_model():
 def test_make_provider_preserves_namespaced_model_for_forced_dynamic_provider():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "my-company-api",
                     "model": "openai/gpt-4o-mini",
                 }
@@ -1374,8 +1387,8 @@ def test_make_provider_preserves_namespaced_model_for_forced_dynamic_provider():
 def test_make_provider_strips_dynamic_custom_route_prefix_once():
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "auto",
                     "model": "my-company-api/openai/gpt-4o-mini",
                 }
@@ -1405,7 +1418,9 @@ def test_make_provider_strips_dynamic_custom_route_prefix_once():
 def test_make_provider_rejects_dynamic_custom_provider_without_api_base():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "my-company-api", "model": "gpt-4o-mini"}},
+            "modelPresets": {
+                "default": {"provider": "my-company-api", "model": "gpt-4o-mini"}
+            },
             "providers": {
                 "my-company-api": {
                     "apiKey": "sk-test",
@@ -1421,7 +1436,9 @@ def test_make_provider_rejects_dynamic_custom_provider_without_api_base():
 def test_make_provider_rejects_auto_dynamic_custom_prefix_without_api_base():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "auto", "model": "companyProxy/gpt-4o"}},
+            "modelPresets": {
+                "default": {"provider": "auto", "model": "companyProxy/gpt-4o"}
+            },
             "providers": {
                 "otherProxy": {
                     "apiBase": "https://other.example.test/v1",
@@ -1824,10 +1841,11 @@ def _stop_gateway_provider(_config) -> object:
 
 
 def _test_provider_snapshot(provider: object, config: Config) -> ProviderSnapshot:
+    default_preset = config.resolve_default_preset()
     return ProviderSnapshot(
         provider=provider,
-        model=config.agents.defaults.model,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        model=default_preset.model,
+        context_window_tokens=default_preset.context_window_tokens,
         signature=("test",),
     )
 

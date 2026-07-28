@@ -61,7 +61,9 @@ def test_bedrock_provider_is_registered_and_matches_without_api_key() -> None:
     assert hasattr(ProvidersConfig(), "bedrock")
 
     cfg = Config.model_validate({
-        "agents": {"defaults": {"model": "bedrock/global.anthropic.claude-opus-4-7"}},
+        "modelPresets": {
+            "default": {"model": "bedrock/global.anthropic.claude-opus-4-7"},
+        },
         "providers": {"bedrock": {"region": "us-east-1"}},
     })
 

@@ -114,9 +114,10 @@ class Nanobot:
                 Path(workspace).expanduser().resolve()
             )
         if model is not None:
-            config.agents.defaults.model_preset = None
-            config.agents.defaults.model = model
-            config.agents.defaults.provider = "auto"
+            config.model_presets["default"] = config.resolve_preset().model_copy(
+                update={"model": model, "provider": "auto"}
+            )
+            config.agents.defaults.model_preset = "default"
         elif model_preset is not None:
             config.agents.defaults.model_preset = model_preset
 

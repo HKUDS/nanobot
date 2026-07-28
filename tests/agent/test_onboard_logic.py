@@ -537,7 +537,7 @@ class TestRunOnboardExitBehavior:
 
         def fake_configure_general_settings(config, section):
             if section == "Agent Settings":
-                config.agents.defaults.model = "test/provider-model"
+                config.resolve_default_preset().model = "test/provider-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
@@ -1997,7 +1997,7 @@ class TestModelPresetWizard:
         config.model_presets["fast"] = ModelPresetConfig(model="gpt-4.1-mini")
         config.model_presets["power"] = ModelPresetConfig(model="gpt-4.1")
         _sync_preset_cache(config)
-        assert _MODEL_PRESET_CACHE == {"fast", "power"}
+        assert _MODEL_PRESET_CACHE == {"default", "fast", "power"}
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_add(self, monkeypatch):
@@ -2106,10 +2106,9 @@ class TestModelPresetWizard:
         assert defaults.model_preset == "fast"
         _MODEL_PRESET_CACHE.clear()
 
-    def test_model_preset_field_handler_clear(self, monkeypatch):
-        """_handle_model_preset_field should clear preset when Clear value is chosen."""
+    def test_model_preset_field_handler_selects_default(self, monkeypatch):
+        """The concrete default preset replaces the legacy clear selection."""
         from nanobot.cli.onboard import (
-            _CLEAR_CHOICE,
             _MODEL_PRESET_CACHE,
             _handle_model_preset_field,
         )
@@ -2118,11 +2117,11 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
         _MODEL_PRESET_CACHE.add("fast")
 
-        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: _CLEAR_CHOICE)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "default")
 
         defaults = AgentDefaults(model_preset="fast")
         _handle_model_preset_field(defaults, "model_preset", "Model Preset", "fast")
-        assert defaults.model_preset is None
+        assert defaults.model_preset == "default"
         _MODEL_PRESET_CACHE.clear()
 
     def test_main_menu_dispatch_includes_model_presets(self):
@@ -2208,13 +2207,13 @@ class TestModelPresetWizard:
     def test_provider_field_handler(self, monkeypatch):
         """_handle_provider_field should set provider from choices."""
         from nanobot.cli.onboard import _handle_provider_field
-        from nanobot.config.schema import AgentDefaults
+        from nanobot.config.schema import ModelPresetConfig
 
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "anthropic")
 
-        defaults = AgentDefaults()
-        _handle_provider_field(defaults, "provider", "Provider", "auto")
-        assert defaults.provider == "anthropic"
+        preset = ModelPresetConfig(model="anthropic/claude-opus-4-5")
+        _handle_provider_field(preset, "provider", "Provider", "auto")
+        assert preset.provider == "anthropic"
 
     def test_search_provider_field_handler(self, monkeypatch):
         """_handle_search_provider_field should set the search engine from choices."""
@@ -2235,7 +2234,10 @@ class TestModelPresetWizard:
             _handle_search_provider_field,
             _resolve_field_handler,
         )
-        from nanobot.config.schema import AgentDefaults
+        from nanobot.config.schema import ModelPresetConfig
 
         assert _resolve_field_handler(WebSearchConfig(), "provider") is _handle_search_provider_field
-        assert _resolve_field_handler(AgentDefaults(), "provider") is _handle_provider_field
+        assert (
+            _resolve_field_handler(ModelPresetConfig(model="test"), "provider")
+            is _handle_provider_field
+        )

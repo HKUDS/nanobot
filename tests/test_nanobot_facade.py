@@ -111,7 +111,7 @@ def test_from_config_accepts_default_model_override(tmp_path):
     )
 
     assert bot.runtime.model == "openai/gpt-4.1-mini"
-    assert bot._loop.model_preset is None
+    assert bot._loop.model_preset == "default"
 
 
 def test_from_config_accepts_default_model_preset(tmp_path):
@@ -249,8 +249,8 @@ def test_sdk_make_provider_uses_github_copilot_backend():
 
     config = Config.model_validate(
         {
-            "agents": {
-                "defaults": {
+            "modelPresets": {
+                "default": {
                     "provider": "github-copilot",
                     "model": "github-copilot/gpt-4.1",
                 }
@@ -884,7 +884,7 @@ async def test_run_model_preset_override_is_per_run(tmp_path):
         config=bot._config,
     )
     assert bot._loop.runtime_resolver.runtime is original_runtime
-    assert bot._loop.model_preset is None
+    assert bot._loop.model_preset == "default"
 
 
 @pytest.mark.asyncio

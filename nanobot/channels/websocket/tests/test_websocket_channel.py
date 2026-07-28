@@ -2462,7 +2462,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     port = 29891
     config_path = tmp_path / "config.json"
     config = Config()
-    config.agents.defaults.model = "openai/gpt-4o"
+    config.resolve_default_preset().model = "openai/gpt-4o"
     config.providers.openai.api_key = "secret-key"
     config.model_presets["deep"] = ModelPresetConfig(
         model="anthropic/claude-opus-4-5",
@@ -2795,8 +2795,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert bad_image.status_code == 400
 
         saved = load_config(config_path)
-        assert saved.agents.defaults.model == "atomic_chat/test"
-        assert saved.agents.defaults.provider == "atomic_chat"
+        assert saved.resolve_default_preset().model == "atomic_chat/test"
+        assert saved.resolve_default_preset().provider == "atomic_chat"
         assert saved.agents.defaults.model_preset == "fast-writing"
         assert saved.agents.defaults.fallback_models == ["deep"]
         assert saved.model_presets["fast-writing"].label == "Codex"
@@ -3001,7 +3001,7 @@ def test_settings_payload_normalizes_camel_case_provider(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.agents.defaults.provider = "minimaxAnthropic"
+    config.resolve_default_preset().provider = "minimaxAnthropic"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 

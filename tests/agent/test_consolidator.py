@@ -170,6 +170,34 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "telegram:chat-1"
 
+    async def test_summarize_preserves_media_manifest_deterministically(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User shared a screenshot.",
+            finish_reason="stop",
+        )
+        messages = [{
+            "role": "user",
+            "content": "",
+            "media": ["/media/screenshot.png"],
+        }]
+
+        result = await consolidator.archive(messages, runtime=runtime)
+
+        assert result == (
+            "Archived attachments:\n- [image: /media/screenshot.png]\n\n"
+            "User shared a screenshot."
+        )
+        prompt = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "[image: /media/screenshot.png]" in prompt
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert "[image: /media/screenshot.png]" in entries[0]["content"]
+
     async def test_summarize_raw_dumps_on_llm_failure(
         self, consolidator, mock_provider, store, runtime
     ):
@@ -991,6 +1019,18 @@ class TestRawArchiveTruncation:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "hello" in entries[0]["content"]
+
+    def test_raw_archive_preserves_late_media_path_before_truncation(self, store):
+        messages = [
+            {"role": "user", "content": "x" * 20_000},
+            {"role": "user", "content": "", "media": ["/media/late.png"]},
+        ]
+
+        store.raw_archive(messages)
+
+        entry = store.read_unprocessed_history(since_cursor=0)[0]["content"]
+        assert "Archived attachments:" in entry
+        assert "[image: /media/late.png]" in entry
 
     def test_raw_archive_excludes_model_only_runtime_context(self, store):
         content, marker = append_runtime_context(

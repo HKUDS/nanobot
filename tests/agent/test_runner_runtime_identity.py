@@ -19,9 +19,11 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
     second_provider = MagicMock(spec=LLMProvider)
     first_provider.generation = GenerationSettings(temperature=0.2, max_tokens=2048)
     second_provider.generation = GenerationSettings(temperature=0.9, max_tokens=512)
+    first_provider.supports_image_input = False
     first_calls = 0
     second_calls = 0
     request_temperatures: list[float] = []
+    request_image_capabilities: list[bool | None] = []
     selected_runtime = LLMRuntime.capture(
         first_provider,
         "captured-model",
@@ -33,6 +35,7 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         nonlocal first_calls, selected_runtime
         first_calls += 1
         request_temperatures.append(kwargs["temperature"])
+        request_image_capabilities.append(kwargs["supports_image_input"])
         selected_runtime = LLMRuntime.capture(
             second_provider,
             "future-model",
@@ -68,4 +71,5 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
     assert first_calls == 2
     assert second_calls == 0
     assert request_temperatures == [0.2, 0.2]
+    assert request_image_capabilities == [False, False]
     assert selected_runtime.provider is second_provider

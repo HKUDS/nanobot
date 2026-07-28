@@ -218,6 +218,16 @@ class LLMProvider(ABC):
         "速率限制",
         "访问量过大",
     )
+    _IMAGE_UNSUPPORTED_MARKERS = (
+        "does not support image",
+        "doesn't support image",
+        "images are not supported",
+        "image input is not supported",
+        "image input not supported",
+        "image_url is not supported",
+        "unsupported image input",
+        "vision is not supported",
+    )
     _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
     _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
     _NON_RETRYABLE_429_ERROR_TOKENS = frozenset({
@@ -272,6 +282,7 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+        self.supports_image_input: bool | None = None
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -602,6 +613,51 @@ class LLMProvider(ABC):
                 result.append(msg)
         return result if found else None
 
+    def _messages_for_image_capability(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        supports_image_input: bool | None | object = _SENTINEL,
+    ) -> list[dict[str, Any]]:
+        """Apply an explicit text-only preset before making a provider request."""
+        capability = (
+            self.supports_image_input
+            if supports_image_input is self._SENTINEL
+            else supports_image_input
+        )
+        if capability is not False:
+            return messages
+        return self._strip_image_content(messages) or messages
+
+    def _outer_image_capability(
+        self,
+        supports_image_input: bool | None,
+    ) -> bool | None:
+        """Return the image policy applied by this provider's retry wrapper."""
+        return supports_image_input
+
+    def _image_policy_request_kwargs(
+        self,
+        supports_image_input: bool | None,
+    ) -> dict[str, Any]:
+        """Return provider-internal kwargs needed for candidate image policy."""
+        return {}
+
+    @classmethod
+    def _is_image_unsupported_response(cls, response: LLMResponse) -> bool:
+        if response.finish_reason != "error":
+            return False
+        text = " ".join(
+            str(value or "")
+            for value in (
+                response.content,
+                response.error_kind,
+                response.error_type,
+                response.error_code,
+            )
+        ).lower()
+        return any(marker in text for marker in cls._IMAGE_UNSUPPORTED_MARKERS)
+
     @staticmethod
     def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
         """Replace image_url blocks with text placeholder *in-place*.
@@ -692,6 +748,7 @@ class LLMProvider(ABC):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        supports_image_input: bool | None | object = _SENTINEL,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -700,6 +757,14 @@ class LLMProvider(ABC):
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
+        candidate_image_capability = (
+            self.supports_image_input
+            if supports_image_input is self._SENTINEL
+            else supports_image_input
+        )
+        outer_image_capability = self._outer_image_capability(
+            candidate_image_capability
+        )
 
         has_streamed_content = False
 
@@ -717,13 +782,19 @@ class LLMProvider(ABC):
             has_streamed_content = False
 
         kw: dict[str, Any] = dict(
-            messages=messages, tools=tools, model=model,
+            messages=self._messages_for_image_capability(
+                messages,
+                supports_image_input=outer_image_capability,
+            ),
+            tools=tools,
+            model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
             on_content_delta=_tracking_delta if on_content_delta is not None else None,
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
         )
+        kw.update(self._image_policy_request_kwargs(candidate_image_capability))
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
         return await self._run_with_retry(
@@ -734,6 +805,7 @@ class LLMProvider(ABC):
             on_retry_wait=on_retry_wait,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
+            supports_image_input=outer_image_capability,
         )
 
     async def chat_with_retry(
@@ -747,6 +819,7 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        supports_image_input: bool | None | object = _SENTINEL,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -763,18 +836,33 @@ class LLMProvider(ABC):
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
+        candidate_image_capability = (
+            self.supports_image_input
+            if supports_image_input is self._SENTINEL
+            else supports_image_input
+        )
+        outer_image_capability = self._outer_image_capability(
+            candidate_image_capability
+        )
 
         kw: dict[str, Any] = dict(
-            messages=messages, tools=tools, model=model,
+            messages=self._messages_for_image_capability(
+                messages,
+                supports_image_input=outer_image_capability,
+            ),
+            tools=tools,
+            model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
+        kw.update(self._image_policy_request_kwargs(candidate_image_capability))
         return await self._run_with_retry(
             self._safe_chat,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            supports_image_input=outer_image_capability,
         )
 
     @classmethod
@@ -882,6 +970,7 @@ class LLMProvider(ABC):
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        supports_image_input: bool | None | object = _SENTINEL,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -928,9 +1017,19 @@ class LLMProvider(ABC):
 
             if not self._is_transient_response(response):
                 stripped = self._strip_image_content(original_messages)
-                if stripped is not None and stripped != kw["messages"]:
+                if (
+                    (
+                        self.supports_image_input
+                        if supports_image_input is self._SENTINEL
+                        else supports_image_input
+                    )
+                    is None
+                    and self._is_image_unsupported_response(response)
+                    and stripped is not None
+                    and stripped != kw["messages"]
+                ):
                     logger.warning(
-                        "Non-transient LLM error with image content, retrying without images"
+                        "Model rejected image input, retrying without images"
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped

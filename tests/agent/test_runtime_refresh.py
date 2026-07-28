@@ -302,9 +302,9 @@ def test_settings_context_window_refreshes_runtime_state(
     config_path = tmp_path / "config.json"
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
-    config.agents.defaults.model = "openai/gpt-4o"
-    config.agents.defaults.provider = "openai"
-    config.agents.defaults.context_window_tokens = 65_536
+    config.resolve_default_preset().model = "openai/gpt-4o"
+    config.resolve_default_preset().provider = "openai"
+    config.resolve_default_preset().context_window_tokens = 65_536
     config.providers.openai.api_key = "sk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)

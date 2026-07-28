@@ -405,6 +405,44 @@ def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
     assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
+def test_get_history_can_return_internal_media_refs_without_breadcrumbs():
+    session = Session(key="test:media-internal")
+    session.messages.append(
+        {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
+    )
+
+    history = session.get_history(max_messages=500, include_media=True)
+
+    assert history == [{
+        "role": "user",
+        "content": "look",
+        "_media_paths": ["/m/a.png", "/m/b.png"],
+    }]
+
+
+def test_get_history_keeps_runtime_context_boundary_with_internal_media_refs():
+    content, marker = append_runtime_context(
+        "look",
+        [RuntimeContextBlock(source="test", content="trusted runtime context")],
+    )
+    session = Session(key="test:media-runtime-context")
+    session.messages.append({
+        "role": "user",
+        "content": content,
+        "media": ["/m/a.png"],
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    })
+
+    history = session.get_history(max_messages=500, include_media=True)
+
+    assert history == [{
+        "role": "user",
+        "content": content,
+        "_media_paths": ["/m/a.png"],
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    }]
+
+
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     session = Session(key="test:cli-app")
     session.messages.append(

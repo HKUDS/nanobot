@@ -293,23 +293,16 @@ _IMAGE_MSG_NO_META = [
 
 
 @pytest.mark.asyncio
-async def test_non_transient_error_with_images_retries_without_images() -> None:
-    """Any non-transient error retries once with images stripped when images are present."""
+async def test_unrelated_non_transient_error_with_images_is_not_hidden() -> None:
+    """Only an explicit unsupported-image error may trigger image fallback."""
     provider = ScriptedProvider([
         LLMResponse(content="API调用参数有误,请检查文档", finish_reason="error"),
-        LLMResponse(content="ok, no image"),
     ])
 
     response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
 
-    assert response.content == "ok, no image"
-    assert provider.calls == 2
-    msgs_on_retry = provider.last_kwargs["messages"]
-    for msg in msgs_on_retry:
-        content = msg.get("content")
-        if isinstance(content, list):
-            assert all(b.get("type") != "image_url" for b in content)
-            assert any("not delivered" in (b.get("text") or "").lower() for b in content)
+    assert response.content == "API调用参数有误,请检查文档"
+    assert provider.calls == 1
 
 
 @pytest.mark.asyncio
@@ -349,7 +342,7 @@ async def test_non_transient_error_without_images_no_retry() -> None:
 async def test_image_fallback_returns_error_on_second_failure() -> None:
     """If the image-stripped retry also fails, return that error."""
     provider = ScriptedProvider([
-        LLMResponse(content="some model error", finish_reason="error"),
+        LLMResponse(content="model does not support images", finish_reason="error"),
         LLMResponse(content="still failing", finish_reason="error"),
     ])
 
@@ -364,7 +357,7 @@ async def test_image_fallback_returns_error_on_second_failure() -> None:
 async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
     """When _meta is absent, fallback placeholder is non-descriptive."""
     provider = ScriptedProvider([
-        LLMResponse(content="error", finish_reason="error"),
+        LLMResponse(content="image input is not supported", finish_reason="error"),
         LLMResponse(content="ok"),
     ])
 
@@ -377,6 +370,75 @@ async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
         content = msg.get("content")
         if isinstance(content, list):
             assert any("not delivered" in (b.get("text") or "").lower() for b in content)
+
+
+@pytest.mark.asyncio
+async def test_text_only_preset_strips_images_before_first_request() -> None:
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+    provider.supports_image_input = False
+
+    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
+
+    assert response.content == "ok"
+    assert provider.calls == 1
+    content = provider.last_kwargs["messages"][0]["content"]
+    assert all(block.get("type") != "image_url" for block in content)
+    assert any("not delivered" in (block.get("text") or "").lower() for block in content)
+
+
+@pytest.mark.asyncio
+async def test_explicit_image_support_does_not_silently_downgrade() -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="model does not support images", finish_reason="error"),
+    ])
+    provider.supports_image_input = True
+
+    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
+
+    assert response.finish_reason == "error"
+    assert provider.calls == 1
+    content = provider.last_kwargs["messages"][0]["content"]
+    assert any(block.get("type") == "image_url" for block in content)
+
+
+@pytest.mark.asyncio
+async def test_image_capability_override_is_request_scoped_under_concurrency() -> None:
+    class ConcurrentProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = 0
+            self.ready = asyncio.Event()
+            self.received_image_flags: list[bool] = []
+
+        def get_default_model(self) -> str:
+            return "test-model"
+
+        async def chat(self, **kwargs) -> LLMResponse:
+            content = kwargs["messages"][0]["content"]
+            self.received_image_flags.append(
+                any(block.get("type") == "image_url" for block in content)
+            )
+            self.entered += 1
+            if self.entered == 2:
+                self.ready.set()
+            await self.ready.wait()
+            return LLMResponse(content="ok")
+
+    provider = ConcurrentProvider()
+
+    await asyncio.gather(
+        provider.chat_with_retry(
+            messages=copy.deepcopy(_IMAGE_MSG),
+            supports_image_input=False,
+        ),
+        provider.chat_with_retry(
+            messages=copy.deepcopy(_IMAGE_MSG),
+            supports_image_input=True,
+        ),
+    )
+
+    assert sorted(provider.received_image_flags) == [False, True]
+    assert provider.supports_image_input is None
 
 
 @pytest.mark.asyncio

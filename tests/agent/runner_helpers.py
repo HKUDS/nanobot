@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from nanobot.agent.runner import AgentRunSpec
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -21,7 +21,7 @@ def make_run_spec(provider: LLMProvider, **kwargs: Any) -> AgentRunSpec:
     model = kwargs.pop("model")
     context_window_tokens = kwargs.pop(
         "context_window_tokens",
-        AgentDefaults().context_window_tokens,
+        ModelPresetConfig(model=model).context_window_tokens,
     )
     provider_generation = getattr(provider, "generation", None)
     defaults = GenerationSettings()

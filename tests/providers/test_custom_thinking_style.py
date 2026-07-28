@@ -67,6 +67,7 @@ class TestCustomProviderThinkingStyle:
             {
                 "agents": {"defaults": {"modelPreset": "primary"}},
                 "modelPresets": {
+                    "default": {"model": "anthropic/claude-opus-4-5"},
                     "primary": {"model": "tenant-model", "provider": "tenant"},
                 },
                 "providers": {
@@ -92,6 +93,7 @@ class TestCustomProviderThinkingStyle:
                     }
                 },
                 "modelPresets": {
+                    "default": {"model": "anthropic/claude-opus-4-5"},
                     "primary": {"model": "openai/gpt-4.1", "provider": "openai"},
                     "fallback": {"model": "tenant-model", "provider": "tenant"},
                 },

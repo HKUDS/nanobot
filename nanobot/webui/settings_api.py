@@ -857,6 +857,13 @@ def _parse_bool(value: str, field: str) -> bool:
     return normalized in {"1", "true", "yes"}
 
 
+def _parse_image_input_support(value: str | None) -> bool | None:
+    normalized = (value or "").strip().lower()
+    if normalized in {"", "auto"}:
+        return None
+    return _parse_bool(normalized, "supports_image_input")
+
+
 def _parse_context_window_tokens(value: str | None) -> int | None:
     if value is None:
         return None
@@ -945,28 +952,10 @@ def _provider_display_name_exists(
     return False
 
 
-def _unique_model_configuration_name(config: Any, label: str) -> str:
-    """Return a stable, unused preset name for a migrated model configuration."""
-    try:
-        base = _model_configuration_slug(label)
-    except WebUISettingsError:
-        base = "model"
-    candidate = base
-    suffix = 2
-    while candidate in config.model_presets:
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-    return candidate
-
-
-def _model_configuration_label(model: str) -> str:
-    return model.rsplit("/", 1)[-1] or model
-
-
 def _model_call_order_state(config: Any) -> tuple[list[str], bool]:
     defaults = config.agents.defaults
     primary = defaults.model_preset
-    if not primary or primary == "default" or primary not in config.model_presets:
+    if primary not in config.model_presets:
         return [], False
     order = [primary]
     for fallback in defaults.fallback_models:
@@ -1088,7 +1077,7 @@ def settings_payload(
 ) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults
-    active_preset_name = defaults.model_preset or "default"
+    active_preset_name = defaults.model_preset
     effective_preset = config.resolve_preset()
 
     provider_name = (
@@ -1132,32 +1121,7 @@ def settings_payload(
         ),
         None,
     )
-    model_presets = [
-        {
-            "name": "default",
-            "label": "Default",
-            "active": active_preset_name == "default",
-            "is_default": True,
-            "model": defaults.model,
-            "provider": defaults.provider,
-            "resolved_provider": config.get_provider_name(
-                defaults.model,
-                preset=config.resolve_default_preset(),
-            ),
-            "max_tokens": defaults.max_tokens,
-            "context_window_tokens": defaults.context_window_tokens,
-            "temperature": defaults.temperature,
-            "reasoning_effort": defaults.reasoning_effort,
-            "reasoning_effort_values": _reasoning_effort_values_for(
-                config.get_provider_name(
-                    defaults.model,
-                    preset=config.resolve_default_preset(),
-                )
-                or defaults.provider,
-                defaults.model,
-            ),
-        }
-    ]
+    model_presets = []
     for name, preset in config.model_presets.items():
         resolved_preset_provider = (
             config.get_provider_name(
@@ -1171,7 +1135,7 @@ def settings_payload(
                 "name": name,
                 "label": preset.label or name,
                 "active": active_preset_name == name,
-                "is_default": False,
+                "is_default": name == "default",
                 "model": preset.model,
                 "provider": preset.provider,
                 "resolved_provider": resolved_preset_provider,
@@ -1179,6 +1143,7 @@ def settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "supports_image_input": preset.supports_image_input,
                 "reasoning_effort_values": _reasoning_effort_values_for(
                     resolved_preset_provider, preset.model
                 ),
@@ -1320,13 +1285,14 @@ def settings_usage_payload() -> dict[str, Any]:
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults
+    default_preset = config.resolve_default_preset()
     changed = False
     restart_required = False
 
     if "model_preset" in query or "modelPreset" in query:
         preset = (_query_first_alias(query, "model_preset", "modelPreset") or "").strip()
-        preset_value = None if not preset or preset == "default" else preset
-        if preset_value is not None and preset_value not in config.model_presets:
+        preset_value = preset or "default"
+        if preset_value not in config.model_presets:
             raise WebUISettingsError("unknown model preset")
         if defaults.model_preset != preset_value:
             defaults.model_preset = preset_value
@@ -1337,8 +1303,8 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         model = model.strip()
         if not model:
             raise WebUISettingsError("model is required")
-        if defaults.model != model:
-            defaults.model = model
+        if default_preset.model != model:
+            default_preset.model = model
             changed = True
 
     provider = _query_first(query, "provider")
@@ -1347,8 +1313,8 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         if not provider:
             raise WebUISettingsError("provider is required")
         _validate_configured_provider(config, provider)
-        if defaults.provider != provider:
-            defaults.provider = provider
+        if default_preset.provider != provider:
+            default_preset.provider = provider
             changed = True
 
     context_window_tokens = _parse_context_window_tokens(
@@ -1356,9 +1322,9 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
     )
     if (
         context_window_tokens is not None
-        and defaults.context_window_tokens != context_window_tokens
+        and default_preset.context_window_tokens != context_window_tokens
     ):
-        defaults.context_window_tokens = context_window_tokens
+        default_preset.context_window_tokens = context_window_tokens
         changed = True
 
     timezone = _query_first(query, "timezone")
@@ -1449,6 +1415,9 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
         reasoning_effort = (
             _query_first_alias(query, "reasoning_effort", "reasoningEffort") or ""
         ).strip() or None
+    supports_image_input = _parse_image_input_support(
+        _query_first_alias(query, "supports_image_input", "supportsImageInput")
+    )
     config.model_presets[name] = ModelPresetConfig(
         label=label,
         model=model,
@@ -1461,6 +1430,7 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
         ),
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
+        supports_image_input=supports_image_input,
     )
     save_config(config)
     payload = settings_payload()
@@ -1470,7 +1440,7 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
 
 def update_model_configuration(query: QueryParams) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
-    if not name or name == "default":
+    if not name:
         raise WebUISettingsError("model configuration is required")
 
     config = load_config()
@@ -1539,6 +1509,14 @@ def update_model_configuration(query: QueryParams) -> dict[str, Any]:
             preset.reasoning_effort = reasoning_effort
             changed = True
 
+    if "supports_image_input" in query or "supportsImageInput" in query:
+        supports_image_input = _parse_image_input_support(
+            _query_first_alias(query, "supports_image_input", "supportsImageInput")
+        )
+        if preset.supports_image_input is not supports_image_input:
+            preset.supports_image_input = supports_image_input
+            changed = True
+
     if changed:
         save_config(config)
     return settings_payload()
@@ -1584,68 +1562,16 @@ def update_model_call_order(query: QueryParams) -> dict[str, Any]:
 
 
 def migrate_model_configurations(_query: QueryParams | None = None) -> dict[str, Any]:
-    """Materialize legacy primary/inline model settings as named presets."""
-    config = load_config()
-    defaults = config.agents.defaults
-    primary = config.resolve_preset()
-    created: list[str] = []
-
-    if not defaults.model_preset or defaults.model_preset == "default":
-        label = _model_configuration_label(primary.model)
-        name = _unique_model_configuration_name(config, label)
-        config.model_presets[name] = ModelPresetConfig(
-            label=label,
-            model=primary.model,
-            provider=primary.provider,
-            max_tokens=primary.max_tokens,
-            context_window_tokens=primary.context_window_tokens,
-            temperature=primary.temperature,
-            reasoning_effort=primary.reasoning_effort,
-        )
-        defaults.model_preset = name
-        created.append(name)
-
-    fallback_models: list[str] = []
-    for fallback in defaults.fallback_models:
-        if isinstance(fallback, str):
-            fallback_models.append(fallback)
-            continue
-        label = _model_configuration_label(fallback.model)
-        name = _unique_model_configuration_name(config, label)
-        config.model_presets[name] = ModelPresetConfig(
-            label=label,
-            model=fallback.model,
-            provider=fallback.provider,
-            max_tokens=(
-                fallback.max_tokens
-                if fallback.max_tokens is not None
-                else primary.max_tokens
-            ),
-            context_window_tokens=(
-                fallback.context_window_tokens
-                if fallback.context_window_tokens is not None
-                else primary.context_window_tokens
-            ),
-            temperature=(
-                fallback.temperature
-                if fallback.temperature is not None
-                else primary.temperature
-            ),
-            reasoning_effort=fallback.reasoning_effort,
-        )
-        fallback_models.append(name)
-        created.append(name)
-
-    if created:
-        defaults.fallback_models = fallback_models
-        save_config(config)
+    """Compatibility endpoint; loading config now performs this migration."""
     return settings_payload()
 
 
 def delete_model_configuration(query: QueryParams) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
-    if not name or name == "default":
+    if not name:
         raise WebUISettingsError("model configuration is required")
+    if name == "default":
+        raise WebUISettingsError("default model configuration cannot be deleted", status=409)
 
     config = load_config()
     if name not in config.model_presets:

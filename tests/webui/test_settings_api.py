@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
@@ -180,14 +180,12 @@ def _dynamic_provider_config(
             }
         }
     }
+    config = Config.model_validate(raw_config)
     if defaults:
-        raw_config["agents"] = {
-            "defaults": {
-                "provider": DYNAMIC_PROVIDER_NAME,
-                "model": "gpt-4o-mini",
-            }
-        }
-    return Config.model_validate(raw_config)
+        default_preset = config.resolve_default_preset()
+        default_preset.provider = DYNAMIC_PROVIDER_NAME
+        default_preset.model = "gpt-4o-mini"
+    return config
 
 
 def test_create_model_configuration_writes_label_without_changing_call_order(
@@ -196,8 +194,8 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.agents.defaults.model = "openai/gpt-4o"
-    config.agents.defaults.provider = "openai"
+    config.resolve_default_preset().model = "openai/gpt-4o"
+    config.resolve_default_preset().provider = "openai"
     config.providers.openai.api_key = "sk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
@@ -217,7 +215,7 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
     assert rows["fast-writing"]["label"] == "Fast writing"
 
     saved = load_config(config_path)
-    assert saved.agents.defaults.model_preset is None
+    assert saved.agents.defaults.model_preset == "default"
     assert saved.model_presets["fast-writing"].label == "Fast writing"
     assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
     assert saved.model_presets["fast-writing"].provider == "openai"
@@ -335,7 +333,7 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     assert payload["agent"]["model_preset"] == "default"
     assert payload["agent"]["model"] == "anthropic/claude-opus-4-5"
     saved = load_config(config_path)
-    assert saved.agents.defaults.model_preset is None
+    assert saved.agents.defaults.model_preset == "default"
     assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
@@ -348,6 +346,7 @@ def test_settings_payload_exposes_named_model_call_order(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets = {
+        "default": config.resolve_default_preset(),
         "primary": ModelPresetConfig(model="openai/gpt-4.1", provider="openai"),
         "backup": ModelPresetConfig(model="anthropic/claude-sonnet-4", provider="anthropic"),
     }
@@ -369,6 +368,7 @@ def test_update_model_call_order_sets_primary_and_fallbacks(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets = {
+        "default": config.resolve_default_preset(),
         "primary": ModelPresetConfig(model="openai/gpt-4.1", provider="openai"),
         "backup": ModelPresetConfig(model="anthropic/claude-sonnet-4", provider="anthropic"),
     }
@@ -384,7 +384,7 @@ def test_update_model_call_order_sets_primary_and_fallbacks(
     assert saved.agents.defaults.fallback_models == ["primary"]
 
 
-def test_update_model_call_order_requires_named_primary(
+def test_update_model_call_order_accepts_default_as_primary(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -394,50 +394,60 @@ def test_update_model_call_order_requires_named_primary(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError) as error:
-        update_model_call_order({"order": [json.dumps(["backup"])]})
+    payload = update_model_call_order({"order": [json.dumps(["backup", "default"])]})
 
-    assert error.value.status == 409
-    assert load_config(config_path).agents.defaults.model_preset is None
+    assert payload["model_call_order"] == ["backup", "default"]
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset == "backup"
+    assert saved.agents.defaults.fallback_models == ["default"]
 
 
-def test_migrate_model_configurations_preserves_legacy_chain(
+def test_loading_settings_migrates_legacy_chain_once(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config()
-    config.agents.defaults.model = "openai/gpt-4o"
-    config.agents.defaults.provider = "openai"
-    config.agents.defaults.max_tokens = 4096
-    config.agents.defaults.temperature = 0.25
-    config.agents.defaults.fallback_models = [
-        InlineFallbackConfig(
-            model="anthropic/claude-sonnet-4",
-            provider="anthropic",
-        )
-    ]
-    save_config(config, config_path)
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": "openai/gpt-4o",
+                        "provider": "openai",
+                        "maxTokens": 4096,
+                        "temperature": 0.25,
+                        "fallbackModels": [
+                            {
+                                "model": "anthropic/claude-sonnet-4",
+                                "provider": "anthropic",
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    legacy_payload = settings_payload()
-    assert legacy_payload["model_call_order"] == []
-    assert legacy_payload["model_call_order_editable"] is False
-
-    payload = migrate_model_configurations()
+    payload = settings_payload()
 
     assert payload["model_call_order_editable"] is True
-    assert payload["model_call_order"] == ["gpt-4o", "claude-sonnet-4"]
+    assert payload["model_call_order"] == ["default", "claude-sonnet-4"]
     saved = load_config(config_path)
-    assert saved.agents.defaults.model_preset == "gpt-4o"
+    assert saved.agents.defaults.model_preset == "default"
     assert saved.agents.defaults.fallback_models == ["claude-sonnet-4"]
-    assert saved.model_presets["gpt-4o"].temperature == 0.25
+    assert saved.model_presets["default"].model == "openai/gpt-4o"
+    assert saved.model_presets["default"].temperature == 0.25
     assert saved.model_presets["claude-sonnet-4"].max_tokens == 4096
     assert saved.model_presets["claude-sonnet-4"].temperature == 0.25
 
     repeated = migrate_model_configurations()
-    assert repeated["model_call_order"] == ["gpt-4o", "claude-sonnet-4"]
-    assert set(load_config(config_path).model_presets) == {"gpt-4o", "claude-sonnet-4"}
+    assert repeated["model_call_order"] == ["default", "claude-sonnet-4"]
+    assert set(load_config(config_path).model_presets) == {
+        "default",
+        "claude-sonnet-4",
+    }
 
 
 def test_model_configuration_advanced_options_round_trip(
@@ -459,6 +469,7 @@ def test_model_configuration_advanced_options_round_trip(
             "context_window_tokens": ["262144"],
             "temperature": ["0.4"],
             "reasoning_effort": ["high"],
+            "supports_image_input": ["true"],
         }
     )
     row = next(row for row in created["model_presets"] if row["name"] == "reasoning")
@@ -466,6 +477,7 @@ def test_model_configuration_advanced_options_round_trip(
     assert row["context_window_tokens"] == 262144
     assert row["temperature"] == 0.4
     assert row["reasoning_effort"] == "high"
+    assert row["supports_image_input"] is True
 
     updated = update_model_configuration(
         {
@@ -473,12 +485,14 @@ def test_model_configuration_advanced_options_round_trip(
             "max_tokens": ["8192"],
             "temperature": ["0"],
             "reasoning_effort": [""],
+            "supports_image_input": ["false"],
         }
     )
     row = next(row for row in updated["model_presets"] if row["name"] == "reasoning")
     assert row["max_tokens"] == 8192
     assert row["temperature"] == 0
     assert row["reasoning_effort"] is None
+    assert row["supports_image_input"] is False
 
 
 def test_delete_model_configuration_requires_removing_it_from_call_order(
@@ -488,6 +502,7 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets = {
+        "default": config.resolve_default_preset(),
         "primary": ModelPresetConfig(model="openai/gpt-4.1"),
         "spare": ModelPresetConfig(model="openai/gpt-4.1-mini"),
     }
@@ -754,7 +769,7 @@ def test_update_agent_settings_accepts_context_window_options(
 
     assert payload["agent"]["context_window_tokens"] == 200000
     saved = load_config(config_path)
-    assert saved.agents.defaults.context_window_tokens == 200000
+    assert saved.resolve_default_preset().context_window_tokens == 200000
 
 
 def test_update_model_configuration_preserves_custom_context_windows(
@@ -799,7 +814,7 @@ def test_update_context_window_rejects_unknown_values(
         update_agent_settings({"context_window_tokens": ["128000"]})
 
 
-def test_update_model_configuration_rejects_default_preset(
+def test_update_model_configuration_edits_default_preset(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -807,8 +822,16 @@ def test_update_model_configuration_rejects_default_preset(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="model configuration is required"):
-        update_model_configuration({"name": ["default"], "model": ["openai/gpt-4.1"]})
+    payload = update_model_configuration({
+        "name": ["default"],
+        "model": ["openai/gpt-4.1"],
+        "supports_image_input": ["true"],
+    })
+
+    assert payload["agent"]["model"] == "openai/gpt-4.1"
+    saved = load_config(config_path)
+    assert saved.resolve_default_preset().model == "openai/gpt-4.1"
+    assert saved.resolve_default_preset().supports_image_input is True
 
 
 def test_settings_payload_includes_oauth_provider_status(
@@ -900,8 +923,8 @@ def test_settings_payload_keeps_configured_opencode_legacy_alias(tmp_path, monke
     config_path = tmp_path / "config.json"
     config = Config.model_validate({
         "providers": {"opencodeZen": {"apiKey": "legacy-key"}},
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "provider": "opencode_zen",
                 "model": "opencode/deepseek-v4-pro",
             }

@@ -367,6 +367,24 @@ def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     return f"[image: {path}]" if path else empty
 
 
+def content_with_media_breadcrumbs(
+    role: object,
+    content: object,
+    media: object,
+) -> object:
+    """Append persisted media paths to user text using the canonical breadcrumb."""
+    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
+        return content
+    breadcrumbs = "\n".join(
+        image_placeholder_text(path)
+        for path in media
+        if isinstance(path, str) and path
+    )
+    if not breadcrumbs:
+        return content
+    return f"{content}\n{breadcrumbs}" if content else breadcrumbs
+
+
 def truncate_text(text: str, max_chars: int) -> str:
     """Truncate text with a stable suffix."""
     if max_chars <= 0 or len(text) <= max_chars:

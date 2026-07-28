@@ -77,6 +77,7 @@ class TestProviderSignatureIncludesExtraQuery:
         base = {
             "agents": {"defaults": {"modelPreset": "fast"}},
             "modelPresets": {
+                "default": {"model": "anthropic/claude-opus-4-5"},
                 "fast": {"model": "custom/test-model", "provider": "custom"},
             },
             "providers": {

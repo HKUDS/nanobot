@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.runtime_context import RuntimeContextBlock
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -259,10 +263,12 @@ class TestBuildUserContent:
         result = builder.build_user_content("hello", [])
         assert result == "hello"
 
-    def test_nonexistent_media_file_returns_string(self, tmp_path):
+    def test_nonexistent_media_file_returns_explicit_placeholder(self, tmp_path):
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", ["/nonexistent/image.png"])
-        assert result == "hello"
+        assert isinstance(result, list)
+        assert "unavailable" in result[0]["text"].lower()
+        assert result[1] == {"type": "text", "text": "hello"}
 
     def test_non_image_file_returns_string(self, tmp_path):
         txt = tmp_path / "doc.txt"
@@ -438,3 +444,55 @@ class TestBuildMessages:
         user_msg = messages[-1]["content"]
         assert isinstance(user_msg, list)
         assert any(b.get("type") == "image_url" for b in user_msg)
+
+    def test_persisted_media_rehydrates_to_identical_image_content(self, tmp_path):
+        png = tmp_path / "stable.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        builder = _builder(tmp_path)
+        first_content = builder.build_user_content("describe", [str(png)])
+        history = [
+            {
+                "role": "user",
+                "content": "describe",
+                "_media_paths": [str(png)],
+            },
+            {"role": "assistant", "content": "done"},
+        ]
+
+        messages = builder.build_messages(history, "next")
+
+        assert messages[1]["content"] == first_content
+        assert "_media_paths" not in messages[1]
+
+    def test_persisted_media_and_runtime_context_rehydrate_identically(self, tmp_path):
+        png = tmp_path / "stable-context.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        builder = _builder(tmp_path)
+        blocks = [
+            RuntimeContextBlock(
+                source="cli_apps",
+                content="CLI App Attachment: @drawio (tool=run_cli_app).",
+            )
+        ]
+        first_content = builder.build_messages(
+            [],
+            "describe",
+            media=[str(png)],
+            runtime_context_blocks=blocks,
+        )[-1]["content"]
+        persisted_content, marker = append_runtime_context("describe", blocks)
+        history = [
+            {
+                "role": "user",
+                "content": persisted_content,
+                "_media_paths": [str(png)],
+                RUNTIME_CONTEXT_HISTORY_META: marker,
+            },
+            {"role": "assistant", "content": "done"},
+        ]
+
+        messages = builder.build_messages(history, "next")
+
+        assert messages[1]["content"] == first_content
+        assert "_media_paths" not in messages[1]
+        assert RUNTIME_CONTEXT_HISTORY_META not in messages[1]

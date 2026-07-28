@@ -117,6 +117,9 @@ class FallbackProvider(LLMProvider):
         self._provider_factory = provider_factory
         self._fallback_model_observer = fallback_model_observer
         self._has_fallbacks = bool(fallback_presets)
+        # Candidate-specific image policy is applied inside _try_with_fallback;
+        # the outer retry wrapper preserves canonical images for the chain.
+        self.supports_image_input = getattr(primary, "supports_image_input", None)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
 
@@ -139,6 +142,19 @@ class FallbackProvider(LLMProvider):
     def supports_progress_deltas(self) -> bool:
         return bool(getattr(self._primary, "supports_progress_deltas", False))
 
+    def _outer_image_capability(
+        self,
+        supports_image_input: bool | None,
+    ) -> bool | None:
+        """Keep canonical images intact until each candidate applies its policy."""
+        return True
+
+    def _image_policy_request_kwargs(
+        self,
+        supports_image_input: bool | None,
+    ) -> dict[str, Any]:
+        return {"_primary_supports_image_input": supports_image_input}
+
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
         if self._primary_tripped_at is None:
@@ -149,16 +165,39 @@ class FallbackProvider(LLMProvider):
         return False
 
     async def chat(self, **kwargs: Any) -> LLMResponse:
+        primary_supports_image_input = kwargs.pop(
+            "_primary_supports_image_input",
+            getattr(self._primary, "supports_image_input", None),
+        )
         if not self._has_fallbacks:
-            return await self._primary.chat(**kwargs)
+            return await self._call_with_image_policy(
+                lambda p, kw: p.chat(**kw),
+                self._primary,
+                kwargs,
+                has_streamed=None,
+                supports_image_input=primary_supports_image_input,
+            )
         return await self._try_with_fallback(
-            lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
+            lambda p, kw: p.chat(**kw),
+            kwargs,
+            has_streamed=None,
+            primary_supports_image_input=primary_supports_image_input,
         )
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
+        primary_supports_image_input = kwargs.pop(
+            "_primary_supports_image_input",
+            getattr(self._primary, "supports_image_input", None),
+        )
         if not self._has_fallbacks:
-            return await self._primary.chat_stream(**kwargs)
+            return await self._call_with_image_policy(
+                lambda p, kw: p.chat_stream(**kw),
+                self._primary,
+                kwargs,
+                has_streamed=None,
+                supports_image_input=primary_supports_image_input,
+            )
 
         has_streamed: list[bool] = [False]
         original_delta = kwargs.get("on_content_delta")
@@ -175,6 +214,7 @@ class FallbackProvider(LLMProvider):
             kwargs,
             has_streamed=has_streamed,
             on_stream_recover=on_stream_recover,
+            primary_supports_image_input=primary_supports_image_input,
         )
 
     async def _try_with_fallback(
@@ -183,6 +223,7 @@ class FallbackProvider(LLMProvider):
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        primary_supports_image_input: bool | None | object = LLMProvider._SENTINEL,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
@@ -190,7 +231,13 @@ class FallbackProvider(LLMProvider):
 
         if self._primary_available():
             primary_was_attempted = True
-            response = await call(self._primary, kwargs)
+            response = await self._call_with_image_policy(
+                call,
+                self._primary,
+                kwargs,
+                has_streamed=has_streamed,
+                supports_image_input=primary_supports_image_input,
+            )
             if response.finish_reason != "error":
                 self._primary_failures = 0
                 self._primary_tripped_at = None
@@ -216,7 +263,8 @@ class FallbackProvider(LLMProvider):
                     )
                     return response
 
-            if not self._should_fallback(response):
+            image_rejected = self._primary._is_image_unsupported_response(response)
+            if not image_rejected and not self._should_fallback(response):
                 logger.warning(
                     "Primary model '{}' returned non-fallbackable error: {}",
                     primary_model,
@@ -224,13 +272,14 @@ class FallbackProvider(LLMProvider):
                 )
                 return response
 
-            self._primary_failures += 1
-            if self._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
-                self._primary_tripped_at = time.monotonic()
-                logger.warning(
-                    "Primary model '{}' circuit open after {} consecutive failures",
-                    primary_model, self._primary_failures,
-                )
+            if not image_rejected:
+                self._primary_failures += 1
+                if self._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
+                    self._primary_tripped_at = time.monotonic()
+                    logger.warning(
+                        "Primary model '{}' circuit open after {} consecutive failures",
+                        primary_model, self._primary_failures,
+                    )
         else:
             logger.debug("Primary model '{}' circuit open; skipping", primary_model)
 
@@ -270,6 +319,7 @@ class FallbackProvider(LLMProvider):
                 )
             try:
                 fallback_provider = self._provider_factory(fallback)
+                fallback_provider.supports_image_input = fallback.supports_image_input
             except Exception as exc:
                 logger.warning(
                     "Failed to create provider for fallback '{}': {}", fallback_model, exc
@@ -288,7 +338,13 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs.pop("reasoning_effort", None)
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
-            fallback_response = await call(fallback_provider, fallback_kwargs)
+            fallback_response = await self._call_with_image_policy(
+                call,
+                fallback_provider,
+                fallback_kwargs,
+                has_streamed=has_streamed,
+                supports_image_input=fallback.supports_image_input,
+            )
 
             if fallback_response.finish_reason != "error":
                 logger.info(
@@ -316,6 +372,49 @@ class FallbackProvider(LLMProvider):
             content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
             finish_reason="error",
         )
+
+    @staticmethod
+    async def _call_with_image_policy(
+        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
+        provider: LLMProvider,
+        kwargs: dict[str, Any],
+        *,
+        has_streamed: list[bool] | None,
+        supports_image_input: bool | None | object = LLMProvider._SENTINEL,
+    ) -> LLMResponse:
+        original_messages = kwargs.get("messages")
+        if not isinstance(original_messages, list):
+            return await call(provider, kwargs)
+
+        prepared_kwargs = dict(kwargs)
+        prepared_kwargs["messages"] = provider._messages_for_image_capability(
+            original_messages,
+            supports_image_input=supports_image_input,
+        )
+        response = await call(provider, prepared_kwargs)
+        capability = (
+            provider.supports_image_input
+            if supports_image_input is LLMProvider._SENTINEL
+            else supports_image_input
+        )
+        if (
+            capability is None
+            and provider._is_image_unsupported_response(response)
+            and (has_streamed is None or not has_streamed[0])
+        ):
+            stripped = provider._strip_image_content(original_messages)
+            if stripped is not None and stripped != prepared_kwargs["messages"]:
+                logger.warning(
+                    "Fallback candidate '{}' rejected image input, retrying without images",
+                    prepared_kwargs.get("model") or provider.get_default_model(),
+                )
+                retry_kwargs = dict(prepared_kwargs)
+                retry_kwargs["messages"] = stripped
+                retry_response = await call(provider, retry_kwargs)
+                if retry_response.finish_reason != "error":
+                    provider._strip_image_content_inplace(original_messages)
+                return retry_response
+        return response
 
     async def _notify_fallback_model(self, model: str) -> None:
         if self._fallback_model_observer is None:

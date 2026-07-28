@@ -22,10 +22,10 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     recent_message_start_index,
     safe_filename,
     strip_think,
@@ -165,6 +165,7 @@ class Session:
         max_tokens: int = 0,
         extend_to_user: bool = False,
         include_runtime_context: bool = True,
+        include_media: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input.
 
@@ -209,17 +210,17 @@ class Session:
             role = message.get("role")
             if role == "assistant" and isinstance(content, str):
                 content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
             media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            media_paths = (
+                [path for path in media if isinstance(path, str) and path]
+                if role == "user" and isinstance(media, list)
+                else []
+            )
+            # General history consumers retain a compact breadcrumb. The agent
+            # loop asks for internal media refs and deterministically rebuilds
+            # image blocks at the request boundary.
+            if media_paths and not include_media:
+                content = content_with_media_breadcrumbs(role, content, media_paths)
             cli_apps = message.get("cli_apps")
             if (
                 include_runtime_context
@@ -248,6 +249,11 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if media_paths and include_media:
+                entry["_media_paths"] = media_paths
+                runtime_context = message.get(RUNTIME_CONTEXT_HISTORY_META)
+                if isinstance(runtime_context, dict):
+                    entry[RUNTIME_CONTEXT_HISTORY_META] = deepcopy(runtime_context)
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]

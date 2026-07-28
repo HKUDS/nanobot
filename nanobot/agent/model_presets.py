@@ -23,7 +23,7 @@ def default_selection_signature(
 
 
 def configured_model_presets(config: Any) -> dict[str, ModelPresetConfig]:
-    return {**config.model_presets, "default": config.resolve_default_preset()}
+    return dict(config.model_presets)
 
 
 def load_model_preset_catalog(
@@ -61,6 +61,7 @@ def build_static_preset_snapshot(
         signature=("model_preset", name, preset.model_dump_json()),
         generation=preset.to_generation_settings(),
         model_preset=name,
+        supports_image_input=preset.supports_image_input,
     )
 
 

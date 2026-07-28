@@ -229,6 +229,7 @@ interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  imageInputSupport: "auto" | "supported" | "text_only";
   timezone: string;
   botName: string;
   botIcon: string;
@@ -426,10 +427,27 @@ interface SettingsViewProps {
 
 function modelPresetValue(payload: SettingsPayload): string {
   return (
+    payload.agent.model_preset ??
     payload.model_call_order?.[0] ??
-    payload.model_presets.find((preset) => !preset.is_default)?.name ??
-    ""
+    payload.model_presets.find((preset) => preset.is_default)?.name ??
+    "default"
   );
+}
+
+function imageInputSupportMode(
+  value: boolean | null | undefined,
+): AgentSettingsDraft["imageInputSupport"] {
+  if (value === true) return "supported";
+  if (value === false) return "text_only";
+  return "auto";
+}
+
+function imageInputSupportValue(
+  value: AgentSettingsDraft["imageInputSupport"],
+): boolean | null {
+  if (value === "supported") return true;
+  if (value === "text_only") return false;
+  return null;
 }
 
 function normalizeContextWindowTokens(value: number | null | undefined): number {
@@ -470,6 +488,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  imageInputSupport: "auto",
   timezone: "UTC",
   botName: "nanobot",
   botIcon: "",
@@ -526,7 +545,7 @@ function agentDraftFromPayload(
   const activePresetName = preferredPresetName ?? modelPresetValue(payload);
   const activePreset =
     payload.model_presets.find(
-      (preset) => !preset.is_default && preset.name === activePresetName,
+      (preset) => preset.name === activePresetName,
     ) ?? null;
   return {
     model: activePreset?.model ?? payload.agent.model,
@@ -539,6 +558,7 @@ function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    imageInputSupport: imageInputSupportMode(activePreset?.supports_image_input),
     timezone: payload.agent.timezone,
     botName: payload.agent.bot_name,
     botIcon: payload.agent.bot_icon,
@@ -1034,7 +1054,7 @@ export function SettingsView({
   const modelDirty = useMemo(() => {
     if (!settings) return false;
     const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === form.modelPreset,
+      (preset) => preset.name === form.modelPreset,
     );
     if (!selectedPreset) return false;
     return (
@@ -1044,6 +1064,7 @@ export function SettingsView({
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
       form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
+      form.imageInputSupport !== imageInputSupportMode(selectedPreset.supports_image_input) ||
       form.presetLabel.trim() !== selectedPreset.label
     );
   }, [form, settings]);
@@ -1198,6 +1219,7 @@ export function SettingsView({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          supportsImageInput: imageInputSupportValue(form.imageInputSupport),
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
@@ -1228,7 +1250,7 @@ export function SettingsView({
 
     if (!modelDirty) return;
     const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === form.modelPreset,
+      (preset) => preset.name === form.modelPreset,
     );
     if (!selectedPreset) return;
     const reasoningEffort = form.reasoningEffort || null;
@@ -1253,6 +1275,10 @@ export function SettingsView({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        supportsImageInput:
+          form.imageInputSupport !== imageInputSupportMode(selectedPreset.supports_image_input)
+            ? imageInputSupportValue(form.imageInputSupport)
+            : undefined,
       });
       applyPayload(payload);
       setForm(agentDraftFromPayload(payload, selectedPreset.name));
@@ -1268,7 +1294,7 @@ export function SettingsView({
   const beginModelPresetCreation = () => {
     if (!settings || saving || modelCallOrderSaving || modelConfigurationSaving) return;
     const primaryPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === settings.model_call_order?.[0],
+      (preset) => preset.name === settings.model_call_order?.[0],
     );
     const currentProvider = primaryPreset?.provider === "auto"
       ? primaryPreset.resolved_provider ?? settings.agent.resolved_provider
@@ -1290,6 +1316,7 @@ export function SettingsView({
       ),
       temperature: primaryPreset?.temperature ?? settings.agent.temperature,
       reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      imageInputSupport: imageInputSupportMode(primaryPreset?.supports_image_input),
     }));
     setModelPresetCreating(true);
   };
@@ -3168,7 +3195,7 @@ function ModelsSettings({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
-  const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
+  const namedPresets = settings.model_presets;
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
   const callOrderOccurrences = new Map<string, number>();
@@ -3244,6 +3271,7 @@ function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      imageInputSupport: imageInputSupportMode(preset.supports_image_input),
     }));
     setEditorOpen(true);
   };
@@ -3655,6 +3683,7 @@ function ModelsSettings({
                   contextWindowTokens={form.contextWindowTokens}
                   temperature={form.temperature}
                   reasoningEffort={form.reasoningEffort}
+                  imageInputSupport={form.imageInputSupport}
                   onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
                 />
               </div>
@@ -3673,7 +3702,7 @@ function ModelsSettings({
                 >
                   {tx("settings.actions.cancel", "Cancel")}
                 </Button>
-              ) : selectedPreset ? (
+              ) : selectedPreset && !selectedPreset.is_default ? (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -3726,17 +3755,23 @@ function ModelAdvancedFields({
   contextWindowTokens,
   temperature,
   reasoningEffort,
+  imageInputSupport,
   onChange,
 }: {
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  imageInputSupport: AgentSettingsDraft["imageInputSupport"];
   onChange: (
     value: Partial<
       Pick<
         AgentSettingsDraft,
-        "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+        | "maxTokens"
+        | "contextWindowTokens"
+        | "temperature"
+        | "reasoningEffort"
+        | "imageInputSupport"
       >
     >,
   ) => void;
@@ -3811,6 +3846,33 @@ function ModelAdvancedFields({
           className="h-9 rounded-[12px] text-[13px]"
         />
       </label>
+      <div>
+        <span className="mb-2 block text-[12px] font-medium text-muted-foreground">
+          {tx("settings.models.imageInput", "Image input")}
+        </span>
+        <SegmentedControl
+          value={imageInputSupport}
+          options={[
+            {
+              value: "auto",
+              label: tx("settings.values.auto", "Auto"),
+            },
+            {
+              value: "supported",
+              label: tx("settings.models.imageInputSupported", "Supported"),
+            },
+            {
+              value: "text_only",
+              label: tx("settings.models.imageInputTextOnly", "Text only"),
+            },
+          ]}
+          onChange={(value) =>
+            onChange({
+              imageInputSupport: value,
+            })
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -9761,14 +9823,14 @@ function StatusPill({
   );
 }
 
-function SegmentedControl({
+function SegmentedControl<T extends string>({
   value,
   options,
   onChange,
 }: {
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
 }) {
   return (
     <div className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground">

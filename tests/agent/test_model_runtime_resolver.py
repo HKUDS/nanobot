@@ -95,6 +95,33 @@ def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
     assert resolved.generation == GenerationSettings(0.5, 512, None)
 
 
+def test_static_presets_keep_image_capability_request_scoped() -> None:
+    provider = _provider()
+    provider.supports_image_input = None
+    resolver = ModelRuntimeResolver(
+        _runtime(provider),
+        model_presets={
+            "vision": ModelPresetConfig(
+                model="shared-model",
+                supports_image_input=True,
+            ),
+            "text": ModelPresetConfig(
+                model="shared-model",
+                supports_image_input=False,
+            ),
+        },
+    )
+
+    vision = resolver.resolve_preset("vision")
+    text = resolver.resolve_preset("text")
+
+    assert vision.provider is provider
+    assert text.provider is provider
+    assert vision.supports_image_input is True
+    assert text.supports_image_input is False
+    assert provider.supports_image_input is None
+
+
 def test_resolver_reuses_preset_until_runtime_config_is_invalidated() -> None:
     initial = _runtime()
     preset = ModelPresetConfig(model="fast-model")

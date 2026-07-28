@@ -432,6 +432,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    supports_image_input: boolean | null;
     reasoning_effort_values?: string[];
   }>;
   model_call_order: string[];
@@ -968,6 +969,7 @@ export interface ModelConfigurationCreate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  supportsImageInput?: boolean | null;
 }
 
 export interface ModelConfigurationUpdate {
@@ -979,6 +981,7 @@ export interface ModelConfigurationUpdate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  supportsImageInput?: boolean | null;
 }
 
 export interface ProviderSettingsUpdate {

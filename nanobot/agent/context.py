@@ -15,10 +15,13 @@ from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_END,
+    RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_MESSAGE_META,
     RUNTIME_CONTEXT_TAG,
     RuntimeContextBlock,
     append_runtime_context,
+    detach_runtime_context,
+    reattach_runtime_context,
 )
 from nanobot.utils.helpers import (
     detect_image_mime,
@@ -60,6 +63,9 @@ class ContextBuilder:
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
+    _MISSING_IMAGE_TEXT = (
+        "[Image attachment unavailable — do not describe or reference it]"
+    )
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
@@ -224,7 +230,7 @@ class ContextBuilder:
                     unified_session=unified_session,
                 ),
             },
-            *history,
+            *self._hydrate_history_media(history),
         ]
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
@@ -254,6 +260,9 @@ class ContextBuilder:
         for path in image_paths:
             p = Path(path)
             if not p.is_file():
+                image_blocks.append(
+                    {"type": "text", "text": self._MISSING_IMAGE_TEXT}
+                )
                 continue
             raw = p.read_bytes()
             # Re-detect from the bytes used for the request: the file may have
@@ -271,3 +280,45 @@ class ContextBuilder:
         if not image_blocks:
             return text
         return image_blocks + [{"type": "text", "text": text}]
+
+    def _hydrate_history_media(
+        self,
+        history: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Rebuild persisted user media into the same blocks used on first send."""
+        hydrated: list[dict[str, Any]] = []
+        for message in history:
+            clean = dict(message)
+            media_paths = clean.pop("_media_paths", None)
+            runtime_context = clean.pop(RUNTIME_CONTEXT_HISTORY_META, None)
+            if (
+                clean.get("role") == "user"
+                and isinstance(clean.get("content"), str)
+                and isinstance(media_paths, list)
+                and media_paths
+            ):
+                visible_content = clean["content"]
+                detached = (
+                    detach_runtime_context(visible_content, runtime_context)
+                    if isinstance(runtime_context, Mapping)
+                    else None
+                )
+                if detached is not None:
+                    visible_content, sources, context_blocks = detached
+                hydrated_content = self.build_user_content(
+                    visible_content,
+                    image_paths=[
+                        path
+                        for path in media_paths
+                        if isinstance(path, str) and path
+                    ],
+                )
+                if detached is not None:
+                    hydrated_content, _ = reattach_runtime_context(
+                        hydrated_content,
+                        sources,
+                        context_blocks,
+                    )
+                clean["content"] = hydrated_content
+            hydrated.append(clean)
+        return hydrated

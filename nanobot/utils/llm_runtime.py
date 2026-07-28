@@ -10,6 +10,8 @@ from nanobot.providers.base import GenerationSettings, LLMProvider
 if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
 
+_IMAGE_CAPABILITY_UNSET = object()
+
 
 @dataclass(frozen=True, slots=True)
 class LLMRuntime:
@@ -26,6 +28,7 @@ class LLMRuntime:
     context_window_tokens: int
     model_preset: str | None = None
     snapshot_signature: tuple[object, ...] | None = None
+    supports_image_input: bool | None = None
 
     @classmethod
     def capture(
@@ -36,10 +39,18 @@ class LLMRuntime:
         context_window_tokens: int,
         model_preset: str | None = None,
         snapshot_signature: tuple[object, ...] | None = None,
+        supports_image_input: bool | None | object = _IMAGE_CAPABILITY_UNSET,
     ) -> LLMRuntime:
         """Capture provider defaults without retaining mutable generation state."""
         defaults = GenerationSettings()
         generation = getattr(provider, "generation", defaults)
+        provider_image_capability = getattr(provider, "supports_image_input", None)
+        if not (
+            provider_image_capability is True
+            or provider_image_capability is False
+            or provider_image_capability is None
+        ):
+            provider_image_capability = None
         return cls(
             provider=provider,
             model=model,
@@ -55,6 +66,11 @@ class LLMRuntime:
             context_window_tokens=context_window_tokens,
             model_preset=model_preset,
             snapshot_signature=snapshot_signature,
+            supports_image_input=(
+                provider_image_capability
+                if supports_image_input is _IMAGE_CAPABILITY_UNSET
+                else supports_image_input
+            ),
         )
 
     def with_generation_overrides(
@@ -94,6 +110,7 @@ def runtime_from_provider_snapshot(
             context_window_tokens=snapshot.context_window_tokens,
             model_preset=snapshot.model_preset,
             snapshot_signature=snapshot.signature,
+            supports_image_input=snapshot.supports_image_input,
         )
     return LLMRuntime.capture(
         snapshot.provider,
@@ -101,4 +118,5 @@ def runtime_from_provider_snapshot(
         context_window_tokens=snapshot.context_window_tokens,
         model_preset=snapshot.model_preset,
         snapshot_signature=snapshot.signature,
+        supports_image_input=snapshot.supports_image_input,
     )

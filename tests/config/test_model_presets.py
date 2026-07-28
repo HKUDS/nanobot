@@ -11,12 +11,8 @@ from nanobot.config.schema import Config
 def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     config = Config()
     resolved = config.resolve_preset()
-    assert resolved.model == config.agents.defaults.model
-    assert resolved.provider == config.agents.defaults.provider
-    assert resolved.max_tokens == config.agents.defaults.max_tokens
-    assert resolved.context_window_tokens == config.agents.defaults.context_window_tokens
-    assert resolved.temperature == config.agents.defaults.temperature
-    assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
+    assert resolved is config.model_presets["default"]
+    assert config.agents.defaults.model_preset == "default"
 
 
 def test_model_preset_catalog_missing_env_reports_explicit_config_path(
@@ -119,8 +115,8 @@ def test_custom_provider_fallback_uses_model_extra_without_pydantic_warnings() -
 
 def test_dynamic_custom_provider_prefix_matches_camel_case_key() -> None:
     config = Config.model_validate({
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "provider": "auto",
                 "model": "companyProxy/gpt-4o-mini",
             }
@@ -141,8 +137,8 @@ def test_dynamic_custom_provider_prefix_matches_camel_case_key() -> None:
 
 def test_dynamic_custom_provider_prefix_does_not_fall_through_when_base_missing() -> None:
     config = Config.model_validate({
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "provider": "auto",
                 "model": "companyProxy/gpt-4o-mini",
             }
@@ -161,7 +157,7 @@ def test_dynamic_custom_provider_prefix_does_not_fall_through_when_base_missing(
     assert config.get_api_base() is None
 
 
-def test_legacy_defaults_config_without_presets_still_resolves() -> None:
+def test_schema_no_longer_resolves_legacy_agent_model_fields() -> None:
     config = Config.model_validate({
         "agents": {
             "defaults": {
@@ -176,19 +172,17 @@ def test_legacy_defaults_config_without_presets_still_resolves() -> None:
     })
 
     resolved = config.resolve_preset()
-    assert config.agents.defaults.model_preset is None
-    assert config.model_presets == {}
-    assert resolved.model == "openai/gpt-4.1"
-    assert resolved.provider == "openai"
-    assert resolved.max_tokens == 4096
-    assert resolved.context_window_tokens == 128_000
-    assert resolved.temperature == 0.2
-    assert resolved.reasoning_effort == "low"
+    assert config.agents.defaults.model_preset == "default"
+    assert resolved.model == "anthropic/claude-opus-4-5"
+    dumped_defaults = config.agents.defaults.model_dump(mode="json", by_alias=True)
+    assert "model" not in dumped_defaults
+    assert "provider" not in dumped_defaults
 
 
 def test_resolve_preset_returns_active_preset() -> None:
     config = Config.model_validate({
         "model_presets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
@@ -213,16 +207,15 @@ def test_resolve_preset_returns_active_preset() -> None:
     assert resolved.reasoning_effort == "low"
 
 
-def test_default_preset_is_agents_defaults_even_when_named_preset_is_active() -> None:
+def test_default_preset_is_concrete_when_named_preset_is_active() -> None:
     config = Config.model_validate({
         "agents": {
             "defaults": {
-                "model": "openai/gpt-4.1",
-                "provider": "openai",
                 "modelPreset": "fast",
             }
         },
         "modelPresets": {
+            "default": {"model": "openai/gpt-4.1", "provider": "openai"},
             "fast": {"model": "openai/gpt-4.1-mini", "provider": "openai"},
         },
     })
@@ -234,6 +227,7 @@ def test_default_preset_is_agents_defaults_even_when_named_preset_is_active() ->
 def test_model_presets_accepts_camel_case_root_key() -> None:
     config = Config.model_validate({
         "modelPresets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
@@ -248,6 +242,7 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
 def test_model_presets_serializes_with_camel_case_root_key() -> None:
     config = Config.model_validate({
         "model_presets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
@@ -265,6 +260,7 @@ def test_model_presets_serializes_with_camel_case_root_key() -> None:
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:
     config = Config.model_validate({
         "model_presets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {"model": "openai/gpt-4.1", "provider": "openai"},
             "deep": {"model": "anthropic/claude-opus-4-5", "provider": "anthropic"},
         },
@@ -291,6 +287,7 @@ def test_validator_rejects_unknown_preset() -> None:
 def test_validator_accepts_dream_model_preset() -> None:
     config = Config.model_validate({
         "modelPresets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "dream": {"model": "anthropic/claude-haiku-4-5", "provider": "anthropic"},
         },
         "agents": {"defaults": {"dream": {"modelOverride": "dream"}}},
@@ -308,10 +305,9 @@ def test_validator_rejects_unknown_dream_model_preset() -> None:
 
 def test_model_preset_accepts_explicit_default_name() -> None:
     config = Config.model_validate({
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "model": "openai/gpt-4.1",
-                "modelPreset": "default",
             }
         }
     })
@@ -319,13 +315,11 @@ def test_model_preset_accepts_explicit_default_name() -> None:
     assert config.resolve_preset().model == "openai/gpt-4.1"
 
 
-def test_model_presets_rejects_reserved_default_name() -> None:
-    import pytest
-
-    with pytest.raises(ValueError, match="model_preset name 'default' is reserved"):
+def test_model_presets_requires_default_name() -> None:
+    with pytest.raises(ValueError, match="must define a 'default' preset"):
         Config.model_validate({
             "modelPresets": {
-                "default": {"model": "custom-model"},
+                "custom": {"model": "custom-model"},
             },
         })
 
@@ -342,6 +336,7 @@ def test_match_provider_uses_preset_model() -> None:
             "openai": {"apiKey": "sk-test"},
         },
         "model_presets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
@@ -363,6 +358,7 @@ def test_match_provider_uses_preset_provider_when_forced() -> None:
             "anthropic": {"apiKey": "sk-test"},
         },
         "model_presets": {
+            "default": {"model": "anthropic/claude-opus-4-5"},
             "fast": {
                 "model": "anthropic/claude-opus-4-5",
                 "provider": "anthropic",
@@ -383,8 +379,8 @@ def test_match_provider_routes_forced_novita_model_api_models() -> None:
         "providers": {
             "novita": {"apiKey": "sk-test"},
         },
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "model": "deepseek-v4-pro",
                 "provider": "novita",
             }
@@ -400,8 +396,8 @@ def test_transcription_only_provider_is_not_chat_fallback() -> None:
         "providers": {
             "assemblyai": {"apiKey": "aai-test"},
         },
-        "agents": {
-            "defaults": {
+        "modelPresets": {
+            "default": {
                 "model": "assemblyai/universal-3-pro",
             }
         },

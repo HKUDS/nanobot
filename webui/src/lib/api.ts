@@ -774,7 +774,11 @@ function appendModelGenerationSettings(
   query: URLSearchParams,
   configuration: Pick<
     ModelConfigurationCreate,
-    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+    | "maxTokens"
+    | "contextWindowTokens"
+    | "temperature"
+    | "reasoningEffort"
+    | "supportsImageInput"
   >,
 ): void {
   if (configuration.maxTokens !== undefined) {
@@ -788,6 +792,14 @@ function appendModelGenerationSettings(
   }
   if (configuration.reasoningEffort !== undefined) {
     query.set("reasoning_effort", configuration.reasoningEffort ?? "");
+  }
+  if (configuration.supportsImageInput !== undefined) {
+    query.set(
+      "supports_image_input",
+      configuration.supportsImageInput === null
+        ? "auto"
+        : String(configuration.supportsImageInput),
+    );
   }
 }
 
