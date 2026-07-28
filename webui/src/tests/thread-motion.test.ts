@@ -192,6 +192,71 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.followTo).toHaveBeenLastCalledWith(1_950);
   });
 
+  it("releases completion follow when composer editing begins", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    coordinator.completeTurn();
+    camera.jumpTo.mockClear();
+    camera.followTo.mockClear();
+    camera.cancel.mockClear();
+
+    coordinator.handleComposerInput();
+    setGeometry({
+      scrollTop: 1_400,
+      scrollHeight: 1_940,
+      composerHeight: 160,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(camera.followTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("idle");
+  });
+
+  it("remembers composer editing that begins before turn completion", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    camera.followTo.mockClear();
+    camera.cancel.mockClear();
+
+    coordinator.handleComposerInput();
+    expect(coordinator.snapshot().mode).toBe("follow-output");
+
+    coordinator.completeTurn();
+    setGeometry({
+      scrollTop: 1_400,
+      scrollHeight: 1_940,
+      composerHeight: 160,
+    });
+    advanceFrame();
+
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(camera.followTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("idle");
+  });
+
   it("keeps turn identity stable when canonical replay replaces DOM ids", () => {
     const {
       camera,

@@ -664,6 +664,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           <div
             ref={composerDockRef}
             data-testid="thread-composer-dock"
+            onInputCapture={(event) => {
+              if (event.target instanceof HTMLTextAreaElement) {
+                threadMotionRef.current?.handleComposerInput();
+              }
+            }}
             className={cn(
               "row-start-2 z-10 w-full",
               hasMessages ? "sticky bottom-0 bg-background" : "relative self-center",

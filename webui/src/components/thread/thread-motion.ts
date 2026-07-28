@@ -21,6 +21,7 @@ type ThreadMotionEvent =
   | "navigation-settled"
   | "user-scroll"
   | "boundary-scroll"
+  | "composer-input"
   | "turn-completed"
   | "resume-follow";
 
@@ -49,6 +50,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
   "follow-completion": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
+    "composer-input": "idle",
   },
   "navigating-history": {
     "navigate-history": "navigating-history",
@@ -141,6 +143,7 @@ export class ThreadMotionCoordinator {
   private promptPositioned = false;
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
+  private composerInputDuringTurn = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
     this.camera = options.camera;
@@ -170,6 +173,7 @@ export class ThreadMotionCoordinator {
     this.turn = turn;
     if (isNewTurn) {
       this.camera.cancel();
+      this.composerInputDuringTurn = false;
       this.promptPositioned = turn.entry === "restored";
       this.mode = this.promptPositioned && turn.hasOutput
         ? "follow-output"
@@ -187,10 +191,17 @@ export class ThreadMotionCoordinator {
     }
     // Protocol completion can share a React commit with the last large text
     // batch and begins the run-drawer exit. Keep camera ownership through
-    // those final layout changes; only a new turn or explicit user navigation
-    // may end completion follow.
+    // those final layout changes; only a new turn, explicit user navigation,
+    // or input for the next prompt may end completion follow.
     this.transition("turn-completed");
+    if (
+      this.composerInputDuringTurn
+      && this.transition("composer-input")
+    ) {
+      this.camera.cancel();
+    }
     this.turn = { id: null, promptId: null, hasOutput: false };
+    this.composerInputDuringTurn = false;
     this.promptPositioned = false;
     this.invalidateGeometry();
   }
@@ -199,6 +210,15 @@ export class ThreadMotionCoordinator {
     this.geometryDirty = true;
     if (this.measurementFrameId !== null) return;
     this.measurementFrameId = this.scheduler.request(this.flushGeometry);
+  }
+
+  handleComposerInput(): void {
+    // Input and protocol completion can arrive in either order. Remember
+    // editing that starts just before turn_end so the completion drawer
+    // cannot reacquire the camera a few milliseconds later.
+    if (this.turn.id) this.composerInputDuringTurn = true;
+    if (!this.transition("composer-input")) return;
+    this.camera.cancel();
   }
 
   takeUserControl(): void {
@@ -275,6 +295,7 @@ export class ThreadMotionCoordinator {
     this.geometryDirty = false;
     this.camera.cancel();
     this.turn = { id: null, promptId: null, hasOutput: false };
+    this.composerInputDuringTurn = false;
     this.mode = "idle";
     this.promptPositioned = false;
   }

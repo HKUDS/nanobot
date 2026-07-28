@@ -446,6 +446,9 @@ describe("ThreadComposer", () => {
     );
 
     expect(screen.getByText("gpt-4o")).toBeInTheDocument();
+    const modelPill = screen.getByText("gpt-4o").closest(".composer-model-pill");
+    expect(modelPill).toHaveClass("font-medium", "text-foreground/70");
+    expect(modelPill).not.toHaveClass("font-semibold");
     expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");

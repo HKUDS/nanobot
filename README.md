@@ -3,6 +3,8 @@
   <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
 </picture>
 
+# nanobot
+
 <div align="center">
   <p>
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview">English</a> |
@@ -212,6 +214,8 @@ The one-shot form is useful for a quick provider check, shell scripts, and local
 
 Need manual JSON, another device on your LAN, or help with provider/model matching? Continue with [Install and Quick Start](./docs/quick-start.md), [WebUI](./docs/webui.md), or [Troubleshooting](./docs/troubleshooting.md).
 
+If nanobot worked for you, a star on GitHub is the simplest way to support the project.
+
 - Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
 - Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
 - Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
@@ -243,29 +247,6 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 </p>
 
 🐈 nanobot stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
-
-## ✨ Features
-
-<table align="center">
-  <tr align="center">
-    <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
-    <th><p align="center">🚀 Full-Stack Software Engineer</p></th>
-    <th><p align="center">📅 Smart Daily Routine Manager</p></th>
-    <th><p align="center">📚 Personal Knowledge Assistant</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Discovery • Insights • Trends</td>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Organize</td>
-    <td align="center">Learn • Memory • Reasoning</td>
-  </tr>
-</table>
 
 ## 📚 Docs
 
@@ -315,21 +296,13 @@ For older updates, see the [release archive](./docs/release-archive.md) or [GitH
   <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
 </p>
 
-## 🤝 Contribute & Roadmap
+## 🤝 Contribute
 
-PRs welcome! The codebase is intentionally small and readable. 🤗
+Use nanobot for a real task, report what broke, and then pick a focused improvement.
 
-### Contribution Flow
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution guidelines.
-
-**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
-
-- **Multi-modal** — See and hear (images, voice, video)
-- **Long-term memory** — Never forget important context
-- **Better reasoning** — Multi-step planning and reflection
-- **More integrations** — Calendar and more
-- **Self-improvement** — Learn from feedback and mistakes
+- Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
+- Browse [open issues](https://github.com/HKUDS/nanobot/issues) for problems to investigate.
+- Open a [pull request](https://github.com/HKUDS/nanobot/pulls) for a focused fix or integration.
 
 ## Contact
 

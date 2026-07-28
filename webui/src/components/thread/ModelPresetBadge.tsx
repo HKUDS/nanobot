@@ -359,7 +359,7 @@ function PresetPill({
       data-preset-offset={offset}
       title={fallbackModelName || title || undefined}
       className={cn(
-        "composer-model-badge composer-model-pill inline-flex h-full w-fit max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-semibold text-foreground/58",
+        "composer-model-badge composer-model-pill inline-flex h-full w-fit max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/70",
         offset === undefined && "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible/model-badge:ring-2 group-focus-visible/model-badge:ring-ring/45",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",

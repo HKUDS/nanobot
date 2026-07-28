@@ -867,6 +867,85 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("releases completion follow when single-line input starts before completion", async () => {
+    const resizeObserver = stubResizeObserver();
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+
+    try {
+      const threaded: UIMessage[] = [
+        { id: "u1", role: "user", content: "question", turnId: "turn-1", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "answer", turnId: "turn-1", createdAt: 2 },
+      ];
+      const viewport = (isStreaming: boolean, activeTurnId?: string) => (
+        <ThreadViewport
+          messages={threaded}
+          isStreaming={isStreaming}
+          composer={<textarea aria-label="Message input" />}
+          activeTurnId={activeTurnId}
+        />
+      );
+      const { container, rerender } = render(viewport(true));
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1_200 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 700 },
+      });
+
+      rerender(viewport(true, "turn-1"));
+      await flushAnimationFrame();
+      jumpTo.mockClear();
+      followTo.mockClear();
+
+      const composerDock = screen.getByTestId("thread-composer-dock");
+      const composerObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(composerDock),
+      );
+      expect(composerObserver).toBeDefined();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1_240,
+      });
+
+      act(() => {
+        composerObserver!.callback(
+          [{ target: composerDock }] as ResizeObserverEntry[],
+          composerObserver as unknown as ResizeObserver,
+        );
+      });
+      await flushAnimationFrame();
+
+      expect(followTo).toHaveBeenCalled();
+
+      followTo.mockClear();
+      fireEvent.input(screen.getByLabelText("Message input"), {
+        target: { value: "x" },
+      });
+      const scrollTopAfterInput = scroller.scrollTop;
+      rerender(viewport(false));
+      await flushAnimationFrame();
+      expect(followTo).not.toHaveBeenCalled();
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 1_280,
+      });
+      act(() => {
+        composerObserver!.callback(
+          [{ target: composerDock }] as ResizeObserverEntry[],
+          composerObserver as unknown as ResizeObserver,
+        );
+      });
+      await flushAnimationFrame();
+
+      expect(jumpTo).not.toHaveBeenCalled();
+      expect(followTo).not.toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(scrollTopAfterInput);
+    } finally {
+      resizeObserver.restore();
+    }
+  });
+
   it("keeps the thread scrollport above a mobile soft keyboard", async () => {
     const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
     try {

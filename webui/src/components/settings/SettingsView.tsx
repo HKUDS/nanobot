@@ -3171,13 +3171,20 @@ function ModelsSettings({
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
+  const callOrderOccurrences = new Map<string, number>();
   const presetRows = [
-    ...callOrder.map((name, orderIndex) => ({
-      name,
-      orderIndex,
-      preset: namedPresetsByName.get(name),
-    })),
+    ...callOrder.map((name, orderIndex) => {
+      const occurrence = callOrderOccurrences.get(name) ?? 0;
+      callOrderOccurrences.set(name, occurrence + 1);
+      return {
+        key: `ordered:${name}:${occurrence}`,
+        name,
+        orderIndex,
+        preset: namedPresetsByName.get(name),
+      };
+    }),
     ...unorderedPresets.map((preset) => ({
+      key: `disabled:${preset.name}`,
       name: preset.name,
       orderIndex: -1,
       preset,
@@ -3321,7 +3328,7 @@ function ModelsSettings({
           ) : (
             <>
               <div role="list" className="divide-y divide-border/45">
-                {presetRows.map(({ name, orderIndex, preset }) => {
+                {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
                   const provider = preset
                     ? modelPresetProviderKey(preset, settings)
@@ -3343,7 +3350,7 @@ function ModelsSettings({
                     draggedCallOrderIndex < orderIndex;
                   return (
                     <div
-                      key={name}
+                      key={key}
                       role="listitem"
                       tabIndex={ordered ? 0 : -1}
                       draggable={ordered && !callOrderBusy}
