@@ -344,7 +344,8 @@ def test_gateway_missing_provider_managed_start_for_webui_setup(
     assert result.exit_code == 0
     assert "Provider/model setup is incomplete: No provider is configured for model" in output
     assert "Gateway will start so you can configure a provider and model" in output
-    assert "WebUI Settings → Models" in output
+    assert "WebUI Settings" in output
+    assert "Models." in output
     assert f"WebUI: http://127.0.0.1:{webui_port}" in output
     assert f"channels.websocket.{secret_field}" in output
     if secret_field == "token":
