@@ -309,6 +309,16 @@ interface SlashPaletteCommand {
   recent: boolean;
 }
 
+function skillMatchRank(skill: SkillSummary, query: string): number | null {
+  if (!query) return 0;
+  const name = skill.name.toLowerCase();
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+  if (skill.description.toLowerCase().includes(query)) return 3;
+  return null;
+}
+
 function slashCommandI18nKey(command: string): string {
   return command.replace(/^\//, "").replace(/-/g, "_");
 }
@@ -1029,15 +1039,28 @@ export function ThreadComposer({
       const query = skillQuery.text;
       return skills
         .filter((skill) => skill.available)
-        .filter((skill) => {
-          const haystack = [
-            skill.name,
-            skill.description,
-          ].join(" ").toLowerCase();
-          return haystack.includes(query);
+        .flatMap((skill) => {
+          const matchRank = skillMatchRank(skill, query);
+          return matchRank === null
+            ? []
+            : [{
+                command: `$${skill.name}`,
+                matchRank,
+                skill,
+              }];
         })
-        .map((skill) => {
-          const command = `$${skill.name}`;
+        .sort((a, b) => {
+          if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
+          if (query !== "") return 0;
+          const aRecent = recentSlashCommands.indexOf(a.command);
+          const bRecent = recentSlashCommands.indexOf(b.command);
+          if (aRecent === -1 && bRecent === -1) return 0;
+          if (aRecent === -1) return 1;
+          if (bRecent === -1) return -1;
+          return aRecent - bRecent;
+        })
+        .slice(0, 8)
+        .map(({ command, skill }) => {
           const description = skill.description || skill.name;
           return {
             command,
@@ -1048,8 +1071,7 @@ export function ThreadComposer({
             kind: "skill" as const,
             recent: recentSlashCommands.includes(command),
           };
-        })
-        .slice(0, 8);
+        });
     }
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands

@@ -36,6 +36,8 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
 
     assert "find_files/list_dir first" in read_file
     assert "before editing" in read_file
+    assert "uploaded non-image attachments are referenced by path" in read_file
+    assert "only when their contents are needed" in read_file
     assert "prefer it over shell find/ls" in find_files
     assert "prefer this over shell grep" in grep
 

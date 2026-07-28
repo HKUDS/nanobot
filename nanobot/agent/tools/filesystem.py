@@ -261,6 +261,8 @@ class ReadFileTool(_FsTool):
             "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
             "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Uploaded non-image attachments are referenced by path; read them "
+            "with this tool only when their contents are needed. "
             "Use find_files/list_dir first when the path is uncertain. "
             "Read the relevant range before editing so replacements or patches "
             "are based on current content. "
@@ -366,11 +368,25 @@ class ReadFileTool(_FsTool):
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
-                # Binary file - return error message
-                mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                if mime and mime.startswith("image/"):
-                    return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-                return ToolResult.error(f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported.")
+                # Match the former eager extractor for known text formats while
+                # keeping arbitrary binary files on the guarded error path.
+                from nanobot.utils.document import _is_text_extension
+
+                if _is_text_extension(fp.suffix.lower()):
+                    text_content = raw.decode("latin-1")
+                else:
+                    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        return build_image_content_blocks(
+                            raw,
+                            mime,
+                            str(fp),
+                            f"(Image file: {path})",
+                        )
+                    return ToolResult.error(
+                        f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                        "Only supported text files and images can be read."
+                    )
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but

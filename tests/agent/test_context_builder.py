@@ -244,38 +244,38 @@ class TestBundledToolContract:
 
 
 # ---------------------------------------------------------------------------
-# _build_user_content
+# build_user_content
 # ---------------------------------------------------------------------------
 
 
 class TestBuildUserContent:
     def test_no_media_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", None)
+        result = builder.build_user_content("hello", None)
         assert result == "hello"
 
     def test_empty_media_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [])
+        result = builder.build_user_content("hello", [])
         assert result == "hello"
 
     def test_nonexistent_media_file_returns_string(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", ["/nonexistent/image.png"])
+        result = builder.build_user_content("hello", ["/nonexistent/image.png"])
         assert result == "hello"
 
     def test_non_image_file_returns_string(self, tmp_path):
         txt = tmp_path / "doc.txt"
         txt.write_text("not an image", encoding="utf-8")
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(txt)])
+        result = builder.build_user_content("hello", [str(txt)])
         assert result == "hello"
 
     def test_valid_image_returns_list(self, tmp_path):
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(png)])
+        result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
         assert len(result) == 2
         assert result[0]["type"] == "image_url"
@@ -287,7 +287,7 @@ class TestBuildUserContent:
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
-        result = builder._build_user_content("hello", [str(png)])
+        result = builder.build_user_content("hello", [str(png)])
         assert "_meta" in result[0]
         assert "path" in result[0]["_meta"]
 
@@ -368,6 +368,25 @@ class TestBuildMessages:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
         assert "hello" in str(messages[1]["content"])
+
+    def test_public_builder_preserves_assistant_role_compatibility(self, tmp_path):
+        from nanobot.agent import ContextBuilder as PublicContextBuilder
+
+        builder = PublicContextBuilder(tmp_path)
+        messages = builder.build_messages(
+            history=[{"role": "assistant", "content": "previous result"}],
+            current_message="subagent result",
+            current_role="assistant",
+            runtime_context_blocks=[
+                RuntimeContextBlock(source="test", content="user-only runtime context"),
+            ],
+        )
+
+        assert len(messages) == 2
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == "previous result\n\nsubagent result"
+        assert "user-only runtime context" not in messages[-1]["content"]
+        assert "_meta" not in messages[-1]
 
     def test_runtime_context_is_not_injected_by_default(self, tmp_path):
         builder = _builder(tmp_path)

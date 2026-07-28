@@ -67,14 +67,6 @@ class MessageTool(Tool):
         self._fallback_message_id = default_message_id
         self._fallback_metadata: dict[str, Any] = {}
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
-        self._turn_delivered_media_var: ContextVar[tuple[str, ...]] = ContextVar(
-            "message_turn_delivered_media",
-            default=(),
-        )
-        self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
-            "message_record_channel_delivery",
-            default=False,
-        )
         self._suppress_delivery_var: ContextVar[bool] = ContextVar(
             "message_suppress_delivery",
             default=False,
@@ -96,19 +88,6 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
-        self._turn_delivered_media_var.set(())
-
-    def turn_delivered_media_paths(self) -> list[str]:
-        """Absolute paths attached via this tool to the active chat in the current turn."""
-        return list(self._turn_delivered_media_var.get())
-
-    def set_record_channel_delivery(self, active: bool):
-        """Mark tool-sent messages as proactive channel deliveries."""
-        return self._record_channel_delivery_var.set(active)
-
-    def reset_record_channel_delivery(self, token) -> None:
-        """Restore previous proactive delivery recording state."""
-        self._record_channel_delivery_var.reset(token)
 
     def set_suppress_delivery(self, active: bool):
         """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
@@ -241,7 +220,7 @@ class MessageTool(Tool):
         metadata = dict(default_metadata) if same_target else {}
         if message_id:
             metadata["message_id"] = message_id
-        if self._record_channel_delivery_var.get() or media:
+        if media:
             metadata["_record_channel_delivery"] = True
 
         msg = OutboundMessage(
@@ -261,9 +240,6 @@ class MessageTool(Tool):
             await self._send_callback(msg)
             if channel == default_channel and chat_id == default_chat_id:
                 self._sent_in_turn = True
-                if media:
-                    prev = self._turn_delivered_media_var.get()
-                    self._turn_delivered_media_var.set(prev + tuple(str(p) for p in media))
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"

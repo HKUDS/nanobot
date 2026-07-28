@@ -1556,7 +1556,6 @@ Global settings that apply to all channels. Configure under the `channels` secti
   "channels": {
     "sendProgress": true,
     "sendToolHints": true,
-    "extractDocumentText": true,
     "sendMaxRetries": 3,
     "telegram": {
       "enabled": false
@@ -1570,8 +1569,14 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `true` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix / Mattermost keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
-| `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. PDF, DOCX, XLSX, and PPTX readers are included in the standard installation. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
+
+Non-image attachments are included in the user message as local path references, without
+injecting their contents into the model prompt. When file tools are enabled, the agent
+can inspect supported text, PDF, DOCX, XLSX, and PPTX files on demand with `read_file`,
+or pass the original path to another tool when exact file bytes are required. The deprecated
+`channels.extractDocumentText` setting is accepted for compatibility but ignored.
+Normal tool workspace and media access rules still apply to attachment paths.
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 
