@@ -39,74 +39,57 @@ function cameraHarness(prefersReducedMotion = false) {
 }
 
 describe("ThreadCameraController", () => {
-  it("responds immediately, then eases out as a static target gets closer", () => {
-    const { camera, viewport, advance } = cameraHarness();
+  it("pins automatic follow in the geometry frame without camera debt", () => {
+    const { camera, viewport, frames } = cameraHarness();
 
-    camera.followTo(60);
-    advance(16);
-    const firstStep = viewport.scrollTop;
-    advance(16);
-    const secondStep = viewport.scrollTop - firstStep;
-    advance(16);
-    const thirdStep = viewport.scrollTop - firstStep - secondStep;
+    expect(camera.followTo(60)).toBe("settled");
 
-    expect(firstStep).toBeGreaterThan(0);
-    expect(secondStep).toBeGreaterThan(0);
-    expect(thirdStep).toBeGreaterThan(0);
-    expect(secondStep).toBeLessThan(firstStep);
-    expect(thirdStep).toBeLessThan(secondStep);
+    expect(viewport.scrollTop).toBe(60);
+    expect(frames).toHaveLength(0);
+    expect(camera.isFollowing()).toBe(false);
   });
 
-  it("retargets an active follow without adding another loop", () => {
+  it("retargets active history navigation without adding another loop", () => {
     const { camera, viewport, frames, advance } = cameraHarness();
 
-    expect(camera.followTo(100)).toBe("started");
+    expect(camera.navigateTo(100)).toBe("started");
     expect(frames).toHaveLength(1);
     advance(16);
     expect(frames).toHaveLength(1);
 
-    expect(camera.followTo(180)).toBe("retargeted");
+    expect(camera.navigateTo(180)).toBe("retargeted");
     expect(frames).toHaveLength(1);
     for (let frame = 0; frame < 120; frame += 1) advance(16);
     expect(viewport.scrollTop).toBe(180);
   });
 
-  it("tracks repeated target growth as one monotonic camera movement", () => {
-    const { camera, viewport, advance } = cameraHarness();
+  it("pins repeated automatic targets without accumulating lag", () => {
+    const { camera, viewport, frames } = cameraHarness();
 
     camera.followTo(80);
-    advance(16);
-    const first = viewport.scrollTop;
+    expect(viewport.scrollTop).toBe(80);
     camera.followTo(140);
-    advance(16);
-    const second = viewport.scrollTop;
+    expect(viewport.scrollTop).toBe(140);
     camera.followTo(220);
-    advance(16);
-    const third = viewport.scrollTop;
-
-    expect(first).toBeGreaterThan(0);
-    expect(second).toBeGreaterThan(first);
-    expect(third).toBeGreaterThan(second);
-    expect(camera.isFollowing()).toBe(true);
+    expect(viewport.scrollTop).toBe(220);
+    expect(frames).toHaveLength(0);
+    expect(camera.isFollowing()).toBe(false);
   });
 
-  it("uses a faster motion profile for explicit long-distance navigation", () => {
-    const follow = cameraHarness();
-    const navigation = cameraHarness();
+  it("eases explicit long-distance navigation across frames", () => {
+    const { camera, viewport, advance } = cameraHarness();
 
-    follow.camera.followTo(1_000);
-    navigation.camera.navigateTo(1_000);
-    follow.advance(16);
-    navigation.advance(16);
+    camera.navigateTo(1_000);
+    advance(16);
 
-    expect(navigation.viewport.scrollTop).toBeGreaterThan(follow.viewport.scrollTop);
-    expect(navigation.viewport.scrollTop).toBeLessThan(1_000);
+    expect(viewport.scrollTop).toBeGreaterThan(0);
+    expect(viewport.scrollTop).toBeLessThan(1_000);
   });
 
   it("gives an immediate jump command priority over an active follow", () => {
     const { camera, viewport, scheduler, frames } = cameraHarness();
 
-    camera.followTo(240);
+    camera.navigateTo(240);
     expect(frames).toHaveLength(1);
     camera.jumpTo(40);
 
@@ -116,12 +99,12 @@ describe("ThreadCameraController", () => {
     expect(frames).toHaveLength(0);
   });
 
-  it("preserves spatial continuity with a shorter reduced-motion chase", () => {
+  it("preserves spatial continuity with shorter reduced-motion navigation", () => {
     const regular = cameraHarness();
     const reduced = cameraHarness(true);
 
-    expect(regular.camera.followTo(240)).toBe("started");
-    expect(reduced.camera.followTo(240)).toBe("started");
+    expect(regular.camera.navigateTo(240)).toBe("started");
+    expect(reduced.camera.navigateTo(240)).toBe("started");
 
     regular.advance(16);
     reduced.advance(16);

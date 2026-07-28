@@ -124,9 +124,10 @@ function defaultScheduler(): ThreadMotionScheduler {
 }
 
 /**
- * Owns the policy that turns discrete layout events into continuous camera
- * motion. Callers only invalidate geometry; one display frame coalesces those
- * notifications, reads the authoritative layout, and retargets the camera.
+ * Owns the policy that turns discrete layout events into automatic tail
+ * pinning or explicit camera navigation. Callers only invalidate geometry;
+ * one display frame coalesces those notifications and reads the authoritative
+ * layout before applying either policy.
  */
 export class ThreadMotionCoordinator {
   private readonly camera: ThreadMotionCamera;
@@ -336,10 +337,7 @@ export class ThreadMotionCoordinator {
     const result = this.camera.followTo(target);
     if (
       result
-      && (
-        Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
-        || result === "retargeted"
-      )
+      && Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
     ) {
       this.onAutoFollow?.();
     }
@@ -374,8 +372,9 @@ export class ThreadMotionCoordinator {
         return;
       }
       // Before output exists, the real lower scroll boundary is the only
-      // position with zero hidden downward travel. Once output exists, start
-      // from the prompt origin and let the follow camera reveal its growth.
+      // position with zero hidden downward travel. Once output exists, first
+      // establish the prompt origin; automatic follow below then resolves the
+      // current tail in this same authoritative geometry frame.
       this.camera.jumpTo(
         this.turn.hasOutput ? geometry.promptTop : geometry.maxScrollTop,
       );

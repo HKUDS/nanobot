@@ -36,7 +36,7 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     }),
     dispose: vi.fn(),
     jumpTo: vi.fn(),
-    followTo: vi.fn(() => "started" as const),
+    followTo: vi.fn(() => "settled" as const),
     isFollowing: vi.fn(() => cameraFollowing),
     navigateTo: vi.fn(() => {
       cameraFollowing = true;
@@ -120,7 +120,7 @@ describe("ThreadMotionCoordinator", () => {
     });
   });
 
-  it("retargets repeated output growth without restarting camera ownership", () => {
+  it("pins repeated output growth on each authoritative geometry frame", () => {
     const {
       camera,
       coordinator,
