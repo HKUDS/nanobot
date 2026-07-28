@@ -579,3 +579,21 @@ def test_history_skips_non_dict_jsonl_lines(tmp_path: Path) -> None:
     }]
     next_cursor = memory.append_history("next", session_key="cli:t")
     assert next_cursor == 2
+
+def test_raw_archive_handles_none_timestamp_and_missing_role(tmp_path: Path) -> None:
+    """raw_archive and _format_messages must safely format messages with None timestamp or missing role.
+
+    Prevents TypeError on NoneType[:16] slicing and KeyError on missing 'role'
+    when raw-dumping unconsolidated history entries without timestamps or role fields.
+    """
+    memory = MemoryStore(tmp_path)
+    messages = [
+        {"content": "message with none timestamp", "timestamp": None, "role": "user"},
+        {"content": "message with int timestamp", "timestamp": 1720000000, "role": "assistant"},
+        {"content": "message with missing role", "timestamp": "2026-07-28T12:00:00"},
+    ]
+    memory.raw_archive(messages, session_key="cli:test")
+    raw_history = memory.history_file.read_text(encoding="utf-8")
+    assert "[?] USER: message with none timestamp" in raw_history
+    assert "[1720000000] ASSISTANT: message with int timestamp" in raw_history
+    assert "[2026-07-28T12:00] UNKNOWN: message with missing role" in raw_history

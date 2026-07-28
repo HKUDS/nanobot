@@ -713,11 +713,10 @@ class MemoryStore:
                 if tools_used
                 else ""
             )
-            timestamp = cast(str, message.get("timestamp", "?"))
-            role = cast(str, message["role"])
-            lines.append(
-                f"[{timestamp[:16]}] {role.upper()}{tools}: {content}"
-            )
+            raw_timestamp = message.get("timestamp")
+            timestamp = str(raw_timestamp) if raw_timestamp is not None else "?"
+            role = str(message.get("role") or "unknown")
+            lines.append(f"[{timestamp[:16]}] {role.upper()}{tools}: {content}")
         return "\n".join(lines)
 
     def raw_archive(
