@@ -223,6 +223,8 @@ If nanobot worked for you, a star on GitHub is the simplest way to support the p
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
+<a id="deploy-to-render"></a>
+
 ## ☁️ Deploy
 
 **Render — one click**
