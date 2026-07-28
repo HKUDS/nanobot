@@ -74,13 +74,20 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
 
-    if schedule.kind == "cron" and schedule.tz:
+    if schedule.kind == "cron":
+        if not schedule.expr or not schedule.expr.strip():
+            raise ValueError("cron schedule requires a non-empty 'expr'")
         try:
-            from zoneinfo import ZoneInfo
-
-            ZoneInfo(schedule.tz)
-        except Exception:
-            raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+            from croniter import croniter
+            croniter(schedule.expr)
+        except Exception as e:
+            raise ValueError(f"invalid cron expression '{schedule.expr}': {e}") from None
+        if schedule.tz:
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(schedule.tz)
+            except Exception:
+                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
 def _has_legacy_delivery_context(payload: CronPayload) -> bool:
