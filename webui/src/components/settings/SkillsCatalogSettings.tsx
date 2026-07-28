@@ -41,6 +41,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   ).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [view, setView] = useState<"installed" | "discover">("installed");
+  const [installingSkill, setInstallingSkill] = useState("");
   const [installedQuery, setInstalledQuery] = useState("");
   const [installedFilter, setInstalledFilter] = useState<"all" | "enabled" | "disabled">(
     "all",
@@ -209,7 +210,11 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
           )}
         </section>
       ) : (
-        <SkillsMarketplace installedSkills={skills} />
+        <SkillsMarketplace
+          installedSkills={skills}
+          installing={installingSkill}
+          onInstallingChange={setInstallingSkill}
+        />
       )}
 
       <SkillDetailSheet

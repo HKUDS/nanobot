@@ -530,7 +530,6 @@ async def _install_skillhub_skill(
         "name": skill_id,
         "provider": _PROVIDER_SKILLHUB,
         "version": version,
-        "verified": bool(signature.get("signed")),
     }
 
 

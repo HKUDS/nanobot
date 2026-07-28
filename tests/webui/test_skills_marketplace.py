@@ -477,7 +477,6 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
         "name": "ima-skills",
         "provider": "skillhub",
         "version": "1.1.8",
-        "verified": True,
     }
     assert (tmp_path / "skills" / "ima-skills" / "SKILL.md").read_bytes() == skill_content
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
-import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -113,19 +113,25 @@ def delete_webui_skill(
     target = skills_root / name
     if target.parent != skills_root:
         raise SkillManagementError("invalid skill name")
-    if target.is_symlink():
-        target.unlink()
-    elif target.is_dir():
-        shutil.rmtree(target)
-    else:
+    if not target.is_symlink() and not target.is_dir():
         raise SkillManagementError("skill directory was not found", status=404)
 
     config = load_config()
-    next_disabled = set(config.agents.defaults.disabled_skills)
+    original_disabled = list(config.agents.defaults.disabled_skills)
+    next_disabled = set(original_disabled)
     if name in next_disabled:
         next_disabled.remove(name)
-        config.agents.defaults.disabled_skills = sorted(next_disabled)
-        save_config(config)
+    with tempfile.TemporaryDirectory(prefix=".nanobot-delete-", dir=skills_root) as staging:
+        staged_target = Path(staging) / name
+        target.replace(staged_target)
+        try:
+            if next_disabled != set(original_disabled):
+                config.agents.defaults.disabled_skills = sorted(next_disabled)
+                save_config(config)
+        except Exception:
+            config.agents.defaults.disabled_skills = original_disabled
+            staged_target.replace(target)
+            raise
     disabled_skills.clear()
     disabled_skills.update(next_disabled)
     return {"name": name, "enabled": False, "deleted": True}

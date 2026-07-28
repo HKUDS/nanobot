@@ -199,6 +199,7 @@ class GatewayHTTPHandler:
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills if disabled_skills is not None else set()
         self.skill_state_action = skill_state_action
+        self._skill_install_lock = asyncio.Lock()
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -912,25 +913,28 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         if not self._allow_webui_package_install(connection, request):
             return _http_error(403, "remote skill installation is disabled")
+        if self._skill_install_lock.locked():
+            return _http_error(409, "another skill installation is already in progress")
 
         query = _parse_query(request.path)
         provider = _query_first(query, "provider") or "skills_sh"
         source = _query_first(query, "source") or ""
         skill_id = _query_first(query, "skill") or ""
         version = _query_first(query, "version") or ""
-        try:
-            action = await install_marketplace_skill(
-                source,
-                skill_id,
-                self.skills_workspace_path,
-                provider=provider,
-                version=version,
-            )
-        except SkillsMarketplaceError as exc:
-            return _http_error(exc.status, exc.message)
-        except Exception:
-            self._log.exception("skill installation failed")
-            return _http_error(500, "skill installation failed")
+        async with self._skill_install_lock:
+            try:
+                action = await install_marketplace_skill(
+                    source,
+                    skill_id,
+                    self.skills_workspace_path,
+                    provider=provider,
+                    version=version,
+                )
+            except SkillsMarketplaceError as exc:
+                return _http_error(exc.status, exc.message)
+            except Exception:
+                self._log.exception("skill installation failed")
+                return _http_error(500, "skill installation failed")
         return _http_json_response({
             **webui_skills_payload(
                 self.skills_workspace_path,
@@ -983,7 +987,7 @@ class GatewayHTTPHandler:
     ) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self._allow_webui_package_install(connection, request):
+        if not _is_local_browser_request(connection, request.headers):
             return _http_error(403, "remote skill deletion is disabled")
         name = _query_first(_parse_query(request.path), "name") or ""
         try:

@@ -766,6 +766,151 @@ async def test_webui_skills_marketplace_routes_search_and_install(
 
 
 @pytest.mark.asyncio
+async def test_webui_skill_install_rejects_overlapping_requests(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
+        started.set()
+        await finish.wait()
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    install_mock = AsyncMock(side_effect=install)
+    monkeypatch.setattr("nanobot.webui.ws_http.install_marketplace_skill", install_mock)
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    path = (
+        "/api/webui/skills/install"
+        "?source=acme%2Fagent-skills&skill=react-testing"
+    )
+    request = _FakeReq(
+        {
+            "Authorization": f"Bearer {token}",
+            "Host": "127.0.0.1:8765",
+        },
+        path=path,
+    )
+
+    first = asyncio.create_task(channel.gateway.http.dispatch(_LOCAL, request))
+    await started.wait()
+    overlapping = await channel.gateway.http.dispatch(_LOCAL, request)
+
+    assert overlapping.status_code == 409
+    assert "already in progress" in overlapping.body.decode()
+    assert install_mock.await_count == 1
+
+    finish.set()
+    completed = await first
+    assert completed.status_code == 200
+    assert install_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_delete_remains_local_only(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delete = MagicMock()
+    policy = MagicMock()
+    policy.tools.webui_allow_remote_package_install = True
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: policy)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.dispatch(
+        _REMOTE,
+        _FakeReq(
+            {"Authorization": f"Bearer {token}"},
+            path="/api/webui/skills/delete?name=custom-skill",
+        ),
+    )
+
+    assert response.status_code == 403
+    assert "remote skill deletion is disabled" in response.body.decode()
+    delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_install_honors_remote_install_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = MagicMock()
+    policy.tools.webui_allow_remote_package_install = True
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: policy)
+
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.install_marketplace_skill",
+        AsyncMock(side_effect=install),
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.dispatch(
+        _REMOTE,
+        _FakeReq(
+            {"Authorization": f"Bearer {token}"},
+            path=(
+                "/api/webui/skills/install"
+                "?source=acme%2Fagent-skills&skill=react-testing"
+            ),
+        ),
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.body.decode())["last_action"]["name"] == "react-testing"
+
+
+@pytest.mark.asyncio
 async def test_cli_apps_routes_require_token_and_return_payload(
     bus: MagicMock,
     tmp_path: Path,

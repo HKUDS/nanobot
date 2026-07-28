@@ -37,7 +37,11 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
-      const body = routes[String(input)];
+      const route = routes[String(input)];
+      const body =
+        typeof route === "function"
+          ? await (route as () => unknown | Promise<unknown>)()
+          : route;
       return body === undefined
         ? ({ ok: false, status: 404, json: async () => ({}) } as Response)
         : jsonResponse(body);
@@ -597,6 +601,26 @@ describe("App layout", () => {
   });
 
   it("discovers and installs a skill from skills.sh", async () => {
+    let finishInstall!: (value: unknown) => void;
+    const pendingInstall = new Promise<unknown>((resolve) => {
+      finishInstall = resolve;
+    });
+    const installedPayload = {
+      skills: [
+        {
+          name: "react-testing",
+          description: "Test React apps.",
+          source: "workspace",
+          available: true,
+        },
+        { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+      ],
+      last_action: {
+        installed: true,
+        already_installed: false,
+        name: "react-testing",
+      },
+    };
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
@@ -683,22 +707,8 @@ describe("App layout", () => {
       "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
         trends: { "acme/agent-skills/react-testing": [] },
       },
-      "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing": {
-        skills: [
-          {
-            name: "react-testing",
-            description: "Test React apps.",
-            source: "workspace",
-            available: true,
-          },
-          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
-        ],
-        last_action: {
-          installed: true,
-          already_installed: false,
-          name: "react-testing",
-        },
-      },
+      "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing":
+        () => pendingInstall,
     });
 
     render(<App />);
@@ -751,10 +761,20 @@ describe("App layout", () => {
         }),
       );
     });
+    fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Discover" }));
     expect(
-      await screen.findByRole("button", { name: "Installed React Testing" }),
+      await screen.findByRole("button", { name: "Install find-skills" }),
     ).toBeDisabled();
 
+    await act(async () => {
+      finishInstall(installedPayload);
+      await pendingInstall;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Install find-skills" })).toBeEnabled();
+    });
     fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
     expect(screen.getByText("react-testing")).toBeInTheDocument();
   });
@@ -1996,9 +2016,8 @@ describe("App layout", () => {
     expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
     expect(screen.queryByText(/Product names, logos, and brands/)).not.toBeInTheDocument();
     expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
-    const clickProviderRow = (label: string) => {
-      const providerLabel = screen
-        .getAllByText(label)
+    const clickProviderRow = async (label: string) => {
+      const providerLabel = (await screen.findAllByText(label))
         .find((element) => element.className.includes("font-semibold"));
       expect(providerLabel).toBeTruthy();
       fireEvent.click(providerLabel!);
@@ -2009,21 +2028,21 @@ describe("App layout", () => {
       );
       fireEvent.click(await screen.findByRole("menuitem", { name: label }));
     };
-    clickProviderRow("OpenAI");
+    await clickProviderRow("OpenAI");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
-    clickProviderRow("OpenAI");
+    await clickProviderRow("OpenAI");
     await chooseProvider("OpenRouter");
-    clickProviderRow("OpenRouter");
-    clickProviderRow("OpenAI");
+    await clickProviderRow("OpenRouter");
+    await clickProviderRow("OpenAI");
     expect(screen.getByText("open••••-key")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
-    clickProviderRow("OpenAI");
+    await clickProviderRow("OpenAI");
     await chooseProvider("Ant Ling");
     expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
-    clickProviderRow("Ant Ling");
+    await clickProviderRow("Ant Ling");
     await chooseProvider("Atomic Chat");
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();

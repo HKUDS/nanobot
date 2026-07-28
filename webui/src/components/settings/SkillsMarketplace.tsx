@@ -36,7 +36,15 @@ import type {
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillSummary[] }) {
+export function SkillsMarketplace({
+  installedSkills,
+  installing,
+  onInstallingChange,
+}: {
+  installedSkills: SkillSummary[];
+  installing: string;
+  onInstallingChange: (skillId: string) => void;
+}) {
   const { token } = useClient();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -48,7 +56,6 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
   const [error, setError] = useState("");
   const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
-  const [installing, setInstalling] = useState("");
   const installedNames = useMemo(
     () => new Set(installedSkills.map((skill) => skill.name)),
     [installedSkills],
@@ -149,7 +156,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
-    setInstalling(skill.id);
+    onInstallingChange(skill.id);
     setError("");
     try {
       const payload = await installMarketplaceSkill(
@@ -179,7 +186,7 @@ export function SkillsMarketplace({ installedSkills }: { installedSkills: SkillS
             }),
       );
     } finally {
-      setInstalling("");
+      onInstallingChange("");
     }
   };
 
@@ -396,6 +403,7 @@ function MarketplaceSkillGroups({
   grouped: boolean;
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
+  const { t } = useTranslation();
   const providers: Array<Exclude<MarketplaceProvider, "all">> = [
     "skills_sh",
     "skillhub",
@@ -425,7 +433,10 @@ function MarketplaceSkillGroups({
                 target="_blank"
                 rel="noreferrer"
                 className="text-muted-foreground transition-colors hover:text-foreground"
-                aria-label={`Open ${providerLabel(provider)}`}
+                aria-label={t("settings.skills.marketplaceOpenProvider", {
+                  provider: providerLabel(provider),
+                  defaultValue: "Open {{provider}}",
+                })}
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden />
               </a>
@@ -613,6 +624,9 @@ function providerUrl(provider: Exclude<MarketplaceProvider, "all">): string {
 
 function TrendSparkline({ values }: { values?: number[] }) {
   const { t } = useTranslation();
+  const trendLabel = t("settings.skills.marketplaceTrendLabel", {
+    defaultValue: "8-week install trend",
+  });
 
   if (values === undefined) {
     return <span className="hidden h-[30px] w-24 shrink-0 sm:block" aria-hidden />;
@@ -647,9 +661,9 @@ function TrendSparkline({ values }: { values?: number[] }) {
       viewBox={`0 0 ${width} ${height}`}
       className="hidden h-[30px] w-24 shrink-0 overflow-visible text-foreground/40 sm:block"
       role="img"
-      aria-label="8-week install trend"
+      aria-label={trendLabel}
     >
-      <title>8-week install trend</title>
+      <title>{trendLabel}</title>
       <path d={area} fill="currentColor" opacity="0.06" />
       <path
         d={line}

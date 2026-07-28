@@ -150,3 +150,30 @@ def test_delete_webui_skill_rejects_symlinked_skills_root(
 
     assert exc_info.value.status == 403
     assert (outside / "custom-skill" / "SKILL.md").is_file()
+
+
+def test_delete_webui_skill_restores_directory_when_config_save_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = _write_skill(tmp_path, "custom-skill")
+    config = _config("custom-skill")
+    monkeypatch.setattr("nanobot.webui.skills_api.load_config", lambda: config)
+
+    def fail_save(_config: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nanobot.webui.skills_api.save_config", fail_save)
+    disabled = {"custom-skill"}
+
+    with pytest.raises(OSError, match="disk full"):
+        delete_webui_skill(
+            tmp_path,
+            "custom-skill",
+            disabled_skills=disabled,
+        )
+
+    assert directory.is_dir()
+    assert (directory / "SKILL.md").is_file()
+    assert config.agents.defaults.disabled_skills == ["custom-skill"]
+    assert disabled == {"custom-skill"}
