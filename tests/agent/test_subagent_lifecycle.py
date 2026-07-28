@@ -18,6 +18,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMUsage
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -434,6 +435,54 @@ class TestAnnounceResult:
         )
 
         assert published[0].session_key_override == "s1"
+
+    @pytest.mark.asyncio
+    async def test_result_marks_other_running_session_tasks(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        sibling = MagicMock()
+        sibling.done.return_value = False
+        sm._session_tasks["s1"] = {"t1", "t2"}
+        sm._running_tasks["t2"] = sibling
+
+        await sm._announce_result(
+            "t1",
+            "first",
+            "task one",
+            "result one",
+            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+            "ok",
+        )
+
+        msg = published[0]
+        assert msg.metadata["subagent_remaining_count"] == 1
+        assert "1 other background task is still running" in msg.content
+        assert "do not finalize" in msg.content.lower()
+        assert "background task" not in scrub_subagent_announce_body(msg.content)
+
+    @pytest.mark.asyncio
+    async def test_last_session_result_has_no_pending_notice(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        current = MagicMock()
+        current.done.return_value = False
+        sm._session_tasks["s1"] = {"t1"}
+        sm._running_tasks["t1"] = current
+
+        await sm._announce_result(
+            "t1",
+            "last",
+            "last task",
+            "last result",
+            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+            "ok",
+        )
+
+        msg = published[0]
+        assert msg.metadata["subagent_remaining_count"] == 0
+        assert "other background task" not in msg.content
 
     @pytest.mark.asyncio
     async def test_session_key_override_fallback(self, tmp_path):
