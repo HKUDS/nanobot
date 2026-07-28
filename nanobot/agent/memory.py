@@ -30,6 +30,8 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.prompt_templates import render_template
 
+from nanobot.utils.helpers import content_with_media_breadcrumbs
+
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -643,11 +645,19 @@ class MemoryStore:
     def _format_messages(messages: list[dict]) -> str:
         lines = []
         for message in messages:
-            if not message.get("content"):
+            # --- 新增开始：将 media 合并到 content 中 ---
+            role = message.get("role")
+            content = message.get("content", "")
+            media = message.get("media")
+            # 调用共享函数，如果 content 为空但 media 有内容，会生成面包屑
+            content = content_with_media_breadcrumbs(role, content, media)
+            # 现在 content 可能非空了
+            if not content:
                 continue
+            # --- 新增结束 ---
             tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+                f"[{message.get('timestamp', '?')[:16]}] {role.upper()}{tools}: {content}"
             )
         return "\n".join(lines)
 

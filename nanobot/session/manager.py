@@ -208,12 +208,11 @@ class Session:
             # image used to be. Without this, an image-only user turn
             # replays as an empty user message — the assistant's reply then
             # looks like it's responding to nothing.
-            media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            # 在文件顶部添加导入
+            from nanobot.utils.helpers import content_with_media_breadcrumbs
+
+            # 然后将上述片段替换为：
+            content = content_with_media_breadcrumbs(role, content, message.get("media"))
             cli_apps = message.get("cli_apps")
             if (
                 include_runtime_context
