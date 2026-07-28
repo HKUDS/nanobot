@@ -1575,7 +1575,7 @@ class AgentLoop:
                 self._clear_pending_user_turn(ctx.session)
                 self.sessions.save(ctx.session)
                 if not ctx.ephemeral:
-                    await self._runtime_events().session_turn_persisted(
+                    await self.runtime_event_publisher.session_turn_persisted(
                         ctx.msg,
                         ctx.session_key,
                         turn_id=ctx.turn_id,
@@ -1723,7 +1723,7 @@ class AgentLoop:
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
         if not ctx.ephemeral:
-            await self._runtime_events().session_turn_persisted(
+            await self.runtime_event_publisher.session_turn_persisted(
                 ctx.msg,
                 ctx.session_key,
                 turn_id=ctx.turn_id,
