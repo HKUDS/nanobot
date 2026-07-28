@@ -259,7 +259,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **ModelScope**: If you're using ModelScope's OpenAI-compatible endpoint, set `"apiBase": "https://api-inference.modelscope.cn/v1"` in your modelscope provider config.
 > - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, set `"apiBase": "https://api.stepfun.ai/step_plan/v1"` in your stepfun provider config. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
 > - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
-> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
+> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Set `reasoningEffort: "none"` on the active model preset to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
 > - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
 > - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, `openai_codex`, and `xai_grok`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
@@ -1346,20 +1346,12 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 ## Model Presets
 
-Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
+Model presets let you name a complete model configuration and select one per session with `/model <preset>`. Configure all model, provider, generation, context-window, and image-input settings under top-level `modelPresets`; `agents.defaults` only selects preset names.
 
-Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
+On first load, nanobot migrates legacy model fields from `agents.defaults` and inline fallback objects in `config.json` into named presets, then atomically rewrites the file. If a concrete `modelPresets.default` and legacy direct fields both exist, the concrete preset wins and the legacy fields are removed. Legacy model fields supplied through nested `NANOBOT_AGENTS` environment settings are not supported.
 
 ```json
 {
-  "modelPresets": {
-    "fast": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
-      "maxTokens": 4096,
-      "contextWindowTokens": 65536
-    }
-  },
   "agents": {
     "defaults": {
       "modelPreset": "fast",
@@ -1367,6 +1359,14 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
     }
   },
   "modelPresets": {
+    "default": {
+      "label": "Default",
+      "model": "claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "supportsImageInput": true
+    },
     "fast": {
       "label": "Fast",
       "model": "gpt-4.1-mini",
@@ -1374,7 +1374,8 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
       "maxTokens": 4096,
       "contextWindowTokens": 128000,
       "temperature": 0.2,
-      "reasoningEffort": "low"
+      "reasoningEffort": "low",
+      "supportsImageInput": true
     },
     "deep": {
       "label": "Deep",
@@ -1396,7 +1397,7 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 }
 ```
 
-`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+`modelPresets` is a top-level object. `default` is required; its other keys (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
 
 | Field | Description |
 |-------|-------------|
@@ -1407,25 +1408,30 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 | `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+| `supportsImageInput` | `true` always sends images, `false` strips them before the first request, and `null`/omitted uses automatic retry-on-unsupported behavior. |
 
-`default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
+Every config has a concrete `modelPresets.default` entry. Use `/model default` to switch a session back to it. Configure the default model by editing that preset, not by adding model fields under `agents.defaults`.
 
-Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When `modelPreset` is `null` or omitted, such sessions follow the implicit `default` preset from direct `agents.defaults.*` fields. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
+Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When it is omitted, such sessions use `modelPresets.default`. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
 
 ### Model Fallbacks
 
-`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` or, in older configs, by the implicit `default` preset from direct `agents.defaults.*` fields.
+`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is selected by `agents.defaults.modelPreset`, or by `modelPresets.default` when that selector is omitted.
 
-Each fallback candidate can be either:
-
-- A preset name from `modelPresets`, such as `"deep"`. This is the recommended form. The preset's full model, provider, generation, and context-window config is used.
-- An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
+Each fallback candidate is a preset name from `modelPresets`, such as `"deep"`. The preset's complete model, provider, generation, context-window, and image-input configuration is used.
 
 Preset fallback chain:
 
 ```json
 {
   "modelPresets": {
+    "default": {
+      "model": "gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.2
+    },
     "fast": {
       "model": "gpt-4.1-mini",
       "provider": "openai",
@@ -1456,37 +1462,7 @@ Preset fallback chain:
 }
 ```
 
-String entries are preset names, not raw model names. In the example above, `"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider model ID. Changing a preset updates both `/model <preset>` switching and any fallback chain that references it.
-
-Inline fallback object:
-
-```json
-{
-  "modelPresets": {
-    "fast": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
-      "maxTokens": 4096,
-      "contextWindowTokens": 65536
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "fast",
-      "fallbackModels": [
-        {
-          "provider": "deepseek",
-          "model": "deepseek-v4-pro",
-          "maxTokens": 4096,
-          "contextWindowTokens": 262144
-        }
-      ]
-    }
-  }
-}
-```
-
-Use inline objects only when a fallback is not worth naming as a reusable preset. `fallbackModels` belongs under `agents.defaults`, not inside individual `modelPresets` entries.
+String entries are preset names, not raw model names. In the example above, `"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider model ID. Changing a preset updates both `/model <preset>` switching and any fallback chain that references it. `fallbackModels` belongs under `agents.defaults`, not inside individual `modelPresets` entries.
 
 Failover normally runs when the primary provider returns a fallbackable model/provider error before any answer text has been streamed. Stream-stall timeouts are the recovery exception: if the provider already emitted partial answer text and then stalls, nanobot closes the current stream segment and retries/fails over in a new segment. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, authentication/permission failures such as invalid or expired credentials, and quota/balance exhaustion. It does not run for malformed requests, content filtering/refusals, or context-length/message-format errors.
 

@@ -87,9 +87,9 @@ The WebUI launcher is the normal browser entry point. Underneath, the gateway ke
 
 ## Provider and Model Selection
 
-The active model should normally come from a named `modelPresets` entry selected by `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still form the implicit `default` preset for older or minimal configs. The active provider is resolved in this order:
+The active model comes from the named `modelPresets` entry selected by `agents.defaults.modelPreset`, or from the concrete `modelPresets.default` entry when that selector is omitted. The active provider is resolved in this order:
 
-1. If the active preset provider or implicit default provider is not `"auto"`, nanobot uses that provider.
+1. If the active preset provider is not `"auto"`, nanobot uses that provider.
 2. If provider is `"auto"`, nanobot tries to infer the provider from the model name, configured API keys, local provider base URLs, or gateway providers.
 3. OAuth providers such as OpenAI Codex and GitHub Copilot require explicit login and explicit provider/model selection inside the active preset.
 

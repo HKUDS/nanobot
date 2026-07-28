@@ -266,21 +266,10 @@ The config controls what nanobot may use. The workspace is where nanobot keeps
 state for that instance. See [multiple-instances.md](multiple-instances.md) for
 multi-instance CLI and gateway examples.
 
-### Choose a default or per-run model
+### Choose a default or per-run model preset
 
-Set the SDK instance default model when you create the bot:
-
-```python
-bot = Nanobot.from_config(model="openai/gpt-4.1")
-```
-
-Override the model for one run without changing the instance default:
-
-```python
-result = await bot.run("Summarize this file", model="openai/gpt-4.1-mini")
-```
-
-Model presets from `config.json` work the same way:
+Define complete model choices under `modelPresets` in `config.json`, then select
+them by name for the SDK instance or for one run:
 
 ```python
 bot = Nanobot.from_config(model_preset="fast")
@@ -288,7 +277,8 @@ bot = Nanobot.from_config(model_preset="fast")
 result = await bot.run("Think deeply about this bug", model_preset="reasoning")
 ```
 
-`model` and `model_preset` are mutually exclusive.
+The public SDK accepts preset names rather than raw model IDs. This keeps provider,
+generation, context-window, fallback, and image-input settings together.
 
 For first setup, prefer named presets in `config.json`. Mixing an API key from
 one provider with a model ID from another is the most common first-run failure.
@@ -463,7 +453,7 @@ configuration docs remain the source of truth for the runtime around it:
 
 ## API Reference
 
-### `Nanobot.from_config(config_path=None, *, workspace=None, model=None, model_preset=None)`
+### `Nanobot.from_config(config_path=None, *, workspace=None, model_preset=None)`
 
 Create a `Nanobot` instance from a config file.
 
@@ -471,11 +461,9 @@ Create a `Nanobot` instance from a config file.
 |-------|------|---------|-------------|
 | `config_path` | `str \| Path \| None` | `None` | Path to `config.json`. Defaults to `~/.nanobot/config.json`. |
 | `workspace` | `str \| Path \| None` | `None` | Override the workspace directory from config. |
-| `model` | `str \| None` | `None` | Override the instance default model. |
 | `model_preset` | `str \| None` | `None` | Override the instance default model preset from `config.json`. |
 
 Raises `FileNotFoundError` if an explicit config path does not exist.
-Raises `ValueError` if both `model` and `model_preset` are provided.
 
 ### `await bot.run(...)`
 
@@ -492,13 +480,12 @@ Run the agent once and return a `RunResult`.
 | `ephemeral` | `bool` | `False` | Run without persisting the turn or compacting session history. |
 | `attributes` | `Mapping[str, Any] \| None` | `None` | Caller-owned request data for host integrations. It is available to context providers and turn-hook factories, but is not added to trusted message metadata or persisted in session messages. |
 | `hooks` | `list[AgentHook] \| None` | `None` | Lifecycle hooks for this run only. |
-| `model` | `str \| None` | `None` | Override the model for this run only. |
 | `model_preset` | `str \| None` | `None` | Override the model preset for this run only. |
 
 Without an override, a run uses the preset saved in its session, or the configured
-default when that session has no saved selection. `model` and `model_preset` are
-mutually exclusive per-run overrides; they do not change the saved session selection
-or `bot.runtime.model` after the run completes.
+default when that session has no saved selection. A per-run `model_preset` override
+does not change the saved session selection or `bot.runtime.model` after the run
+completes.
 
 ### `await bot.run_streamed(...)`
 
@@ -535,7 +522,7 @@ async for event in bot.stream("Generate a long answer"):
 | `await aclose()` | Close the stream; equivalent cleanup primitive for `async with` / manual lifecycle code. |
 
 SDK runs with different session keys may overlap, including runs with per-run
-`model` or `model_preset` overrides. Each run receives an immutable runtime without
+`model_preset` overrides. Each run receives an immutable runtime without
 mutating the instance default. Runs sharing one session key remain serialized.
 
 ### `StreamEvent`

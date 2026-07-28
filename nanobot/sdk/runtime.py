@@ -6,15 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 
-def ensure_single_model_selector(
-    *,
-    model: str | None,
-    model_preset: str | None,
-) -> None:
-    if model is not None and model_preset is not None:
-        raise ValueError("model and model_preset are mutually exclusive")
-
-
 def build_process_direct_kwargs(
     *,
     session_key: str,

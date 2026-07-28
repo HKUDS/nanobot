@@ -59,7 +59,7 @@ Provider metadata is centralized in `nanobot/providers/registry.py`. Configurati
 
 Provider selection uses:
 
-- explicit `agents.defaults.provider` or preset provider;
+- the active model preset's explicit provider;
 - provider registry keywords;
 - API key prefixes and API base URL hints;
 - local provider fallback when `apiBase` is configured;

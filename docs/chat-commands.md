@@ -57,7 +57,7 @@ To switch presets for future turns:
 /model default
 ```
 
-Preset names come from the top-level `modelPresets` config. Switching affects only the current session and persists the selection in that session, so later turns keep using it across process restarts. It does not rewrite `config.json`, does not change other sessions, and does not alter an in-progress turn's captured model. Sessions without a saved selection follow `agents.defaults.modelPreset` (or the implicit `default` preset when it is omitted). See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+Preset names come from the top-level `modelPresets` config. Switching affects only the current session and persists the selection in that session, so later turns keep using it across process restarts. It does not rewrite `config.json`, does not change other sessions, and does not alter an in-progress turn's captured model. Sessions without a saved selection follow `agents.defaults.modelPreset`, or the concrete `modelPresets.default` entry when it is omitted. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
 
 ## Local triggers
 

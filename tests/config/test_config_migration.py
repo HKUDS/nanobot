@@ -153,6 +153,62 @@ def test_load_config_rewrites_legacy_model_fields_to_default_preset(tmp_path) ->
     assert saved["modelPresets"]["default"]["temperature"] == 0
 
 
+def test_load_config_prefers_existing_default_preset_over_legacy_fields(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "modelPresets": {
+                "default": {
+                    "model": "anthropic/claude-opus-4-5",
+                    "provider": "anthropic",
+                    "maxTokens": 8192,
+                }
+            },
+            "agents": {
+                "defaults": {
+                    "model": "openai/gpt-4.1",
+                    "provider": "openai",
+                    "maxTokens": 4096,
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert config.resolve_default_preset().model == "anthropic/claude-opus-4-5"
+    assert config.resolve_default_preset().provider == "anthropic"
+    assert config.resolve_default_preset().max_tokens == 8192
+    assert saved["modelPresets"]["default"]["model"] == "anthropic/claude-opus-4-5"
+    assert "model" not in saved["agents"]["defaults"]
+    assert "provider" not in saved["agents"]["defaults"]
+    assert "maxTokens" not in saved["agents"]["defaults"]
+
+
+def test_load_config_does_not_migrate_legacy_model_fields_from_environment(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "NANOBOT_AGENTS",
+        json.dumps({
+            "defaults": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+                "maxTokens": 4096,
+            }
+        }),
+    )
+
+    config = load_config(tmp_path / "missing-config.json")
+
+    assert config.resolve_default_preset().model == "anthropic/claude-opus-4-5"
+    assert config.resolve_default_preset().provider == "auto"
+    assert config.resolve_default_preset().max_tokens == 8192
+
+
 def test_load_config_migrates_inline_fallback_to_named_preset(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(

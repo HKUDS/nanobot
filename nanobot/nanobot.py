@@ -13,10 +13,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
-from nanobot.sdk.runtime import (
-    build_process_direct_kwargs,
-    ensure_single_model_selector,
-)
+from nanobot.sdk.runtime import build_process_direct_kwargs
 from nanobot.sdk.streaming import RunStream, SDKStreamEmitter, SDKStreamingHook
 from nanobot.sdk.types import (
     STREAM_EVENT_REASONING_COMPLETED,
@@ -84,7 +81,6 @@ class Nanobot:
         config_path: str | Path | None = None,
         *,
         workspace: str | Path | None = None,
-        model: str | None = None,
         model_preset: str | None = None,
     ) -> Nanobot:
         """Create a Nanobot instance from a config file.
@@ -93,12 +89,10 @@ class Nanobot:
             config_path: Path to ``config.json``.  Defaults to
                 ``~/.nanobot/config.json``.
             workspace: Override the workspace directory from config.
-            model: Override the instance default model.
             model_preset: Override the instance default model preset.
         """
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
-        ensure_single_model_selector(model=model, model_preset=model_preset)
         resolved: Path | None = None
         if config_path is not None:
             resolved = Path(config_path).expanduser().resolve()
@@ -113,12 +107,7 @@ class Nanobot:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()
             )
-        if model is not None:
-            config.model_presets["default"] = config.resolve_preset().model_copy(
-                update={"model": model, "provider": "auto"}
-            )
-            config.agents.defaults.model_preset = "default"
-        elif model_preset is not None:
+        if model_preset is not None:
             config.agents.defaults.model_preset = model_preset
 
         loop = AgentLoop.from_config(
@@ -140,7 +129,6 @@ class Nanobot:
         ephemeral: bool = False,
         attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
-        model: str | None = None,
         model_preset: str | None = None,
     ) -> RunResult:
         """Run the agent once and return the result.
@@ -158,13 +146,12 @@ class Nanobot:
                 providers and turn-hook factories. Attributes are kept separate
                 from nanobot's trusted internal message metadata.
             hooks: Optional lifecycle hooks for this run.
-            model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
         """
         capture = SDKCaptureHook()
         per_run_hooks = [capture, *(hooks or [])]
         runtime = self._loop.runtime_resolver.resolve_override(
-            model=model,
+            model=None,
             model_preset=model_preset,
             config=self._config,
         )
@@ -199,12 +186,11 @@ class Nanobot:
         ephemeral: bool = False,
         attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
-        model: str | None = None,
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
         override_runtime = self._loop.runtime_resolver.resolve_override(
-            model=model,
+            model=None,
             model_preset=model_preset,
             config=self._config,
         )
@@ -302,7 +288,6 @@ class Nanobot:
         ephemeral: bool = False,
         attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
-        model: str | None = None,
         model_preset: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream events for one agent turn."""
@@ -316,7 +301,6 @@ class Nanobot:
             ephemeral=ephemeral,
             attributes=attributes,
             hooks=hooks,
-            model=model,
             model_preset=model_preset,
         )
         try:
