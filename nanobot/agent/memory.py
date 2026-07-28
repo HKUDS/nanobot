@@ -19,10 +19,12 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
+    image_placeholder_text,
     recent_message_start_index,
     strip_think,
     truncate_text,
@@ -695,11 +697,16 @@ class MemoryStore:
     def _format_messages(messages: list[dict]) -> str:
         lines = []
         for message in messages:
-            if not message.get("content"):
+            content = content_with_media_breadcrumbs(
+                message.get("role"),
+                message.get("content", ""),
+                message.get("media"),
+            )
+            if not content:
                 continue
             tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {content}"
             )
         return "\n".join(lines)
 
@@ -716,6 +723,15 @@ class MemoryStore:
             self._format_messages(public_history_messages(messages)),
             limit,
         )
+        for media_chunk in _archived_media_reference_chunks(messages, existing_text=formatted):
+            self.append_history(
+                media_chunk,
+                max_chars=min(
+                    _HISTORY_ENTRY_HARD_CAP,
+                    max(_ARCHIVE_MEDIA_REFERENCES_MAX_CHARS, len(media_chunk)),
+                ),
+                session_key=session_key,
+            )
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
             f"{formatted}",
@@ -786,7 +802,54 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
+_ARCHIVE_MEDIA_REFERENCES_MAX_CHARS = 4_000
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
+
+
+def _archived_media_reference_chunks(
+    messages: list[dict],
+    *,
+    existing_text: str = "",
+) -> list[str]:
+    """Return complete, deduplicated media-reference lines in bounded chunks."""
+    references: list[str] = []
+    seen: set[str] = set()
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        media = message.get("media")
+        if not isinstance(media, list):
+            continue
+        for path in media:
+            breadcrumb = image_placeholder_text(path) if isinstance(path, str) else ""
+            if (
+                isinstance(path, str)
+                and path
+                and path not in seen
+                and breadcrumb not in existing_text
+            ):
+                seen.add(path)
+                references.append(breadcrumb)
+
+    lines = [
+        f"- [ephemeral] Uploaded media remains available at {reference}"
+        for reference in references
+    ]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for line in lines:
+        addition = len(line) + (1 if current else 0)
+        if current and current_size + addition > _ARCHIVE_MEDIA_REFERENCES_MAX_CHARS:
+            chunks.append("\n".join(current))
+            current = []
+            current_size = 0
+            addition = len(line)
+        current.append(line)
+        current_size += addition
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
 class Consolidator:
@@ -1019,13 +1082,38 @@ class Consolidator:
             logger.warning("Consolidation provider returned an error, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)
             return None
-        summary = response.content or "[no summary]"
-        self.store.append_history(
-            summary,
-            max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
-            session_key=session_key,
+        summary = strip_think(response.content or "[no summary]")
+        persisted_summary = truncate_text(summary.rstrip(), _ARCHIVE_SUMMARY_MAX_CHARS)
+        media_chunks = _archived_media_reference_chunks(
+            messages,
+            existing_text=persisted_summary,
         )
-        return summary
+        for media_chunk in media_chunks:
+            self.store.append_history(
+                media_chunk,
+                max_chars=min(
+                    _HISTORY_ENTRY_HARD_CAP,
+                    max(_ARCHIVE_MEDIA_REFERENCES_MAX_CHARS, len(media_chunk)),
+                ),
+                session_key=session_key,
+            )
+
+        keep_summary = bool(persisted_summary and persisted_summary != "(nothing)")
+        if keep_summary or not media_chunks:
+            self.store.append_history(
+                persisted_summary,
+                max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
+                session_key=session_key,
+            )
+
+        media_references = "\n".join(media_chunks)
+        if media_references:
+            return (
+                f"{media_references}\n{persisted_summary}"
+                if keep_summary
+                else media_references
+            )
+        return persisted_summary
 
     async def maybe_consolidate_by_tokens(
         self,
