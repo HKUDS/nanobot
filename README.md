@@ -231,7 +231,7 @@ Deploy nanobot's gateway and bundled WebUI from the repository's ready-to-use Bl
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
 
-Render will ask for the model credential and WebUI access secret, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service.
+Render will ask for `ANTHROPIC_API_KEY` and a private `NANOBOT_WEB_TOKEN`, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service.
 
 **Self-host**
 
