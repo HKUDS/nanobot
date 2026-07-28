@@ -369,6 +369,25 @@ class TestBuildMessages:
         assert messages[1]["role"] == "user"
         assert "hello" in str(messages[1]["content"])
 
+    def test_public_builder_preserves_assistant_role_compatibility(self, tmp_path):
+        from nanobot.agent import ContextBuilder as PublicContextBuilder
+
+        builder = PublicContextBuilder(tmp_path)
+        messages = builder.build_messages(
+            history=[{"role": "assistant", "content": "previous result"}],
+            current_message="subagent result",
+            current_role="assistant",
+            runtime_context_blocks=[
+                RuntimeContextBlock(source="test", content="user-only runtime context"),
+            ],
+        )
+
+        assert len(messages) == 2
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == "previous result\n\nsubagent result"
+        assert "user-only runtime context" not in messages[-1]["content"]
+        assert "_meta" not in messages[-1]
+
     def test_runtime_context_is_not_injected_by_default(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages([], "hello", channel="cli")
