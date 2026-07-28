@@ -107,6 +107,8 @@ export const ChatList = memo(function ChatList({
   const listContentRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
   const activeHighlightRef = useRef<HTMLDivElement>(null);
+  const activeHighlightSurfaceRef = useRef<HTMLDivElement>(null);
+  const highlightVisibleRef = useRef(false);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -162,15 +164,25 @@ export const ChatList = memo(function ChatList({
   }, [showArchived, sort]);
 
   useLayoutEffect(() => {
+    let resetTransitionFrame: number | null = null;
+
     const updateHighlight = () => {
       const content = listContentRef.current;
       const row = activeRowRef.current;
       const highlight = activeHighlightRef.current;
+      const surface = activeHighlightSurfaceRef.current;
 
-      if (!highlight) return;
+      if (!highlight || !surface) return;
       if (!content || !row) {
-        highlight.style.opacity = "0";
+        surface.style.opacity = "0";
+        surface.style.transform = "scale(0.97)";
+        highlightVisibleRef.current = false;
         return;
+      }
+
+      const shouldFloatIn = !highlightVisibleRef.current;
+      if (shouldFloatIn) {
+        highlight.style.transitionProperty = "none";
       }
 
       const contentRect = content.getBoundingClientRect();
@@ -180,7 +192,21 @@ export const ChatList = memo(function ChatList({
       highlight.style.transform = `translate3d(${rowRect.left - contentRect.left}px, ${
         rowRect.top - contentRect.top
       }px, 0)`;
-      highlight.style.opacity = "1";
+
+      if (shouldFloatIn) {
+        void highlight.offsetWidth;
+      }
+
+      surface.style.opacity = "1";
+      surface.style.transform = "scale(1)";
+      highlightVisibleRef.current = true;
+
+      if (shouldFloatIn) {
+        resetTransitionFrame = window.requestAnimationFrame(() => {
+          highlight.style.removeProperty("transition-property");
+          resetTransitionFrame = null;
+        });
+      }
     };
 
     updateHighlight();
@@ -196,6 +222,10 @@ export const ChatList = memo(function ChatList({
     window.addEventListener("resize", updateHighlight);
 
     return () => {
+      if (resetTransitionFrame !== null) {
+        window.cancelAnimationFrame(resetTransitionFrame);
+      }
+      activeHighlightRef.current?.style.removeProperty("transition-property");
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateHighlight);
     };
@@ -449,8 +479,14 @@ export const ChatList = memo(function ChatList({
           ref={activeHighlightRef}
           data-testid="active-chat-highlight"
           aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height,opacity] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]"
-        />
+          className="pointer-events-none absolute left-0 top-0 z-0 !mt-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none"
+        >
+          <div
+            ref={activeHighlightSurfaceRef}
+            data-testid="active-chat-highlight-surface"
+            className="h-full w-full scale-[0.97] rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none dark:bg-white/[0.07]"
+          />
+        </div>
       </div>
     </div>
   );

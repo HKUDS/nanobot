@@ -220,7 +220,12 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("slides one borderless highlight between selected topics", () => {
+  it("floats a borderless highlight in, then slides it between selected topics", () => {
+    let revealFrame: FrameRequestCallback | null = null;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      revealFrame = callback;
+      return 1;
+    });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         if (this.hasAttribute("data-chat-list-content")) {
@@ -250,11 +255,26 @@ describe("ChatList", () => {
     const { rerender } = render(
       <ChatList
         {...props}
-        activeKey="websocket:active"
+        activeKey={null}
       />,
     );
 
     const highlight = screen.getByTestId("active-chat-highlight");
+    const surface = screen.getByTestId("active-chat-highlight-surface");
+    expect(surface).toHaveClass(
+      "bg-sidebar-foreground/[0.055]",
+      "transition-[opacity,transform]",
+      "motion-reduce:transition-none",
+    );
+    expect(surface).toHaveStyle("opacity: 0; transform: scale(0.97)");
+
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:active"
+      />,
+    );
+
     const activeButton = screen.getByTitle("Active topic");
     expect(activeButton).toHaveAttribute("aria-current", "page");
     expect(activeButton.parentElement).not.toHaveClass(
@@ -262,13 +282,16 @@ describe("ChatList", () => {
       "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
     );
     expect(highlight).toHaveClass(
-      "bg-sidebar-foreground/[0.055]",
-      "transition-[transform,width,height,opacity]",
+      "transition-[transform,width,height]",
       "motion-reduce:transition-none",
     );
     expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1",
+      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); transition-property: none",
     );
+    expect(surface).toHaveStyle("opacity: 1; transform: scale(1)");
+
+    revealFrame?.(0);
+    expect(highlight.style.transitionProperty).toBe("");
 
     rerender(
       <ChatList
@@ -280,7 +303,7 @@ describe("ChatList", () => {
     expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
     expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
     expect(highlight).toHaveStyle(
-      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0); opacity: 1",
+      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0)",
     );
   });
 
