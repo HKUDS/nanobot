@@ -5,10 +5,28 @@ on:
     branches: [main]
     paths-ignore:
       - docs/**
+      - .agent/**
+      - .github/ISSUE_TEMPLATE/**
+      - AGENTS.md
+      - CLAUDE.md
+      - COMMUNICATION.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - webui/README.md
   pull_request:
     branches: [main]
     paths-ignore:
       - docs/**
+      - .agent/**
+      - .github/ISSUE_TEMPLATE/**
+      - AGENTS.md
+      - CLAUDE.md
+      - COMMUNICATION.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - webui/README.md
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
