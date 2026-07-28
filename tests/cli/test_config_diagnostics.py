@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
+from nanobot.gateway import GatewayRuntime, GatewayStartOptions, GatewayStatus, RuntimeResult
 
 runner = CliRunner()
 
@@ -228,16 +229,28 @@ def test_agent_provider_setup_failure_points_to_shortest_routes(tmp_path) -> Non
         ["gateway", "restart"],
     ],
 )
-def test_gateway_provider_setup_failure_points_to_shortest_routes(
+def test_gateway_provider_setup_failure_points_to_shortest_routes_when_webui_disabled(
     tmp_path,
+    monkeypatch,
     args: list[str],
 ) -> None:
     config_path = tmp_path / "explicit-gateway-config.json"
     workspace = tmp_path / "workspace"
     config_path.write_text(
-        json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}),
+        json.dumps(
+            {
+                "agents": {"defaults": {"workspace": str(workspace)}},
+                "channels": {"websocket": {"enabled": False}},
+            }
+        ),
         encoding="utf-8",
     )
+
+    def unexpected_managed_start(*_args, **_kwargs) -> RuntimeResult:
+        pytest.fail("provider validation must fail before a managed gateway start")
+
+    monkeypatch.setattr(GatewayRuntime, "start_background", unexpected_managed_start)
+    monkeypatch.setattr(GatewayRuntime, "restart", unexpected_managed_start)
 
     result = runner.invoke(app, [*args, "--config", str(config_path)])
     output = _without_rendered_line_breaks(result.stdout)
@@ -248,6 +261,134 @@ def test_gateway_provider_setup_failure_points_to_shortest_routes(
     assert "nanobot onboard --wizard" in output
     assert "nanobot status --config" in output
     assert config_path.name in output
+    assert "Traceback" not in output
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "start_mode"),
+    [
+        (["gateway", "--background"], "background"),
+        (["gateway", "restart"], "restart"),
+    ],
+)
+@pytest.mark.parametrize("secret_field", ["tokenIssueSecret", "token"])
+def test_gateway_missing_provider_managed_start_for_webui_setup(
+    tmp_path,
+    monkeypatch,
+    args: list[str],
+    start_mode: str,
+    secret_field: str,
+) -> None:
+    config_path = tmp_path / "explicit-gateway-config.json"
+    workspace = tmp_path / "workspace"
+    webui_port = 18776
+    bootstrap_secret = "must-not-appear-in-gateway-output"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"workspace": str(workspace)}},
+                "channels": {
+                    "websocket": {
+                        "enabled": True,
+                        "host": "127.0.0.1",
+                        "port": webui_port,
+                        secret_field: bootstrap_secret,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    started_options: list[tuple[str, GatewayStartOptions]] = []
+    status = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=tmp_path / "gateway.json",
+        log_path=tmp_path / "gateway.log",
+        started_at="2026-07-28T00:00:00Z",
+        port=18790,
+        reason="running",
+    )
+
+    def fake_start_background(
+        _runtime: GatewayRuntime,
+        options: GatewayStartOptions,
+    ) -> RuntimeResult:
+        started_options.append(("background", options))
+        return RuntimeResult(True, "gateway_started_background", status)
+
+    def fake_restart(
+        _runtime: GatewayRuntime,
+        options: GatewayStartOptions,
+        *,
+        timeout_s: int,
+    ) -> RuntimeResult:
+        assert timeout_s == 20
+        started_options.append(("restart", options))
+        return RuntimeResult(True, "gateway_started_background", status)
+
+    monkeypatch.setattr(GatewayRuntime, "start_background", fake_start_background)
+    monkeypatch.setattr(GatewayRuntime, "restart", fake_restart)
+    monkeypatch.setattr(
+        "nanobot.cli.commands.ensure_webui_bundle",
+        lambda **_kwargs: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [*args, "--config", str(config_path)],
+    )
+    output = _without_rendered_line_breaks(result.stdout)
+
+    assert result.exit_code == 0
+    assert "Provider/model setup is incomplete: No provider is configured for model" in output
+    assert "Gateway will start so you can configure a provider and model" in output
+    assert "WebUI Settings → Models" in output
+    assert f"WebUI: http://127.0.0.1:{webui_port}" in output
+    assert f"channels.websocket.{secret_field}" in output
+    if secret_field == "token":
+        assert "channels.websocket.tokenIssueSecret" not in output
+    assert "bootstrapSecret" not in output
+    assert bootstrap_secret not in output
+    assert "Gateway cannot start" not in output
+    assert started_options == [
+        (
+            start_mode,
+            GatewayStartOptions(
+                port=18790,
+                config_path=str(config_path.resolve()),
+            ),
+        )
+    ]
+    assert not workspace.exists()
+
+
+def test_gateway_invalid_webui_config_blocks_unconfigured_setup_mode(tmp_path) -> None:
+    config_path = tmp_path / "invalid-webui-config.json"
+    workspace = tmp_path / "workspace"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"workspace": str(workspace)}},
+                "channels": {
+                    "websocket": {
+                        "enabled": True,
+                        "port": "not-a-port",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_path)])
+    output = _without_rendered_line_breaks(result.stdout)
+
+    assert result.exit_code == 1
+    assert "Gateway configuration is invalid." in output
+    assert "channels.websocket.port" in output
+    assert "Provider/model setup is incomplete" not in output
     assert "Traceback" not in output
     assert not workspace.exists()
 

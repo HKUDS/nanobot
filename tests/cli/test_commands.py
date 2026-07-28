@@ -3008,6 +3008,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
+    refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
+    assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)
     assert "local_trigger_store" in agent_kwargs
     assert kwargs["store"] is agent_kwargs["local_trigger_store"]
     assert "bus" not in kwargs

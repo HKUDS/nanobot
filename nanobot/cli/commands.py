@@ -1012,20 +1012,13 @@ def _webui_channel_enabled(config: Config) -> bool:
     return bool(WebSocketConfig.model_validate(current).enabled)
 
 
-def _validate_gateway_startup(config: Config) -> None:
-    """Fail direct gateway starts before runtime side effects when config is invalid."""
+def _validate_gateway_startup(config: Config) -> str | None:
+    """Validate gateway startup and return a provider error recoverable through WebUI."""
     from nanobot.config.loader import get_config_path
 
     config_path = get_config_path()
-    provider_error = _provider_setup_error(config)
-    if provider_error:
-        console.print(Text(f"Gateway cannot start: {provider_error}", style="red"))
-        console.print("Complete provider/model setup:")
-        _print_model_setup_steps(config_path)
-        raise typer.Exit(1)
-
     try:
-        _webui_config_dict(config)
+        webui_config = _webui_config_dict(config)
     except ValidationError as exc:
         retry_command = f'nanobot gateway --config "{config_path}"'
         _print_runtime_config_validation_error(
@@ -1036,6 +1029,41 @@ def _validate_gateway_startup(config: Config) -> None:
             retry_command=retry_command,
         )
         raise typer.Exit(1) from exc
+
+    provider_error = _provider_setup_error(config)
+    if not provider_error:
+        return None
+
+    if bool(webui_config["enabled"]):
+        console.print(
+            Text(f"Provider/model setup is incomplete: {provider_error}", style="yellow")
+        )
+        console.print(
+            "Gateway will start so you can configure a provider and model "
+            "in WebUI Settings → Models."
+        )
+        browser_url = _webui_browser_url(config)
+        webui_url = browser_url.split("/#/", 1)[0]
+        console.print(Text(f"WebUI: {webui_url}", style="cyan"))
+        if browser_url != webui_url:
+            secret_key = (
+                "tokenIssueSecret"
+                if str(webui_config.get("tokenIssueSecret") or "").strip()
+                else "token"
+            )
+            console.print(
+                Text(
+                    f"If prompted, enter the configured channels.websocket.{secret_key} "
+                    f"value (see {config_path}).",
+                    style="dim",
+                )
+            )
+        return provider_error
+
+    console.print(Text(f"Gateway cannot start: {provider_error}", style="red"))
+    console.print("Complete provider/model setup:")
+    _print_model_setup_steps(config_path)
+    raise typer.Exit(1)
 
 
 def _prepare_webui_bundle_for_gateway(

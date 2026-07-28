@@ -29,7 +29,7 @@ from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
-GatewayConfigValidator = Callable[[Config], None]
+GatewayConfigValidator = Callable[[Config], str | None]
 GatewayRuntimeFactory = Callable[..., Any]
 GatewayServiceFactory = Callable[[], Any]
 WebUIBundlePreparer = Callable[[Config, BuildMode], None]
@@ -175,9 +175,18 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
+        unconfigured_provider_error = None
         if validate_startup_config is not None:
-            validate_startup_config(cfg)
-        run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
+            unconfigured_provider_error = validate_startup_config(cfg)
+        if unconfigured_provider_error is None:
+            run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
+        else:
+            run_gateway(
+                cfg,
+                port=port,
+                webui_bundle_mode=interactive_build_mode(),
+                unconfigured_provider_error=unconfigured_provider_error,
+            )
 
     @gateway_app.command("status")
     def gateway_status(
