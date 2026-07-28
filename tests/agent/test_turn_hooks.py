@@ -14,6 +14,23 @@ class RecordingHook(AgentHook):
         self._events.append(f"{self._label}:{context.iteration}")
 
 
+def test_turn_hook_context_preserves_legacy_positional_arguments(tmp_path) -> None:
+    context = AgentTurnHookContext(
+        None,
+        tmp_path,
+        "sdk",
+        "chat-a",
+        "message-1",
+        "sdk:chat-a",
+        {"trusted": True},
+        True,
+    )
+
+    assert context.metadata == {"trusted": True}
+    assert context.ephemeral is True
+    assert context.attributes == {}
+
+
 @pytest.mark.asyncio
 async def test_turn_hook_builder_runs_progress_hook_before_extra_hooks() -> None:
     events: list[str] = []

@@ -29,7 +29,6 @@ class AgentTurnHookSpec:
     chat_id: str = "direct"
     message_id: str | None = None
     metadata: dict[str, Any] | None = None
-    attributes: dict[str, Any] | None = None
     session_key: str | None = None
     workspace: Path | None = None
     tool_hint_max_length: int = 40
@@ -40,6 +39,7 @@ class AgentTurnHookSpec:
     turn_hooks: list[AgentHook] = field(default_factory=list)
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
+    attributes: dict[str, Any] | None = None
 
 
 def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:

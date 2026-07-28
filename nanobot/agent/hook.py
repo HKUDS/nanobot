@@ -58,8 +58,8 @@ class AgentTurnHookContext:
     message_id: str | None = None
     session_key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    attributes: dict[str, Any] = field(default_factory=dict)
     ephemeral: bool = False
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentHook:

@@ -23,7 +23,10 @@ MAX_WEBUI_QUOTE_CHARS = 4_000
 
 @dataclass(frozen=True)
 class RuntimeContextBlock:
-    """One provider-owned block appended to the current user content."""
+    """Provider-owned context appended verbatim to the current user content.
+
+    Callers must bound and delimit content obtained from untrusted sources.
+    """
 
     source: str
     content: str

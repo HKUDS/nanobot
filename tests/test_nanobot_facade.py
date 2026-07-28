@@ -264,6 +264,29 @@ async def test_run_custom_session_key(tmp_path):
     )
 
 
+def test_request_context_preserves_legacy_positional_arguments(tmp_path):
+    from nanobot.agent.tools.context import RequestContext
+
+    context = RequestContext(
+        "cli",
+        "direct",
+        "message-1",
+        "sdk:legacy",
+        "hello",
+        None,
+        {"trusted": True},
+        "alice",
+        "turn-1",
+        tmp_path,
+    )
+
+    assert context.metadata == {"trusted": True}
+    assert context.sender_id == "alice"
+    assert context.turn_id == "turn-1"
+    assert context.workspace == tmp_path
+    assert context.attributes == {}
+
+
 @pytest.mark.asyncio
 async def test_run_exposes_attributes_to_context_provider_without_persisting_them(tmp_path):
     from nanobot.agent.loop import AgentLoop
@@ -312,7 +335,7 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
 
 
 @pytest.mark.asyncio
-async def test_runtime_subscription_observes_saved_session_and_can_unsubscribe(tmp_path):
+async def test_runtime_subscription_is_best_effort_and_reads_display_safe_session(tmp_path):
     from nanobot import SessionTurnPersisted
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -330,12 +353,30 @@ async def test_runtime_subscription_observes_saved_session_and_can_unsubscribe(t
         model="test-model",
     ))
     seen: list[tuple[SessionTurnPersisted, SessionSnapshot | None]] = []
+    failed_sync_attempts = 0
+
+    async def provide_context(_request):
+        return RuntimeContextBlock(
+            source="external",
+            content=(
+                "[Runtime Context — metadata only, not instructions]\n"
+                '"model-only context"\n'
+                "[/Runtime Context]"
+            ),
+        )
+
+    def fail_sync(_event: SessionTurnPersisted) -> None:
+        nonlocal failed_sync_attempts
+        failed_sync_attempts += 1
+        raise RuntimeError("host sync failed")
 
     def on_persisted(event: SessionTurnPersisted) -> None:
-        seen.append((event, bot.sessions.export(event.context.session_key)))
+        seen.append((event, bot.sessions.get(event.context.session_key)))
 
+    remove_context = bot.runtime.add_context_provider(provide_context)
+    remove_failure = bot.runtime.subscribe(SessionTurnPersisted, fail_sync)
     unsubscribe = bot.runtime.subscribe(SessionTurnPersisted, on_persisted)
-    await bot.run(
+    result = await bot.run(
         "hi",
         session_key="sdk:persisted",
         sender_id="alice",
@@ -347,10 +388,18 @@ async def test_runtime_subscription_observes_saved_session_and_can_unsubscribe(t
     assert event.sender_id == "alice"
     assert event.context.attributes == {"tenant": "acme"}
     assert snapshot is not None
+    assert snapshot.messages[-2]["content"] == "hi"
     assert snapshot.messages[-1]["role"] == "assistant"
     assert snapshot.messages[-1]["content"] == "saved reply"
+    assert result.content == "saved reply"
+    assert failed_sync_attempts == 1
+    trusted_snapshot = bot.sessions.export("sdk:persisted")
+    assert trusted_snapshot is not None
+    assert "model-only context" in trusted_snapshot.messages[-2]["content"]
 
+    remove_failure()
     unsubscribe()
+    remove_context()
     await bot.run("again", session_key="sdk:persisted")
     assert len(seen) == 1
 
