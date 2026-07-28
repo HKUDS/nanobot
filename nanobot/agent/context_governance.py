@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 SNIP_SAFETY_BUFFER = 1024
-MICROCOMPACT_KEEP_RECENT = 10
 MICROCOMPACT_MIN_CHARS = 500
 INFLIGHT_COMPACT_TARGET_RATIO = 0.85
 COMPACTABLE_TOOLS = frozenset({
@@ -498,14 +497,7 @@ class ContextGovernor:
                 continue
             compactable.append((idx, str(tool_call_id)))
 
-        if not compactable:
-            return []
-        primary_count = max(0, len(compactable) - MICROCOMPACT_KEEP_RECENT)
-        primary = compactable[:primary_count]
-        # Hard overflow beats the keep-recent preference. Return recent results
-        # after stale ones so the newest result is naturally last.
-        fallback = compactable[primary_count:]
-        return primary + fallback
+        return compactable
 
     def _compact_tool_result_at(self, messages: list[dict[str, Any]], idx: int) -> None:
         messages[idx]["content"] = self._tool_result_compaction_message(messages[idx])

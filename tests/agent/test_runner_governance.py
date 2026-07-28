@@ -10,7 +10,6 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
-    MICROCOMPACT_KEEP_RECENT,
     ContextGovernanceConfig,
     ContextGovernor,
 )
@@ -495,7 +494,7 @@ def test_microcompact_skips_when_prompt_under_hard_budget(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -529,7 +528,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -617,7 +616,7 @@ def test_context_governor_keeps_compaction_boundary_stable(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -658,7 +657,7 @@ def test_microcompact_preserves_short_results(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     messages = _microcompact_messages(total=total, tool_name="exec", content="short")
     spec = make_run_spec(provider,
         initial_messages=messages,
@@ -690,7 +689,7 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "y" * 1000
     messages = _microcompact_messages(total=total, tool_name="message", content=long_content)
     spec = make_run_spec(provider,

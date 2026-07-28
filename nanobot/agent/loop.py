@@ -43,11 +43,7 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import (
-    RuntimeEventBus,
-    RuntimeEventPublisher,
-    ensure_runtime_event_publisher,
-)
+from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
@@ -378,8 +374,8 @@ class AgentLoop:
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
-        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._background_tasks: list[asyncio.Task] = []
+        self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
@@ -544,7 +540,7 @@ class AgentLoop:
             return
         if self._runtime_model_publisher is not None:
             self._runtime_model_publisher(runtime.model, runtime.model_preset)
-        self._runtime_events().runtime_model_changed(
+        self.runtime_event_publisher.runtime_model_changed(
             runtime.model,
             runtime.model_preset,
         )
@@ -621,9 +617,6 @@ class AgentLoop:
         if provider not in self._runtime_context_providers:
             self._runtime_context_providers.append(provider)
 
-    def _runtime_events(self) -> RuntimeEventPublisher:
-        return ensure_runtime_event_publisher(self)
-
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         return await self._cron_turns.submit(msg)
 
@@ -687,7 +680,6 @@ class AgentLoop:
             current_message=ctx.msg.content,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
             channel=ctx.delivery.route.channel,
-            current_role="user",
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
@@ -759,7 +751,7 @@ class AgentLoop:
 
         Returns the total number of cancelled tasks + subagents.
         """
-        tasks = self._active_tasks.pop(key, [])
+        tasks = self._active_tasks.pop(key, set())
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
@@ -1153,13 +1145,9 @@ class AgentLoop:
                 # Compute the effective session key before dispatching
                 # This ensures /stop command can find tasks correctly when unified session is enabled
                 task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(effective_key, []).append(task)
-                task.add_done_callback(
-                    lambda t, k=effective_key: self._active_tasks.get(k, [])
-                    and self._active_tasks[k].remove(t)
-                    if t in self._active_tasks.get(k, [])
-                    else None
-                )
+                active_tasks = self._active_tasks.setdefault(effective_key, set())
+                active_tasks.add(task)
+                task.add_done_callback(active_tasks.discard)
         finally:
             # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
             await self.close_mcp()
@@ -1302,8 +1290,8 @@ class AgentLoop:
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         task = asyncio.create_task(coro)
-        self._background_tasks.append(task)
-        task.add_done_callback(self._background_tasks.remove)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -2036,5 +2024,5 @@ class AgentLoop:
                     **kwargs,
                 )
         finally:
-            await self._runtime_events().run_status_changed(msg, session_key, "idle")
-            self._runtime_events().clear_turn(session_key)
+            await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
+            self.runtime_event_publisher.clear_turn(session_key)

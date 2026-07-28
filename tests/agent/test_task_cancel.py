@@ -73,7 +73,7 @@ class TestHandleStop:
 
         task = asyncio.create_task(slow_task())
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = [task]
+        loop._active_tasks["test:c1"] = {task}
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
@@ -100,7 +100,7 @@ class TestHandleStop:
 
         tasks = [asyncio.create_task(slow(i)) for i in range(2)]
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = tasks
+        loop._active_tasks["test:c1"] = set(tasks)
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)

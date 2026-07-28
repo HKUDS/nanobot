@@ -43,15 +43,13 @@ def _provider_extra_headers(
 def _make_provider_core(
     config: Config,
     *,
-    preset_name: str | None = None,
-    preset: ModelPresetConfig | None = None,
+    preset: ModelPresetConfig,
     model: str | None = None,
 ) -> LLMProvider:
     """Create a plain LLM provider without failover wrapping."""
-    resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    model = model or resolved.model
-    provider_name = config.get_provider_name(model, preset=resolved)
-    p = config.get_provider(model, preset=resolved)
+    model = model or preset.model
+    provider_name = config.get_provider_name(model, preset=preset)
+    p = config.get_provider(model, preset=preset)
     spec = find_by_name(provider_name) if provider_name else None
     if provider_name and not spec and p:
         if not p.api_base:
@@ -120,7 +118,7 @@ def _make_provider_core(
 
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model, preset=resolved),
+            api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
         )
@@ -140,7 +138,7 @@ def _make_provider_core(
 
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model, preset=resolved),
+            api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
@@ -150,7 +148,7 @@ def _make_provider_core(
             proxy=p.proxy if p else None,
         )
 
-    provider.generation = resolved.to_generation_settings()
+    provider.generation = preset.to_generation_settings()
     return provider
 
 
@@ -197,16 +195,14 @@ def make_provider(
     the failover path to create providers for fallback models.
     """
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    provider = _make_provider_core(config, preset_name=preset_name, preset=preset, model=model)
+    provider = _make_provider_core(config, preset=resolved, model=model)
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
     if fallback_presets:
         provider = FallbackProvider(
             primary=provider,
             fallback_presets=fallback_presets,
-            provider_factory=lambda fb: _make_provider_core(
-                config, preset_name=preset_name, preset=fb
-            ),
+            provider_factory=lambda fb: _make_provider_core(config, preset=fb),
         )
 
     return provider

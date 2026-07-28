@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -304,7 +304,6 @@ class WebuiTurnCoordinator:
     bus: MessageBus
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
-    _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
@@ -408,18 +407,6 @@ class WebuiTurnCoordinator:
             )
         )
 
-    def capture_title_context(
-        self,
-        session_key: str,
-        msg: InboundMessage,
-        llm: LLMRuntime,
-    ) -> None:
-        if msg.channel == "websocket" and msg.metadata.get("webui") is True:
-            self._title_contexts[session_key] = llm
-
-    def discard(self, session_key: str) -> None:
-        self._title_contexts.pop(session_key, None)
-
     async def publish_run_status(
         self,
         msg: InboundMessage,
@@ -451,32 +438,6 @@ class WebuiTurnCoordinator:
                 metadata=msg.metadata,
             )
         )
-        self._schedule_title_update(msg, session_key=session_key)
-
-    def _schedule_title_update(self, msg: InboundMessage, *, session_key: str) -> None:
-        title_context = self._title_contexts.pop(session_key, None)
-        if msg.metadata.get("webui") is not True or title_context is None:
-            return
-
-        async def _generate_title_and_notify(
-            title_llm: LLMRuntime = title_context,
-        ) -> None:
-            generated = await maybe_generate_webui_title_after_turn(
-                channel=msg.channel,
-                metadata=msg.metadata,
-                sessions=self.sessions,
-                session_key=session_key,
-                provider=title_llm.provider,
-                model=title_llm.model,
-            )
-            if generated:
-                await self._publish_session_metadata_updated(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    metadata=msg.metadata,
-                )
-
-        self.schedule_background(_generate_title_and_notify())
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = event.runtime

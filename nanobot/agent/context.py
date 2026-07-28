@@ -87,9 +87,9 @@ class ContextBuilder:
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
-            parts.append(f"# Memory\n\n{memory}")
+        memory = self.memory.read_memory()
+        if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
+            parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -199,7 +199,6 @@ class ContextBuilder:
         *,
         media: list[str] | None = None,
         channel: str | None = None,
-        current_role: str = "user",
         session_summary: str | None = None,
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
         workspace: Path | None = None,
@@ -210,7 +209,7 @@ class ContextBuilder:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
         user_content = self._build_user_content(current_message, media)
-        blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
+        blocks = list(runtime_context_blocks or ())
         merged, runtime_context_meta = append_runtime_context(user_content, blocks)
         messages = [
             {
@@ -226,17 +225,17 @@ class ContextBuilder:
             },
             *history,
         ]
-        if messages[-1].get("role") == current_role:
+        if messages[-1].get("role") == "user":
             last = dict(messages[-1])
             last["content"] = self._merge_message_content(last.get("content"), merged)
-            if current_role == "user" and runtime_context_meta is not None:
+            if runtime_context_meta is not None:
                 internal_meta = dict(last.get("_meta") or {})
                 internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = runtime_context_meta
                 last["_meta"] = internal_meta
             messages[-1] = last
             return messages
-        current = {"role": current_role, "content": merged}
-        if current_role == "user" and runtime_context_meta is not None:
+        current = {"role": "user", "content": merged}
+        if runtime_context_meta is not None:
             current["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta}
         messages.append(current)
         return messages

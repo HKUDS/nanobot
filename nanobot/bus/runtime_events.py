@@ -233,19 +233,3 @@ class RuntimeEventPublisher:
         self.bus.publish_nowait(
             RuntimeModelChanged(model=model, model_preset=model_preset)
         )
-
-
-def ensure_runtime_event_publisher(owner: Any) -> RuntimeEventPublisher:
-    """Return an owner's runtime publisher, creating missing state lazily."""
-    publisher = getattr(owner, "runtime_event_publisher", None)
-    if isinstance(publisher, RuntimeEventPublisher):
-        return publisher
-
-    bus = getattr(owner, "runtime_events", None)
-    if not isinstance(bus, RuntimeEventBus):
-        bus = RuntimeEventBus()
-        owner.runtime_events = bus
-
-    publisher = RuntimeEventPublisher(bus)
-    owner.runtime_event_publisher = publisher
-    return publisher

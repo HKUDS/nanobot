@@ -34,7 +34,7 @@ from nanobot.session.keys import (
     LAST_CHANNEL_METADATA_KEY,
     UNIFIED_SESSION_KEY,
 )
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
@@ -49,7 +49,6 @@ from nanobot.session.webui_turns import (
     maybe_generate_webui_title,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
-from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _mk_loop() -> AgentLoop:
@@ -312,55 +311,6 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_with_retry.assert_not_awaited()
-
-
-def test_webui_title_update_uses_captured_llm_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bus = MessageBus()
-    sessions = SessionManager(tmp_path)
-    scheduled: list[object] = []
-    captured: dict[str, object] = {}
-
-    async def fake_title_after_turn(**kwargs: object) -> bool:
-        captured.update(kwargs)
-        return False
-
-    monkeypatch.setattr(
-        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
-        fake_title_after_turn,
-    )
-    coordinator = WebuiTurnCoordinator(
-        bus=bus,
-        sessions=sessions,
-        schedule_background=lambda coro: scheduled.append(coro),
-    )
-    provider = MagicMock()
-    msg = InboundMessage(
-        channel="websocket",
-        sender_id="u1",
-        chat_id="chat1",
-        content="say hello",
-        metadata={"webui": True},
-    )
-
-    coordinator.capture_title_context(
-        "websocket:chat1",
-        msg,
-        LLMRuntime.capture(provider, "turn-model", context_window_tokens=32_768),
-    )
-    asyncio.run(coordinator.handle_turn_end(
-        msg,
-        session_key="websocket:chat1",
-        latency_ms=None,
-    ))
-
-    assert len(scheduled) == 1
-    asyncio.run(scheduled[0])  # type: ignore[arg-type]
-
-    assert captured["provider"] is provider
-    assert captured["model"] == "turn-model"
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
@@ -1386,7 +1336,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 
     first_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="keep progress")
     task = asyncio.create_task(loop._process_message(first_msg))
-    loop._active_tasks[first_msg.session_key] = [task]
+    loop._active_tasks[first_msg.session_key] = {task}
     await asyncio.wait_for(checkpoint_saved.wait(), timeout=1.0)
 
     stop_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="/stop")
@@ -1451,7 +1401,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 
     runtime = loop.llm_runtime()
     seen: dict[str, object] = {}
-    record_runtime = MagicMock(wraps=loop._runtime_events().record_turn_runtime)
+    record_runtime = MagicMock(wraps=loop.runtime_event_publisher.record_turn_runtime)
     loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
     async def fake_run_agent_loop(initial_messages, **kwargs):
@@ -1691,7 +1641,6 @@ def test_subagent_followup_uses_user_model_input_and_assistant_history(tmp_path:
     projected = builder.build_messages(
         history=history,
         current_message="subagent result",
-        current_role="user",
         channel="cli",
     )
 

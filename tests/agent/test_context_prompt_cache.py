@@ -340,21 +340,6 @@ def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) 
     assert "Wait for the tool results, then answer once" in prompt
 
 
-def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[{"role": "assistant", "content": "previous result"}],
-        current_message="subagent result",
-        channel="cli",
-        current_role="assistant",
-    )
-
-    for left, right in zip(messages, messages[1:]):
-        assert not (left.get("role") == right.get("role") == "assistant")
-
-
 def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
     """Memory search guidance should be discoverable without loading its full body."""
     workspace = _make_workspace(tmp_path)
@@ -398,7 +383,7 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     assert "This file is automatically updated by nanobot" not in prompt
 
 
-def test_customized_memory_md_is_injected(tmp_path) -> None:
+def test_customized_memory_md_is_injected(tmp_path, monkeypatch) -> None:
     """A Dream-populated MEMORY.md should be injected normally."""
     workspace = _make_workspace(tmp_path)
     from nanobot.utils.helpers import sync_workspace_templates
@@ -409,7 +394,17 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
     )
 
     builder = ContextBuilder(workspace)
+    read_memory = builder.memory.read_memory
+    calls = 0
+
+    def tracked_read_memory() -> str:
+        nonlocal calls
+        calls += 1
+        return read_memory()
+
+    monkeypatch.setattr(builder.memory, "read_memory", tracked_read_memory)
     prompt = builder.build_system_prompt()
 
     assert "# Memory\n\n## Long-term Memory" in prompt
     assert "User prefers dark mode" in prompt
+    assert calls == 1
