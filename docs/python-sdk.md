@@ -633,11 +633,11 @@ Do not expose exported snapshots directly to chat users.
 | `model` | Current runtime model name. |
 | `workspace` | Current runtime workspace path. |
 | `add_context_provider(provider)` | Register an async per-turn context provider and return an unsubscribe callback. |
-| `subscribe(event_type, handler)` | Subscribe a best-effort sync or async handler to one runtime event type and return an unsubscribe callback. |
+| `on_session_turn_persisted(handler)` | Register a best-effort sync or async callback for locally persisted turns and return an unsubscribe callback. |
 | `await compact_session(session_key)` | Run token/replay-window consolidation for a session. |
 | `await compact_idle_session(session_key, max_suffix=8)` | Run idle-session compaction and return its summary. |
 
-### Host integration context and persistence events
+### Host integration context and persisted-turn callbacks
 
 Host applications can attach external context without copying or modifying the
 nanobot agent loop. A context provider receives a `RequestContext` before each
@@ -645,14 +645,15 @@ model turn and may return one or more `RuntimeContextBlock` values. Use
 `attributes` for caller-owned routing data; nanobot keeps it separate from
 trusted channel metadata and does not persist it in session messages.
 
-`SessionTurnPersisted` is published after a non-ephemeral turn has been saved.
-Its handler may read the completed transcript through `bot.sessions`. Runtime
-event handlers run in registration order, and async handlers are awaited before
-the run continues. Subscriptions are observational: handler exceptions are
-logged and suppressed so the completed local turn remains successful. Durable
-external synchronization must catch failures and persist retry work before the
-handler returns. During SDK runs, handlers execute while the session is still
-serialized and must not re-enter `bot.run()` for the same session.
+`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn
+has been saved. The callback receives `SessionTurnPersisted` and may read the
+completed transcript through `bot.sessions`. Callbacks run in registration
+order, and async callbacks are awaited before the run continues. They are
+observational: callback exceptions are logged and suppressed so the completed
+local turn remains successful. Durable external synchronization must catch
+failures and persist retry work before the callback returns. During SDK runs,
+callbacks execute while the session is still serialized and must not re-enter
+`bot.run()` for the same session.
 
 ```python
 import json
@@ -704,7 +705,7 @@ async def run_with_external_memory(external_memory, enqueue_retry) -> None:
                     await enqueue_retry(event, snapshot, exc)
 
         remove_context = bot.runtime.add_context_provider(load_context)
-        remove_sync = bot.runtime.subscribe(SessionTurnPersisted, sync_saved_turn)
+        remove_sync = bot.runtime.on_session_turn_persisted(sync_saved_turn)
         try:
             await bot.run(
                 "Continue the architecture discussion",
@@ -719,7 +720,7 @@ async def run_with_external_memory(external_memory, enqueue_retry) -> None:
 Context providers are trusted host extensions, and `RuntimeContextBlock.content`
 is appended verbatim to model-visible context. Apply equivalent bounding,
 encoding, and delimiter escaping to untrusted external content.
-`SessionTurnPersisted` is not emitted for `ephemeral=True` runs.
+Persisted-turn callbacks are not invoked for `ephemeral=True` runs.
 
 ## Hooks
 

@@ -335,7 +335,7 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
 
 
 @pytest.mark.asyncio
-async def test_runtime_subscription_is_best_effort_and_reads_display_safe_session(tmp_path):
+async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_session(tmp_path):
     from nanobot import SessionTurnPersisted
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -374,8 +374,8 @@ async def test_runtime_subscription_is_best_effort_and_reads_display_safe_sessio
         seen.append((event, bot.sessions.get(event.context.session_key)))
 
     remove_context = bot.runtime.add_context_provider(provide_context)
-    remove_failure = bot.runtime.subscribe(SessionTurnPersisted, fail_sync)
-    unsubscribe = bot.runtime.subscribe(SessionTurnPersisted, on_persisted)
+    remove_failure = bot.runtime.on_session_turn_persisted(fail_sync)
+    unsubscribe = bot.runtime.on_session_turn_persisted(on_persisted)
     result = await bot.run(
         "hi",
         session_key="sdk:persisted",
@@ -405,7 +405,7 @@ async def test_runtime_subscription_is_best_effort_and_reads_display_safe_sessio
 
 
 @pytest.mark.asyncio
-async def test_runtime_subscription_observes_saved_command_turn(tmp_path):
+async def test_persisted_turn_callback_observes_saved_command_turn(tmp_path):
     from nanobot import SessionTurnPersisted
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -417,7 +417,7 @@ async def test_runtime_subscription_observes_saved_command_turn(tmp_path):
         model="test-model",
     ))
     seen: list[SessionTurnPersisted] = []
-    bot.runtime.subscribe(SessionTurnPersisted, seen.append)
+    bot.runtime.on_session_turn_persisted(seen.append)
 
     await bot.run("/skill", session_key="sdk:command")
 
@@ -431,7 +431,7 @@ async def test_runtime_subscription_observes_saved_command_turn(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ephemeral_run_does_not_publish_session_persisted_event(tmp_path):
+async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
     from nanobot import SessionTurnPersisted
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -449,11 +449,18 @@ async def test_ephemeral_run_does_not_publish_session_persisted_event(tmp_path):
         model="test-model",
     ))
     seen: list[SessionTurnPersisted] = []
-    bot.runtime.subscribe(SessionTurnPersisted, seen.append)
+    bot.runtime.on_session_turn_persisted(seen.append)
 
     await bot.run("hi", session_key="sdk:ephemeral", ephemeral=True)
 
     assert seen == []
+
+
+def test_runtime_client_does_not_expose_generic_event_subscription():
+    from nanobot.sdk.clients import RuntimeClient
+
+    assert hasattr(RuntimeClient, "on_session_turn_persisted")
+    assert not hasattr(RuntimeClient, "subscribe")
 
 
 def test_import_from_top_level():
