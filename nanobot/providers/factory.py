@@ -23,7 +23,6 @@ class ProviderSnapshot:
 
 @dataclass(frozen=True)
 class _ProviderSetup:
-    resolved: ModelPresetConfig
     model: str
     provider_name: str
     provider_config: ProviderConfig | None
@@ -98,7 +97,6 @@ def _resolve_provider_setup(
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
 
     return _ProviderSetup(
-        resolved=preset,
         model=model,
         provider_name=provider_name,
         provider_config=p,
@@ -135,7 +133,6 @@ def _make_provider_core(
         preset=preset,
         model=model,
     )
-    resolved = setup.resolved
     model = setup.model
     provider_name = setup.provider_name
     p = setup.provider_config
