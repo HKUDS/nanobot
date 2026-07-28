@@ -261,7 +261,8 @@ def get_approved(channel: str) -> list[str]:
     """Return all approved sender IDs for *channel*."""
     with _LOCK:
         data = _load()
-        return sorted(data.get("approved", {}).get(channel, set()))
+        approved = data.get("approved") or {}
+        return sorted(approved.get(channel, set()))
 
 
 def format_pairing_reply(code: str) -> str:

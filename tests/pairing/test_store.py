@@ -304,3 +304,11 @@ def test_pending_gc_drops_malformed_entries(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(store, "_store_path", lambda: path)
     assert store.list_pending() == []
+
+def test_get_approved_handles_null_approved_map(monkeypatch):
+    """get_approved must return an empty list without raising AttributeError if approved map is null.
+
+    Prevents AttributeError: 'NoneType' object has no attribute 'get' when data has approved: null.
+    """
+    monkeypatch.setattr(store, "_load", lambda: {"approved": None, "pending": {}})
+    assert store.get_approved("telegram") == []
