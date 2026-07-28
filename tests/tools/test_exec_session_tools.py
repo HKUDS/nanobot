@@ -334,27 +334,36 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
 
 
 def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
-    async def run() -> tuple[str, str, str]:
+    async def run() -> tuple[str, str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _waiting_shell_command("booting")
+        command = _waiting_shell_command("booting", delayed="ready")
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=100)
+        initial = await exec_tool.execute(command=command, yield_time_ms=0)
         sid = _session_id(initial)
+        # Synchronize on an stdin-gated marker before exercising the immediate timeout below.
+        ready = await stdin_tool.execute(
+            session_id=sid,
+            chars="\n",
+            wait_for="ready",
+            wait_timeout_ms=10000,
+            yield_time_ms=0,
+        )
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="never-ready",
-            wait_timeout_ms=200,
+            wait_timeout_ms=0,
             yield_time_ms=0,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
-        return initial, waited, cleanup
+        return initial, ready, waited, cleanup
 
-    initial, waited, cleanup = asyncio.run(run())
+    initial, ready, waited, cleanup = asyncio.run(run())
 
     assert "Process running" in initial
-    assert "booting" in initial + waited
+    assert "booting" in initial + ready
+    assert "ready" in ready
     assert "Process running" in waited
     assert "Wait target not observed: 'never-ready'" in waited
     assert "Session terminated." in cleanup

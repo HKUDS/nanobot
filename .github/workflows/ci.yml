@@ -68,14 +68,18 @@ jobs:
             os: ubuntu-latest
             python-version: "3.11"
             coverage: false
+            pytest_args: ""
           - name: latest, 3.14 + coverage
             os: ubuntu-latest
             python-version: "3.14"
             coverage: true
+            pytest_args: ""
           - name: Windows, 3.14
             os: windows-latest
             python-version: "3.14"
             coverage: false
+            # Keep each test file in one worker while using both hosted-runner cores.
+            pytest_args: "-n 2 --dist loadfile"
 
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +102,9 @@ jobs:
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
 
+      - name: Verify dependency consistency
+        run: uv pip check
+
       # Channel requirements live in manifests rather than uv.lock. Avoid a
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
@@ -115,6 +122,7 @@ jobs:
         if: ${{ !matrix.coverage }}
         run: >-
           uv run --no-sync python -m pytest
+          ${{ matrix.pytest_args }}
           --durations=25 --durations-min=1.0
 
   webui:

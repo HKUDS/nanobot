@@ -308,19 +308,17 @@ class TestAppendHistoryHardCap:
         entry = store.read_unprocessed_history(since_cursor=0)[0]
         assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
 
-    def test_oversize_warning_is_emitted_once(self, store, caplog):
+    def test_oversize_warning_is_emitted_once(self, store, monkeypatch):
         """Repeated oversized writes should warn only on the first occurrence."""
-        from loguru import logger as loguru_logger
-
         records: list[str] = []
-        handler_id = loguru_logger.add(lambda m: records.append(m), level="WARNING")
-        try:
-            huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
-            store.append_history(huge)
-            store.append_history(huge)
-            store.append_history(huge)
-        finally:
-            loguru_logger.remove(handler_id)
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
+        store.append_history(huge)
+        store.append_history(huge)
+        store.append_history(huge)
 
         oversize_warnings = [r for r in records if "exceeds" in r and "chars" in r]
         assert len(oversize_warnings) == 1

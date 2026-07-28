@@ -35,6 +35,10 @@ from nanobot.webui.metadata import (
 runner = CliRunner()
 
 
+def _without_rendered_line_breaks(output: str) -> str:
+    return "".join(output.splitlines())
+
+
 def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
     metadata = {
         "webui": True,
@@ -2150,7 +2154,7 @@ def test_webui_yes_still_refuses_invalid_custom_model_setup(
 
     assert result.exit_code == 1
     assert "provider/model setup is incomplete" in result.stdout
-    assert "Settings → Models" in result.stdout
+    assert "Settings → Models" in _without_rendered_line_breaks(result.stdout)
     assert "nanobot onboard --wizard" in result.stdout
     assert "nanobot status --config" in result.stdout
     assert config_file.name in result.stdout

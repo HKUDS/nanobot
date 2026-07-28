@@ -174,7 +174,7 @@ def test_status_reports_missing_provider_with_shortest_setup_routes(tmp_path) ->
     assert result.exit_code == 0
     assert "Agent: ✗" in result.stdout
     assert "No provider is configured for model" in result.stdout
-    assert "Settings → Models" in result.stdout
+    assert "Settings → Models" in _without_rendered_line_breaks(result.stdout)
     assert "nanobot onboard --wizard" in result.stdout
     assert "nanobot status --config" in result.stdout
 

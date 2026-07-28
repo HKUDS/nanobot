@@ -1492,12 +1492,197 @@ def test_repository_dependency_installer_selects_all_channel_manifests(monkeypat
     monkeypatch.setattr(dependencies, "discover_plugins", lambda: plugins)
     monkeypatch.setattr(
         dependencies,
-        "ensure_enabled_channel_dependencies",
+        "ensure_repository_channel_dependencies",
         lambda names, discovered: prepared.append((names, discovered)) or {},
     )
 
     assert dependencies.main(["--all-channels"]) == 0
     assert prepared == [(set(plugins), plugins)]
+
+
+def test_repository_dependency_installer_batches_missing_manifests(monkeypatch):
+    from nanobot.optional_features import InstallResult
+    from scripts import install_channel_dependencies as dependencies
+
+    plugins = {
+        "second": ChannelPlugin(
+            name="second",
+            display_name="Second",
+            runtime="missing.second.runtime:SecondChannel",
+            dependencies=("shared-sdk>=1", "second-sdk>=2"),
+        ),
+        "first": ChannelPlugin(
+            name="first",
+            display_name="First",
+            runtime="missing.first.runtime:FirstChannel",
+            dependencies=("first-sdk>=1", "shared-sdk>=1"),
+        ),
+        "ready": ChannelPlugin(
+            name="ready",
+            display_name="Ready",
+            runtime="missing.ready.runtime:ReadyChannel",
+            dependencies=("ready-sdk>=1",),
+        ),
+    }
+    batch_installed = False
+    installs: list[tuple[str, list[str]]] = []
+
+    def extra_installed(name: str, _requirements: list[str]) -> bool:
+        return name == "ready" or batch_installed
+
+    def install_extra(name: str, requirements: list[str]) -> InstallResult:
+        nonlocal batch_installed
+        installs.append((name, requirements))
+        batch_installed = True
+        return InstallResult(True, name, ["pip"])
+
+    monkeypatch.setattr(dependencies, "extra_installed", extra_installed)
+    monkeypatch.setattr(dependencies, "install_extra", install_extra)
+    monkeypatch.setattr(
+        dependencies,
+        "ensure_enabled_channel_dependencies",
+        lambda _names, _plugins: pytest.fail("verified batch must not use the fallback"),
+    )
+
+    failures = dependencies.ensure_repository_channel_dependencies(set(plugins), plugins)
+
+    assert failures == {}
+    assert installs == [
+        (
+            "channel-dependencies",
+            ["first-sdk>=1", "shared-sdk>=1", "second-sdk>=2"],
+        )
+    ]
+
+
+def test_repository_dependency_installer_falls_back_after_batch_failure(monkeypatch):
+    from nanobot.optional_features import InstallResult
+    from scripts import install_channel_dependencies as dependencies
+
+    plugins = {
+        name: ChannelPlugin(
+            name=name,
+            display_name=name.title(),
+            runtime=f"missing.{name}.runtime:Channel",
+            dependencies=(f"{name}-sdk>=1",),
+        )
+        for name in ("first", "second")
+    }
+    fallbacks: list[set[str]] = []
+    fallback_finished = False
+
+    def extra_installed(name: str, _requirements: list[str]) -> bool:
+        return fallback_finished and name == "first"
+
+    def fallback(names: set[str], _plugins: dict[str, ChannelPlugin]) -> dict[str, str]:
+        nonlocal fallback_finished
+        fallbacks.append(names)
+        fallback_finished = True
+        return {"second": "install failed"}
+
+    monkeypatch.setattr(dependencies, "extra_installed", extra_installed)
+    monkeypatch.setattr(
+        dependencies,
+        "install_extra",
+        lambda name, _requirements: InstallResult(False, name, ["pip"]),
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "ensure_enabled_channel_dependencies",
+        fallback,
+    )
+
+    failures = dependencies.ensure_repository_channel_dependencies(set(plugins), plugins)
+
+    assert failures == {"second": "install failed"}
+    assert fallbacks == [set(plugins)]
+
+
+def test_repository_dependency_installer_rechecks_each_channel_after_batch(monkeypatch):
+    from nanobot.optional_features import InstallResult
+    from scripts import install_channel_dependencies as dependencies
+
+    plugins = {
+        name: ChannelPlugin(
+            name=name,
+            display_name=name.title(),
+            runtime=f"missing.{name}.runtime:Channel",
+            dependencies=(f"{name}-sdk>=1",),
+        )
+        for name in ("first", "second")
+    }
+    batch_finished = False
+    fallback_finished = False
+    fallbacks: list[set[str]] = []
+
+    def extra_installed(name: str, _requirements: list[str]) -> bool:
+        if fallback_finished:
+            return True
+        if batch_finished:
+            return name == "second"
+        return name == "first"
+
+    def install_extra(name: str, _requirements: list[str]) -> InstallResult:
+        nonlocal batch_finished
+        batch_finished = True
+        return InstallResult(True, name, ["pip"])
+
+    def fallback(names: set[str], _plugins: dict[str, ChannelPlugin]) -> dict[str, str]:
+        nonlocal fallback_finished
+        fallbacks.append(names)
+        fallback_finished = True
+        return {}
+
+    monkeypatch.setattr(dependencies, "extra_installed", extra_installed)
+    monkeypatch.setattr(dependencies, "install_extra", install_extra)
+    monkeypatch.setattr(
+        dependencies,
+        "ensure_enabled_channel_dependencies",
+        fallback,
+    )
+
+    failures = dependencies.ensure_repository_channel_dependencies(set(plugins), plugins)
+
+    assert failures == {}
+    assert fallbacks == [{"first"}]
+
+
+def test_repository_dependency_installer_reports_conflict_after_fallback(monkeypatch):
+    from nanobot.optional_features import InstallResult
+    from scripts import install_channel_dependencies as dependencies
+
+    plugins = {
+        name: ChannelPlugin(
+            name=name,
+            display_name=name.title(),
+            runtime=f"missing.{name}.runtime:Channel",
+            dependencies=(f"{name}-sdk>=1",),
+        )
+        for name in ("first", "second")
+    }
+    fallback_finished = False
+
+    def extra_installed(name: str, _requirements: list[str]) -> bool:
+        return fallback_finished and name == "second"
+
+    def fallback(_names: set[str], _plugins: dict[str, ChannelPlugin]) -> dict[str, str]:
+        nonlocal fallback_finished
+        fallback_finished = True
+        return {}
+
+    monkeypatch.setattr(dependencies, "extra_installed", extra_installed)
+    monkeypatch.setattr(
+        dependencies,
+        "install_extra",
+        lambda name, _requirements: InstallResult(False, name, ["pip"]),
+    )
+    monkeypatch.setattr(dependencies, "ensure_enabled_channel_dependencies", fallback)
+
+    failures = dependencies.ensure_repository_channel_dependencies(set(plugins), plugins)
+
+    assert failures == {
+        "first": "Channel dependencies could not be installed. Check gateway logs."
+    }
 
 
 def test_repository_dependency_installer_rejects_unknown_channel(monkeypatch, capsys):
@@ -1520,7 +1705,7 @@ def test_repository_dependency_installer_propagates_install_failure(monkeypatch,
     monkeypatch.setattr(dependencies, "discover_plugins", lambda: {"demo": plugin})
     monkeypatch.setattr(
         dependencies,
-        "ensure_enabled_channel_dependencies",
+        "ensure_repository_channel_dependencies",
         lambda _names, _plugins: {"demo": "dependency install failed"},
     )
 
