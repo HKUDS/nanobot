@@ -108,7 +108,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             aria-selected={view === item}
             onClick={() => setView(item)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+              "inline-flex items-center rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
               view === item
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -116,12 +116,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
           >
             {item === "installed"
               ? t("settings.skills.installedTab", { defaultValue: "Installed" })
-              : (
-                  <>
-                    <VercelMark />
-                    {t("settings.skills.discoverTab", { defaultValue: "Discover" })}
-                  </>
-                )}
+              : t("settings.skills.discoverTab", { defaultValue: "Discover" })}
           </button>
         ))}
       </div>
@@ -225,14 +220,6 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         }}
       />
     </div>
-  );
-}
-
-function VercelMark() {
-  return (
-    <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden>
-      <path d="M8 1 16 15H0L8 1Z" fill="currentColor" />
-    </svg>
   );
 }
 

@@ -774,6 +774,9 @@
     "skills": {
       "description": "檢閱此 Agent 可在對話期間載入的指令技能。",
       "caption": "{{available}} 個可用 · 共 {{total}} 個",
+      "views": "技能檢視",
+      "installedTab": "已安裝",
+      "discoverTab": "探索",
       "featured": "Agent 技能",
       "empty": "目前沒有可用的技能。",
       "sourceWorkspace": "自訂",

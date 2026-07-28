@@ -774,6 +774,9 @@
     "skills": {
       "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",
       "caption": "{{available}} khả dụng · tổng {{total}}",
+      "views": "Chế độ xem kỹ năng",
+      "installedTab": "Đã cài đặt",
+      "discoverTab": "Khám phá",
       "featured": "Kỹ năng agent",
       "empty": "Không có kỹ năng nào khả dụng.",
       "sourceWorkspace": "Tùy chỉnh",

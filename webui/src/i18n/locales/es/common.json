@@ -775,6 +775,9 @@
     "skills": {
       "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",
       "caption": "{{available}} disponibles · {{total}} en total",
+      "views": "Vistas de habilidades",
+      "installedTab": "Instaladas",
+      "discoverTab": "Descubrir",
       "featured": "Habilidades del agente",
       "empty": "No hay habilidades disponibles.",
       "sourceWorkspace": "Personalizada",

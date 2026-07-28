@@ -774,6 +774,9 @@
     "skills": {
       "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",
       "caption": "{{available}} disponibles · {{total}} au total",
+      "views": "Vues des compétences",
+      "installedTab": "Installées",
+      "discoverTab": "Découvrir",
       "featured": "Compétences agent",
       "empty": "Aucune compétence disponible.",
       "sourceWorkspace": "Personnalisée",

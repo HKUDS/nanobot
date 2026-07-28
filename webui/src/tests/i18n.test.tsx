@@ -75,6 +75,9 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.apps.description",
   "settings.apps.caption",
   "settings.apps.restartRequired",
+  "settings.skills.views",
+  "settings.skills.installedTab",
+  "settings.skills.discoverTab",
   "settings.nanobotFeatures.disable",
   "settings.nanobotFeatures.ready",
   "settings.nanobotFeatures.missingDependency",
@@ -437,6 +440,8 @@ describe("webui i18n", () => {
     expect(settings.byok.tabs.webSearch).toBe("网页搜索");
     expect(settings.overview.webSearch).toBe("网页搜索");
     expect(settings.overview.workspace).toBe("工作区");
+    expect(settings.skills.installedTab).toBe("已安装");
+    expect(settings.skills.discoverTab).toBe("发现");
   });
 
   it("keeps Brazilian Portuguese settings overview copy localized", () => {

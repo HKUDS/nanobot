@@ -664,7 +664,9 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    fireEvent.click(await screen.findByRole("tab", { name: "Discover" }));
+    const discoverTab = await screen.findByRole("tab", { name: "Discover" });
+    expect(discoverTab.querySelector("svg")).toBeNull();
+    fireEvent.click(discoverTab);
     expect(await screen.findByRole("heading", { name: "Trending today" })).toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();

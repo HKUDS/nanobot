@@ -774,6 +774,9 @@
     "skills": {
       "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",
       "caption": "{{available}} tersedia · {{total}} total",
+      "views": "Tampilan skill",
+      "installedTab": "Terpasang",
+      "discoverTab": "Temukan",
       "featured": "Skill agent",
       "empty": "Tidak ada skill yang tersedia.",
       "sourceWorkspace": "Kustom",

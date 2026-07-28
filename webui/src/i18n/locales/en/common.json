@@ -788,6 +788,9 @@
     "skills": {
       "description": "Review the instruction skills this agent can load during a conversation.",
       "caption": "{{available}} available · {{total}} total",
+      "views": "Skills views",
+      "installedTab": "Installed",
+      "discoverTab": "Discover",
       "featured": "Agent skills",
       "empty": "No skills are available.",
       "sourceWorkspace": "Custom",

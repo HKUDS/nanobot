@@ -788,6 +788,9 @@
     "skills": {
       "description": "查看此 agent 在对话中可以加载的指令技能。",
       "caption": "{{available}} 个可用 · 共 {{total}} 个",
+      "views": "技能视图",
+      "installedTab": "已安装",
+      "discoverTab": "发现",
       "featured": "Agent 技能",
       "empty": "暂无可用技能。",
       "sourceWorkspace": "自定义",

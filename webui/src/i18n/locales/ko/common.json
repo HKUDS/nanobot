@@ -774,6 +774,9 @@
     "skills": {
       "description": "이 에이전트가 대화 중에 불러올 수 있는 지시 스킬을 확인합니다.",
       "caption": "{{available}}개 사용 가능 · 총 {{total}}개",
+      "views": "스킬 보기",
+      "installedTab": "설치됨",
+      "discoverTab": "탐색",
       "featured": "에이전트 스킬",
       "empty": "사용 가능한 스킬이 없습니다.",
       "sourceWorkspace": "사용자 지정",
