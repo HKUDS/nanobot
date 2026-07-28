@@ -19,6 +19,7 @@ import httpx
 
 from nanobot.agent.skills import SkillsLoader
 from nanobot.security.network import PinnedDNSAsyncTransport
+from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
 
 _PROVIDER_ALL = "all"
 _PROVIDER_SKILLS_SH = "skills_sh"
@@ -353,6 +354,17 @@ async def _install_skills_sh_skill(
     if skill_id in existing:
         return {"installed": True, "already_installed": True, "name": skill_id}
 
+    workspace = workspace_path.expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    try:
+        require_path_within(
+            workspace / "skills",
+            workspace,
+            message="skills directory must stay inside the workspace",
+        )
+    except WorkspaceBoundaryError as exc:
+        raise SkillsMarketplaceError(str(exc), status=403) from exc
+
     npx = shutil.which("npx")
     if npx is None:
         raise SkillsMarketplaceError(
@@ -360,8 +372,6 @@ async def _install_skills_sh_skill(
             status=503,
         )
 
-    workspace = workspace_path.expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["DISABLE_TELEMETRY"] = "1"
     command = (
@@ -439,7 +449,15 @@ async def _install_skillhub_skill(
         }
 
     workspace = workspace_path.expanduser().resolve()
-    skills_root = workspace / "skills"
+    workspace.mkdir(parents=True, exist_ok=True)
+    try:
+        skills_root = require_path_within(
+            workspace / "skills",
+            workspace,
+            message="skills directory must stay inside the workspace",
+        )
+    except WorkspaceBoundaryError as exc:
+        raise SkillsMarketplaceError(str(exc), status=403) from exc
     skills_root.mkdir(parents=True, exist_ok=True)
     target = skills_root / skill_id
 

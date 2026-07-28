@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.loader import load_config, save_config
+from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
 
 
 class SkillManagementError(Exception):
@@ -100,7 +101,15 @@ def delete_webui_skill(
     if entry.get("source") != "workspace":
         raise SkillManagementError("built-in skills cannot be deleted", status=403)
 
-    skills_root = (workspace_path.expanduser().resolve() / "skills").resolve()
+    workspace = workspace_path.expanduser().resolve()
+    try:
+        skills_root = require_path_within(
+            workspace / "skills",
+            workspace,
+            message="skills directory must stay inside the workspace",
+        )
+    except WorkspaceBoundaryError as exc:
+        raise SkillManagementError(str(exc), status=403) from exc
     target = skills_root / name
     if target.parent != skills_root:
         raise SkillManagementError("invalid skill name")

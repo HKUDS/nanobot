@@ -534,3 +534,29 @@ async def test_install_marketplace_skill_is_idempotent(
         "already_installed": True,
         "name": "already-here",
     }
+
+
+@pytest.mark.asyncio
+async def test_install_marketplace_skill_rejects_symlinked_skills_root(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    try:
+        (workspace / "skills").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    with pytest.raises(SkillsMarketplaceError) as exc_info:
+        await install_marketplace_skill(
+            "",
+            "ima-skills",
+            workspace,
+            provider="skillhub",
+            version="1.1.8",
+        )
+
+    assert exc_info.value.status == 403
+    assert list(outside.iterdir()) == []

@@ -485,10 +485,17 @@ function SkillDetailSheet({
                     type="button"
                     role="switch"
                     aria-checked={enabled}
-                    aria-label={t("settings.skills.toggleEnabled", {
-                      name: activeSkill.name,
-                      defaultValue: enabled ? "Disable {{name}}" : "Enable {{name}}",
-                    })}
+                    aria-label={
+                      enabled
+                        ? t("settings.skills.disableSkill", {
+                            name: activeSkill.name,
+                            defaultValue: "Disable {{name}}",
+                          })
+                        : t("settings.skills.enableSkill", {
+                            name: activeSkill.name,
+                            defaultValue: "Enable {{name}}",
+                          })
+                    }
                     disabled={actionBusy}
                     onClick={() => void toggleEnabled()}
                     className={cn(

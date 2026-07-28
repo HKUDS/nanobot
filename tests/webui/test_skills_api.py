@@ -126,3 +126,27 @@ def test_delete_webui_skill_only_deletes_workspace_skills(
     with pytest.raises(SkillManagementError) as exc_info:
         delete_webui_skill(tmp_path, "cron", disabled_skills=disabled)
     assert exc_info.value.status == 403
+
+
+def test_delete_webui_skill_rejects_symlinked_skills_root(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    directory = outside / "custom-skill"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        "---\nname: custom-skill\n---\n",
+        encoding="utf-8",
+    )
+    try:
+        (workspace / "skills").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    with pytest.raises(SkillManagementError) as exc_info:
+        delete_webui_skill(workspace, "custom-skill", disabled_skills=set())
+
+    assert exc_info.value.status == 403
+    assert (outside / "custom-skill" / "SKILL.md").is_file()
