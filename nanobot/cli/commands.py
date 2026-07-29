@@ -2743,6 +2743,7 @@ def channels_login(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.bus.queue import MessageBus
     from nanobot.channels.registry import discover_all
 
     _, loaded = _load_inspection_config(config=config)
@@ -2757,8 +2758,8 @@ def channels_login(
 
     console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
 
-    channel_factory = cast(Any, all_channels[channel_name])
-    channel = channel_factory(channel_cfg, bus=None)
+    channel_factory = all_channels[channel_name]
+    channel = channel_factory(channel_cfg, bus=MessageBus())
 
     success = asyncio.run(channel.login(force=force))
 

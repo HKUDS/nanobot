@@ -17,6 +17,8 @@ from nanobot.webui.transcript import (
 )
 
 if TYPE_CHECKING:
+    from websockets.asyncio.server import ServerConnection
+
     from nanobot.channels.websocket.runtime import WebSocketChannel
 
 _WEBUI_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
@@ -68,7 +70,7 @@ def create_webui_chat_fork(
 
 async def handle_webui_fork_chat(
     channel: WebSocketChannel,
-    connection: Any,
+    connection: ServerConnection,
     envelope: Mapping[str, Any],
 ) -> None:
     """Handle the WebUI ``fork_chat`` websocket command.

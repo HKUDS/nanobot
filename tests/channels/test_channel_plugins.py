@@ -1217,6 +1217,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
         async def login(self, force: bool = False) -> bool:
             seen["force"] = force
             seen["config"] = self.config
+            seen["bus"] = self.bus
             return True
 
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
@@ -1229,6 +1230,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
 
     assert result.exit_code == 0
     assert seen["force"] is True
+    assert isinstance(seen["bus"], MessageBus)
 
 
 def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
