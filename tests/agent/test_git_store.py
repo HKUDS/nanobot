@@ -1,10 +1,10 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+from unittest.mock import patch
+
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from nanobot.utils.gitstore import CommitInfo, GitStore, GitStoreError
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -50,6 +50,11 @@ class TestInit:
         assert len(commits) == 1
         assert "init" in commits[0].message
 
+    def test_init_failure_is_explicit(self, git):
+        with patch("dulwich.porcelain.init", side_effect=OSError("cannot initialize")):
+            with pytest.raises(GitStoreError, match="init failed"):
+                git.init()
+
 
 class TestBuildGitignore:
     def test_subdirectory_dirs(self, git):
@@ -64,7 +69,11 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [
+            line
+            for line in content.split("\n")
+            if line.startswith("!") and line.endswith("/")
+        ]
         assert dir_lines == []
 
 
@@ -93,6 +102,11 @@ class TestAutoCommit:
         git_ready.auto_commit("nothing 1")
         git_ready.auto_commit("nothing 2")
         assert len(git_ready.log()) == 1  # only init commit
+
+    def test_status_failure_is_explicit(self, git_ready):
+        with patch("dulwich.porcelain.status", side_effect=OSError("broken index")):
+            with pytest.raises(GitStoreError, match="auto-commit failed"):
+                git_ready.auto_commit("update")
 
 
 class TestLog:
@@ -223,6 +237,14 @@ class TestCommitInfoFormat:
         c = CommitInfo(sha="abcd1234", message="test", timestamp="2026-04-02 12:00")
         result = c.format()
         assert "(no file changes)" in result
+
+    def test_format_empty_message(self):
+        from nanobot.utils.gitstore import CommitInfo
+        c = CommitInfo(sha="abcd1234", message="", timestamp="2026-04-02 12:00")
+        result = c.format()
+        assert "(no message)" in result
+        assert "`abcd1234`" in result
+        assert c.subject() == "(no message)"
 
 
 class TestRevert:

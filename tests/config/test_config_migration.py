@@ -96,22 +96,17 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("field_name", ["maxMessages", "max_messages"])
-def test_load_config_warns_and_ignores_legacy_max_messages(tmp_path, field_name) -> None:
+def test_load_config_ignores_legacy_max_messages(tmp_path, field_name) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps({"agents": {"defaults": {field_name: 25, "maxTokens": 1234}}}),
         encoding="utf-8",
     )
 
-    with patch("nanobot.config.loader.logger.warning") as warning:
-        config = load_config(config_path)
+    config = load_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
     assert not hasattr(config.agents.defaults, "max_messages")
-    warning.assert_called_once()
-    message = warning.call_args.args[0]
-    assert "legacy and ignored" in message
-    assert "next version" in message
 
 
 def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
@@ -121,8 +116,7 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with patch("nanobot.config.loader.logger.warning"):
-        config = load_config(config_path)
+    config = load_config(config_path)
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
@@ -131,7 +125,7 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
-    from types import SimpleNamespace
+    from nanobot.channels.plugin import load_channel_package
 
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
@@ -154,18 +148,12 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
     monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda: {"qq": load_channel_package("qq")},
+    )
+    monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
-        lambda: {
-            "qq": SimpleNamespace(
-                default_config=lambda: {
-                    "enabled": False,
-                    "appId": "",
-                    "secret": "",
-                    "allowFrom": [],
-                    "msgFormat": "plain",
-                }
-            )
-        },
+        lambda: pytest.fail("onboarding must not import channel runtimes"),
     )
 
     from typer.testing import CliRunner

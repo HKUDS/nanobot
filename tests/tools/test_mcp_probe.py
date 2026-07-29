@@ -49,9 +49,23 @@ async def test_probe_returns_false_for_closed_port():
 
 
 @pytest.mark.asyncio
-async def test_probe_uses_default_port_for_http():
-    """When no port in URL, should default to 80 (will fail -> False)."""
+async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch):
+    """When no port is present, probe the validated address on port 80."""
+    attempts: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.resolve_url_target",
+        lambda _url: (True, "", ("93.184.216.34",)),
+    )
+
+    async def _open_connection(host: str, port: int):
+        attempts.append((host, port))
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+
     assert await _probe_http_url("http://unreachable-host.test/mcp") is False
+    assert attempts == [("93.184.216.34", 80)]
 
 
 @pytest.mark.asyncio

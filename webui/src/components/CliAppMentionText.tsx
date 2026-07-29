@@ -1,5 +1,9 @@
 import { useMemo } from "react";
 
+import {
+  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  InlineTokenHighlight,
+} from "@/components/InlineTokenHighlight";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { CliAppInfo, McpPresetInfo } from "@/lib/types";
@@ -24,7 +28,6 @@ export function cliAppInitials(app: CliAppInfo): string {
       .join("") || app.name.slice(0, 2).toUpperCase()
   );
 }
-
 export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_name">): string {
   const value = preset.display_name || preset.name;
   return (
@@ -36,7 +39,6 @@ export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_
       .join("") || preset.name.slice(0, 2).toUpperCase()
   );
 }
-
 export function splitCapabilityMentionSegments(
   value: string,
   cliApps: CliAppInfo[],
@@ -138,7 +140,7 @@ export function CliAppMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
-  const color = app.brand_color || "hsl(var(--primary))";
+  const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
@@ -146,14 +148,10 @@ export function CliAppMentionToken({
   const testIdPrefix = variant === "composer" ? "composer" : "message";
 
   return (
-    <span
-      data-testid={`${testIdPrefix}-cli-mention-${app.name}`}
+    <InlineTokenHighlight
+      testId={`${testIdPrefix}-cli-mention-${app.name}`}
       title={`CLI app: ${app.display_name || app.name}`}
-      className="relative inline transition-[color,text-shadow] duration-150"
-      style={{
-        color,
-        textShadow: `0 0 10px ${alphaColor(color, 24)}`,
-      }}
+      color={color}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}
@@ -182,7 +180,7 @@ export function CliAppMentionToken({
         ) : null}
       </span>
       {mentionName}
-    </span>
+    </InlineTokenHighlight>
   );
 }
 
@@ -197,7 +195,7 @@ export function McpPresetMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
-  const color = preset.brand_color || "hsl(var(--primary))";
+  const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
@@ -205,14 +203,10 @@ export function McpPresetMentionToken({
   const testIdPrefix = variant === "composer" ? "composer" : "message";
 
   return (
-    <span
-      data-testid={`${testIdPrefix}-mcp-mention-${preset.name}`}
+    <InlineTokenHighlight
+      testId={`${testIdPrefix}-mcp-mention-${preset.name}`}
       title={`MCP server: ${preset.display_name || preset.name}`}
-      className="relative inline transition-[color,text-shadow] duration-150"
-      style={{
-        color,
-        textShadow: `0 0 10px ${alphaColor(color, 24)}`,
-      }}
+      color={color}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}
@@ -241,16 +235,6 @@ export function McpPresetMentionToken({
         ) : null}
       </span>
       {mentionName}
-    </span>
+    </InlineTokenHighlight>
   );
-}
-
-function alphaColor(color: string, percent: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    const alpha = Math.round((percent / 100) * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${color}${alpha}`;
-  }
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }

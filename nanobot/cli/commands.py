@@ -1,15 +1,23 @@
 """CLI commands for nanobot."""
 
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
+
 import asyncio
 import os
 import select
 import signal
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
-from typing import Any
+from types import FrameType
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+if TYPE_CHECKING:
+    from nanobot.gateway.runtime import GatewayRuntime
+    from nanobot.providers.registry import ProviderSpec
+
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -17,8 +25,10 @@ if sys.platform == "win32":
         os.environ["PYTHONIOENCODING"] = "utf-8"
         # Re-open stdout/stderr with UTF-8 encoding
         with suppress(Exception):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            for stream in (sys.stdout, sys.stderr):
+                reconfigure = getattr(stream, "reconfigure", None)
+                if callable(reconfigure):
+                    reconfigure(encoding="utf-8", errors="replace")
 
 # Keep console encoding setup before importing CLI UI/logging libraries.
 import typer  # noqa: E402
@@ -52,8 +62,10 @@ from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
 from prompt_toolkit.history import FileHistory  # noqa: E402
 from prompt_toolkit.key_binding import KeyBindings  # noqa: E402
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent  # noqa: E402
 from prompt_toolkit.keys import Keys  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 from rich.markup import escape  # noqa: E402
@@ -77,8 +89,17 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
 from nanobot.security.network import is_loopback_host  # noqa: E402
-from nanobot.utils.evaluator import evaluate_response  # noqa: E402
-from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
+from nanobot.session.keys import (  # noqa: E402
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+)
+from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt  # noqa: E402
+from nanobot.utils.helpers import (  # noqa: E402
+    sanitize_surrogates as _sanitize_surrogates,
+)
+from nanobot.utils.helpers import (  # noqa: E402
+    sync_workspace_templates,
+)
 from nanobot.utils.restart import (  # noqa: E402
     consume_restart_notice_from_env,
     format_restart_completed_message,
@@ -90,17 +111,6 @@ from nanobot.webui.build import (  # noqa: E402
     ensure_webui_bundle,
 )
 from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
-
-
-def _sanitize_surrogates(text: str) -> str:
-    """Reconstruct surrogate pairs into real characters; replace lone surrogates.
-
-    On Windows, console input may produce lone surrogate code points (e.g.
-    ``\\ud83d\\udc08`` for U+1F408).  Round-tripping through UTF-16 reconstructs
-    paired surrogates into their actual characters and replaces unpaired ones
-    with U+FFFD.
-    """
-    return text.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
 
 
 def _signal_name(signum: int) -> str:
@@ -140,7 +150,7 @@ def _ensure_interactive_tty_mode() -> None:
 def _install_gateway_shutdown_handlers(
     loop: asyncio.AbstractEventLoop,
     shutdown_event: asyncio.Event,
-    tasks: list[asyncio.Task],
+    tasks: list[asyncio.Task[Any]],
     print_status: Callable[[str], None],
 ) -> Callable[[], None]:
     """Install foreground gateway signal handlers and return a restore callback."""
@@ -270,12 +280,20 @@ def _pick_heartbeat_target_from_sessions(
     enabled_channels: Iterable[str],
     sessions: Iterable[dict[str, Any]],
     archived_keys: Iterable[str],
+    unified_session_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     enabled = set(enabled_channels)
     archived = set(archived_keys)
     for item in sessions:
         key = item.get("key") or ""
         if key in archived:
+            continue
+        if key == UNIFIED_SESSION_KEY:
+            route = last_channel_from_metadata(unified_session_metadata)
+            if route is not None:
+                channel, chat_id = route
+                if channel not in {"cli", "system"} and channel in enabled:
+                    return channel, chat_id
             continue
         if ":" not in key:
             continue
@@ -291,8 +309,8 @@ def _pick_heartbeat_target_from_sessions(
 # CLI input: prompt_toolkit for editing, paste, history, and display
 # ---------------------------------------------------------------------------
 
-_PROMPT_SESSION: PromptSession | None = None
-_SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_PROMPT_SESSION: PromptSession[str] | None = None
+_saved_term_attrs: list[Any] | None = None  # original termios settings, restored on exit
 
 
 def _flush_pending_tty_input() -> None:
@@ -321,12 +339,12 @@ def _flush_pending_tty_input() -> None:
 
 def _restore_terminal() -> None:
     """Restore terminal to its original state (echo, line buffering, etc.)."""
-    if _SAVED_TERM_ATTRS is None:
+    if _saved_term_attrs is None:
         return
     with suppress(Exception):
         import termios
 
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _saved_term_attrs)
 
 
 def _build_cli_key_bindings() -> KeyBindings:
@@ -350,20 +368,20 @@ def _build_cli_key_bindings() -> KeyBindings:
     kb = KeyBindings()
 
     @kb.add("enter")
-    def _(event):
+    def _(event: KeyPressEvent) -> None:
         event.current_buffer.validate_and_handle()
 
     @kb.add("escape", "enter")  # Alt+Enter / Meta+Enter (ESC + CR, "\x1b\r")
-    def _(event):
+    def _(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 
     # LF-as-Enter terminals send Alt+Enter as ESC + LF rather than ESC + CR.
     @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
-    def _(event):
+    def _(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 
     @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
-    def _(event):
+    def _(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 
     return kb
@@ -371,13 +389,13 @@ def _build_cli_key_bindings() -> KeyBindings:
 
 def _init_prompt_session() -> None:
     """Create the prompt_toolkit session with persistent file history."""
-    global _PROMPT_SESSION, _SAVED_TERM_ATTRS
+    global _PROMPT_SESSION, _saved_term_attrs
 
     # Save terminal state so we can restore it on exit
     with suppress(Exception):
         import termios
 
-        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
+        _saved_term_attrs = termios.tcgetattr(sys.stdin.fileno())
 
     from nanobot.config.paths import get_cli_history_path
 
@@ -398,11 +416,14 @@ def _make_console() -> Console:
     return Console(file=sys.stdout)
 
 
-def _render_interactive_ansi(render_fn) -> str:
+def _render_interactive_ansi(render_fn: Callable[[Console], None]) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
         force_terminal=sys.stdout.isatty(),
-        color_system=console.color_system or "standard",
+        color_system=cast(
+            Literal["auto", "standard", "256", "truecolor", "windows"],
+            console.color_system or "standard",
+        ),
         width=console.width,
     )
     with ansi_console.capture() as capture:
@@ -413,7 +434,7 @@ def _render_interactive_ansi(render_fn) -> str:
 def _print_agent_response(
     response: str,
     render_markdown: bool,
-    metadata: dict | None = None,
+    metadata: dict[str, Any] | None = None,
     show_header: bool = True,
 ) -> None:
     """Render assistant response with consistent terminal styling."""
@@ -427,7 +448,9 @@ def _print_agent_response(
     console.print()
 
 
-def _response_renderable(content: str, render_markdown: bool, metadata: dict | None = None):
+def _response_renderable(
+    content: str, render_markdown: bool, metadata: dict[str, Any] | None = None
+) -> Text | Markdown:
     """Render plain-text command output without markdown collapsing newlines."""
     if not render_markdown:
         return Text(content)
@@ -450,19 +473,19 @@ async def _print_interactive_line(text: str) -> None:
 async def _print_interactive_response(
     response: str,
     render_markdown: bool,
-    metadata: dict | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
     def _write() -> None:
         content = response or ""
-        ansi = _render_interactive_ansi(
-            lambda c: (
-                c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
-                c.print(_response_renderable(content, render_markdown, metadata)),
-                c.print(),
-            )
-        )
+
+        def _render(target: Console) -> None:
+            target.print()
+            target.print(f"[cyan]{__logo__} nanobot[/cyan]")
+            target.print(_response_renderable(content, render_markdown, metadata))
+            target.print()
+
+        ansi = _render_interactive_ansi(_render)
         print_formatted_text(ANSI(ansi), end="")
 
     await run_in_terminal(_write)
@@ -643,6 +666,7 @@ def onboard(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
+    explicit_config = config is not None
     if config:
         config_path = Path(config).expanduser().resolve()
         set_config_path(config_path)
@@ -655,10 +679,11 @@ def onboard(
             loaded.agents.defaults.workspace = workspace
         return loaded
 
+    loaded_config: Config | None = None
     # Create or update config
     if config_path.exists():
         if wizard:
-            config = _apply_workspace_override(load_config(config_path))
+            loaded_config = _apply_workspace_override(load_config(config_path))
         else:
             should_refresh = non_interactive_refresh
             if not non_interactive_refresh:
@@ -670,37 +695,39 @@ def onboard(
                     "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
                 )
                 if typer.confirm("Overwrite?"):
-                    config = _apply_workspace_override(Config())
-                    save_config(config, config_path)
+                    loaded_config = _apply_workspace_override(Config())
+                    save_config(loaded_config, config_path)
                     console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
                 else:
                     should_refresh = True
 
             if should_refresh:
-                config = _apply_workspace_override(load_config(config_path))
-                save_config(config, config_path)
+                loaded_config = _apply_workspace_override(load_config(config_path))
+                save_config(loaded_config, config_path)
                 console.print(
                     f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
                 )
     else:
-        config = _apply_workspace_override(Config())
+        loaded_config = _apply_workspace_override(Config())
         # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
         if not wizard:
-            save_config(config, config_path)
+            save_config(loaded_config, config_path)
             console.print(f"[green]✓[/green] Created config at {config_path}")
+
+    assert loaded_config is not None
 
     # Run interactive wizard if enabled
     if wizard:
         from nanobot.cli.onboard import run_onboard
 
         try:
-            result = run_onboard(initial_config=config)
+            result = run_onboard(initial_config=loaded_config)
             if not result.should_save:
                 console.print("[yellow]Configuration discarded. No changes were saved.[/yellow]")
                 return
 
-            config = result.config
-            save_config(config, config_path)
+            loaded_config = result.config
+            save_config(loaded_config, config_path)
             console.print(f"[green]✓[/green] Config saved at {config_path}")
         except Exception as e:
             console.print(f"[red]✗[/red] Error during configuration: {e}")
@@ -709,53 +736,42 @@ def onboard(
     _onboard_plugins(config_path)
 
     # Create workspace, preferring the configured workspace path.
-    workspace_path = get_workspace_path(config.workspace_path)
+    workspace_path = get_workspace_path(loaded_config.workspace_path)
     if not workspace_path.exists():
         workspace_path.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace_path}")
 
     sync_workspace_templates(workspace_path)
 
-    agent_cmd = 'nanobot agent -m "Hello!"'
-    gateway_cmd = "nanobot gateway"
-    if config:
-        agent_cmd += f" --config {config_path}"
-        gateway_cmd += f" --config {config_path}"
+    webui_cmd = "nanobot webui"
+    if explicit_config:
+        webui_cmd += f' -c "{config_path}"'
 
-    console.print(f"\n{__logo__} nanobot is ready!")
-    console.print("\nNext steps:")
-    if wizard:
-        console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
-        console.print(f"  2. Start gateway: [cyan]{gateway_cmd}[/cyan]")
-    else:
-        console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
-        console.print("     Get one at: https://openrouter.ai/keys")
-        console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
-    console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
-    )
+    typer.echo(f"\n✓ nanobot is ready. Run: {webui_cmd}")
 
 
 def _onboard_plugins(config_path: Path) -> None:
     """Inject default config for all discovered channels (built-in + plugins)."""
     import json
 
-    from nanobot.channels.registry import discover_all
+    from nanobot.channels.contracts import channel_default_config
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import merge_missing_defaults
 
-    all_channels = discover_all()
-    if not all_channels:
+    plugins = discover_plugins()
+    if not plugins:
         return
 
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
 
     channels = data.setdefault("channels", {})
-    for name, cls in all_channels.items():
+    for name, plugin in plugins.items():
+        defaults = channel_default_config(plugin)
         if name not in channels:
-            channels[name] = cls.default_config()
+            channels[name] = defaults
         else:
-            channels[name] = merge_missing_defaults(channels[name], cls.default_config())
+            channels[name] = merge_missing_defaults(channels[name], defaults)
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -763,8 +779,7 @@ def _onboard_plugins(config_path: Path) -> None:
 
 def _print_enable_options(
     extras: dict[str, list[str] | None],
-    builtin_channels: set[str],
-    plugin_channels: dict[str, Any],
+    channel_plugins: dict[str, Any],
     config: Config,
 ) -> None:
     table = Table(title="Available Features")
@@ -772,10 +787,16 @@ def _print_enable_options(
     table.add_column("Type")
     table.add_column("Enabled")
 
-    for item in sorted(builtin_channels | set(plugin_channels) | set(extras)):
-        is_channel = item in builtin_channels or item in plugin_channels
+    for item in sorted(set(channel_plugins) | set(extras)):
+        plugin = channel_plugins.get(item)
+        is_channel = plugin is not None
         enabled = (
-            feature_support.channel_enabled(config, item)
+            feature_support.channel_enabled(
+                config,
+                item,
+                plugin,
+                default_enabled=plugin.default_enabled,
+            )
             if is_channel
             else feature_support.extra_installed(item, extras[item])
         )
@@ -796,9 +817,89 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
+def _print_config_error(error: Exception) -> None:
+    """Render a configuration failure without exposing traceback internals."""
+    from nanobot.config.errors import ConfigLoadError
+
+    console.print(Text(str(error), style="red"))
+    if isinstance(error, ConfigLoadError):
+        command = _status_command(error.path)
+        console.print(f"[dim]Check again after editing: {escape(command)}[/dim]")
+
+
+def _print_runtime_config_validation_error(
+    error: ValidationError,
+    *,
+    config_path: Path,
+    summary: str,
+    path_prefix: tuple[str | int, ...],
+    retry_command: str,
+) -> None:
+    """Render a runtime-owned Pydantic config error without exposing input values."""
+    from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
+
+    issues = tuple(
+        ConfigIssue(
+            path=(*path_prefix, *issue.path),
+            message=issue.message,
+        )
+        for issue in validation_issues(error)
+    )
+    diagnostic = ConfigLoadError(
+        config_path,
+        kind="invalid_schema",
+        summary=summary,
+        issues=issues,
+    )
+    console.print(Text(str(diagnostic), style="red"))
+    console.print(f"[dim]Fix the listed setting, then retry: {escape(retry_command)}[/dim]")
+
+
+def _status_command(config_path: Path) -> str:
+    return f'nanobot status --config "{config_path}"'
+
+
+def _print_model_setup_steps(config_path: Path) -> None:
+    """Show the shortest setup routes shared by Status and Agent startup."""
+    config_arg = f'--config "{config_path}"'
+    console.print(
+        f"  WebUI: run [cyan]nanobot webui {escape(config_arg)}[/cyan], "
+        "then open Settings → Models"
+    )
+    console.print(f"  CLI:   run [cyan]nanobot onboard --wizard {escape(config_arg)}[/cyan]")
+    console.print(f"  Check: [cyan]{escape(_status_command(config_path))}[/cyan]")
+
+
+def _print_agent_start_error(error: ValueError) -> None:
+    from nanobot.config.loader import get_config_path
+
+    console.print(Text(f"Agent cannot start: {error}", style="red"))
+    console.print("Complete provider/model setup:")
+    _print_model_setup_steps(get_config_path())
+
+
+def _load_config_for_cli(
+    config_path: Path | None = None,
+    *,
+    resolve_env: bool = False,
+) -> Config:
+    """Load CLI configuration and turn expected failures into a clean exit."""
+    from nanobot.config.errors import ConfigLoadError
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+    try:
+        loaded = load_config(config_path)
+        if resolve_env:
+            loaded = resolve_config_env_vars(loaded)
+        return loaded
+    except ConfigLoadError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from exc
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from nanobot.config.loader import set_config_path
 
     config_path = None
     if config:
@@ -809,12 +910,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
-    try:
-        loaded = resolve_config_env_vars(load_config(config_path))
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
-    _warn_deprecated_config_keys(config_path)
+    loaded = _load_config_for_cli(config_path, resolve_env=True)
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return loaded
@@ -835,29 +931,12 @@ def _read_trigger_cli_message(message: str | None) -> str:
     raise typer.Exit(1)
 
 
-def _warn_deprecated_config_keys(config_path: Path | None) -> None:
-    """Hint users to remove obsolete keys from their config file."""
-    import json
-
-    from nanobot.config.loader import get_config_path
-
-    path = config_path or get_config_path()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if "memoryWindow" in raw.get("agents", {}).get("defaults", {}):
-        console.print(
-            "[dim]Hint: `memoryWindow` in your config is no longer used "
-            "and can be safely removed.[/dim]"
-        )
-
-
 def _load_inspection_config(
     config: str | None = None,
     workspace: str | None = None,
 ) -> tuple[Path, Config]:
     """Load config for diagnostic commands without resolving secret env refs."""
+    from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import get_config_path, load_config, set_config_path
 
     config_path = None
@@ -869,10 +948,12 @@ def _load_inspection_config(
     display_path = config_path or get_config_path()
     try:
         loaded = load_config(config_path)
+    except ConfigLoadError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from exc
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
-    _warn_deprecated_config_keys(display_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return display_path, loaded
@@ -920,22 +1001,15 @@ def _resolve_webui_config_path(config: str | None) -> Path:
 
 def _load_webui_setup_config(config_path: Path) -> Config:
     """Load config for first-run mutation without resolving env-var placeholders."""
-    from nanobot.config.loader import load_config
-
-    try:
-        return load_config(config_path)
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1) from e
+    return _load_config_for_cli(config_path)
 
 
 def _provider_setup_error(config: Config) -> str | None:
-    """Return the provider setup error, or None when the current model can start."""
-    from nanobot.config.loader import resolve_config_env_vars
-    from nanobot.providers.factory import build_provider_snapshot
+    """Return a local provider/model configuration error, or None."""
+    from nanobot.providers.factory import validate_provider_setup
 
     try:
-        build_provider_snapshot(resolve_config_env_vars(config.model_copy(deep=True)))
+        validate_provider_setup(config)
     except ValueError as exc:
         return str(exc)
     return None
@@ -943,18 +1017,72 @@ def _provider_setup_error(config: Config) -> str | None:
 
 def _webui_config_dict(config: Config) -> dict[str, Any]:
     """Return the current WebSocket config as a mutable alias-key dictionary."""
-    from nanobot.channels.websocket import WebSocketConfig
+    from nanobot.channels.websocket.runtime import WebSocketConfig
 
-    current = getattr(config.channels, "websocket", None) or {}
+    current: Any = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
     return model.model_dump(by_alias=True, exclude_none=True)
 
 
 def _webui_channel_enabled(config: Config) -> bool:
-    from nanobot.channels.websocket import WebSocketConfig
+    from nanobot.channels.websocket.runtime import WebSocketConfig
 
-    current = getattr(config.channels, "websocket", None) or {}
+    current: Any = getattr(config.channels, "websocket", None) or {}
     return bool(WebSocketConfig.model_validate(current).enabled)
+
+
+def _validate_gateway_startup(config: Config) -> str | None:
+    """Validate gateway startup and return a provider error recoverable through WebUI."""
+    from nanobot.config.loader import get_config_path
+
+    config_path = get_config_path()
+    try:
+        webui_config = _webui_config_dict(config)
+    except ValidationError as exc:
+        retry_command = f'nanobot gateway --config "{config_path}"'
+        _print_runtime_config_validation_error(
+            exc,
+            config_path=config_path,
+            summary="Gateway configuration is invalid.",
+            path_prefix=("channels", "websocket"),
+            retry_command=retry_command,
+        )
+        raise typer.Exit(1) from exc
+
+    provider_error = _provider_setup_error(config)
+    if not provider_error:
+        return None
+
+    if bool(webui_config["enabled"]):
+        console.print(
+            Text(f"Provider/model setup is incomplete: {provider_error}", style="yellow")
+        )
+        console.print(
+            "Gateway will start so you can configure a provider and model "
+            "in WebUI Settings → Models."
+        )
+        browser_url = _webui_browser_url(config)
+        webui_url = browser_url.split("/#/", 1)[0]
+        console.print(Text(f"WebUI: {webui_url}", style="cyan"))
+        if browser_url != webui_url:
+            secret_key = (
+                "tokenIssueSecret"
+                if str(webui_config.get("tokenIssueSecret") or "").strip()
+                else "token"
+            )
+            console.print(
+                Text(
+                    f"If prompted, enter the configured channels.websocket.{secret_key} "
+                    f"value (see {config_path}).",
+                    style="dim",
+                )
+            )
+        return provider_error
+
+    console.print(Text(f"Gateway cannot start: {provider_error}", style="red"))
+    console.print("Complete provider/model setup:")
+    _print_model_setup_steps(config_path)
+    raise typer.Exit(1)
 
 
 def _prepare_webui_bundle_for_gateway(
@@ -1056,9 +1184,9 @@ def _webui_display_url(url: str) -> str:
 
 def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> tuple[bool, bool]:
     """Enable the local WebUI channel with safe localhost defaults."""
-    from nanobot.channels.websocket import WebSocketConfig
+    from nanobot.channels.websocket.runtime import WebSocketConfig
 
-    current = getattr(config.channels, "websocket", None) or {}
+    current: Any = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
     changed = False
     generated_secret = False
@@ -1220,7 +1348,7 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
 
 
-def _attach_to_background_gateway(runtime: Any) -> None:
+def _attach_to_background_gateway(runtime: "GatewayRuntime") -> None:
     """Keep a foreground WebUI command attached to a managed gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
@@ -1254,14 +1382,20 @@ def _gateway_instance_command(
     return " ".join(shlex.quote(part) for part in parts)
 
 
-def _run_quick_start_for_webui(config: Config, *, yes: bool) -> Config:
+def _run_quick_start_for_webui(
+    config: Config,
+    *,
+    yes: bool,
+    config_path: Path,
+) -> Config:
     """Offer the existing Quick Start flow when provider setup is missing."""
     if yes:
         console.print(
             "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
-            "provider credentials. Run `nanobot webui` interactively or "
-            "`nanobot onboard --wizard`.[/red]"
+            "provider credentials.[/red]"
         )
+        console.print("Complete provider/model setup:")
+        _print_model_setup_steps(config_path)
         raise typer.Exit(1)
 
     console.print()
@@ -1301,7 +1435,7 @@ def trigger(
     trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
     message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Deliver a local trigger message to its bound chat session."""
     from nanobot.triggers.local_store import (
@@ -1397,16 +1531,19 @@ def serve(
         api_key=api_key,
     )
 
-    async def on_startup(_app):
+    async def on_startup(_app: Any) -> None:
         await agent_loop._connect_mcp()
 
-    async def on_cleanup(_app):
+    async def on_cleanup(_app: Any) -> None:
         await agent_loop.close_mcp()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
 
-    web.run_app(api_app, host=host, port=port, print=lambda msg: logger.info(msg))
+    def _log_aiohttp(message: object) -> None:
+        logger.info("{}", message)
+
+    web.run_app(api_app, host=host, port=port, print=_log_aiohttp)
 
 
 # ============================================================================
@@ -1438,7 +1575,7 @@ def webui(
     ),
 ) -> None:
     """Prepare the local WebUI, start the gateway, and open the browser workbench."""
-    from nanobot.config.loader import save_config
+    from nanobot.config.loader import resolve_config_env_vars, save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
     _ensure_interactive_tty_mode()
@@ -1452,10 +1589,33 @@ def webui(
     if workspace:
         setup_config.agents.defaults.workspace = workspace
 
-    provider_error = _provider_setup_error(setup_config)
-    if provider_error:
+    try:
+        resolved_setup_config = resolve_config_env_vars(
+            setup_config.model_copy(deep=True),
+            config_path=config_path,
+        )
+    except ValueError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from exc
+
+    provider_error = _provider_setup_error(resolved_setup_config)
+    settings_setup_error = provider_error if provider_error and created_config else None
+    if settings_setup_error:
+        console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
+        console.print("Configure a provider and model in WebUI Settings → Models.")
+        if background:
+            console.print(
+                "[red]First-time WebUI setup must run in the foreground. "
+                "Run `nanobot webui` without --background.[/red]"
+            )
+            raise typer.Exit(1)
+    elif provider_error:
         console.print(f"[dim]Provider check: {provider_error}[/dim]")
-        setup_config = _run_quick_start_for_webui(setup_config, yes=yes)
+        setup_config = _run_quick_start_for_webui(
+            setup_config,
+            yes=yes,
+            config_path=config_path,
+        )
         if workspace:
             setup_config.agents.defaults.workspace = workspace
 
@@ -1467,6 +1627,16 @@ def webui(
         )
         _warn_webui_bind_scope(setup_config)
         webui_url = _webui_browser_url(setup_config)
+    except ValidationError as exc:
+        retry_command = f'nanobot webui --config "{config_path}"'
+        _print_runtime_config_validation_error(
+            exc,
+            config_path=config_path,
+            summary="WebUI configuration is invalid.",
+            path_prefix=("channels", "websocket"),
+            retry_command=retry_command,
+        )
+        raise typer.Exit(1) from exc
     except ValueError as exc:
         console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -1596,6 +1766,7 @@ def webui(
         port=effective_gateway_port,
         open_browser_url=None if no_open else webui_url,
         webui_bundle_mode=webui_bundle_mode,
+        unconfigured_provider_error=settings_setup_error,
     )
 
 
@@ -1614,20 +1785,34 @@ def _run_gateway(
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
+    unconfigured_provider_error: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
+    from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
-    from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from nanobot.providers.factory import (
+        ProviderSnapshot,
+        build_provider_snapshot,
+        build_unconfigured_provider_snapshot,
+        load_provider_snapshot,
+    )
+    from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.session.webui_turns import (
+        WebuiTurnCoordinator,
+        WebuiTurnRoutePolicy,
+        build_webui_fallback_model_observer,
+    )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
@@ -1659,11 +1844,35 @@ def _run_gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
-    try:
-        provider_snapshot = build_provider_snapshot(config)
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
+    fallback_model_observer = build_webui_fallback_model_observer(bus)
+
+    def _observe_fallback_models(snapshot: ProviderSnapshot) -> ProviderSnapshot:
+        if isinstance(snapshot.provider, FallbackProvider):
+            snapshot.provider.set_fallback_model_observer(fallback_model_observer)
+        return snapshot
+
+    def _load_gateway_provider_snapshot(
+        *args: Any,
+        **kwargs: Any,
+    ) -> ProviderSnapshot:
+        try:
+            return _observe_fallback_models(load_provider_snapshot(*args, **kwargs))
+        except ValueError as exc:
+            if unconfigured_provider_error is None:
+                raise
+            return build_unconfigured_provider_snapshot(config, str(exc))
+
+    if unconfigured_provider_error is not None:
+        provider_snapshot = build_unconfigured_provider_snapshot(
+            config,
+            unconfigured_provider_error,
+        )
+    else:
+        try:
+            provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
+        except ValueError as exc:
+            console.print(f"[red]Error: {exc}[/red]")
+            raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.
@@ -1689,6 +1898,12 @@ def _run_gateway(
     cron = CronService(cron_store_path)
     trigger_store = LocalTriggerStore(config.workspace_path)
 
+    turn_delivery_factory = TurnDeliveryFactory(
+        bus,
+        runtime_events,
+        route_policy=WebuiTurnRoutePolicy(session_manager),
+    )
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -1698,18 +1913,24 @@ def _run_gateway(
         cron_service=cron,
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
-        provider_snapshot_loader=load_provider_snapshot,
+        provider_snapshot_loader=_load_gateway_provider_snapshot,
+        preset_catalog_loader=load_model_preset_catalog,
         runtime_events=runtime_events,
+        turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
     )
-    WebuiTurnCoordinator(
+    def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
+        agent._schedule_background(cast(Coroutine[Any, Any, None], awaitable))
+
+    webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
-        schedule_background=lambda coro: agent._schedule_background(coro),
-    ).subscribe(runtime_events)
+        schedule_background=_schedule_webui_background,
+    )
+    webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1752,24 +1973,25 @@ def _run_gateway(
             session_manager.save(session)
         await bus.publish_outbound(msg)
 
-    message_tool = getattr(agent, "tools", {}).get("message")
+    message_tool = agent.tools.get("message")
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        async def _silent(*_args, **_kwargs):
+        async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from nanobot.agent.memory import DreamRunProgress, MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
+            progress = DreamRunProgress()
             resp = None
             diff_body = ""
             try:
@@ -1779,27 +2001,35 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
+                dream_runtime = agent.dream_runtime()
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
                     ephemeral=True,
                     tools=store.build_dream_tools(),
-                    on_progress=_silent,
+                    on_progress=progress,
+                    runtime=dream_runtime,
                 )
-                # Ground truth: the real file delta, not the LLM's self-report.
+                # The real file delta grounds the audit record; clean completion
+                # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()
-                productive = bool(diff_body) or (
-                    not store.git.is_initialized()
-                    and MemoryStore.dream_run_completed(resp)
+                completed = MemoryStore.dream_run_completed(
+                    resp,
+                    had_tool_errors=progress.had_tool_errors,
                 )
-                if productive:
+                if completed:
                     store.set_last_dream_cursor(last_cursor)
-                    logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
-                elif MemoryStore.dream_run_completed(resp):
-                    logger.info(
-                        "Dream cron job completed with no memory changes; "
-                        "cursor not advanced",
-                    )
+                    if diff_body:
+                        logger.info(
+                            "Dream cron job completed, cursor advanced to {}",
+                            last_cursor,
+                        )
+                    else:
+                        logger.info(
+                            "Dream cron job completed with no memory changes; "
+                            "cursor advanced to {}",
+                            last_cursor,
+                        )
                 else:
                     logger.warning(
                         "Dream cron job did not complete; cursor remains at {}",
@@ -1859,21 +2089,29 @@ def _run_gateway(
             finally:
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
                     message_tool.reset_suppress_delivery(suppress_token)
-            response = resp.content if resp else ""
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
             session = agent.sessions.get_or_create("heartbeat")
             session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
             agent.sessions.save(session)
 
-            if not response:
-                return None
+            if not resp or not resp.content:
+                return
+
+            response = resp.content
+
+            evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
 
             # Fail closed: stay silent on evaluator failure instead of notifying.
             should_notify = await evaluate_response(
-                response, prompt, agent.provider, agent.model,
+                response=response,
+                task_context=prompt,
+                provider=agent.provider,
+                model=agent.model,
+                evaluator_prompt=evaluator_prompt,
                 default_notify=False,
             )
+
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
                 await _deliver_to_channel(
@@ -1899,11 +2137,7 @@ def _run_gateway(
     cron.on_job = on_cron_job
 
     def _webui_runtime_model_name() -> str | None:
-        model = getattr(agent, "model", None)
-        if isinstance(model, str):
-            stripped = model.strip()
-            return stripped or None
-        return None
+        return agent.model.strip() or None
 
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
@@ -1914,12 +2148,8 @@ def _run_gateway(
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
-        webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
-        webui_local_trigger_pending_ids=getattr(
-            agent,
-            "pending_local_trigger_ids_for_session",
-            None,
-        ),
+        webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
+        webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -1928,10 +2158,16 @@ def _run_gateway(
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         sidebar_state = read_webui_sidebar_state()
+        unified_metadata = None
+        if config.agents.defaults.unified_session:
+            record = session_manager.read_session_metadata(UNIFIED_SESSION_KEY)
+            if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
+                unified_metadata = record["metadata"]
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
             sessions=session_manager.list_sessions(),
             archived_keys=sidebar_state.get("archived_keys", []),
+            unified_session_metadata=unified_metadata,
         )
 
     if channels.enabled_channels:
@@ -1940,8 +2176,9 @@ def _run_gateway(
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
     cron_status = cron.status()
-    if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+    cron_job_count = cast(int, cron_status["jobs"])
+    if cron_job_count > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
 
     hb_cfg = config.gateway.heartbeat
     if hb_cfg.enabled:
@@ -1949,13 +2186,16 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
-    async def _health_server(host: str, health_port: int):
+    async def _health_server(host: str, health_port: int) -> None:
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
 
         connection_slots = asyncio.Semaphore(_GATEWAY_HEALTH_MAX_CONNECTIONS)
 
-        async def handle(reader, writer):
+        async def handle(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
             if connection_slots.locked():
                 writer.close()
                 return
@@ -2042,7 +2282,7 @@ def _run_gateway(
         # Channels start asynchronously; a short poll lets us avoid racing the bind.
         for _ in range(40):  # ~4s max
             try:
-                reader, writer = await asyncio.open_connection(
+                _reader, writer = await asyncio.open_connection(
                     target_host,
                     target_port,
                 )
@@ -2058,10 +2298,10 @@ def _run_gateway(
         except Exception as e:
             console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
-    async def run():
-        tasks: list[asyncio.Task] = []
-        shutdown_task: asyncio.Task | None = None
-        runtime_tasks: asyncio.Future | None = None
+    async def run() -> None:
+        tasks: list[asyncio.Task[Any]] = []
+        shutdown_task: asyncio.Task[Any] | None = None
+        runtime_tasks: asyncio.Future[list[Any]] | None = None
         runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
         _ensure_interactive_tty_mode()
@@ -2073,13 +2313,23 @@ def _run_gateway(
         )
         try:
             await cron.start()
+            # Re-read once on first admission to close the watcher subscription window.
+            agent.runtime_resolver.invalidate()
             tasks = [
+                asyncio.create_task(
+                    watch_config_file(
+                        Path(config_path),
+                        lambda: agent.invalidate_runtime_config(),
+                    ),
+                    name="nanobot-config-watcher",
+                ),
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(
                     run_local_trigger_queue(
                         store=trigger_store,
-                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                        submit_turn=agent.submit_local_trigger_turn,
+                        is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
                 ),
@@ -2106,7 +2356,7 @@ def _run_gateway(
             if runtime_tasks in done:
                 runtime_tasks_drained = True
                 await runtime_tasks
-            elif runtime_tasks is not None:
+            else:
                 runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
@@ -2123,6 +2373,9 @@ def _run_gateway(
                         await shutdown_task
                 cron.stop()
                 agent.stop()
+                # Some SDKs swallow task cancellation while attempting to reconnect.
+                # Close channel transports before waiting for their runners to exit.
+                await channels.stop_all()
                 for task in tasks:
                     if not task.done():
                         task.cancel()
@@ -2131,7 +2384,6 @@ def _run_gateway(
                 if runtime_tasks is not None and not runtime_tasks_drained:
                     with suppress(asyncio.CancelledError, Exception):
                         await runtime_tasks
-                await channels.stop_all()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
@@ -2150,6 +2402,7 @@ app.add_typer(
         log_handler_id=_log_handler_id,
         load_runtime_config=_load_runtime_config,
         run_gateway=_run_gateway,
+        validate_startup_config=_validate_gateway_startup,
         prepare_webui_bundle=lambda config, mode: _prepare_webui_bundle_for_gateway(
             config,
             mode=mode,
@@ -2169,39 +2422,47 @@ def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
+    from nanobot.providers.factory import make_provider
     from nanobot.providers.image_generation import image_gen_provider_configs
 
-    config = _load_runtime_config(config, workspace)
-    sync_workspace_templates(config.workspace_path)
+    runtime_config = _load_runtime_config(config, workspace)
+    try:
+        provider = make_provider(runtime_config)
+    except ValueError as exc:
+        _print_agent_start_error(exc)
+        raise typer.Exit(1) from exc
+
+    sync_workspace_templates(runtime_config.workspace_path)
 
     bus = MessageBus()
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
-    if is_default_workspace(config.workspace_path):
-        _migrate_cron_store(config)
+    if is_default_workspace(runtime_config.workspace_path):
+        _migrate_cron_store(runtime_config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     _set_nanobot_logs(logs)
 
     try:
         agent_loop = AgentLoop.from_config(
-            config, bus,
+            runtime_config, bus,
+            provider=provider,
             cron_service=cron,
-            image_generation_provider_configs=image_gen_provider_configs(config),
+            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
         )
     except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
+        _print_agent_start_error(exc)
         raise typer.Exit(1) from exc
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -2213,7 +2474,9 @@ def agent(
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
 
-    def _make_progress(renderer: StreamRenderer | None = None):
+    def _make_progress(
+        renderer: StreamRenderer | None = None,
+    ) -> Callable[..., Awaitable[None]]:
         reasoning_buffer = _ReasoningBuffer()
 
         async def _cli_progress(content: str, *, tool_hint: bool = False, reasoning: bool = False, **_kwargs: Any) -> None:
@@ -2243,11 +2506,11 @@ def agent(
 
     if message:
         # Single message mode — direct call, no bus needed
-        async def run_once():
+        async def run_once() -> None:
             renderer = StreamRenderer(
                 render_markdown=markdown,
-                bot_name=config.agents.defaults.bot_name,
-                bot_icon=config.agents.defaults.bot_icon,
+                bot_name=runtime_config.agents.defaults.bot_name,
+                bot_icon=runtime_config.agents.defaults.bot_icon,
             )
             response = await agent_loop.process_direct(
                 message, session_id,
@@ -2273,8 +2536,8 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        _model, _preset_tag = _model_display(config)
-        _icon = config.agents.defaults.bot_icon or __logo__
+        _model, _preset_tag = _model_display(runtime_config)
+        _icon = runtime_config.agents.defaults.bot_icon or __logo__
         console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
@@ -2282,7 +2545,7 @@ def agent(
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
-        def _handle_signal(signum, frame):
+        def _handle_signal(signum: int, _frame: FrameType | None) -> None:
             sig_name = signal.Signals(signum).name
             _restore_terminal()
             console.print(f"\nReceived {sig_name}, goodbye!")
@@ -2298,7 +2561,7 @@ def agent(
         if hasattr(signal, 'SIGPIPE'):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
-        async def run_interactive():
+        async def run_interactive() -> None:
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
@@ -2306,7 +2569,7 @@ def agent(
             renderer: StreamRenderer | None = None
             reasoning_buffer = _ReasoningBuffer()
 
-            async def _consume_outbound():
+            async def _consume_outbound() -> None:
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
@@ -2339,7 +2602,7 @@ def agent(
 
                         if await _maybe_print_interactive_progress(
                             msg,
-                            renderer,
+                            None,
                             agent_loop.channels_config,
                             renderer,
                             reasoning_buffer,
@@ -2386,8 +2649,8 @@ def agent(
                         reasoning_buffer.clear()
                         renderer = StreamRenderer(
                             render_markdown=markdown,
-                            bot_name=config.agents.defaults.bot_name,
-                            bot_icon=config.agents.defaults.bot_icon,
+                            bot_name=runtime_config.agents.defaults.bot_name,
+                            bot_icon=runtime_config.agents.defaults.bot_icon,
                         )
 
                         await bus.publish_inbound(InboundMessage(
@@ -2462,7 +2725,7 @@ def channels_status(
         if section is None:
             enabled = False
         elif isinstance(section, dict):
-            enabled = section.get("enabled", False)
+            enabled = cast(dict[str, Any], section).get("enabled", False)
         else:
             enabled = getattr(section, "enabled", False)
         table.add_row(
@@ -2480,10 +2743,11 @@ def channels_login(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.bus.queue import MessageBus
     from nanobot.channels.registry import discover_all
 
     _, loaded = _load_inspection_config(config=config)
-    channel_cfg = getattr(loaded.channels, channel_name, None) or {}
+    channel_cfg: Any = getattr(loaded.channels, channel_name, None) or {}
 
     # Validate channel exists
     all_channels = discover_all()
@@ -2494,8 +2758,8 @@ def channels_login(
 
     console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
 
-    channel_cls = all_channels[channel_name]
-    channel = channel_cls(channel_cfg, bus=None)
+    channel_factory = all_channels[channel_name]
+    channel = channel_factory(channel_cfg, bus=MessageBus())
 
     success = asyncio.run(channel.login(force=force))
 
@@ -2516,7 +2780,7 @@ def plugins_list(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """List optional nanobot features."""
-    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
@@ -2525,7 +2789,6 @@ def plugins_list(
 
     _print_enable_options(
         feature_support.optional_dependency_groups(),
-        set(discover_channel_names()),
         discover_plugins(),
         load_config(resolved_config_path),
     )
@@ -2606,10 +2869,31 @@ def status(
     )
 
     if config_path.exists():
+        from nanobot.config.errors import ConfigLoadError
+        from nanobot.config.loader import resolve_config_env_vars, resolve_env_refs
         from nanobot.providers.registry import PROVIDERS
 
         _model, _preset_tag = _model_display(loaded)
         console.print(f"Model: {_model}{_preset_tag}")
+
+        provider_ready = False
+        try:
+            resolved = resolve_config_env_vars(
+                loaded.model_copy(deep=True),
+                config_path=config_path,
+            )
+        except ConfigLoadError as exc:
+            console.print("Agent: [red]✗ configuration is not ready[/red]")
+            _print_config_error(exc)
+        else:
+            provider_error = _provider_setup_error(resolved)
+            if provider_error:
+                console.print(Text(f"Agent: ✗ {provider_error}", style="red"))
+                console.print("Complete provider/model setup:")
+                _print_model_setup_steps(config_path)
+            else:
+                provider_ready = True
+                console.print("Agent: [green]✓ provider/model configuration is ready[/green]")
 
         # Check API keys from registry
         for spec in PROVIDERS:
@@ -2620,13 +2904,24 @@ def status(
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
-                if p.api_base:
+                if resolve_env_refs(p.api_base or ""):
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
-                has_key = bool(p.api_key)
+                has_key = bool(resolve_env_refs(p.api_key or ""))
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        if provider_ready:
+            console.print()
+            console.print('Next: [cyan]nanobot agent -m "Hello!"[/cyan]')
+            console.print(
+                "[dim]Status does not call the model or verify network access and credentials.[/dim]"
+            )
+    else:
+        console.print("Agent: [red]✗ configuration file not found[/red]")
+        console.print("Create the provider/model configuration:")
+        _print_model_setup_steps(config_path)
 
 
 # ============================================================================
@@ -2642,33 +2937,39 @@ _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 
 _PROVIDER_DISPLAY: dict[str, str] = {
     "openai_codex": "OpenAI Codex",
+    "xai_grok": "xAI Grok",
     "github_copilot": "GitHub Copilot",
 }
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "openai_codex": "openai-codex/gpt-5.6-sol",
+    "xai_grok": "xai-grok/grok-4.5",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
 
-def _register_login(name: str):
+def _register_login(
+    name: str,
+) -> Callable[[Callable[[], None]], Callable[[], None]]:
     """Register an OAuth login handler."""
-    def decorator(fn):
+    def decorator(fn: Callable[[], None]) -> Callable[[], None]:
         _LOGIN_HANDLERS[name] = fn
         return fn
 
     return decorator
 
 
-def _register_logout(name: str):
+def _register_logout(
+    name: str,
+) -> Callable[[Callable[[], None]], Callable[[], None]]:
     """Register an OAuth logout handler."""
-    def decorator(fn):
+    def decorator(fn: Callable[[], None]) -> Callable[[], None]:
         _LOGOUT_HANDLERS[name] = fn
         return fn
     return decorator
 
 
-def _resolve_oauth_provider(provider: str):
+def _resolve_oauth_provider(provider: str) -> "ProviderSpec":
     """Resolve and validate an OAuth provider configuration."""
     from nanobot.providers.registry import PROVIDERS
 
@@ -2691,7 +2992,7 @@ def _set_oauth_provider_as_main(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
+    if resolved_config_path is not None and get_config_path() != resolved_config_path:
         set_config_path(resolved_config_path)
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
@@ -2700,6 +3001,8 @@ def _set_oauth_provider_as_main(
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name
     config.agents.defaults.model = selected_model
+    if provider_name == "xai_grok" and selected_model == "xai-grok/grok-4.5":
+        config.agents.defaults.context_window_tokens = 500_000
     save_config(config, resolved_config_path)
 
     saved_path = resolved_config_path or get_config_path()
@@ -2712,7 +3015,10 @@ def _set_oauth_provider_as_main(
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'openai-codex', 'xai-grok', 'github-copilot')",
+    ),
     set_main: bool = typer.Option(
         False,
         "--set-main",
@@ -2735,6 +3041,13 @@ def provider_login(
         console.print(f"[red]Login not implemented for {spec.label}[/red]")
         raise typer.Exit(1)
 
+    if config:
+        from nanobot.config.loader import set_config_path
+
+        resolved_config_path = Path(config).expanduser().resolve()
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
+
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
     if set_main or model:
@@ -2743,7 +3056,11 @@ def provider_login(
 
 @provider_app.command("logout")
 def provider_logout(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'openai-codex', 'xai-grok', 'github-copilot')",
+    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -2752,6 +3069,13 @@ def provider_logout(
     if not handler:
         console.print(f"[red]Logout not implemented for {spec.label}[/red]")
         raise typer.Exit(1)
+
+    if config:
+        from nanobot.config.loader import set_config_path
+
+        resolved_config_path = Path(config).expanduser().resolve()
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
     console.print(f"{__logo__} OAuth Logout - {spec.label}\n")
     handler()
@@ -2801,6 +3125,55 @@ def _logout_openai_codex() -> None:
 
     storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
+
+
+@_register_login("xai_grok")
+def _login_xai_grok() -> None:
+    """Authenticate with xAI using the Grok subscription OAuth contract."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
+
+    try:
+        proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    token = None
+    with suppress(Exception):
+        token = get_xai_oauth_token(proxy=proxy)
+    if not (token and token.access):
+        console.print(
+            "[cyan]Starting xAI browser sign-in for your X Premium / Grok subscription...[/cyan]\n"
+        )
+        try:
+            token = login_xai_oauth(
+                print_fn=lambda message: console.print(message),
+                prompt_fn=lambda prompt: typer.prompt(prompt),
+                proxy=proxy,
+            )
+        except Exception as exc:
+            console.print(f"[red]Authentication error: {exc}[/red]")
+            raise typer.Exit(1) from exc
+    account = token.account_id or "xAI account"
+    console.print(f"[green]✓ Authenticated with xAI[/green]  [dim]{account}[/dim]")
+    console.print(
+        "[dim]Hosted X Search is enabled automatically when the selected model supports it.[/dim]"
+    )
+
+
+@_register_logout("xai_grok")
+def _logout_xai_grok() -> None:
+    """Clear local xAI OAuth credentials for this nanobot instance."""
+    from nanobot.providers.xai_oauth import get_xai_oauth_storage_path, logout_xai_oauth
+
+    token_path = get_xai_oauth_storage_path()
+    provider_label = _PROVIDER_DISPLAY["xai_grok"]
+    if logout_xai_oauth():
+        console.print(f"[green]✓ Logged out from {provider_label}[/green]")
+        console.print(f"[dim]Removed: {token_path}[/dim]")
+    else:
+        console.print(f"[yellow]! No local OAuth credentials found for {provider_label}[/yellow]")
 
 
 @_register_logout("github_copilot")

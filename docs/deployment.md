@@ -4,7 +4,7 @@ Use this page after `nanobot agent -m "Hello!"` works locally. Deployment keeps 
 
 ## Before You Deploy
 
-Check these once before Docker, systemd, or LaunchAgent:
+Check these once before Render, Docker, systemd, or LaunchAgent:
 
 | Check | Why it matters |
 |---|---|
@@ -22,10 +22,39 @@ Restart the deployed process after editing `config.json`. Long-running processes
 
 | Runtime | Use it for | State location | Useful first command |
 |---|---|---|---|
+| Render | One-click hosted gateway and WebUI | Persistent disk at `/home/nanobot/.nanobot` | [Deploy to Render](#render) |
 | Docker Compose | Repeatable container runs on Linux servers or workstations | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker compose run --rm nanobot-cli agent -m "Hello!"` |
 | Docker CLI | Manual container testing or small one-off hosts | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status` |
 | systemd user service | Linux user-level gateway that restarts automatically | Host user's `~/.nanobot` unless you pass explicit paths | `systemctl --user status nanobot-gateway` |
 | macOS LaunchAgent | macOS gateway that starts after login | Host user's `~/.nanobot` unless the plist passes explicit paths | `launchctl list | grep ai.nanobot.gateway` |
+
+## Render
+
+Run nanobot online without managing a server. The blueprint deploys the gateway and bundled WebUI together, with a persistent disk so sessions, memory, and chat history survive restarts.
+
+> [!IMPORTANT]
+> This setup requires a paid Render service because persistent disks are not available on the free tier. During setup, provide `ANTHROPIC_API_KEY` and set `NANOBOT_WEB_TOKEN` to a strong private password (for example, generate one with `openssl rand -hex 32`).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
+
+[Review the deployment blueprint](../render.yaml)
+
+### First Deployment
+
+1. Click **Deploy to Render**, sign in, and review the Blueprint. It creates one Starter web service and a 1 GB persistent disk.
+2. Enter your `ANTHROPIC_API_KEY`. Set `NANOBOT_WEB_TOKEN` to a new random value and save it in your password manager; this is the password for the public WebUI.
+3. Create the Blueprint and wait for the service status to become **Live**. The first build can take several minutes.
+4. Open the generated `onrender.com` URL. The **Authentication required** page means the gateway is running: enter the same `NANOBOT_WEB_TOKEN` value to open the WebUI.
+
+The model API key is used by nanobot to call Anthropic. The Web token only protects access to this deployment; do not share it in issues, screenshots, or chat.
+
+### Updates and Data
+
+The Blueprint disables automatic deploys so upstream repository changes do not unexpectedly restart your agent. To update, open the service in the Render Dashboard and choose **Manual Deploy → Deploy latest commit**.
+
+The persistent disk keeps `config.json`, sessions, memory, WebUI history, cron state, media, and logs across restarts and updates. The deployment initializes `config.json` only when it does not already exist, so settings changed later in the WebUI are not replaced on every boot.
+
+If deployment fails, open the service **Logs** page first. A missing model key fails provider requests after startup, while an incorrect Web token leaves you on the authentication page.
 
 ## Docker
 
@@ -62,6 +91,22 @@ Restart the deployed process after editing `config.json`. Long-running processes
 
 ### Docker Compose
 
+The default image preinstalls WhatsApp dependencies. To bake other enabled
+channels into an image (recommended for deployments without PyPI access), pass
+a comma-separated `NANOBOT_CHANNELS` build argument:
+
+```bash
+NANOBOT_CHANNELS=telegram,slack docker compose build
+```
+
+The image keeps nanobot in a virtual environment owned by its built-in non-root
+runtime user (UID 1000). If an enabled channel was not preinstalled, gateway
+startup can therefore install its manifest-declared dependencies. Rebuilding
+with `NANOBOT_CHANNELS` keeps that installation reproducible instead of relying
+on the container's writable layer. If you override the container with a
+different `--user`, bake every enabled channel into the image because that UID
+is not guaranteed write access to the virtual environment.
+
 ```bash
 docker compose run --rm nanobot-cli onboard   # first-time setup
 vim ~/.nanobot/config.json                     # add API keys
@@ -74,11 +119,31 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
+The default Compose file drops all Linux capabilities and keeps Docker's default
+AppArmor/seccomp profiles enabled. If you explicitly set
+`"tools.exec.sandbox": "bwrap"` in `~/.nanobot/config.json`, add the bwrap
+override file when starting containers:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-gateway
+docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobot-cli agent -m "Hello!"
+```
+
+The override grants `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for
+the container so bubblewrap can create its nested namespaces. Use it only when the
+bwrap sandbox is enabled.
+
 ### Docker
 
 ```bash
 # Build the image
 docker build -t nanobot .
+
+# Or preinstall a regular Python extra such as Bedrock support
+docker build --build-arg NANOBOT_EXTRAS=bedrock -t nanobot .
+
+# Or preinstall dependencies for a specific set of channels
+docker build --build-arg NANOBOT_CHANNELS=telegram,slack -t nanobot .
 
 # Initialize config (first time only)
 docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
@@ -87,12 +152,17 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
-# Mirrors the security caps and port mappings declared in docker-compose.yml:
-#   - `--cap-drop ALL --cap-add SYS_ADMIN` + unconfined apparmor/seccomp are required
-#     when `tools.exec.sandbox: "bwrap"` is enabled (bwrap needs CAP_SYS_ADMIN for
-#     user namespaces). Without them, `bwrap` exits with `clone3: Operation not permitted`.
-#   - `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway health
-#     endpoint on 18790.
+# `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway
+# health endpoint on 18790.
+docker run \
+  --cap-drop ALL \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  -p 18790:18790 -p 8765:8765 \
+  nanobot gateway
+
+# If `tools.exec.sandbox: "bwrap"` is enabled, run with the extra permissions
+# bubblewrap needs for nested namespaces. Without them, `bwrap` may exit with
+# `clone3: Operation not permitted`.
 docker run \
   --cap-drop ALL --cap-add SYS_ADMIN \
   --security-opt apparmor=unconfined \

@@ -32,6 +32,19 @@ describe("bootstrap helpers", () => {
     );
   });
 
+  it("keeps the gateway websocket port when Vite proxies a custom target", () => {
+    vi.stubGlobal("window", {
+      location: {
+        port: "5173",
+        hostname: "127.0.0.1",
+        protocol: "http:",
+      },
+    });
+    expect(deriveWsUrl("/ws", "tok", "ws://127.0.0.1:8899/ws")).toBe(
+      "ws://127.0.0.1:8899/ws?token=tok",
+    );
+  });
+
   it("preserves the host socket bridge URL", () => {
     expect(deriveWsUrl("/", "tok en", "nanobot-host://engine/")).toBe(
       "nanobot-host://engine/?token=tok%20en",

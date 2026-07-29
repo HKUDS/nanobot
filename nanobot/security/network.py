@@ -7,6 +7,7 @@ import ipaddress
 import re
 import socket
 from contextlib import contextmanager, suppress
+from typing import Any, cast
 from urllib.parse import urlparse
 from urllib.request import getproxies, proxy_bypass
 
@@ -20,6 +21,7 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("169.254.0.0/16"),   # link-local / cloud metadata
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("::/128"),            # unspecified; may route to local host
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),          # unique local
     ipaddress.ip_network("fe80::/10"),         # link-local v6
@@ -44,7 +46,7 @@ def is_loopback_host(host: str) -> bool:
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
     global _allowed_networks
-    nets = []
+    nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     for cidr in cidrs:
         with suppress(ValueError):
             nets.append(ipaddress.ip_network(cidr, strict=False))
@@ -73,7 +75,12 @@ def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(normalized in net for net in _BLOCKED_NETWORKS)
 
 
-def resolve_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str, tuple[str, ...]]:
+def resolve_url_target(
+    url: str,
+    *,
+    allow_loopback: bool = False,
+    trust_remote_dns: bool = False,
+) -> tuple[bool, str, tuple[str, ...]]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs.
 
     ``allow_loopback`` is intentionally narrow: it only permits literal
@@ -81,8 +88,14 @@ def resolve_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool,
     loopback. It does not allow RFC1918, link-local, metadata, or public DNS
     names that happen to resolve to loopback.
 
+    ``trust_remote_dns`` accepts ordinary hostnames unavailable to local DNS.
+    This is only safe when a user-configured trusted proxy owns final DNS
+    resolution and network egress. Localhost names and private/internal IP
+    literals remain blocked.
+
     Returns (ok, error_message, resolved_ips).  When ok is True,
-    resolved_ips contains the public IPs that were validated for this URL.
+    resolved_ips contains the public IPs that were validated for this URL, or
+    is empty when an unresolved hostname is delegated to a trusted proxy.
     """
     try:
         p = urlparse(url)
@@ -101,7 +114,20 @@ def resolve_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool,
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
-        return False, f"Cannot resolve hostname: {hostname}", ()
+        if not trust_remote_dns:
+            return False, f"Cannot resolve hostname: {hostname}", ()
+
+        normalized_hostname = hostname.rstrip(".").lower()
+        if normalized_hostname == "localhost" or normalized_hostname.endswith(".localhost"):
+            return False, f"Blocked local/internal hostname: {hostname}", ()
+
+        try:
+            literal_addr = ipaddress.ip_address(normalized_hostname)
+        except ValueError:
+            return True, "", ()
+        if _is_private(literal_addr):
+            return False, f"Blocked private/internal address: {literal_addr}", ()
+        return True, "", (str(_normalize_addr(literal_addr)),)
 
     addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
@@ -204,10 +230,17 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
     pinned_host = hostname.rstrip(".").lower()
     original_getaddrinfo = socket.getaddrinfo
 
-    def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+    def _getaddrinfo(
+        host: Any,
+        port: Any,
+        family: int = 0,
+        type: int = 0,  # noqa: A002
+        proto: int = 0,
+        flags: int = 0,
+    ) -> list[Any]:
         if str(host).rstrip(".").lower() != pinned_host:
             return original_getaddrinfo(host, port, family, type, proto, flags)
-        infos = []
+        infos: list[Any] = []
         for ip in resolved_ips:
             addr = ipaddress.ip_address(ip)
             addr_family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
@@ -217,7 +250,7 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
             infos.append((addr_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
         return infos
 
-    socket.getaddrinfo = _getaddrinfo
+    socket.getaddrinfo = cast(Any, _getaddrinfo)
     try:
         yield
     finally:

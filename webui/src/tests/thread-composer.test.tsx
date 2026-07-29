@@ -164,6 +164,7 @@ function stubVisualViewport({
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   Reflect.deleteProperty(window, "nanobotHost");
   if (ORIGINAL_MEDIA_DEVICES) {
     Object.defineProperty(navigator, "mediaDevices", {
@@ -291,7 +292,95 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
   return String.fromCharCode(...bytes.slice(offset, offset + length));
 }
 
+const MODEL_PRESETS = [
+  { name: "kimi", label: "Kimi", provider: "moonshot" },
+  { name: "dflash", label: "DFlash", provider: "deepseek" },
+  { name: "dspro", label: "DS Pro", provider: "deepseek" },
+];
+
+function renderPresetComposer(variant: "thread" | "hero" = "thread") {
+  const onPresetChange = vi.fn();
+  render(
+    <ThreadComposer
+      onSend={vi.fn()}
+      modelLabel="Kimi"
+      modelPreset="kimi"
+      modelProvider="moonshot"
+      modelPresets={MODEL_PRESETS}
+      onModelPresetChange={onPresetChange}
+      placeholder={variant === "hero" ? "Ask anything..." : "Type your message..."}
+      variant={variant}
+    />,
+  );
+  return {
+    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    onPresetChange,
+  };
+}
+
+function pointerDown(badge: HTMLElement, pointerId = 7, clientY = 100, button = 0) {
+  fireEvent.pointerDown(badge, {
+    button,
+    clientY,
+    isPrimary: true,
+    pointerId,
+    pointerType: "mouse",
+  });
+}
+
+function longPress(badge: HTMLElement, pointerId = 7) {
+  pointerDown(badge, pointerId);
+  act(() => {
+    vi.advanceTimersByTime(400);
+  });
+}
+
 describe("ThreadComposer", () => {
+  it("focuses and sends a removable quoted answer excerpt", async () => {
+    const onSend = vi.fn();
+    const onQuotedContextChange = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        quotedContext="selected answer excerpt"
+        focusRequest={1}
+        onQuotedContextChange={onQuotedContextChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("selected answer excerpt");
+
+    fireEvent.change(input, { target: { value: "What does this mean?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("What does this mean?", undefined, {
+      quotedContext: "selected answer excerpt",
+    });
+    expect(onQuotedContextChange).toHaveBeenCalledWith(null);
+  });
+
+  it("removes quoted context without clearing the draft", () => {
+    const onQuotedContextChange = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        quotedContext="selected answer excerpt"
+        onQuotedContextChange={onQuotedContextChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+
+    expect(onQuotedContextChange).toHaveBeenCalledWith(null);
+    expect(input).toHaveValue("keep this draft");
+  });
+
   it("renders a readonly hero model composer when provided", () => {
     render(
       <ThreadComposer
@@ -317,6 +406,34 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
   });
 
+  it("lets long model preset labels use their intrinsic width", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        modelLabel="gpt-5.6-sol"
+        modelPreset="gpt-5-6-sol"
+        modelProvider="openai_codex"
+        modelPresets={[
+          {
+            name: "gpt-5-6-sol",
+            label: "gpt-5.6-sol",
+            model: "openai-codex/gpt-5.6-sol",
+            provider: "openai_codex",
+          },
+          ...MODEL_PRESETS,
+        ]}
+        onModelPresetChange={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+      />,
+    );
+
+    const badge = screen.getByRole("spinbutton", { name: "gpt-5.6-sol" });
+    expect(badge).toHaveClass("w-fit", "max-w-[min(18rem,44vw)]");
+    expect(badge).not.toHaveClass("w-[5.75rem]");
+    expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
+  });
+
   it("keeps the thread composer compact while matching the hero style", () => {
     render(
       <ThreadComposer
@@ -329,16 +446,108 @@ describe("ThreadComposer", () => {
     );
 
     expect(screen.getByText("gpt-4o")).toBeInTheDocument();
+    const modelPill = screen.getByText("gpt-4o").closest(".composer-model-pill");
+    expect(modelPill).toHaveClass("font-medium", "text-foreground/70");
+    expect(modelPill).not.toHaveClass("font-semibold");
     expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
-    expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
+    expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
+    expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
+  });
+
+  it("scrolls complete preset pills after a left-button long press and wraps", () => {
+    vi.useFakeTimers();
+    const { badge, onPresetChange } = renderPresetComposer();
+    expect(badge).toHaveClass("h-9");
+    expect(badge).toHaveStyle({ touchAction: "manipulation" });
+    const idleTouchMove = new Event("touchmove", {
+      bubbles: true,
+      cancelable: true,
+    });
+    badge.dispatchEvent(idleTouchMove);
+    expect(idleTouchMove.defaultPrevented).toBe(false);
+    fireEvent.click(badge);
+    pointerDown(badge);
+    fireEvent.pointerMove(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.pointerUp(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
+    expect(onPresetChange).not.toHaveBeenCalled();
+
+    longPress(badge);
+    expect(badge).toHaveAttribute("data-switching", "true");
+    const viewport = screen.getByTestId("composer-model-pill-viewport");
+    expect(viewport).toHaveClass(
+      "right-0",
+      "w-max",
+      "max-w-[calc(44vw+0.5rem)]",
+      "overflow-hidden",
+      "-top-3",
+      "-bottom-3",
+    );
+    const track = screen.getByTestId("composer-model-pill-track");
+    expect(track).toHaveClass("w-max", "max-w-full", "items-end", "gap-1");
+    const activeTouchMove = new Event("touchmove", {
+      bubbles: true,
+      cancelable: true,
+    });
+    badge.dispatchEvent(activeTouchMove);
+    expect(activeTouchMove.defaultPrevented).toBe(true);
+    const pills = track.querySelectorAll<HTMLElement>(".composer-model-pill");
+    expect(pills).toHaveLength(5);
+    expect(Array.from(pills).every((pill) => pill.classList.contains("w-fit"))).toBe(true);
+    expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
+    expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
+    const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
+    expect(centeredPill).toHaveTextContent("Kimi");
+    expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
+    expect(
+      track.querySelector<HTMLElement>("[data-preset-offset='1']"),
+    ).toHaveStyle({ transform: "scale(1.0200)" });
+
+    fireEvent.pointerMove(badge, {
+      clientY: 122,
+      pointerId: 7,
+      pointerType: "mouse",
+    });
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("Kimi");
+    fireEvent.pointerMove(badge, {
+      clientY: 123,
+      pointerId: 7,
+      pointerType: "mouse",
+    });
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("DS Pro");
+    fireEvent.pointerUp(badge, {
+      clientY: 123,
+      pointerId: 7,
+      pointerType: "mouse",
+    });
+
+    expect(onPresetChange).toHaveBeenCalledWith("dspro");
+    expect(badge).toHaveAttribute("data-settling", "true");
+    expect(track).toHaveAttribute("data-settling", "true");
+    act(() => {
+      vi.advanceTimersByTime(260);
+    });
+    expect(badge).not.toHaveAttribute("data-switching");
+    expect(badge).not.toHaveAttribute("data-settling");
+  });
+
+  it("supports the same long-press switcher in hero mode and cancels pointercancel", () => {
+    vi.useFakeTimers();
+    const { badge, onPresetChange } = renderPresetComposer("hero");
+    expect(badge).toHaveClass("h-8");
+    longPress(badge, 9);
+    expect(badge).toHaveAttribute("data-switching", "true");
+    fireEvent.pointerMove(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
+    fireEvent.pointerCancel(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
+    expect(badge).not.toHaveAttribute("data-switching");
+    expect(onPresetChange).not.toHaveBeenCalled();
   });
 
   it("transcribes voice input into the composer without sending", async () => {
@@ -437,6 +646,49 @@ describe("ThreadComposer", () => {
 
     await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
+  });
+
+  it("distinguishes a missing microphone from a blocked permission", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
+      name: "NotFoundError",
+    }));
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No microphone was found. Connect a microphone and try again.")).toBeInTheDocument();
+    });
+  });
+
+  it("clears a previous voice error when retrying microphone access", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValueOnce(new Error("permission denied"));
+    const onTranscribeAudio = vi.fn(async () => "voice retry");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(voiceButton);
+    await waitFor(() => expect(screen.getByText("Allow microphone access in the address bar, then retry.")).toBeInTheDocument());
+
+    fireEvent.click(voiceButton);
+
+    await waitFor(() => expect(screen.queryByText("Allow microphone access in the address bar, then retry.")).not.toBeInTheDocument());
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
   });
 
   it("supports press-and-hold voice recording", async () => {
@@ -638,7 +890,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace access mode" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: /Workspace access mode/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Full Access/ }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(
@@ -648,6 +900,34 @@ describe("ThreadComposer", () => {
         restrict_to_workspace: false,
       }),
     );
+  });
+
+  it("exposes full and compact workspace labels for container-driven compression", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        variant="hero"
+        workspaceScope={{
+          project_path: "/tmp/project",
+          project_name: "project",
+          access_mode: "full",
+          restrict_to_workspace: false,
+        }}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    const accessButton = screen.getByRole("button", {
+      name: "Workspace access mode: Full Access",
+    });
+    const fullLabel = within(accessButton).getByText("Full Access");
+    const shortLabel = within(accessButton).getByText("Full");
+    expect(accessButton).toHaveAttribute("title", "Full Access");
+    expect(fullLabel).toHaveClass("thread-composer-access-label-full");
+    expect(shortLabel).toHaveClass("thread-composer-access-label-short");
+    expect(shortLabel).toHaveClass("hidden");
   });
 
   it("keeps project selection as a compact composer dropdown", async () => {
@@ -796,11 +1076,57 @@ describe("ThreadComposer", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/Running/);
     expect(status).toHaveTextContent(/2:05/);
-    expect(status.parentElement).toHaveClass("composer-status-strip");
-    expect(status.parentElement).toHaveAttribute("data-state", "enter");
+    expect(status).toHaveClass("composer-status-drawer-content");
+    expect(status.closest("[data-composer-status-drawer]")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
     expect(status.querySelector(".run-pulse-icon")).not.toBeNull();
 
     vi.useRealTimers();
+  });
+
+  it("opens and closes the run timer through one persistent drawer", () => {
+    const { container, rerender } = render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={null}
+      />,
+    );
+
+    const drawer = container.querySelector("[data-composer-status-drawer]");
+    expect(drawer).not.toBeNull();
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+
+    rerender(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={Math.floor(Date.now() / 1000)}
+      />,
+    );
+
+    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("aria-hidden");
+    const status = screen.getByRole("status");
+    expect(status).toHaveClass("composer-status-drawer-content");
+
+    rerender(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={null}
+      />,
+    );
+
+    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(drawer?.querySelector('[role="status"]')).toBe(status);
   });
 
   it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {
@@ -1146,14 +1472,15 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("opens skills only from a $ reference anywhere", () => {
+  it("opens skills only from a $ reference and prioritizes the skill name", () => {
+    const skillName = "arxiv-intelligence-filter";
     render(
         <ThreadComposer
           onSend={vi.fn()}
           placeholder="Type your message..."
           skills={[{
-            name: "github",
-            description: "Work with pull requests and issues",
+            name: skillName,
+            description: "Fetch and summarize the latest AI research papers every day",
             source: "builtin",
             available: true,
           }]}
@@ -1165,15 +1492,92 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
 
-    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+    fireEvent.change(input, { target: { value: "please use $arxiv", selectionStart: 17 } });
 
     const palette = screen.getByRole("listbox", { name: "Slash commands" });
-    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    const option = within(palette).getByRole("option", { name: new RegExp(skillName, "i") });
+    const name = within(option).getByText(skillName);
+    expect(name).not.toHaveClass("truncate");
+    expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("please use $github ");
+    expect(input).toHaveValue(`please use $${skillName} `);
+  });
+
+  it("ranks skill name matches ahead of earlier description matches", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        skills={[
+          {
+            name: "skill-creator",
+            description: "Create or update AgentSkills",
+            source: "builtin",
+            available: true,
+          },
+          {
+            name: "setup-update",
+            description: "Configure upgrades",
+            source: "builtin",
+            available: true,
+          },
+          {
+            name: "update-setup",
+            description: "One-time setup wizard",
+            source: "builtin",
+            available: true,
+          },
+          {
+            name: "up",
+            description: "Exact match",
+            source: "workspace",
+            available: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "$up", selectionStart: 3 } });
+
+    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
+      .getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "upExact match",
+      "update-setupOne-time setup wizard",
+      "setup-updateConfigure upgrades",
+      "skill-creatorCreate or update AgentSkills",
+    ]);
+  });
+
+  it("keeps a recently selected skill visible at the top of the blank skill menu", () => {
+    const skills = Array.from({ length: 9 }, (_, index) => ({
+      name: `skill-${index}`,
+      description: `Skill ${index}`,
+      source: "builtin",
+      available: true,
+    }));
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        skills={skills}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "$skill-8", selectionStart: 8 } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
+
+    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
+      .getAllByRole("option");
+    expect(options).toHaveLength(8);
+    expect(options[0]).toHaveTextContent("skill-8");
+    expect(options[0]).toHaveTextContent("Recent");
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
@@ -1246,6 +1650,42 @@ describe("ThreadComposer", () => {
     expect(logo.className).toContain("top-1/2");
     expect(logo.className).toContain("left-1/2");
     expect(logo.className).not.toContain("-top-");
+  });
+
+  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+    const mention = "@obsidian-agent-cli";
+    const app: CliAppInfo = {
+      name: "obsidian-agent-cli",
+      display_name: "Obsidian CLI",
+      category: "productivity",
+      description: "Obsidian automation",
+      requires: "",
+      source: "local",
+      entry_point: "obsidian-agent",
+      install_supported: true,
+      installed: true,
+      available: true,
+      status: "installed",
+      logo_url: null,
+      brand_color: null,
+      skill_installed: true,
+    };
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={[app]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: mention, selectionStart: mention.length },
+    });
+
+    const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
+    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(token.getAttribute("style")).not.toContain("var(--primary)");
   });
 
   it("opens the slash command palette downward when there is more room below", async () => {
@@ -1550,7 +1990,11 @@ describe("ThreadComposer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
 
-    expect(onSend).toHaveBeenCalledWith("keep the UI minimal");
+    expect(onSend).toHaveBeenCalledWith(
+      "keep the UI minimal",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
 
@@ -1580,7 +2024,11 @@ describe("ThreadComposer", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("send this guidance now");
+    expect(onSend).toHaveBeenCalledWith(
+      "send this guidance now",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("send this guidance now")).not.toBeInTheDocument();
   });
@@ -1700,7 +2148,11 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("guide this one now");
+    expect(onSend).toHaveBeenCalledWith(
+      "guide this one now",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.getByText("older guidance")).toBeInTheDocument();
     expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
@@ -2082,7 +2534,11 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
-    expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
+    expect(onSend).toHaveBeenCalledWith(
+      "remember this edited follow-up",
+      undefined,
+      { continueActiveTurn: true },
+    );
 
     remount.unmount();
     render(

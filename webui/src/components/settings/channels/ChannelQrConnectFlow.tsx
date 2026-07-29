@@ -4,6 +4,7 @@ import { Check, Loader2, Network, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import {
   cancelChannelConnect,
   pollChannelConnect,
@@ -26,28 +27,33 @@ export type ChannelQrConnectLabels = {
   connect: string;
 };
 
+export type ChannelConnectStartOptions = {
+  domain?: string;
+  instanceId?: string;
+  mode?: "replace" | "create";
+  force?: boolean;
+};
+
 export function ChannelQrConnectFlow({
   token,
   channelName,
   startOptions = {},
   idleLabel,
   connectRequestId,
+  forceOnRepeat = false,
   labels,
   onFeaturesUpdate,
 }: {
   token: string;
-  channelName: "feishu" | "weixin";
-  startOptions?: {
-    domain?: "feishu" | "lark";
-    instanceId?: string;
-    mode?: "replace" | "create";
-    force?: boolean;
-  };
+  channelName: string;
+  startOptions?: ChannelConnectStartOptions;
   idleLabel?: string;
   connectRequestId?: number;
+  forceOnRepeat?: boolean;
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const pageVisible = usePageVisibility();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [connect, setConnect] = useState<ChannelConnectPayload | null>(null);
@@ -88,7 +94,7 @@ export function ChannelQrConnectFlow({
   }, [connect?.qr_url]);
 
   useEffect(() => {
-    if (!connect?.session_id || connect.status !== "pending") return;
+    if (!connect?.session_id || connect.status !== "pending" || !pageVisible) return;
     let cancelled = false;
     const poll = async () => {
       if (pollInFlight.current) return;
@@ -123,7 +129,7 @@ export function ChannelQrConnectFlow({
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, token]);
+  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, pageVisible, token]);
 
   const start = useCallback(async (force = false) => {
     setBusy(true);
@@ -232,7 +238,7 @@ export function ChannelQrConnectFlow({
           size="sm"
           variant="outline"
           className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
-          onClick={() => void start(channelName === "weixin" && succeeded)}
+          onClick={() => void start(forceOnRepeat && succeeded)}
           disabled={!canStart}
         >
           {busy ? (
@@ -250,85 +256,5 @@ export function ChannelQrConnectFlow({
         </Button>
       </div>
     </div>
-  );
-}
-export function FeishuConnectFlow({
-  token,
-  instanceId = "default",
-  mode = "replace",
-  idleLabel,
-  connectRequestId,
-  onFeaturesUpdate,
-}: {
-  token: string;
-  instanceId?: string;
-  mode?: "replace" | "create";
-  idleLabel?: string;
-  connectRequestId?: number;
-  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  return (
-    <ChannelQrConnectFlow
-      token={token}
-      channelName="feishu"
-      startOptions={{ domain: "feishu", instanceId, mode }}
-      idleLabel={idleLabel}
-      connectRequestId={connectRequestId}
-      onFeaturesUpdate={onFeaturesUpdate}
-      labels={{
-        qrAlt: tx("settings.channels.feishuQrAlt", "Feishu connection QR code"),
-        scanTitle: tx("settings.channels.feishuScanTitle", "Scan with Feishu"),
-        scanDescription: tx(
-          "settings.channels.feishuScanDescription",
-          "Use Feishu or Lark on your phone to scan this code. nanobot will finish setup automatically after authorization.",
-        ),
-        waiting: tx("settings.channels.feishuWaiting", "Waiting for authorization..."),
-        connected: tx("settings.channels.feishuConnected", "Feishu is connected."),
-        stopped: tx("settings.channels.feishuConnectStopped", "Connection stopped."),
-        connecting: tx("settings.channels.feishuConnecting", "Connecting..."),
-        scanAgain: tx("settings.channels.scanAgain", "Scan again"),
-        connect: tx("settings.channels.connect", "Connect"),
-      }}
-    />
-  );
-}
-
-export function WeixinConnectFlow({
-  token,
-  idleLabel,
-  connectRequestId,
-  onFeaturesUpdate,
-}: {
-  token: string;
-  idleLabel?: string;
-  connectRequestId?: number;
-  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  return (
-    <ChannelQrConnectFlow
-      token={token}
-      channelName="weixin"
-      idleLabel={idleLabel}
-      connectRequestId={connectRequestId}
-      onFeaturesUpdate={onFeaturesUpdate}
-      labels={{
-        qrAlt: tx("settings.channels.weixinQrAlt", "WeChat login QR code"),
-        scanTitle: tx("settings.channels.weixinScanTitle", "Scan with WeChat"),
-        scanDescription: tx(
-          "settings.channels.weixinScanDescription",
-          "Use WeChat on your phone to scan this code. nanobot saves the account state locally after login.",
-        ),
-        waiting: tx("settings.channels.weixinWaiting", "Waiting for WeChat scan..."),
-        connected: tx("settings.channels.weixinConnected", "WeChat is connected."),
-        stopped: tx("settings.channels.weixinConnectStopped", "WeChat login stopped."),
-        connecting: tx("settings.channels.weixinConnecting", "Connecting..."),
-        scanAgain: tx("settings.channels.scanAgain", "Scan again"),
-        connect: tx("settings.channels.connect", "Connect"),
-      }}
-    />
   );
 }

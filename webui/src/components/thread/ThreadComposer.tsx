@@ -18,6 +18,7 @@ import {
   splitCapabilityMentionSegments,
   type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
+import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   Activity,
   ArrowUp,
@@ -27,12 +28,14 @@ import {
   ChevronUp,
   CircleHelp,
   CornerDownRight,
+  FileText,
   GripVertical,
   History,
   ImageIcon,
   Loader2,
   Mic,
   Plus,
+  Quote,
   RotateCw,
   Shield,
   Sparkles,
@@ -58,15 +61,22 @@ import {
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
+  ModelPresetBadge,
+  type ModelPresetOption,
+} from "@/components/thread/ModelPresetBadge";
+import {
+  ACCEPT_ATTR,
+  MAX_ATTACHMENTS_PER_MESSAGE,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
-  MAX_IMAGES_PER_MESSAGE,
+  type AttachmentKind,
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
   CliAppInfo,
@@ -76,71 +86,34 @@ import type {
   OutboundMcpPresetMention,
   SlashCommand,
   SkillSummary,
+  WebUIIngressLimits,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
 import {
-  inferProviderFromModelName,
   logoFallbackUrls,
-  providerBrand,
 } from "@/lib/provider-brand";
+import {
+  isSideChannelLifecycle,
+  slashCommandLifecycle,
+} from "@/lib/slash-command";
+import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 
-/** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
- * deliberately excluded to avoid an embedded-script XSS surface. */
-const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
+const VOICE_ERROR_VISIBLE_MS = 3_500;
+const VOICE_ERROR_FADE_MS = 500;
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
-type ResolvedSlashCommandLifecycle =
-  | "side_channel"
-  | "finalize_active_turn"
-  | "stop_active_turn"
-  | "agent_turn";
-
-function slashCommandName(content: string): string {
-  return content.split(/\s+/, 1)[0];
-}
-
-function slashCommandArgs(content: string, commandName: string): string {
-  return content.slice(commandName.length).trim();
-}
-
-function matchingSlashCommand(content: string, slashCommands: SlashCommand[]): SlashCommand | null {
-  const commandName = slashCommandName(content);
-  if (!commandName.startsWith("/")) return null;
-  const command = slashCommands.find((item) => item.command === commandName);
-  if (!command) return null;
-  if (slashCommandArgs(content, command.command).length > 0 && !command.acceptsArgs) return null;
-  return command;
-}
-
-function slashCommandLifecycle(
-  content: string,
-  slashCommands: SlashCommand[],
-): ResolvedSlashCommandLifecycle | null {
-  const command = matchingSlashCommand(content, slashCommands);
-  if (!command) return null;
-  if (command.lifecycle === "agent_turn_with_args") {
-    return slashCommandArgs(content, command.command).length > 0
-      ? "agent_turn"
-      : "side_channel";
-  }
-  return command.lifecycle;
-}
-
-function isSideChannelLifecycle(lifecycle: ResolvedSlashCommandLifecycle | null): boolean {
-  return (
-    lifecycle === "side_channel"
-    || lifecycle === "finalize_active_turn"
-    || lifecycle === "stop_active_turn"
-  );
-}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function isVoiceShortcutDown(event: KeyboardEvent): boolean {
@@ -192,14 +165,19 @@ function getVoiceShortcutLabel(): string {
 }
 
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  onSend: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
   disabled?: boolean;
   placeholder?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
+  modelDetail?: string | null;
+  modelPreset?: string | null;
+  modelPresets?: ModelPresetOption[];
+  onModelPresetChange?: (name: string) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
+  fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
@@ -220,6 +198,10 @@ interface ThreadComposerProps {
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
   transcriptionProvider?: string | null;
+  ingressLimits?: WebUIIngressLimits | null;
+  quotedContext?: string | null;
+  focusRequest?: number;
+  onQuotedContextChange?: (text: string | null) => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -296,11 +278,13 @@ interface QueuedPrompt {
   id: string;
   text: string;
   images?: QueuedPromptImage[];
+  quotedContext?: string;
 }
 
 interface QueuedPromptImage {
   dataUrl: string;
   name?: string;
+  kind?: AttachmentKind;
 }
 
 interface CliAppMentionQuery {
@@ -318,10 +302,21 @@ interface SlashPaletteCommand {
   title: string;
   description: string;
   icon: string;
+  kind?: "skill";
   argHint?: string;
   detail: string;
   badge?: string;
   recent: boolean;
+}
+
+function skillMatchRank(skill: SkillSummary, query: string): number | null {
+  if (!query) return 0;
+  const name = skill.name.toLowerCase();
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+  if (skill.description.toLowerCase().includes(query)) return 3;
+  return null;
 }
 
 function slashCommandI18nKey(command: string): string {
@@ -367,22 +362,36 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     ? record.images.flatMap((image) => {
         if (!image || typeof image !== "object") return [];
         const candidate = image as Partial<QueuedPromptImage>;
-        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:image/")) {
+        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
           return [];
         }
+        const kind = candidate.kind === "file" || candidate.kind === "image"
+          ? candidate.kind
+          : candidate.dataUrl.startsWith("data:image/")
+            ? "image"
+            : "file";
         return [{
           dataUrl: candidate.dataUrl,
+          kind,
           ...(typeof candidate.name === "string" && candidate.name.trim()
             ? { name: candidate.name.trim() }
             : {}),
         }];
-      }).slice(0, MAX_IMAGES_PER_MESSAGE)
+      }).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
     : [];
+  const quotedContext = typeof record.quotedContext === "string"
+    ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
+    : "";
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
     ? record.id
     : `queued-prompt-restored-${index}`;
-  return { id, text, ...(images.length > 0 ? { images } : {}) };
+  return {
+    id,
+    text,
+    ...(images.length > 0 ? { images } : {}),
+    ...(quotedContext ? { quotedContext } : {}),
+  };
 }
 
 function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
@@ -413,7 +422,8 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
         prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
           id: prompt.id,
           text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
-          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_IMAGES_PER_MESSAGE) } : {}),
+          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
+          ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
         })),
       ),
     );
@@ -427,11 +437,12 @@ function readyImagesToQueuedImages(
 ): QueuedPromptImage[] {
   return images.map((img) => ({
     dataUrl: img.dataUrl,
+    kind: img.kind,
     name: img.file.name,
   }));
 }
 
-function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | undefined {
+function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
   if (!images?.length) return undefined;
   return images.map((img) => ({
     media: {
@@ -439,6 +450,7 @@ function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | u
       ...(img.name ? { name: img.name } : {}),
     },
     preview: {
+      kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : "file"),
       url: img.dataUrl,
       ...(img.name ? { name: img.name } : {}),
     },
@@ -448,7 +460,7 @@ function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | u
 function queuedPromptLabel(prompt: QueuedPrompt): string {
   const text = prompt.text.trim();
   if (text) return text;
-  return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "Image attachment";
+  return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
 }
 
 function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
@@ -576,13 +588,12 @@ function RunElapsedStrip({
   goalState?: GoalStateWsPayload;
 }) {
   const { t } = useTranslation();
+  const pageVisible = usePageVisibility();
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
   const showTimer = startedAt != null;
   const stripLabel = goalStateStripPreview(goalState, t);
   const showGoal = !!stripLabel?.trim();
   const active = showTimer || showGoal;
-  const [renderStrip, setRenderStrip] = useState(active);
-  const [leaving, setLeaving] = useState(false);
   const [, setTick] = useState(0);
   const stripWrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -599,26 +610,15 @@ function RunElapsedStrip({
   }
 
   useEffect(() => {
-    if (active) {
-      setRenderStrip(true);
-      setLeaving(false);
-      return;
-    }
-    setGoalPanelOpen(false);
-    if (!renderStrip) return;
-    setLeaving(true);
-    const id = window.setTimeout(() => {
-      setRenderStrip(false);
-      setLeaving(false);
-    }, 180);
-    return () => window.clearTimeout(id);
-  }, [active, renderStrip]);
+    if (!active) setGoalPanelOpen(false);
+  }, [active]);
 
   useEffect(() => {
-    if (startedAt == null) return;
+    if (startedAt == null || !pageVisible) return;
+    setTick((n) => n + 1);
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
-  }, [startedAt]);
+  }, [pageVisible, startedAt]);
 
   const display = active
     ? { startedAt, goalState, stripLabel }
@@ -650,7 +650,7 @@ function RunElapsedStrip({
 
     relayout();
 
-    preloadMarkdownText();
+    void preloadMarkdownText();
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => relayout())
@@ -695,8 +695,6 @@ function RunElapsedStrip({
     };
   }, [goalPanelOpen]);
 
-  if (!renderStrip || !display) return null;
-
   const elapsed =
     displayStartedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - displayStartedAt)) : 0;
   const m = Math.floor(elapsed / 60);
@@ -712,8 +710,10 @@ function RunElapsedStrip({
   return (
     <div
       ref={stripWrapperRef}
-      className="composer-status-strip relative z-30"
-      data-state={leaving ? "exit" : "enter"}
+      className="composer-status-drawer relative z-30"
+      data-composer-status-drawer=""
+      data-state={active ? "open" : "closed"}
+      aria-hidden={active ? undefined : true}
     >
       {goalPanelOpen && canExpandGoal && markdownBody ? (
         <div
@@ -760,50 +760,54 @@ function RunElapsedStrip({
           </div>
         </div>
       ) : null}
-      <div
-        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
-        role="status"
-        aria-label={ariaLabel}
-      >
-        {displayShowTimer ? (
-          <RunPulseIcon />
-        ) : (
-          <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-        )}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-          {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
-          {timerTitle && displayShowGoal ? (
-            <span className="shrink-0 text-muted-foreground/45" aria-hidden>
-              ·
-            </span>
-          ) : null}
-          {displayShowGoal ? (
-            <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
-            </span>
-          ) : null}
-        </span>
-        {canExpandGoal ? (
-          <button
-            ref={expandToggleRef}
-            type="button"
-            className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-              "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-            aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
-            aria-label={t("thread.composer.goalStateExpandAria")}
-            title={t("thread.composer.goalStateExpandAria")}
-            onClick={() => setGoalPanelOpen((o) => !o)}
+      <div className="composer-status-drawer-clip">
+        {display ? (
+          <div
+            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 px-3 py-2"
+            role="status"
+            aria-label={ariaLabel}
           >
-            {goalPanelOpen ? (
-              <ChevronDown className="h-4 w-4" aria-hidden />
+            {displayShowTimer ? (
+              <RunPulseIcon />
             ) : (
-              <ChevronUp className="h-4 w-4" aria-hidden />
+              <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
             )}
-          </button>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+              {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
+              {timerTitle && displayShowGoal ? (
+                <span className="shrink-0 text-muted-foreground/45" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              {displayShowGoal ? (
+                <span className="truncate">
+                  {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
+                </span>
+              ) : null}
+            </span>
+            {canExpandGoal ? (
+              <button
+                ref={expandToggleRef}
+                type="button"
+                className={cn(
+                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                  "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                aria-expanded={goalPanelOpen}
+                aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
+                aria-label={t("thread.composer.goalStateExpandAria")}
+                title={t("thread.composer.goalStateExpandAria")}
+                onClick={() => setGoalPanelOpen((o) => !o)}
+              >
+                {goalPanelOpen ? (
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                ) : (
+                  <ChevronUp className="h-4 w-4" aria-hidden />
+                )}
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -816,9 +820,14 @@ export function ThreadComposer({
   placeholder,
   isStreaming = false,
   modelLabel = null,
+  modelDetail = null,
+  modelPreset = null,
+  modelPresets = [],
+  onModelPresetChange,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
+  fallbackModelName = null,
   onModelBadgeClick,
   variant = "thread",
   slashCommands = [],
@@ -837,10 +846,15 @@ export function ThreadComposer({
   onWorkspaceScopeChange,
   pendingQueueKey = null,
   transcriptionProvider = null,
+  ingressLimits = null,
+  quotedContext = null,
+  focusRequest = 0,
+  onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
@@ -861,6 +875,7 @@ export function ThreadComposer({
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
+  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const queuedPromptStorageKey = useMemo(
@@ -892,15 +907,37 @@ export function ThreadComposer({
     ? t("thread.composer.placeholderStreaming")
     : placeholder ?? t("thread.composer.placeholderThread");
 
+  const maxAttachments = ingressLimits?.attachments.max_count
+    ?? MAX_ATTACHMENTS_PER_MESSAGE;
+  const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
-    useAttachedImages();
+    useAttachedImages({ ingressLimits });
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
       const key = `thread.composer.imageRejected.${reason}`;
-      return t(key, { max: MAX_IMAGES_PER_MESSAGE });
+      const fallback = reason === "too_many_attachments"
+        ? `Max ${maxAttachments} attachments per message`
+        : reason === "empty_file"
+          ? "Empty files cannot be attached"
+          : reason === "total_too_large"
+            ? "Attachments are too large together — remove some or use smaller files"
+            : reason === "transport_too_large"
+              ? "This attachment would exceed the gateway transport limit"
+              : reason === "too_large"
+                ? "File is too large"
+                : "Unsupported file type";
+      return t(key, { max: maxAttachments, defaultValue: fallback });
     },
-    [t],
+    [maxAttachments, t],
+  );
+
+  const textTooLargeMessage = useCallback(
+    () => t("thread.composer.textTooLarge", {
+      max: formatBytes(maxTextBytes),
+      defaultValue: `Message text is too large (max ${formatBytes(maxTextBytes)})`,
+    }),
+    [maxTextBytes, t],
   );
 
   const addFiles = useCallback(
@@ -933,6 +970,14 @@ export function ThreadComposer({
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
   }, [disabled]);
+
+  useEffect(() => {
+    if (!focusRequest || disabled) return;
+    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [disabled, focusRequest]);
+
+  const normalizedQuotedContext = quotedContext?.trim().slice(0, QUEUED_PROMPT_MAX_CHARS) || null;
 
   const readyImages = useMemo(
     () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
@@ -994,15 +1039,28 @@ export function ThreadComposer({
       const query = skillQuery.text;
       return skills
         .filter((skill) => skill.available)
-        .filter((skill) => {
-          const haystack = [
-            skill.name,
-            skill.description,
-          ].join(" ").toLowerCase();
-          return haystack.includes(query);
+        .flatMap((skill) => {
+          const matchRank = skillMatchRank(skill, query);
+          return matchRank === null
+            ? []
+            : [{
+                command: `$${skill.name}`,
+                matchRank,
+                skill,
+              }];
         })
-        .map((skill) => {
-          const command = `$${skill.name}`;
+        .sort((a, b) => {
+          if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
+          if (query !== "") return 0;
+          const aRecent = recentSlashCommands.indexOf(a.command);
+          const bRecent = recentSlashCommands.indexOf(b.command);
+          if (aRecent === -1 && bRecent === -1) return 0;
+          if (aRecent === -1) return 1;
+          if (bRecent === -1) return -1;
+          return aRecent - bRecent;
+        })
+        .slice(0, 8)
+        .map(({ command, skill }) => {
           const description = skill.description || skill.name;
           return {
             command,
@@ -1010,10 +1068,10 @@ export function ThreadComposer({
             description,
             detail: description,
             icon: "brain",
+            kind: "skill" as const,
             recent: recentSlashCommands.includes(command),
           };
-        })
-        .slice(0, 8);
+        });
     }
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
@@ -1286,10 +1344,28 @@ export function ThreadComposer({
     resizeTextarea();
   }, [resizeTextarea]);
 
-  const clearInlineError = useCallback(() => setInlineError(null), []);
+  const clearVoiceErrorTimers = useCallback(() => {
+    if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
+    voiceErrorFadeTimerRef.current = null;
+  }, []);
+  const clearInlineError = useCallback(() => {
+    clearVoiceErrorTimers();
+    setVoiceErrorFading(false);
+    setInlineError(null);
+  }, [clearVoiceErrorTimers]);
   const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
+    clearVoiceErrorTimers();
+    setVoiceErrorFading(false);
     setInlineError(t(`thread.composer.voiceErrors.${key}`));
-  }, [t]);
+    voiceErrorFadeTimerRef.current = setTimeout(() => {
+      setVoiceErrorFading(true);
+      voiceErrorFadeTimerRef.current = setTimeout(() => {
+        setInlineError(null);
+        setVoiceErrorFading(false);
+        voiceErrorFadeTimerRef.current = null;
+      }, VOICE_ERROR_FADE_MS);
+    }, VOICE_ERROR_VISIBLE_MS);
+  }, [clearVoiceErrorTimers, t]);
   const voiceRecorder = useVoiceRecorder({
     disabled,
     onClearError: clearInlineError,
@@ -1298,6 +1374,8 @@ export function ThreadComposer({
     onTranscribeAudio,
     wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
+
+  useEffect(() => () => clearVoiceErrorTimers(), [clearVoiceErrorTimers]);
 
   useEffect(() => {
     if (!onTranscribeAudio) return;
@@ -1411,6 +1489,10 @@ export function ThreadComposer({
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
     if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
+    if (utf8Bytes(formatQuotedUserMessage(text, normalizedQuotedContext)) > maxTextBytes) {
+      setInlineError(textTooLargeMessage());
+      return;
+    }
     const queuedImages = readyImagesToQueuedImages(readyImages);
     queuedPromptCounterRef.current += 1;
     const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
@@ -1421,11 +1503,23 @@ export function ThreadComposer({
         id,
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
+        ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
       },
     ]);
     clear();
     clearComposerText();
-  }, [canQueueGuidance, clear, clearComposerText, readyImages, value]);
+    onQuotedContextChange?.(null);
+  }, [
+    canQueueGuidance,
+    clear,
+    clearComposerText,
+    maxTextBytes,
+    normalizedQuotedContext,
+    onQuotedContextChange,
+    readyImages,
+    textTooLargeMessage,
+    value,
+  ]);
 
   const removeQueuedPrompt = useCallback((id: string) => {
     secondEnterPromptIdRef.current = null;
@@ -1441,6 +1535,7 @@ export function ThreadComposer({
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(prompt.text.length);
+    onQuotedContextChange?.(prompt.quotedContext ?? null);
     if (prompt.images?.length) {
       restoreReadyImages(prompt.images as RestoredReadyImage[]);
     } else {
@@ -1453,7 +1548,7 @@ export function ThreadComposer({
       el.focus();
       el.setSelectionRange(prompt.text.length, prompt.text.length);
     });
-  }, [clear, resizeTextarea, restoreReadyImages]);
+  }, [clear, onQuotedContextChange, resizeTextarea, restoreReadyImages]);
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -1476,12 +1571,17 @@ export function ThreadComposer({
       const queuedImages = queuedImagesToSendImages(prompt.images);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
       if (text || queuedImages?.length) {
-        if (queuedImages?.length) onSend(text, queuedImages);
-        else onSend(text);
+        const options: SendOptions | undefined = prompt.quotedContext || isStreaming
+          ? {
+              ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+              ...(isStreaming ? { continueActiveTurn: true } : {}),
+            }
+          : undefined;
+        onSend(text, queuedImages, options);
       }
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [onSend],
+    [isStreaming, onSend],
   );
 
   const sendNextQueuedPrompt = useCallback(() => {
@@ -1493,7 +1593,12 @@ export function ThreadComposer({
     }
     setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
     const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
+    const options = nextPrompt.quotedContext
+      ? { quotedContext: nextPrompt.quotedContext }
+      : undefined;
+    if (queuedImages?.length && options) onSend(nextPrompt.text.trim(), queuedImages, options);
+    else if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
+    else if (options) onSend(nextPrompt.text.trim(), undefined, options);
     else onSend(nextPrompt.text.trim());
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [onSend, queuedPrompts]);
@@ -1526,27 +1631,32 @@ export function ThreadComposer({
     if (!canSend) return;
     const trimmed = value.trim();
     const content = trimmed;
-    // Share the same normalized ``data:`` URL with both the wire payload and
-    // the optimistic bubble preview: data URLs are self-contained (no blob
-    // lifetime, safe under React StrictMode double-mount) and keep the
-    // bubble in sync with whatever the backend actually sees.
-    const payload: SendImage[] | undefined =
+    if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
+      setInlineError(textTooLargeMessage());
+      return;
+    }
+    // Share the same ``data:`` URL with both the wire payload and the
+    // optimistic bubble preview: data URLs are self-contained (no blob
+    // lifetime, safe under React StrictMode double-mount) and keep the bubble
+    // in sync with whatever the backend actually sees.
+    const payload: SendAttachment[] | undefined =
       readyImages.length > 0
         ? readyImages.map((img) => ({
             media: {
               data_url: img.dataUrl,
               name: img.file.name,
             },
-            preview: { url: img.dataUrl, name: img.file.name },
+            preview: { kind: img.kind, url: img.dataUrl, name: img.file.name },
           }))
         : undefined;
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
-      attachedCliApps.length > 0 || attachedMcpPresets.length > 0
+      attachedCliApps.length > 0 || attachedMcpPresets.length > 0 || normalizedQuotedContext
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
+            ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
           }
         : undefined;
     const hasPlainTextCommandPayload =
@@ -1565,6 +1675,7 @@ export function ThreadComposer({
       setQueuedPrompts([]);
       clear();
       clearComposerText();
+      onQuotedContextChange?.(null);
       return;
     }
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
@@ -1586,6 +1697,7 @@ export function ThreadComposer({
     // preview here without affecting the rendered message.
     clear();
     clearComposerText();
+    onQuotedContextChange?.(null);
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
@@ -1594,12 +1706,16 @@ export function ThreadComposer({
     clearComposerText,
     handleStop,
     isStreaming,
+    maxTextBytes,
     modelNeedsSetup,
     onModelBadgeClick,
     onSend,
     onStop,
+    onQuotedContextChange,
+    normalizedQuotedContext,
     readyImages,
     slashCommands,
+    textTooLargeMessage,
     value,
   ]);
 
@@ -1786,12 +1902,10 @@ export function ThreadComposer({
       ) : null}
       <div
         className={cn(
-          "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
-          "after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:border after:border-blue-300/75 after:opacity-0 after:transition-opacity after:duration-200 focus-within:after:opacity-100 dark:after:border-blue-400/55",
+          "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
-            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
-          "focus-within:border-blue-300/75 dark:focus-within:border-blue-400/55",
+            ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
           goalState?.active &&
@@ -1851,6 +1965,28 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
+        {normalizedQuotedContext ? (
+          <div
+            className="mx-3 mt-3 flex min-w-0 items-start gap-2 border-l-2 border-muted-foreground/25 pl-3 pr-1 text-muted-foreground"
+            aria-label={t("thread.composer.quotedContext")}
+          >
+            <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <p className="line-clamp-2 min-w-0 flex-1 text-[13px]/[1.45]">
+              {normalizedQuotedContext}
+            </p>
+            <button
+              type="button"
+              className="touch-target -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t("thread.composer.removeQuotedContext")}
+              onClick={() => {
+                onQuotedContextChange?.(null);
+                requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+        ) : null}
         <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         <div className="relative">
           {hasMentionDecorations ? (
@@ -1896,8 +2032,9 @@ export function ThreadComposer({
           <div
             role="alert"
             className={cn(
-              "mx-3 mb-1 rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive",
+              "mx-3 mb-1 max-h-10 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
+              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] duration-500 ease-out",
+              voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
             )}
           >
             {inlineError}
@@ -1905,13 +2042,21 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "flex flex-wrap items-center justify-between gap-y-2",
+            "thread-composer-footer flex flex-nowrap items-center",
             isHero
-              ? cn("gap-x-1.5 px-3 sm:px-4", showProjectPicker ? "pb-1.5" : "pb-3.5")
+              ? cn(
+                  "gap-x-1.5 px-3 sm:px-4",
+                  showProjectPicker ? "pb-1.5" : "pb-3.5",
+                )
               : "gap-x-2 px-2.5 pb-2 sm:px-3",
           )}
         >
-          <div className={cn("flex min-w-0 flex-1 basis-[8rem] items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div
+            className={cn(
+              "thread-composer-footer-primary flex min-w-0 flex-1 basis-0 items-center",
+              isHero ? "gap-1.5" : "gap-2",
+            )}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -1928,7 +2073,7 @@ export function ThreadComposer({
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "rounded-full text-muted-foreground hover:text-foreground",
+                "thread-composer-action touch-target rounded-full text-muted-foreground hover:text-foreground",
                 isHero
                   ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
                   : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
@@ -1954,13 +2099,23 @@ export function ThreadComposer({
               />
             ) : null}
           </div>
-          <div className={cn("ml-auto flex min-w-0 shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div
+            className={cn(
+              "thread-composer-footer-actions ml-auto flex min-w-0 items-center justify-end",
+              isHero ? "gap-1.5" : "gap-2",
+            )}
+          >
             {modelLabel && !voiceRecorder.isRecording ? (
-              <ComposerModelBadge
+              <ModelPresetBadge
                 label={modelLabel}
+                modelDetail={modelDetail}
+                modelPreset={modelPreset}
+                modelPresets={modelPresets}
+                onPresetChange={onModelPresetChange}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
+                fallbackModelName={fallbackModelName}
                 isHero={isHero}
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
@@ -1982,7 +2137,7 @@ export function ThreadComposer({
                       onPointerCancel={voiceRecorder.endPress}
                       onClick={voiceRecorder.handleClick}
                       className={cn(
-                        "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        "thread-composer-action touch-target rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
                         isHero ? "h-8 w-8" : "h-9 w-9",
                         voiceRecorder.isRecording &&
                           "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
@@ -2000,7 +2155,7 @@ export function ThreadComposer({
                   <TooltipContent
                     side="top"
                     align="center"
-                    className="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
+                    className="flex items-center gap-2 rounded-full border border-border/70 bg-popover px-3 py-1.5 text-[13px] font-medium text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10"
                   >
                     <span>{voiceButtonTooltip}</span>
                     {voiceRecorder.state === "idle" ? (
@@ -2025,7 +2180,7 @@ export function ThreadComposer({
               }
               onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
-                "rounded-full transition-transform",
+                "thread-composer-action touch-target rounded-full transition-transform",
                 showStopButton
                   ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero
@@ -2244,90 +2399,6 @@ function QueuedPromptRow({
   );
 }
 
-function ComposerModelBadge({
-  label,
-  provider,
-  providerLabel,
-  needsSetup,
-  isHero,
-  onClick,
-}: {
-  label: string;
-  provider?: string | null;
-  providerLabel?: string | null;
-  needsSetup?: boolean;
-  isHero: boolean;
-  onClick?: () => void;
-}) {
-  const inferredProvider = needsSetup ? null : provider || inferProviderFromModelName(label);
-  const brand = providerBrand(inferredProvider);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
-  const showLogo = !!logoUrl;
-  const title = providerLabel ? `${label} · ${providerLabel}` : label;
-  const interactive = Boolean(onClick);
-  const Container = interactive ? "button" : "span";
-
-  return (
-    <Container
-      title={title}
-      type={interactive ? "button" : undefined}
-      onClick={onClick}
-      className={cn(
-        "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
-        "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
-        interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
-        needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
-        isHero
-          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2 text-[11.5px]"
-          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-2.5 text-[12px]",
-      )}
-    >
-      <span
-        data-testid={needsSetup ? "composer-model-setup-icon" : inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
-        className={cn(
-          "grid shrink-0 place-items-center overflow-hidden",
-          needsSetup
-            ? "text-amber-800 dark:text-amber-200"
-            : "rounded-full border bg-background",
-          isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
-        )}
-        style={{
-          borderColor: !needsSetup && brand ? `${brand.color}28` : undefined,
-          boxShadow: !needsSetup && brand ? `inset 0 0 0 1px ${brand.color}18` : undefined,
-        }}
-        aria-hidden
-      >
-        {needsSetup ? (
-          <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
-        ) : showLogo ? (
-          <img
-            src={logoUrl}
-            alt=""
-            decoding="async"
-            loading="lazy"
-            className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
-            onLoad={onLogoLoad}
-            onError={onLogoError}
-          />
-        ) : brand ? (
-          <span
-            className={cn(
-              "grid h-full w-full place-items-center rounded-full text-white",
-              isHero ? "text-[7.5px]" : "text-[8px]",
-            )}
-            style={{ backgroundColor: brand.color }}
-          >
-            {brand.initials.slice(0, 2)}
-          </span>
-        ) : (
-          <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
-        )}
-      </span>
-      <span className="truncate">{label}</span>
-    </Container>
-  );
-}
-
 function ComposerCliMentionOverlay({
   segments,
   isHero,
@@ -2505,7 +2576,7 @@ function MentionCandidateLogo({
 }) {
   const color = (candidate.kind === "cli"
     ? candidate.app.brand_color
-    : candidate.preset.brand_color) || "hsl(var(--primary))";
+    : candidate.preset.brand_color) || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const rawLogoUrl = candidate.kind === "cli" ? candidate.app.logo_url : candidate.preset.logo_url;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
@@ -2573,6 +2644,7 @@ function SlashCommandPalette({
         {commands.map((command, index) => {
           const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
           const selected = index === selectedIndex;
+          const isSkill = command.kind === "skill";
           const commandKey = slashCommandI18nKey(command.command);
           const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
             defaultValue: command.title,
@@ -2608,23 +2680,34 @@ function SlashCommandPalette({
                 <Icon className="h-4 w-4" />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-                <span className="min-w-0 truncate text-[13.5px] font-semibold tracking-normal text-foreground">
+                <span
+                  className={cn(
+                    "text-[13.5px] font-semibold tracking-normal text-foreground",
+                    isSkill
+                      ? "max-w-full shrink-0 break-all sm:max-w-[55%]"
+                      : "min-w-0 truncate",
+                  )}
+                >
                   {title}
                 </span>
                 <span className="min-w-0 truncate text-[13px] text-muted-foreground">
                   {command.detail || description}
                 </span>
               </span>
-              <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
-                {command.badge || command.recent ? (
-                  <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
-                    {command.badge ?? t("thread.composer.slash.badges.recent")}
-                  </span>
-                ) : null}
-                <span className="font-mono text-[12px] text-muted-foreground/60">
-                  {command.argHint ? `${command.command} ${command.argHint}` : command.command}
+              {!isSkill || command.badge || command.recent ? (
+                <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
+                  {command.badge || command.recent ? (
+                    <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+                      {command.badge ?? t("thread.composer.slash.badges.recent")}
+                    </span>
+                  ) : null}
+                  {!isSkill ? (
+                    <span className="font-mono text-[12px] text-muted-foreground/60">
+                      {command.argHint ? `${command.command} ${command.argHint}` : command.command}
+                    </span>
+                  ) : null}
                 </span>
-              </span>
+              ) : null}
             </button>
           );
         })}
@@ -2673,7 +2756,7 @@ function AttachmentChip({
       data-testid="composer-chip"
     >
       <div className="relative h-10 w-10 overflow-hidden rounded-md bg-background">
-        {image.previewUrl ? (
+        {image.kind === "image" && image.previewUrl ? (
           <img
             src={image.previewUrl}
             alt=""
@@ -2684,7 +2767,11 @@ function AttachmentChip({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
-            <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            {image.kind === "image" ? (
+              <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            ) : (
+              <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
+            )}
           </div>
         )}
         {image.status === "encoding" ? (

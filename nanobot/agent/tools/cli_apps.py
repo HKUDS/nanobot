@@ -1,14 +1,15 @@
 """Controlled runner for installed CLI Apps."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, ToolContext
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -66,11 +67,11 @@ class CliAppsTool(Tool):
         return CliAppsToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.cli_apps.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.cli_apps
         return cls(
             workspace=Path(ctx.workspace),

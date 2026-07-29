@@ -31,7 +31,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         </span>
       </section>
 
-      <section>
+      <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
           <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
             {t("settings.skills.featured", { defaultValue: "Agent skills" })}

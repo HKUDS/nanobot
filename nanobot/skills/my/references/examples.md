@@ -34,23 +34,16 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ```
 → my(action="check")
   → context_window_tokens: 200000
-→ my(action="set", key="context_window_tokens", value=262144)
-  → "Set context_window_tokens = 262144 (was 200000)"
-→ "I've expanded my context window to handle this large codebase."
+→ my(action="set", key="model_preset", value="deep")
+  → "Set model_preset = 'deep' for the next turn; context_window_tokens will be 262144"
+→ "I've selected the configured deep preset for this session's next turn."
 ```
 
 ### Switching to a configured model preset
 ```
 → my(action="set", key="model_preset", value="fast")
-  → "Set model_preset = 'fast' (was 'deep'); model is now 'openai/gpt-4.1-mini'"
-→ "Switched to the fast preset for these batch tasks."
-```
-
-### Switching to a raw model when no preset exists
-```
-→ my(action="set", key="model", value="anthropic/claude-haiku-4-5-20251001")
-  → "Set model = 'anthropic/claude-haiku-4-5-20251001' (was 'anthropic/claude-sonnet-4-6')"
-→ "Switched to a faster model for these batch tasks."
+  → "Set model_preset = 'fast' for the next turn; model will be 'openai/gpt-4.1-mini'"
+→ "Selected the fast preset for this session's next turn."
 ```
 
 ## Cross-Turn Memory

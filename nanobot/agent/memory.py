@@ -1,5 +1,10 @@
 """Memory system: pure file I/O store and lightweight Consolidator."""
 
+# Tool schemas are installed by the ``@tool_parameters`` class decorator at
+# runtime; static analyzers cannot observe that it clears ``parameters`` from
+# ``__abstractmethods__`` before these classes are instantiated.
+# pyright: reportAbstractUsage=false, reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +16,7 @@ import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 
 from loguru import logger
 
@@ -19,6 +24,7 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -29,23 +35,50 @@ from nanobot.utils.helpers import (
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.workspace_prompts import (
+    WORKSPACE_PROMPT_MAX_CHARS,
+    has_workspace_prompt_override,
+    load_workspace_prompt_override,
+    workspace_prompt_file,
+)
 
 from nanobot.utils.helpers import content_with_media_breadcrumbs
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
 
+
+class DreamRunProgress:
+    """Track tool failures that make a nominally completed Dream run unsafe to advance."""
+
+    def __init__(self) -> None:
+        self.had_tool_errors = False
+
+    async def __call__(
+        self,
+        *_args: Any,
+        tool_events: list[dict[str, Any]] | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        if any(
+            isinstance(cast(object, event), dict) and event.get("phase") == "error"
+            for event in tool_events or ()
+        ):
+            self.had_tool_errors = True
+
+
 class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
-    # Durable files whose real working-tree delta grounds Dream commit messages
-    # and the cursor-advance gate. Deliberately excludes memory/.dream_cursor so
-    # that advancing the cursor itself is never mistaken for a productive edit.
+    # Durable files whose real working-tree delta grounds Dream commit messages.
+    # Deliberately excludes memory/.dream_cursor so progress bookkeeping never
+    # appears as a durable-memory edit in the audit record.
     _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
     # Per-file cap when embedding current contents into the Dream prompt. The
     # durable files are tiny in practice (~5 KB total), but a runaway file must
@@ -409,13 +442,33 @@ class MemoryStore:
         ]
 
     def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+        """Drop oldest processed entries without discarding pending Dream input."""
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
-        kept = entries[-self.max_history_entries:]
+        last_dream_cursor = self.get_last_dream_cursor()
+        first_unprocessed = next(
+            (
+                index
+                for index, entry in enumerate(entries)
+                if (
+                    (cursor := self._valid_cursor(entry.get("cursor"))) is not None
+                    and cursor > last_dream_cursor
+                )
+            ),
+            len(entries),
+        )
+        keep_from = min(len(entries) - self.max_history_entries, first_unprocessed)
+        kept = entries[keep_from:]
+        if len(kept) > self.max_history_entries:
+            logger.warning(
+                "History compaction retained {} unprocessed entries beyond the configured "
+                "limit of {}",
+                len(kept),
+                self.max_history_entries,
+            )
         self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
@@ -429,9 +482,11 @@ class MemoryStore:
                     line = line.strip()
                     if line:
                         try:
-                            entries.append(json.loads(line))
+                            parsed: object = json.loads(line)
                         except json.JSONDecodeError:
                             continue
+                        if isinstance(parsed, dict):
+                            entries.append(cast(dict[str, Any], parsed))
 
         return entries
 
@@ -449,7 +504,8 @@ class MemoryStore:
                 lines = [line for line in data.split("\n") if line.strip()]
                 if not lines:
                     return None
-                return json.loads(lines[-1])
+                parsed: object = json.loads(lines[-1])
+                return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
         except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             return None
 
@@ -494,14 +550,10 @@ class MemoryStore:
 
     @property
     def dream_prompt_file(self) -> Path:
-        return self.workspace / "prompts" / "dream.md"
+        return workspace_prompt_file(self.workspace, "dream")
 
     def has_dream_prompt_override(self) -> bool:
-        with suppress(OSError):
-            return self.dream_prompt_file.is_file() and bool(
-                self.dream_prompt_file.read_text(encoding="utf-8").strip()
-            )
-        return False
+        return has_workspace_prompt_override(self.dream_prompt_file)
 
     @staticmethod
     def default_dream_prompt() -> str:
@@ -514,20 +566,19 @@ class MemoryStore:
         )
 
     def _dream_template(self) -> str:
-        with suppress(OSError):
-            text = self.dream_prompt_file.read_text(encoding="utf-8")
-            if text.strip():
-                text = text.rstrip()
-                if len(text) > _DREAM_PROMPT_MAX_CHARS:
-                    if not self._dream_prompt_oversize_logged:
-                        self._dream_prompt_oversize_logged = True
-                        logger.warning(
-                            "workspace Dream prompt exceeds {} chars ({}); truncating. "
-                            "Further occurrences suppressed.",
-                            _DREAM_PROMPT_MAX_CHARS, len(text),
-                        )
-                    return truncate_text(text, _DREAM_PROMPT_MAX_CHARS)
-                return text
+        text, original_chars = load_workspace_prompt_override(self.dream_prompt_file)
+        if text is not None:
+            if (
+                original_chars > WORKSPACE_PROMPT_MAX_CHARS
+                and not self._dream_prompt_oversize_logged
+            ):
+                self._dream_prompt_oversize_logged = True
+                logger.warning(
+                    "workspace Dream prompt exceeds {} chars ({}); truncating. "
+                    "Further occurrences suppressed.",
+                    WORKSPACE_PROMPT_MAX_CHARS, original_chars,
+                )
+            return text
         return self.default_dream_prompt()
 
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
@@ -547,7 +598,7 @@ class MemoryStore:
 
         batch = entries[:max_entries]
         history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
+            f"[{e['timestamp']}] {truncate_text(e['content'], 1000)}"
             for e in batch
         )
         template = self._dream_template()
@@ -569,7 +620,7 @@ class MemoryStore:
             ("USER.md", self.user_file),
             ("memory/MEMORY.md", self.memory_file),
         ]
-        blocks = []
+        blocks: list[str] = []
         for label, path in files:
             try:
                 content = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -584,14 +635,13 @@ class MemoryStore:
         """Structured summary of uncommitted changes to the durable memory files.
 
         Returns "" when git is unavailable or no content file changed. This is
-        the ground-truth input for diff-grounded Dream commit messages and for
-        gating cursor advance on real edits (never on LLM self-report).
+        the ground-truth input for diff-grounded Dream commit messages.
         """
         if not self._git.is_initialized():
             return ""
         return self._git.summarize_working_tree(list(self._DREAM_CONTENT_PATHS))
 
-    def build_dream_tools(self):
+    def build_dream_tools(self) -> ToolRegistry:
         """Build the restricted tool registry used by Dream runs."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
@@ -629,41 +679,49 @@ class MemoryStore:
         tools.register(WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         return tools
 
     @staticmethod
-    def dream_run_completed(resp: object | None) -> bool:
-        """Return True only when an ephemeral Dream agent turn completed cleanly."""
+    def dream_run_completed(
+        resp: object | None,
+        *,
+        had_tool_errors: bool = False,
+    ) -> bool:
+        """Return True only when a Dream turn completed without tool failures."""
         metadata = getattr(resp, "metadata", None)
-        return isinstance(metadata, dict) and metadata.get("_stop_reason") == "completed"
+        if had_tool_errors or not isinstance(metadata, dict):
+            return False
+        return cast(dict[str, Any], metadata).get("_stop_reason") == "completed"
 
     # -- message formatting utility ------------------------------------------
 
     @staticmethod
-    def _format_messages(messages: list[dict]) -> str:
-        lines = []
-        for message in messages:
-            # --- 新增开始：将 media 合并到 content 中 ---
-            role = message.get("role")
-            content = message.get("content", "")
-            media = message.get("media")
-            # 调用共享函数，如果 content 为空但 media 有内容，会生成面包屑
-            content = content_with_media_breadcrumbs(role, content, media)
-            # 现在 content 可能非空了
-            if not content:
-                continue
-            # --- 新增结束 ---
-            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
-            lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {role.upper()}{tools}: {content}"
-            )
-        return "\n".join(lines)
+    def _format_messages(messages: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for message in messages:
+        # 将 media 合并到 content 中
+        content = content_with_media_breadcrumbs(
+            message.get("role"),
+            message.get("content", ""),
+            message.get("media"),
+        )
+        if not content:
+            continue
+        tools_used = message.get("tools_used")
+        tools = f" [tools: {', '.join(cast(list[str], tools_used))}]" if tools_used else ""
+        timestamp = cast(str, message.get("timestamp", "?"))
+        role = cast(str, message["role"])
+        lines.append(
+            f"[{timestamp[:16]}] {role.upper()}{tools}: {content}"
+        )
+    return "\n".join(lines)
 
     def raw_archive(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         *,
         max_chars: int | None = None,
         session_key: str | None = None,
@@ -717,9 +775,9 @@ class MemoryStore:
         Only current base64url-encoded Dream session keys are considered.
         Non-dream session files are never touched.
         """
-        dream_files = []
+        dream_files: list[Path] = []
         for path in sessions_dir.glob("*.jsonl"):
-            decoded_key = SessionManager._decode_storage_key(path.stem)
+            decoded_key = SessionManager.decode_storage_key(path.stem)
             if decoded_key is not None and decoded_key.startswith("dream:"):
                 dream_files.append(path)
         dream_files.sort(key=lambda p: p.stat().st_mtime)
@@ -744,7 +802,6 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
-_DREAM_PROMPT_MAX_CHARS = 32_000      # workspace-local Dream prompt override
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 
@@ -892,18 +949,21 @@ class Consolidator:
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
         history = self._full_unconsolidated_history(session)
-        channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
-        summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
+        summary = (
+            cast(dict[str, Any], meta).get("text")
+            if isinstance(meta, dict)
+            else meta
+            if isinstance(meta, str)
+            else None
+        )
         probe_messages = self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
-            chat_id=chat_id,
-            sender_id=None,
             session_summary=summary,
-            session_metadata=session.metadata,
             session_key=session.key,
             unified_session=self.unified_session,
         )
@@ -931,11 +991,11 @@ class Consolidator:
 
     async def archive(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         *,
         runtime: LLMRuntime,
         session_key: str | None = None,
-        summary_messages: list[dict] | None = None,
+        summary_messages: list[dict[str, Any]] | None = None,
     ) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -951,18 +1011,19 @@ class Consolidator:
         messages_to_summarize = public_history_messages(
             summary_messages if summary_messages is not None else messages
         )
+        formatted = MemoryStore._format_messages(messages_to_summarize)
+        formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
+        system_prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+        )
         try:
-            formatted = MemoryStore._format_messages(messages_to_summarize)
-            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
             response = await runtime.provider.chat_with_retry(
                 model=runtime.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": render_template(
-                            "agent/consolidator_archive.md",
-                            strip=True,
-                        ),
+                        "content": system_prompt,
                     },
                     {"role": "user", "content": formatted},
                 ],
@@ -972,19 +1033,21 @@ class Consolidator:
                 max_tokens=runtime.generation.max_tokens,
                 reasoning_effort=runtime.generation.reasoning_effort,
             )
-            if response.finish_reason == "error":
-                raise RuntimeError(f"LLM returned error: {response.content}")
-            summary = response.content or "[no summary]"
-            self.store.append_history(
-                summary,
-                max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
-                session_key=session_key,
-            )
-            return summary
         except Exception:
-            logger.warning("Consolidation LLM call failed, raw-dumping to history")
+            logger.warning("Consolidation provider call failed, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)
             return None
+        if response.finish_reason == "error":
+            logger.warning("Consolidation provider returned an error, raw-dumping to history")
+            self.store.raw_archive(messages, session_key=session_key)
+            return None
+        summary = response.content or "[no summary]"
+        self.store.append_history(
+            summary,
+            max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
+            session_key=session_key,
+        )
+        return summary
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -1017,14 +1080,10 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
-            try:
-                estimated, source = self.estimate_session_prompt_tokens(
-                    session,
-                    runtime=runtime,
-                )
-            except Exception:
-                logger.exception("Token estimation failed for {}", session.key)
-                estimated, source = 0, "error"
+            estimated, source = self.estimate_session_prompt_tokens(
+                session,
+                runtime=runtime,
+            )
             if estimated <= 0:
                 self._persist_last_summary(session, last_summary)
                 return
@@ -1087,14 +1146,10 @@ class Consolidator:
                     # the next invocation can retry a fresh chunk.
                     break
 
-                try:
-                    estimated, source = self.estimate_session_prompt_tokens(
-                        session,
-                        runtime=runtime,
-                    )
-                except Exception:
-                    logger.exception("Token estimation failed for {}", session.key)
-                    estimated, source = 0, "error"
+                estimated, source = self.estimate_session_prompt_tokens(
+                    session,
+                    runtime=runtime,
+                )
                 if estimated <= 0:
                     break
 

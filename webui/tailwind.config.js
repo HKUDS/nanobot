@@ -4,7 +4,12 @@ import typography from "@tailwindcss/typography";
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+    "../nanobot/channels/*/webui/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
+  ],
   theme: {
     container: {
       center: true,
@@ -87,6 +92,10 @@ export default {
           accent: "hsl(var(--sidebar-accent))",
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
+        },
+        settings: {
+          canvas: "hsl(var(--settings-canvas))",
+          surface: "hsl(var(--settings-surface))",
         },
       },
       keyframes: {

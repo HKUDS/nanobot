@@ -2,15 +2,12 @@ x-common-config: &common-config
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      NANOBOT_CHANNELS: ${NANOBOT_CHANNELS:-whatsapp}
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
   cap_drop:
     - ALL
-  cap_add:
-    - SYS_ADMIN
-  security_opt:
-    - apparmor=unconfined
-    - seccomp=unconfined
 
 services:
   nanobot-gateway:

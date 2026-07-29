@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -61,12 +61,14 @@ class _ExecSession:
         cwd: str,
         timeout: int | None,
         owner_session_key: str | None = None,
+        process_tree: bool = False,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
+        self._process_tree = process_tree
         self.started_at = time.monotonic()
         # timeout None/0 means no limit; an infinite deadline is never reached.
         self.deadline = time.monotonic() + timeout if timeout else float("inf")
@@ -149,8 +151,8 @@ class _ExecSession:
                     timeout=2.0,
                 )
             # Safety-net reap after normal exit.
-            from nanobot.agent.tools.shell import _reap_pid
-            _reap_pid(self.process.pid)
+            from nanobot.agent.tools.shell import _reap_pid  # pyright: ignore[reportPrivateUsage]
+            _reap_pid(self.process.pid)  # pyright: ignore[reportPrivateUsage]
         elif yield_time_ms > 0:
             await self._wait_for_buffered_output()
 
@@ -171,17 +173,23 @@ class _ExecSession:
         )
 
     async def kill(self) -> None:
-        if self.process.returncode is not None:
-            return
-        self.process.kill()
+        from nanobot.agent.tools.shell import ExecTool
+
         try:
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self.process.wait(), timeout=5.0)
+            if self._process_tree:
+                await ExecTool._kill_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
+            else:
+                await ExecTool._kill_process(self.process)  # pyright: ignore[reportPrivateUsage]
         finally:
-            # Safety-net waitpid — prevent zombie if asyncio's child watcher
-            # did not reap the process (common in containers).
-            from nanobot.agent.tools.shell import _reap_pid
-            _reap_pid(self.process.pid)
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        self._stdout_task,
+                        self._stderr_task,
+                        return_exceptions=True,
+                    ),
+                    timeout=2.0,
+                )
 
     async def _wait_for_buffered_output(self) -> None:
         deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
@@ -198,6 +206,7 @@ class ExecSessionManager:
         self.idle_timeout = idle_timeout
         self._sessions: dict[str, _ExecSession] = {}
         self._lock = asyncio.Lock()
+        self._closed = False
 
     async def start(
         self,
@@ -213,6 +222,8 @@ class ExecSessionManager:
         owner_session_key: str | None = None,
     ) -> tuple[str, _SessionPoll]:
         async with self._lock:
+            if self._closed:
+                raise RuntimeError("exec session manager is closed")
             await self._cleanup_locked()
             if len(self._sessions) >= self.max_sessions:
                 raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
@@ -225,6 +236,7 @@ class ExecSessionManager:
                 cwd=cwd,
                 timeout=timeout,
                 owner_session_key=owner_session_key,
+                process_tree=True,
             )
             self._sessions[session_id] = session
 
@@ -250,11 +262,7 @@ class ExecSessionManager:
             session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
-        if (
-            owner_session_key
-            and session.owner_session_key
-            and session.owner_session_key != owner_session_key
-        ):
+        if session.owner_session_key and session.owner_session_key != owner_session_key:
             raise KeyError(session_id)
 
         if chars:
@@ -296,10 +304,63 @@ class ExecSessionManager:
                     owner_session_key=session.owner_session_key,
                 )
                 for session_id, session in sorted(self._sessions.items())
-                if not owner_session_key
-                or not session.owner_session_key
-                or session.owner_session_key == owner_session_key
+                if session.owner_session_key == owner_session_key
             ]
+
+    async def close_all(self) -> int:
+        """Terminate and remove all active sessions during shutdown."""
+        async with self._lock:
+            self._closed = True
+            sessions: list[_ExecSession] = list(self._sessions.values())
+            self._sessions.clear()
+        results: list[None | BaseException] = list(await asyncio.gather(
+            *(session.kill() for session in sessions),
+            return_exceptions=True,
+        ))
+        failures: list[tuple[_ExecSession, BaseException]] = [
+            (session, result)
+            for session, result in zip(sessions, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to close exec sessions",
+                [result for _, result in failures],
+            )
+        return len(sessions)
+
+    async def terminate_by_owner(self, owner_session_key: str) -> int:
+        """Terminate all sessions owned by owner_session_key. Returns count."""
+        async with self._lock:
+            victims: list[_ExecSession] = []
+            for sid, s in list(self._sessions.items()):
+                if s.owner_session_key == owner_session_key:
+                    victims.append(self._sessions.pop(sid))
+        results: list[None | BaseException] = list(await asyncio.gather(
+            *(s.kill() for s in victims),
+            return_exceptions=True,
+        ))
+        failures: list[tuple[_ExecSession, BaseException]] = [
+            (session, result)
+            for session, result in zip(victims, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to terminate exec sessions by owner",
+                [result for _, result in failures],
+            )
+        return len(victims)
 
     async def _cleanup_locked(self) -> None:
         now = time.monotonic()
@@ -309,8 +370,9 @@ class ExecSessionManager:
             if now - session.last_access > self.idle_timeout
         ]
         for session_id in stale:
-            session = self._sessions.pop(session_id)
+            session = self._sessions[session_id]
             await session.kill()
+            self._sessions.pop(session_id, None)
 
     async def _spawn(
         self,
@@ -322,9 +384,10 @@ class ExecSessionManager:
     ) -> asyncio.subprocess.Process:
         from nanobot.agent.tools.shell import ExecTool
 
-        return await ExecTool._spawn(
+        return await ExecTool._spawn(  # pyright: ignore[reportPrivateUsage]
             command, cwd, env, shell_program, login,
             stdin=asyncio.subprocess.PIPE,
+            process_tree=True,
         )
 
 
@@ -384,7 +447,6 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             default=False,
         ),
         yield_time_ms=IntegerSchema(
-            DEFAULT_YIELD_MS,
             description="Milliseconds to wait before returning recent output (default 1000, max 30000).",
             minimum=0,
             maximum=MAX_YIELD_MS,
@@ -395,20 +457,17 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             nullable=True,
         ),
         wait_timeout_ms=IntegerSchema(
-            DEFAULT_WAIT_FOR_MS,
             description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
             description="Maximum output characters to return from this poll (default 10000, max 50000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
         ),
         max_output_tokens=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
             description="Compatibility alias for max_output_chars. The current runtime uses a character budget.",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
@@ -430,7 +489,7 @@ class WriteStdinTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -441,8 +500,8 @@ class WriteStdinTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls()
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def exclusive(self) -> bool:
@@ -463,7 +522,7 @@ class WriteStdinTool(Tool):
             "Do not use this to start new commands; start them with exec."
         )
 
-    async def execute(
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         session_id: str,
         chars: str | None = None,
@@ -574,7 +633,7 @@ class ListExecSessionsTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -585,8 +644,8 @@ class ListExecSessionsTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls()
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def name(self) -> str:
@@ -612,7 +671,7 @@ class ListExecSessionsTool(Tool):
             )
             if not sessions:
                 return "No active exec sessions."
-            lines = []
+            lines: list[str] = []
             for info in sessions:
                 command = " ".join(info.command.split())
                 if len(command) > 120:

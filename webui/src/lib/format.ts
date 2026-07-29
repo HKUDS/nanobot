@@ -16,6 +16,25 @@ const LOW_INFORMATION_TITLE_PREVIEWS = new Set([
   "在吗",
 ]);
 
+export function isModelCommandText(text: string | null | undefined): boolean {
+  return /^\/model(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(text?.trim() ?? "");
+}
+
+export function isModelCommandResponseText(text: string | null | undefined): boolean {
+  const normalized = text?.trim() ?? "";
+  return (
+    /^## Model\s+- Current (?:model|selection error):/.test(normalized)
+    || normalized.startsWith("Switched model preset to ")
+    || normalized.startsWith("Could not switch model preset:")
+    || normalized === "Usage: `/model [preset]`"
+  );
+}
+
+export function visibleSessionPreview(preview: string | null | undefined): string {
+  const normalized = preview?.trim() ?? "";
+  return isModelCommandText(normalized) || isModelCommandResponseText(normalized) ? "" : normalized;
+}
+
 function isLowInformationTitlePreview(text: string): boolean {
   const normalized = text.toLowerCase().replace(/[.!?。！？~～\s]+$/g, "").trim();
   return (
@@ -27,7 +46,7 @@ function isLowInformationTitlePreview(text: string): boolean {
 /** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;
-  const oneLine = preview.replace(/\s+/g, " ").trim();
+  const oneLine = visibleSessionPreview(preview).replace(/\s+/g, " ").trim();
   if (!oneLine) return fallback;
   if (isLowInformationTitlePreview(oneLine)) return fallback;
   return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
@@ -52,6 +71,7 @@ const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
 
 const relativeTimeFormatters = new Map<string, Intl.RelativeTimeFormat>();
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+const clockTimeFormatters = new Map<string, Intl.DateTimeFormat>();
 
 function activeLocale(locale?: string): string {
   return locale || i18n.resolvedLanguage || i18n.language || currentLocale();
@@ -74,6 +94,25 @@ function dateTimeFormatter(locale: string): Intl.DateTimeFormat {
   });
   dateTimeFormatters.set(locale, formatter);
   return formatter;
+}
+
+function clockTimeFormatter(locale: string): Intl.DateTimeFormat {
+  const existing = clockTimeFormatters.get(locale);
+  if (existing) return existing;
+  const formatter = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  clockTimeFormatters.set(locale, formatter);
+  return formatter;
+}
+
+function isSameLocalCalendarDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  );
 }
 
 export function relativeTime(
@@ -99,6 +138,22 @@ export function fmtDateTime(
 ): string {
   const date = parseDate(value);
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
+}
+
+/**
+ * Format a completion timestamp in the browser's local timezone.
+ * Today's messages stay compact; older messages include their date for orientation.
+ */
+export function formatMessageEndTime(
+  value: number | null | undefined,
+  locale?: string,
+): string {
+  const date = parseDate(value);
+  if (!date) return "";
+  const loc = activeLocale(locale);
+  return isSameLocalCalendarDay(date, new Date())
+    ? clockTimeFormatter(loc).format(date)
+    : dateTimeFormatter(loc).format(date);
 }
 
 /** Human-readable turn duration (wall-clock), locale-aware via ``Intl`` (seconds/minutes). */

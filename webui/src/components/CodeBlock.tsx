@@ -40,8 +40,6 @@ const CODE_FONT_STACK = [
 ].join(", ");
 
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
-const CODE_SURFACE_LIGHT = "#f4f4f5";
-const CODE_SURFACE_DARK = "#27272a";
 
 const LazyHighlightedCode = lazy(async () => {
   const [
@@ -81,15 +79,11 @@ const LazyHighlightedCode = lazy(async () => {
           language={language || "text"}
           style={transparentTheme}
           customStyle={{
-            background: chrome === "none"
-              ? "transparent"
-              : isDark
-                ? CODE_SURFACE_DARK
-                : CODE_SURFACE_LIGHT,
+            background: "transparent",
             margin: 0,
-            padding: chrome === "none" ? "0.75rem 1rem" : "1rem",
+            padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
             fontFamily: CODE_FONT_STACK,
-            fontSize: chrome === "none" ? "13px" : "0.875rem",
+            fontSize: "13px",
             lineHeight: chrome === "none" ? 1.55 : 1.6,
             tabSize: 2,
           }}
@@ -148,10 +142,11 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 overflow-x-auto p-4 font-mono text-sm leading-[1.6] text-foreground/90",
+        "m-0 overflow-x-auto bg-transparent font-mono text-[13px] text-foreground/90",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
-        chrome === "default" ? "bg-zinc-100 dark:bg-zinc-800" : "bg-transparent",
-        chrome === "none" && "p-3 text-[13px] leading-[1.55]",
+        chrome === "default"
+          ? "py-4 pl-5 pr-14 leading-[1.6]"
+          : "p-3 leading-[1.55]",
         className,
       )}
       data-testid={testId}
@@ -193,6 +188,7 @@ export function CodeBlock({
   const hasChrome = chrome === "default";
   const renderAnsi = shouldRenderAnsi(language, code);
   const syntaxLanguage = normalizeCodeLanguage(language);
+  const copyLabel = copied ? t("code.copied") : t("code.copyAria");
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(renderAnsi ? stripAnsi(code) : code).then((ok) => {
@@ -205,44 +201,12 @@ export function CodeBlock({
   return (
     <div
       className={cn(
-        "not-prose overflow-hidden",
-        hasChrome && "rounded-lg border",
-        hasChrome && (isDark ? "border-white/10" : "border-black/10"),
+        "not-prose relative overflow-hidden",
+        hasChrome && "rounded-[18px] bg-secondary/70",
         className,
       )}
+      data-language={language || t("code.fallbackLanguage")}
     >
-      {hasChrome ? (
-        <div
-          className={cn(
-            "flex items-center justify-between px-4 pb-1.5 pt-2 text-xs font-medium",
-            isDark
-              ? "bg-zinc-800 text-zinc-300"
-              : "bg-zinc-100 text-zinc-600",
-          )}
-        >
-          <span className="lowercase font-mono">
-            {language || t("code.fallbackLanguage")}
-          </span>
-          <button
-            type="button"
-            onClick={onCopy}
-            className={cn(
-              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono transition-colors",
-              isDark
-                ? "text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
-                : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700",
-            )}
-            aria-label={t("code.copyAria")}
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            <span>{copied ? t("code.copied") : t("code.copy")}</span>
-          </button>
-        </div>
-      ) : null}
       {renderAnsi ? (
         <CodeTextBlock
           code={code}
@@ -279,6 +243,25 @@ export function CodeBlock({
           testId="plain-code-fallback"
         />
       )}
+      {hasChrome ? (
+        <button
+          type="button"
+          onClick={onCopy}
+          className={cn(
+            "absolute right-2.5 top-2.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full",
+            "text-muted-foreground/75 transition-colors hover:bg-background/70 hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+          )}
+          aria-label={copyLabel}
+          title={copyLabel}
+        >
+          {copied ? (
+            <Check className="h-4 w-4" aria-hidden />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden />
+          )}
+        </button>
+      ) : null}
     </div>
   );
 }

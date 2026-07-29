@@ -67,6 +67,13 @@ class TestExtractText:
         result = extract_text(txt_file)
         assert result == content
 
+    def test_extract_text_accepts_string_path(self, tmp_path: Path):
+        """String paths retain the compatibility behavior of Path inputs."""
+        txt_file = tmp_path / "string-path.txt"
+        txt_file.write_text("string path", encoding="utf-8")
+
+        assert extract_text(str(txt_file)) == "string path"
+
     def test_extract_text_txt_file_with_truncation(self, tmp_path: Path):
         """Test that large text files are truncated."""
         txt_file = tmp_path / "large.txt"
@@ -173,6 +180,130 @@ class TestExtractText:
         assert "Test Document" in result
         assert "This is paragraph one." in result
         assert "This is paragraph two." in result
+
+    def test_extract_text_docx_preserves_paragraph_and_table_order(self, tmp_path: Path):
+        """DOCX forms commonly keep nearly all meaningful content in tables."""
+        from docx import Document
+
+        docx_file = tmp_path / "form.docx"
+        doc = Document()
+        doc.add_paragraph("Applicant details")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Name"
+        table.cell(0, 1).text = "Ada Lovelace"
+        table.cell(1, 0).text = "Project"
+        table.cell(1, 1).text = "Analytical Engine"
+        doc.add_paragraph("End of form")
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Name\tAda Lovelace" in result
+        assert "Project\tAnalytical Engine" in result
+        assert result.index("Applicant details") < result.index("Name\tAda Lovelace")
+        assert result.index("Analytical Engine") < result.index("End of form")
+
+    def test_extract_text_docx_preserves_nested_table_text(self, tmp_path: Path):
+        """Nested layout tables must not silently drop form fields."""
+        from docx import Document
+
+        docx_file = tmp_path / "nested-form.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_paragraph("Contact")
+        nested = outer_cell.add_table(rows=1, cols=2)
+        nested.cell(0, 0).text = "Email"
+        nested.cell(0, 1).text = "ada@example.com"
+        outer_cell.add_paragraph("Preferred contact")
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Contact" in result
+        assert "Email" in result
+        assert "ada@example.com" in result
+        assert "Preferred contact" in result
+        assert (
+            result.index("Contact")
+            < result.index("Email")
+            < result.index("ada@example.com")
+            < result.index("Preferred contact")
+        )
+
+    def test_extract_text_docx_does_not_expand_grid_spans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Physical cells avoid python-docx's eager gridSpan expansion."""
+        from docx import Document
+        from docx.table import _Row
+
+        docx_file = tmp_path / "merged.docx"
+        doc = Document()
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).merge(table.cell(0, 1)).text = "Only once"
+        doc.save(docx_file)
+
+        def fail_on_expansion(_row: _Row):
+            pytest.fail("row.cells expands gridSpan before extraction can apply a bound")
+
+        monkeypatch.setattr(_Row, "cells", property(fail_on_expansion))
+
+        assert extract_text(docx_file) == "Only once"
+
+    def test_extract_text_docx_keeps_vertical_merges_compact(self, tmp_path: Path):
+        """Vertically merged labels appear once without shifting later columns."""
+        from docx import Document
+
+        docx_file = tmp_path / "vertical-merge.docx"
+        doc = Document()
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).merge(table.cell(1, 0)).text = "Group"
+        table.cell(0, 1).text = "First"
+        table.cell(1, 1).text = "Second"
+        doc.save(docx_file)
+
+        assert extract_text(docx_file) == "Group\tFirst\n\tSecond"
+
+    def test_extract_text_docx_bounds_physical_table_cells(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Large tables fail safely even when their text output would be empty."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "too-many-cells.docx"
+        doc = Document()
+        doc.add_table(rows=1, cols=2)
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_CELLS", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
+
+    def test_extract_text_docx_bounds_table_nesting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Deeply nested tables fail safely instead of recursing without a bound."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "nested-too-deep.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_table(rows=1, cols=1).cell(0, 0).text = "Nested"
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_DEPTH", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
 
     def test_extract_text_docx_empty(self, tmp_path: Path):
         """Test extracting text from an empty .docx file."""

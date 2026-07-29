@@ -302,7 +302,7 @@ class TestCmdNewUnifiedSession:
             sessions=sessions,
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
-            llm_runtime=MagicMock(return_value=MagicMock()),
+            runtime_for_session=MagicMock(return_value=MagicMock()),
         )
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
@@ -349,6 +349,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = []
+        sessions.get_or_create.return_value = session
 
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
 
@@ -378,6 +379,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
             session = Session(key=key)
             session.messages = []  # empty → exits immediately for both keys
+            sessions.get_or_create.return_value = session
 
             consolidator.archive = AsyncMock()
             await consolidator.maybe_consolidate_by_tokens(
@@ -452,7 +454,7 @@ class TestStopCommandWithUnifiedSession:
         # Simulate the task creation flow (from _run loop)
         effective_key = UNIFIED_SESSION_KEY if loop._unified_session and not msg.session_key_override else msg.session_key
         task = asyncio.create_task(loop._dispatch(msg))
-        loop._active_tasks.setdefault(effective_key, []).append(task)
+        loop._active_tasks.setdefault(effective_key, set()).add(task)
 
         # Wait for task to complete
         await task
@@ -473,7 +475,7 @@ class TestStopCommandWithUnifiedSession:
             await asyncio.sleep(10)  # Will be cancelled
 
         task = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = [task]
+        loop._active_tasks[UNIFIED_SESSION_KEY] = {task}
 
         # Create a message that would have session_key=UNIFIED_SESSION_KEY after dispatch
         msg = InboundMessage(
@@ -504,7 +506,7 @@ class TestStopCommandWithUnifiedSession:
             await asyncio.sleep(10)
 
         task = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = [task]
+        loop._active_tasks[UNIFIED_SESSION_KEY] = {task}
         msg = InboundMessage(
             channel="telegram",
             chat_id="123456",
@@ -531,7 +533,7 @@ class TestStopCommandWithUnifiedSession:
 
         task1 = asyncio.create_task(long_running())
         task2 = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = [task1, task2]
+        loop._active_tasks[UNIFIED_SESSION_KEY] = {task1, task2}
 
         # /stop from discord should cancel tasks started from telegram
         msg = InboundMessage(

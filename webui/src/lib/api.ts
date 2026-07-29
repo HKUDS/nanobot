@@ -15,7 +15,10 @@ import type {
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
   PairingPayload,
+  ProviderCreationUpdate,
   ProviderModelsPayload,
+  ProviderOAuthCompletionResult,
+  ProviderOAuthLoginResult,
   ProviderSettingsUpdate,
   SessionDeleteResult,
   SessionAutomationsPayload,
@@ -51,6 +54,8 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
 }
 const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
+const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
+const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -132,6 +137,7 @@ export async function listSessions(
     updated_at: string | null;
     title?: string;
     preview?: string;
+    model_preset?: string | null;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
   };
@@ -148,6 +154,7 @@ export async function listSessions(
     updatedAt: s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
+    modelPreset: s.model_preset ?? null,
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
   }));
@@ -178,6 +185,7 @@ export async function fetchWebuiThread(
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
+    cache: "no-store",
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -198,6 +206,24 @@ export async function fetchFilePreview(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchFilePreviewAvailability(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<boolean> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  query.set("probe", "1");
+  const payload = await request<{ available?: boolean }>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+  return payload.available !== false;
 }
 
 export async function fetchSessionAutomations(
@@ -479,9 +505,9 @@ export async function runPairingAction(
 
 export async function startChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   options: {
-    domain?: "feishu" | "lark";
+    domain?: string;
     instanceId?: string;
     mode?: "replace" | "create";
     force?: boolean;
@@ -502,7 +528,7 @@ export async function startChannelConnect(
 
 export async function pollChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   sessionId: string,
   base: string = "",
 ): Promise<ChannelConnectPayload> {
@@ -516,7 +542,7 @@ export async function pollChannelConnect(
 
 export async function cancelChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   sessionId: string,
   base: string = "",
 ): Promise<ChannelConnectPayload> {
@@ -744,6 +770,27 @@ export async function updateSettings(
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
 }
 
+function appendModelGenerationSettings(
+  query: URLSearchParams,
+  configuration: Pick<
+    ModelConfigurationCreate,
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+  >,
+): void {
+  if (configuration.maxTokens !== undefined) {
+    query.set("max_tokens", String(configuration.maxTokens));
+  }
+  if (configuration.contextWindowTokens !== undefined) {
+    query.set("context_window_tokens", String(configuration.contextWindowTokens));
+  }
+  if (configuration.temperature !== undefined) {
+    query.set("temperature", String(configuration.temperature));
+  }
+  if (configuration.reasoningEffort !== undefined) {
+    query.set("reasoning_effort", configuration.reasoningEffort ?? "");
+  }
+}
+
 export async function createModelConfiguration(
   token: string,
   configuration: ModelConfigurationCreate,
@@ -754,6 +801,7 @@ export async function createModelConfiguration(
   query.set("label", configuration.label);
   query.set("provider", configuration.provider);
   query.set("model", configuration.model);
+  appendModelGenerationSettings(query, configuration);
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/create?${query}`,
     token,
@@ -770,11 +818,43 @@ export async function updateModelConfiguration(
   if (configuration.label !== undefined) query.set("label", configuration.label);
   if (configuration.provider !== undefined) query.set("provider", configuration.provider);
   if (configuration.model !== undefined) query.set("model", configuration.model);
-  if (configuration.contextWindowTokens !== undefined) {
-    query.set("context_window_tokens", String(configuration.contextWindowTokens));
-  }
+  appendModelGenerationSettings(query, configuration);
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/update?${query}`,
+    token,
+  );
+}
+
+export async function deleteModelConfiguration(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams({ name });
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/delete?${query}`,
+    token,
+  );
+}
+
+export async function migrateModelConfigurations(
+  token: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/migrate`,
+    token,
+  );
+}
+
+export async function updateModelCallOrder(
+  token: string,
+  order: string[],
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams({ order: JSON.stringify(order) });
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-call-order/update?${query}`,
     token,
   );
 }
@@ -784,14 +864,32 @@ export async function updateProviderSettings(
   update: ProviderSettingsUpdate,
   base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("provider", update.provider);
-  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
-  if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
-  if (update.apiType !== undefined) query.set("api_type", update.apiType);
+  const { provider, ...values } = update;
+  const query = new URLSearchParams({ provider });
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
     token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(values)),
+      },
+    },
+  );
+}
+
+export async function createProviderSettings(
+  token: string,
+  update: ProviderCreationUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/create`,
+    token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(update)),
+      },
+    },
   );
 }
 
@@ -799,12 +897,31 @@ export async function loginProviderOAuth(
   token: string,
   provider: string,
   base: string = "",
-): Promise<SettingsPayload> {
+): Promise<ProviderOAuthLoginResult> {
   const query = new URLSearchParams();
   query.set("provider", provider);
-  return request<SettingsPayload>(
+  return request<ProviderOAuthLoginResult>(
     `${base}/api/settings/provider/oauth-login?${query}`,
     token,
+    { cache: "no-store" },
+  );
+}
+
+export async function completeProviderOAuth(
+  token: string,
+  provider: string,
+  flowId: string,
+  authorizationCode?: string,
+  base: string = "",
+): Promise<ProviderOAuthCompletionResult> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  query.set("flow_id", flowId);
+  const headers = authorizationCode ? { [OAUTH_CODE_HEADER]: authorizationCode } : undefined;
+  return request<ProviderOAuthCompletionResult>(
+    `${base}/api/settings/provider/oauth-login/complete?${query}`,
+    token,
+    { cache: "no-store", ...(headers ? { headers } : {}) },
   );
 }
 

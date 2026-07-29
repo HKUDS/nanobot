@@ -9,7 +9,7 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.session.manager import Session, SessionManager
 
 
-def _runtime():
+def _runtime(_session: Session | None = None):
     return MagicMock(name="runtime")
 
 
@@ -240,12 +240,61 @@ class TestCheckExpired:
         resolve_runtime.return_value = replacement
         await scheduled[0]
 
-        resolve_runtime.assert_called_once_with()
+        resolve_runtime.assert_called_once_with(session)
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
             max_suffix=ac._RECENT_SUFFIX_MESSAGES,
         )
+
+    @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
+    def test_invalid_preset_is_isolated_to_one_session(self, resolution_error):
+        ac = _make_autocompact(ttl=15)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        sessions = {
+            key: _make_session(key, updated_at=old_dt)
+            for key in ("cli:removed", "cli:healthy")
+        }
+        for session in sessions.values():
+            _add_turns(session, 5)
+        ac.sessions.list_sessions.return_value = [
+            {"key": key, "updated_at": old_dt.isoformat()}
+            for key in sessions
+        ]
+        ac.sessions.get_or_create.side_effect = sessions.__getitem__
+        healthy_runtime = _runtime()
+
+        def resolve_runtime(session: Session):
+            if session.key == "cli:removed":
+                raise resolution_error("model preset cannot be resolved")
+            return healthy_runtime
+
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, resolve_runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:healthy"}
+
+    def test_unexpected_runtime_resolution_failure_propagates(self):
+        ac = _make_autocompact(ttl=15)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        ac.sessions.list_sessions.return_value = [
+            {"key": session.key, "updated_at": old_dt.isoformat()}
+        ]
+        ac.sessions.get_or_create.return_value = session
+
+        def fail(_session: Session):
+            raise RuntimeError("unexpected resolver failure")
+
+        with pytest.raises(RuntimeError, match="unexpected resolver failure"):
+            ac.check_expired(MagicMock(), fail)
 
     def test_active_session_key_skips(self):
         """Session in active_session_keys should be skipped."""

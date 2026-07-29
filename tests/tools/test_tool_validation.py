@@ -60,7 +60,7 @@ class SampleTool(Tool):
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
 )
@@ -81,12 +81,12 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
     root = tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
     obj = ObjectSchema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         required=["query", "count"],
     )
     params = {"query": "h", "count": 2}
@@ -110,14 +110,14 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     expected = _Mini().validate_params(params)
     assert Schema.validate_json_schema_value(params, root, "") == expected
     assert obj.validate_value(params, "") == expected
-    assert IntegerSchema(0, minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n must be >= 1"]
 
 
 def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
     """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
     built = tool_parameters_schema(
         query=StringSchema(min_length=2),
-        count=IntegerSchema(2, minimum=1, maximum=10),
+        count=IntegerSchema(minimum=1, maximum=10),
         mode=StringSchema("", enum=["fast", "full"]),
         meta=ObjectSchema(
             tag=StringSchema(""),
@@ -289,6 +289,19 @@ def test_exec_extract_absolute_paths_captures_home_paths() -> None:
     assert "~/out.txt" in paths
 
 
+def test_exec_extract_absolute_paths_captures_paths_after_equals() -> None:
+    cmd = "curl --output=/etc/passwd --config=~/.nanobot/config.json"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "/etc/passwd" in paths
+    assert "~/.nanobot/config.json" in paths
+
+
+def test_exec_extract_absolute_paths_does_not_capture_query_tilde() -> None:
+    cmd = 'python query.py --query \'{job=~"app"}\''
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert not any(p.startswith("~") for p in paths)
+
+
 def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
     cmd = 'cat "/tmp/data.txt" "~/.nanobot/config.json"'
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -304,6 +317,15 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
         "Error: Command blocked by safety guard (path outside working dir)"
     )
     assert "hard policy boundary" in error
+
+
+def test_exec_guard_blocks_equals_home_path_outside_workspace(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat --config=~/.nanobot/config.json", str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
@@ -690,6 +712,22 @@ def test_exec_config_timeout_uncapped_and_zero() -> None:
     assert ExecToolConfig(timeout=3600).timeout == 3600
     with pytest.raises(ValidationError):
         ExecToolConfig(timeout=-1)
+
+
+def test_exec_config_accepts_bwrap_bind_aliases() -> None:
+    cfg = ExecToolConfig.model_validate(
+        {
+            "sandboxRoBinds": ["/home/user/.local/bin"],
+            "sandboxRwBinds": ["/home/user/.cache/uv"],
+        }
+    )
+
+    dumped = cfg.model_dump(by_alias=True)
+
+    assert cfg.sandbox_ro_binds == ["/home/user/.local/bin"]
+    assert cfg.sandbox_rw_binds == ["/home/user/.cache/uv"]
+    assert dumped["sandboxRoBinds"] == ["/home/user/.local/bin"]
+    assert dumped["sandboxRwBinds"] == ["/home/user/.cache/uv"]
 
 
 def test_resolve_timeout_config_uncapped_and_unlimited() -> None:

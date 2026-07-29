@@ -225,7 +225,7 @@ async def test_process_message_captures_original_text_before_restore(
         seen.append((ctx.original_user_text, ctx.runtime))
         raise RuntimeError("captured before restore")
 
-    loop._state_restore = stop_after_capture  # type: ignore[method-assign]
+    loop._restore_turn = stop_after_capture  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="captured before restore"):
         await loop._process_message(

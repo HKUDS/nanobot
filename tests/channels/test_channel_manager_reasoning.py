@@ -124,6 +124,7 @@ async def test_reasoning_end_routes_to_send_reasoning_end(manager):
     )
     await manager._send_once(channel, msg)
     channel._end_mock.assert_awaited_once()
+    assert channel._end_mock.await_args.kwargs["stream_id"] == "r1"
     channel._delta_mock.assert_not_awaited()
 
 

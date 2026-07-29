@@ -15,7 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, TypeVar, cast
 
 from filelock import FileLock
 
@@ -63,7 +63,10 @@ class ProcessRuntimePaths:
     log_path: Path
 
 
-class ManagedProcessRuntime:
+_StartOptionsT = TypeVar("_StartOptionsT", bound=ProcessStartOptions)
+
+
+class ManagedProcessRuntime(Generic[_StartOptionsT]):
     """Manage a detached child process without service-specific policy."""
 
     service_name = "process"
@@ -100,12 +103,12 @@ class ManagedProcessRuntime:
         state["started_at"] = _utc_now()
         runtime._write_state(state)
 
-    def start_background(self, options: ProcessStartOptions) -> ProcessResult:
+    def start_background(self, options: _StartOptionsT) -> ProcessResult:
         """Start the configured command as a detached process."""
         with self._lifecycle_lock():
             return self._start_background(options)
 
-    def _start_background(self, options: ProcessStartOptions) -> ProcessResult:
+    def _start_background(self, options: _StartOptionsT) -> ProcessResult:
         current = self.status()
         if current.running:
             return ProcessResult(False, self._message("already_running"), current)
@@ -174,7 +177,7 @@ class ManagedProcessRuntime:
         self._clear_state()
         return ProcessResult(True, self._message("stopped"), self.status(reason="stopped"))
 
-    def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> ProcessResult:
+    def restart(self, options: _StartOptionsT, *, timeout_s: int = 20) -> ProcessResult:
         """Restart the managed process."""
         with self._lifecycle_lock():
             stop_result = self._stop(timeout_s=timeout_s)
@@ -195,6 +198,7 @@ class ManagedProcessRuntime:
                 log_path=self.paths.log_path,
                 reason=reason or "not_started",
             )
+        assert state is not None
 
         if not self._is_pid_running(pid) or not self._record_matches_process(state, pid):
             self._clear_state()
@@ -214,7 +218,7 @@ class ManagedProcessRuntime:
             log_path=self.paths.log_path,
             started_at=_as_str(state.get("started_at")),
             port=_as_int(state.get("port")),
-            command=tuple(command) if isinstance(command, list) else (),
+            command=tuple(cast(list[str], command)) if isinstance(command, list) else (),
             reason=reason or "running",
         )
 
@@ -253,7 +257,7 @@ class ManagedProcessRuntime:
         lock_path = self.paths.state_path.with_name(f"{self.paths.state_path.name}.lock")
         return FileLock(str(lock_path))
 
-    def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
+    def _build_child_command(self, options: _StartOptionsT) -> list[str]:
         raise NotImplementedError
 
     def _popen_platform_kwargs(self) -> dict[str, Any]:
@@ -365,7 +369,7 @@ class ManagedProcessRuntime:
                 payload = json.load(handle)
         except (OSError, json.JSONDecodeError, ValueError):
             return None
-        return payload if isinstance(payload, dict) else None
+        return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
     def _write_state(self, payload: dict[str, Any]) -> None:
         self.paths.run_dir.mkdir(parents=True, exist_ok=True)

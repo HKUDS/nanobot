@@ -25,6 +25,7 @@ class AgentHookContext:
     tool_events: list[dict[str, str]] = field(default_factory=list)
     streamed_content: bool = False
     streamed_reasoning: bool = False
+    stream_continues_current_message: bool = False
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None
@@ -58,6 +59,7 @@ class AgentTurnHookContext:
     session_key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     ephemeral: bool = False
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentHook:
@@ -88,6 +90,14 @@ class AgentHook:
         pass
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        pass
+
+    async def on_provider_tool_event(
+        self,
+        context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        """Observe a provider-hosted tool lifecycle event."""
         pass
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
@@ -191,6 +201,13 @@ class CompositeHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
+
+    async def on_provider_tool_event(
+        self,
+        context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        await self._for_each_hook_safe("on_provider_tool_event", context, event)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)

@@ -195,6 +195,69 @@ async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
 
 
 @pytest.mark.asyncio
+async def test_close_server_ignores_server_cancelled_error(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    class _ServerCancelledStack:
+        async def aclose(self) -> None:
+            raise asyncio.CancelledError()
+
+    loop._mcp_stacks = {"test": _ServerCancelledStack()}
+
+    await mcp_runtime._close_server(loop, "test")
+
+    assert loop._mcp_stacks == {}
+
+
+@pytest.mark.asyncio
+async def test_close_mcp_servers_continues_after_server_cancelled_error(tmp_path):
+    loop = _make_loop(tmp_path)
+    closed: list[str] = []
+
+    class _ServerCancelledStack:
+        async def aclose(self) -> None:
+            raise asyncio.CancelledError()
+
+    class _TrackedStack:
+        async def aclose(self) -> None:
+            closed.append("second")
+
+    loop._mcp_stacks = {
+        "first": _ServerCancelledStack(),
+        "second": _TrackedStack(),
+    }
+
+    await mcp_runtime.close_mcp_servers(loop)
+
+    assert closed == ["second"]
+    assert loop._mcp_stacks == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close_all", [False, True], ids=["single", "all"])
+async def test_mcp_cleanup_re_raises_external_cancellation(tmp_path, close_all: bool):
+    loop = _make_loop(tmp_path)
+    started = asyncio.Event()
+
+    class _BlockingStack:
+        async def aclose(self) -> None:
+            started.set()
+            await asyncio.Event().wait()
+
+    loop._mcp_stacks = {"test": _BlockingStack()}
+
+    if close_all:
+        task = asyncio.create_task(mcp_runtime.close_mcp_servers(loop))
+    else:
+        task = asyncio.create_task(mcp_runtime._close_server(loop, "test"))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
 async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

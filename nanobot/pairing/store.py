@@ -13,12 +13,12 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.config.paths import get_data_dir
-from nanobot.utils.helpers import _write_text_atomic
+from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 
 # threading.Lock is used so store functions remain callable from both sync CLI
 # and async channel handlers.  At private-assistant scale (small JSON file,
@@ -43,10 +43,24 @@ def _load() -> dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
+    if not isinstance(data, dict):
+        logger.warning("Corrupted pairing store, resetting")
+        return {"approved": {}, "pending": {}}
+
+    # JSON stores may contain null or malformed maps after partial edits; treat like {}.
+    data = cast(dict[str, Any], data)
+    raw_approved = data.get("approved")
+    approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
+    data["approved"] = approved
+    raw_pending = data.get("pending")
+    pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
+    data["pending"] = pending
 
     # Convert approved lists to str sets for O(1) lookup.
-    for channel, users in data.get("approved", {}).items():
-        data["approved"][channel] = {str(u) for u in users}
+    for channel, users in approved.items():
+        if not isinstance(users, list):
+            users = []
+        data["approved"][channel] = {str(user) for user in cast(list[object], users)}
     return data
 
 
@@ -54,9 +68,13 @@ def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Convert sets back to lists for JSON serialization
-    payload = {
-        "approved": {ch: sorted(list(users)) for ch, users in data.get("approved", {}).items()},
-        "pending": dict(data.get("pending", {})),
+    raw_approved = data.get("approved")
+    approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
+    raw_pending = data.get("pending")
+    pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
+    payload: dict[str, Any] = {
+        "approved": {ch: sorted(list(cast(set[str], users))) for ch, users in approved.items()},
+        "pending": dict(pending),
     }
     _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -64,10 +82,26 @@ def _save(data: dict[str, Any]) -> None:
 def _gc_pending(data: dict[str, Any]) -> None:
     """Remove expired pending entries in-place."""
     now = time.time()
-    pending: dict[str, Any] = data.get("pending", {})
-    expired = [code for code, info in pending.items() if info.get("expires_at", 0) < now]
+    pending: dict[str, Any] = data.get("pending") or {}
+    expired: list[str] = []
+    for code, info in pending.items():
+        if not isinstance(info, dict):
+            expired.append(code)
+            continue
+        entry = cast(dict[str, Any], info)
+        expires_at = entry.get("expires_at")
+        if (
+            not isinstance(entry.get("channel"), str)
+            or not entry["channel"]
+            or entry.get("sender_id") is None
+            or isinstance(expires_at, bool)
+            or not isinstance(expires_at, (int, float))
+            or expires_at < now
+        ):
+            expired.append(code)
     for code in expired:
         del pending[code]
+    data["pending"] = pending
 
 
 def generate_code(
@@ -150,6 +184,7 @@ def list_pending() -> list[dict[str, Any]]:
         return [
             {"code": code, **info}
             for code, info in data.get("pending", {}).items()
+            if isinstance(info, dict)
         ]
 
 
@@ -193,6 +228,7 @@ def clear_channel(channel: str) -> dict[str, int]:
     """Remove approved senders and pending requests for *channel*."""
     with _LOCK:
         data = _load()
+        _gc_pending(data)
         approved: dict[str, set[str]] = data.get("approved", {})
         approved_users = approved.pop(channel, set())
 
@@ -283,13 +319,13 @@ def handle_pairing_command(channel: str, subcommand_text: str) -> str:
         if len(parts) == 2:
             return (
                 f"Revoked {arg} from {channel}"
-                if revoke(channel, arg)
+                if revoke(channel, parts[1])
                 else f"{arg} was not in the approved list for {channel}"
             )
         if len(parts) == 3:
             return (
                 f"Revoked {parts[2]} from {arg}"
-                if revoke(arg, parts[2])
+                if revoke(parts[1], parts[2])
                 else f"{parts[2]} was not in the approved list for {arg}"
             )
         return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"

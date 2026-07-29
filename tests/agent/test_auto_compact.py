@@ -11,7 +11,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import LLMResponse
 
 
@@ -180,10 +180,62 @@ class TestSessionTTLConfig:
         assert data["idleCompactAfterMinutes"] == 30
         assert "sessionTtlMinutes" not in data
 
+    def test_idle_scan_interval_defaults_to_sixty_seconds(self):
+        """The config default should avoid scanning all sessions every idle tick."""
+        defaults = AgentDefaults()
+        assert defaults.idle_compact_check_interval_seconds == 60
+
+    def test_idle_scan_interval_uses_camel_case_config_key(self):
+        """The JSON config should use the standard camelCase alias."""
+        defaults = AgentDefaults.model_validate({"idleCompactCheckIntervalSeconds": 10})
+        assert defaults.idle_compact_check_interval_seconds == 10
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["idleCompactCheckIntervalSeconds"] == 10
+
     def test_session_file_cap_is_internal_constant(self):
         """Session file cap should remain an internal constant, not a config field."""
         from nanobot.session.manager import FILE_MAX_MESSAGES
         assert FILE_MAX_MESSAGES == 2000
+
+
+class TestIdleScanThrottling:
+    """Test scheduling of full idle-session scans."""
+
+    def test_configured_idle_scan_interval_throttles_checks(self, tmp_path, monkeypatch):
+        """The configured interval should reach the loop and gate session scans."""
+        ticks = iter((1_000.0, 1_000.0, 1_009.999, 1_010.0))
+        monkeypatch.setattr("nanobot.agent.loop.time.monotonic", lambda: next(ticks))
+        config = Config.model_validate({
+            "agents": {
+                "defaults": {
+                    "workspace": str(tmp_path),
+                    "idleCompactCheckIntervalSeconds": 10,
+                }
+            }
+        })
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop.from_config(config, provider=provider)
+        loop.auto_compact.check_expired = MagicMock()
+
+        loop._check_expired_sessions_if_due()
+        loop.auto_compact.check_expired.assert_called_once()
+        loop._check_expired_sessions_if_due()
+        loop.auto_compact.check_expired.assert_called_once()
+        loop._check_expired_sessions_if_due()
+
+        assert loop.auto_compact.check_expired.call_count == 2
+
+    def test_zero_idle_scan_interval_checks_every_tick(self, tmp_path, monkeypatch):
+        """An explicit zero should leave each idle tick eligible to scan."""
+        monkeypatch.setattr("nanobot.agent.loop.time.monotonic", lambda: 1_000.0)
+        loop = _make_loop(tmp_path)
+        loop.auto_compact.check_expired = MagicMock()
+
+        loop._check_expired_sessions_if_due()
+        loop._check_expired_sessions_if_due()
+
+        assert loop.auto_compact.check_expired.call_count == 2
 
 
 class TestAgentLoopTTLParam:
@@ -307,7 +359,7 @@ class TestAutoCompact:
         loop.sessions.save(s2)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(loop)
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         await _drain_background_tasks(loop)
 
         active_after = loop.sessions.get_or_create("cli:active")
@@ -776,10 +828,44 @@ class TestProactiveAutoCompact:
         """Helper: run check_expired via callback and wait for background tasks."""
         loop.auto_compact.check_expired(
             loop._schedule_background,
-            loop.llm_runtime,
+            loop.runtime_for_session,
             active_session_keys=active_session_keys,
         )
         await _drain_background_tasks(loop)
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_survives_session_removed_during_listing(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        removed = loop.sessions.get_or_create("cli:removed")
+        removed.add_message("user", "remove me")
+        loop.sessions.save(removed)
+        healthy = loop.sessions.get_or_create("cli:healthy")
+        healthy.add_message("user", "keep me")
+        loop.sessions.save(healthy)
+
+        removed_path = loop.sessions._get_session_path(removed.key)
+        original_open = open
+
+        def remove_before_open(path, *args, **kwargs):
+            if Path(path) == removed_path:
+                removed_path.unlink()
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", remove_before_open)
+
+        async def idle_once():
+            loop._running = False
+            raise asyncio.TimeoutError
+
+        monkeypatch.setattr(loop.bus, "consume_inbound", idle_once)
+
+        await loop.run()
+
+        assert [row["key"] for row in loop.sessions.list_sessions()] == ["cli:healthy"]
 
     @pytest.mark.asyncio
     async def test_no_check_when_ttl_disabled(self, tmp_path):
@@ -878,12 +964,12 @@ class TestProactiveAutoCompact:
         loop.consolidator.compact_idle_session = _slow_compact
 
         # First call starts archiving via callback
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         await started.wait()
         assert archive_count == 1
 
         # Second call should skip (key is in _archiving)
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         assert archive_count == 1
 
         # Clean up

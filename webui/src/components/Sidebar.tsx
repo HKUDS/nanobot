@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import type {
   ChatSummary,
   SidebarViewState,
@@ -38,6 +37,7 @@ interface SidebarProps {
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
+  onSettingsIntent?: () => void;
   onOpenSearch: () => void;
   activeUtility?: "apps" | "skills" | "automations" | null;
   onToggleArchived: () => void;
@@ -90,7 +90,6 @@ export function Sidebar(props: SidebarProps) {
       className={cn(
         "flex h-full w-full min-w-0 flex-col text-sidebar-foreground",
         props.hostChromeInset ? "bg-transparent" : "bg-sidebar",
-        !props.hostChromeInset && "border-r border-sidebar-border/60",
       )}
     >
       <div
@@ -115,7 +114,7 @@ export function Sidebar(props: SidebarProps) {
           )}
         >
           <img
-            src="/brand/nanobot_icon.png"
+            src="/brand/nanobot_mark.svg"
             alt=""
             className="h-8 w-8 select-none object-contain"
             draggable={false}
@@ -158,6 +157,7 @@ export function Sidebar(props: SidebarProps) {
           collapsed={collapsed}
           label={t("sidebar.apps")}
           onClick={props.onOpenApps}
+          onIntent={props.onSettingsIntent}
           active={props.activeUtility === "apps"}
           icon={<Blocks className="h-4 w-4" />}
         />
@@ -165,6 +165,7 @@ export function Sidebar(props: SidebarProps) {
           collapsed={collapsed}
           label={t("sidebar.skills.title")}
           onClick={props.onOpenSkills}
+          onIntent={props.onSettingsIntent}
           active={props.activeUtility === "skills"}
           icon={<Brain className="h-4 w-4" />}
         />
@@ -172,6 +173,7 @@ export function Sidebar(props: SidebarProps) {
           collapsed={collapsed}
           label={t("sidebar.automations", { defaultValue: "Automations" })}
           onClick={props.onOpenAutomations}
+          onIntent={props.onSettingsIntent}
           active={props.activeUtility === "automations"}
           icon={<CalendarClock className="h-4 w-4" />}
         />
@@ -223,10 +225,9 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
-      <Separator className="bg-sidebar-border/50" />
       <div
         className={cn(
-          "flex items-center gap-1 px-2.5 py-2.5 text-xs",
+          "flex items-center gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
           collapsed && "w-14 flex-col px-0",
         )}
       >
@@ -234,6 +235,7 @@ export function Sidebar(props: SidebarProps) {
           collapsed={collapsed}
           label={t("sidebar.settings")}
           onClick={props.onOpenSettings}
+          onIntent={props.onSettingsIntent}
           className={collapsed ? undefined : "flex-1"}
           icon={<Settings className="h-4 w-4" />}
         />
@@ -252,6 +254,7 @@ function SidebarActionButton({
   className,
   shortcut,
   ariaKeyShortcuts,
+  onIntent,
 }: {
   collapsed: boolean;
   label: string;
@@ -261,6 +264,7 @@ function SidebarActionButton({
   className?: string;
   shortcut?: string;
   ariaKeyShortcuts?: string;
+  onIntent?: () => void;
 }) {
   const title = shortcut ? `${label} (${shortcut})` : collapsed ? label : undefined;
 
@@ -273,8 +277,10 @@ function SidebarActionButton({
       aria-keyshortcuts={ariaKeyShortcuts}
       title={title}
       onClick={() => onClick()}
+      onFocus={onIntent}
+      onPointerEnter={onIntent}
       className={cn(
-        "group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
+        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
         "transition-[width,padding,border-radius,color,background-color] duration-300 ease-out",
         collapsed
           ? "w-9 justify-center gap-0 rounded-xl px-0"

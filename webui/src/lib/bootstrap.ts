@@ -116,7 +116,15 @@ export function deriveWsUrl(
     const host = window.location.hostname.includes(":")
       ? `[${window.location.hostname}]`
       : window.location.hostname;
-    return `ws://${host}:8765${path}${query}`;
+    let scheme = "ws";
+    let port = "8765";
+    if (wsUrl && /^wss?:\/\//i.test(wsUrl)) {
+      const upstream = new URL(wsUrl);
+      scheme = upstream.protocol === "wss:" ? "wss" : "ws";
+      port = upstream.port;
+    }
+    const authority = port ? `${host}:${port}` : host;
+    return `${scheme}://${authority}${path}${query}`;
   }
   if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
     const join = wsUrl.includes("?") ? "&" : "?";

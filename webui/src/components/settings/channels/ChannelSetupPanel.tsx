@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Check,
   ChevronDown,
@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { channelUiContribution } from "@/channel-plugins/registry";
+import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   type ChannelProviderPreset,
@@ -21,17 +23,15 @@ import {
 } from "@/components/settings/channels/CredentialForm";
 import {
   ChannelLogo,
+  ChannelRuntimeError,
   ChannelStatusBadge,
   channelDescription,
-  channelDisplayName,
   channelRequirements,
   channelSetup,
   channelStatusLabel,
+  channelToggleChecked,
+  localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
-import {
-  FeishuConnectFlow,
-  WeixinConnectFlow,
-} from "@/components/settings/channels/ChannelQrConnectFlow";
 import {
   ChannelProviderPresets,
   ChannelSetupActions,
@@ -41,7 +41,7 @@ import {
   ChannelValidationChecks,
   ChannelValidationDetails,
 } from "@/components/settings/channels/ChannelSetupParts";
-import { FeishuAssistantsPanel } from "@/components/settings/channels/FeishuAssistantsPanel";
+import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
 import { Button } from "@/components/ui/button";
 import {
   configureChannel,
@@ -68,34 +68,35 @@ export function ChannelCatalogRow({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
 
   return (
     <button
       type="button"
       aria-label={t("settings.channels.selectChannel", {
-        name: channelDisplayName(feature),
+        name: displayName,
         defaultValue: "View {{name}} settings",
       })}
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
-        selected
-          ? "border-border/55 bg-muted/35"
-          : "border-transparent hover:border-border/45 hover:bg-muted/25",
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border border-transparent px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
+        selected ? "bg-background" : "hover:bg-muted",
       )}
     >
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-          {channelDisplayName(feature)}
+          {displayName}
         </h3>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">
           {channelDescription(feature, t)}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <ChannelStatusBadge>{channelStatusLabel(feature, tx)}</ChannelStatusBadge>
+        <ChannelStatusBadge status={feature.runtime_status}>
+          {channelStatusLabel(feature, tx)}
+        </ChannelStatusBadge>
         <ChevronRight
           className={cn(
             "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
@@ -125,12 +126,28 @@ export function ChannelSetupPanel({
   onAction: (action: "enable" | "disable", name: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
   const [connectRequestId, setConnectRequestId] = useState(0);
-  if (feature.name === "feishu") {
+  const uiContribution = channelUiContribution(feature.name, feature.webui);
+  const PluginPanel = uiContribution?.Panel;
+  if (PluginPanel) {
     return (
-      <FeishuAssistantsPanel
+      <PluginPanel
+        token={token}
+        feature={feature}
+        actionKey={actionKey}
+        showBrandLogos={showBrandLogos}
+        chatAppsDocsUrl={chatAppsDocsUrl}
+        onAction={onAction}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />
+    );
+  }
+  if (feature.instances !== undefined) {
+    return (
+      <ChannelInstancesPanel
         token={token}
         feature={feature}
         showBrandLogos={showBrandLogos}
@@ -142,33 +159,33 @@ export function ChannelSetupPanel({
   const enableBusy = actionKey === `enable:${feature.name}`;
   const disableBusy = actionKey === `disable:${feature.name}`;
   const missingSupport = feature.enabled && !feature.installed;
-  const requiredWebui = feature.name === "websocket";
-  const channelChecked = requiredWebui || feature.enabled;
+  const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
+  const channelChecked = alwaysEnabled || channelToggleChecked(feature);
   const channelBusy = enableBusy || disableBusy;
-  const setup = channelSetup(feature);
+  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
   const needsSetupBeforeEnable =
     !channelChecked
     && feature.configured === false
-    && !(feature.name === "weixin" && setup.mode === "connect");
+    && !(uiContribution?.canConnectBeforeConfigured && setup.mode === "connect");
   const channelToggleDisabled =
-    requiredWebui
+    alwaysEnabled
     || channelBusy
     || needsSetupBeforeEnable
     || (!feature.install_supported && !feature.installed && !feature.enabled);
   const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
   const toggleAriaLabel = t("settings.channels.toggleChannel", {
-    name: channelDisplayName(feature),
+    name: displayName,
     defaultValue: "{{name}} channel",
   });
 
   return (
-    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
-              {channelDisplayName(feature)}
+              {displayName}
             </h3>
             <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
               {channelDescription(feature, t)}
@@ -193,7 +210,9 @@ export function ChannelSetupPanel({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 pt-1">
-          <ChannelStatusBadge>{channelStatusLabel(feature, tx)}</ChannelStatusBadge>
+          <ChannelStatusBadge status={feature.runtime_status}>
+            {channelStatusLabel(feature, tx)}
+          </ChannelStatusBadge>
           {channelBusy ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
           ) : null}
@@ -204,7 +223,7 @@ export function ChannelSetupPanel({
             label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             onChange={(checked) => {
               if (
-                feature.name === "weixin"
+                uiContribution?.canConnectBeforeConfigured
                 && checked
                 && !channelChecked
                 && feature.configured === false
@@ -218,12 +237,15 @@ export function ChannelSetupPanel({
         </div>
       </div>
 
+      <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
+
       <ChannelSetupSurface
         token={token}
         feature={feature}
         setup={setup}
         chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
+        ConnectFlow={uiContribution?.ConnectFlow}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     </aside>
@@ -236,6 +258,7 @@ function ChannelSetupSurface({
   setup,
   chatAppsDocsUrl,
   connectRequestId,
+  ConnectFlow,
   onFeaturesUpdate,
 }: {
   token: string;
@@ -243,6 +266,7 @@ function ChannelSetupSurface({
   setup: ChannelSetupPresentation;
   chatAppsDocsUrl?: string;
   connectRequestId: number;
+  ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t } = useTranslation();
@@ -268,14 +292,10 @@ function ChannelSetupSurface({
   const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
-  const summary = t(`settings.channels.items.${feature.name}.setup.summary`, {
-    defaultValue:
-      setup.summary ??
-      tx(
-        "settings.channels.setupSummary",
-        "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
-      ),
-  });
+  const summary = setup.summary ?? tx(
+    "settings.channels.setupSummary",
+    "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
+  );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
@@ -370,12 +390,18 @@ function ChannelSetupSurface({
     }
   };
 
-  const primaryActionLabel = feature.enabled
+  const primaryActionLabel = channelToggleChecked(feature)
     ? tx("settings.channels.checkConnection", "Check connection")
     : tx("settings.channels.checkAndEnable", "Check and enable");
 
   return (
-    <div className="mt-5 overflow-hidden rounded-[16px] border border-border/70 bg-background shadow-none">
+    <form
+      className="mt-5 overflow-hidden rounded-[16px] bg-background/55"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (mode === "credentials") void saveCredentialSettings();
+      }}
+    >
       <section className="px-4 py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[13px] font-semibold text-foreground">
@@ -404,18 +430,11 @@ function ChannelSetupSurface({
         <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && feature.name === "feishu" ? (
-          <FeishuConnectFlow
+        {mode === "connect" && ConnectFlow ? (
+          <ConnectFlow
             token={token}
-            connectRequestId={connectRequestId}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
-        ) : mode === "connect" && feature.name === "weixin" ? (
-          <WeixinConnectFlow
-            token={token}
-            idleLabel={t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
-              defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
-            })}
+            feature={feature}
+            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
             connectRequestId={connectRequestId}
             onFeaturesUpdate={onFeaturesUpdate}
           />
@@ -436,9 +455,7 @@ function ChannelSetupSurface({
                   )
                 }
               >
-                {t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
-                  defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
-                })}
+                {setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
               </Button>
               {setup.command ? (
                 <Button
@@ -463,7 +480,6 @@ function ChannelSetupSurface({
           <>
             {setup.presets?.length ? (
               <ChannelProviderPresets
-                featureName={feature.name}
                 presets={setup.presets}
                 onApply={applyPreset}
               />
@@ -480,11 +496,10 @@ function ChannelSetupSurface({
             ) : null}
             <div className="mt-3 flex flex-wrap justify-end gap-2">
               <Button
-                type="button"
+                type="submit"
                 size="sm"
                 variant="outline"
                 className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
-                onClick={() => void saveCredentialSettings()}
                 disabled={saving}
               >
                 {saving || validating ? (
@@ -519,7 +534,7 @@ function ChannelSetupSurface({
       ) : null}
 
       {setup.steps.length ? (
-        <ChannelSetupSteps featureName={feature.name} steps={setup.steps} tryIt={setup.tryIt} />
+        <ChannelSetupSteps steps={setup.steps} tryIt={setup.tryIt} />
       ) : null}
 
       {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}
@@ -547,6 +562,6 @@ function ChannelSetupSurface({
           ) : null}
         </details>
       ) : null}
-    </div>
+    </form>
   );
 }

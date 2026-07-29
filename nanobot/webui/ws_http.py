@@ -16,7 +16,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from loguru import logger
@@ -29,7 +29,11 @@ from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_preview_availability_payload,
+    file_preview_payload,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -70,6 +74,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
+from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.session_automations import (
     all_automations_payload,
@@ -92,6 +97,7 @@ _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -146,7 +152,7 @@ class GatewayHTTPHandler:
     def __init__(
         self,
         *,
-        config: Any,  # WebSocketConfig
+        config: WebSocketConfig,
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,
@@ -155,6 +161,7 @@ class GatewayHTTPHandler:
         bus: MessageBus,
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
+        ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
@@ -163,6 +170,7 @@ class GatewayHTTPHandler:
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
+        channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -172,6 +180,7 @@ class GatewayHTTPHandler:
         self.bus = bus
         self.tokens = tokens
         self.media = media
+        self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
@@ -196,6 +205,7 @@ class GatewayHTTPHandler:
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
+            channel_runtime_status=channel_runtime_status,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -326,7 +336,7 @@ class GatewayHTTPHandler:
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = self.tokens.issue_token(self.config.token_ttl_s)
+        token = self.tokens.issue_token(self.config.token_ttl_s, audience="webui")
         api_token = (
             self.tokens.issue_api_token(self.config.token_ttl_s)
             if api_token_allowed
@@ -340,6 +350,9 @@ class GatewayHTTPHandler:
             "ws_path": expected_path,
             "ws_url": ws_url,
             "expires_in": self.config.token_ttl_s,
+            "limits": self.ingress.bootstrap_limits(
+                max_frame_bytes=self.config.max_message_bytes,
+            ),
             "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,
@@ -398,7 +411,7 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        cleaned = []
+        cleaned: list[dict[str, Any]] = []
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
@@ -428,9 +441,15 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         messages = data.get("messages")
         if isinstance(messages, list):
-            scrub_subagent_messages_for_channel(messages)
+            session_messages = cast(list[dict[str, Any]], messages)
+            scrub_subagent_messages_for_channel(session_messages)
+            raw_session_messages = cast(list[Any], messages)
             data["messages"] = public_history_messages(
-                message for message in messages if isinstance(message, dict)
+                [
+                    cast(dict[str, Any], message)
+                    for message in raw_session_messages
+                    if isinstance(message, dict)
+                ]
             )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
@@ -449,7 +468,12 @@ class GatewayHTTPHandler:
             session_data = self.session_manager.read_session_file(decoded_key)
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
             if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
+                raw_session_messages = cast(list[Any], raw_messages)
+                session_messages = [
+                    cast(dict[str, Any], raw_message)
+                    for raw_message in raw_session_messages
+                    if isinstance(raw_message, dict)
+                ]
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -462,6 +486,18 @@ class GatewayHTTPHandler:
         if direction is not None and direction not in {"latest"}:
             return _http_error(400, "invalid direction")
         before = _query_first(query, "before")
+        from nanobot.session.webui_turns import (
+            websocket_turn_id,
+            websocket_turn_transcript_persistence_failed,
+            websocket_turn_wall_started_at,
+        )
+
+        chat_id = decoded_key.split(":", 1)[1]
+        active_turn_started_at = websocket_turn_wall_started_at(chat_id)
+        active_turn_id = websocket_turn_id(chat_id)
+        active_turn_transcript_persistence_failed = (
+            websocket_turn_transcript_persistence_failed(chat_id)
+        )
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -471,6 +507,11 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages=session_messages,
+            active_turn_started_at=active_turn_started_at,
+            active_turn_id=active_turn_id,
+            active_turn_transcript_persistence_failed=(
+                active_turn_transcript_persistence_failed
+            ),
             limit=limit,
             direction=direction,
             before=before,
@@ -488,13 +529,18 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        path = _query_first(_parse_query(request.path), "path")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path")
+        is_probe = _query_first(query, "probe") == "1"
         try:
-            payload = file_preview_payload(
-                path,
-                scope=self.workspaces.scope_for_session_key(decoded_key),
-            )
+            scope = self.workspaces.scope_for_session_key(decoded_key)
+            if is_probe:
+                payload = file_preview_availability_payload(path, scope=scope)
+            else:
+                payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
+            if is_probe and e.status in {400, 403, 404, 415}:
+                return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 
@@ -820,7 +866,7 @@ class GatewayHTTPHandler:
         if not isinstance(decoded, dict):
             return _http_error(400, "state must be an object")
         try:
-            state = write_webui_sidebar_state(decoded)
+            state = write_webui_sidebar_state(cast(dict[str, Any], decoded))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:
@@ -881,7 +927,7 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
             values = json.loads(unquote(raw))
         except Exception:
             return None
-    return values if isinstance(values, dict) else None
+    return cast(dict[str, Any], values) if isinstance(values, dict) else None
 
 
 def _parse_automation_update(
@@ -910,7 +956,7 @@ def _parse_automation_update(
         raw_schedule = values.get("schedule")
         if not isinstance(raw_schedule, dict):
             return "schedule must be an object"
-        parsed_schedule = _parse_automation_schedule(raw_schedule)
+        parsed_schedule = _parse_automation_schedule(cast(dict[str, Any], raw_schedule))
         if isinstance(parsed_schedule, str):
             return parsed_schedule
         if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
@@ -1000,7 +1046,7 @@ def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
 
         tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
         base = datetime.now(tz=tz)
-        croniter(schedule.expr, base).get_next(datetime)
+        croniter(cast(str, schedule.expr), base).get_next(datetime)
     except Exception:
         return "cron schedule is invalid"
     return None

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -30,9 +30,9 @@ class ChannelsConfig(Base):
     model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
-    send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))
     show_reasoning: bool = True  # surface model reasoning when channel implements it
-    extract_document_text: bool = True  # extract text from document attachments before sending to the model
+    extract_document_text: bool = True  # Deprecated and ignored; documents are read on demand
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Deprecated: use top-level transcription.language
@@ -63,10 +63,7 @@ class DreamConfig(Base):
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Override model for Dream sessions (pending implementation)
-    max_batch_size: int = Field(default=20, ge=1)  # Deprecated: no longer used
-    max_iterations: int = Field(default=15, ge=1)  # Deprecated: no longer used
-    annotate_line_ages: bool = True  # Deprecated: no longer used
+    )  # Model preset name for Dream sessions
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -154,6 +151,10 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    idle_compact_check_interval_seconds: int = Field(
+        default=60,
+        ge=0,
+    )  # Minimum interval in seconds between scans for idle sessions
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
@@ -162,6 +163,17 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            raise ValueError(f"unknown timezone {value!r}") from None
+        return value
 
 
 class AgentsConfig(Base):
@@ -173,13 +185,18 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
+    # User-facing name for dynamic custom providers.
+    display_name: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
     api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
-    proxy: str | None = None  # OpenAI-compatible/Codex HTTP proxy URL
+    proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
@@ -234,6 +251,7 @@ class ProvidersConfig(Base):
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
+    modelscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
@@ -257,6 +275,7 @@ class ProvidersConfig(Base):
     byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
+    xai_grok: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # xAI Grok (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
@@ -417,6 +436,9 @@ class Config(BaseSettings):
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
+        dream_name = self.agents.defaults.dream.model_override
+        if dream_name and dream_name != "default" and dream_name not in self.model_presets:
+            raise ValueError(f"Dream model preset {dream_name!r} not found in model_presets")
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
@@ -596,7 +618,10 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(
+        env_prefix="NANOBOT_",
+        env_nested_delimiter="__",
+    )
 
 
 def _resolve_tool_config_refs() -> None:

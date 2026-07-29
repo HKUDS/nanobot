@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { SLACK_SOCKET_MODE_MANIFEST } from "@/components/settings/channels/catalog";
+import { channelUiPresentation } from "@/channel-plugins/registry";
+
+const SLACK_SOCKET_MODE_MANIFEST = channelUiPresentation("slack")?.setup?.actions?.find(
+  (action) => action.id === "slack-manifest",
+)?.copyText;
 
 describe("Slack setup manifest", () => {
   it.each(["app_mention", "message.channels", "message.groups", "message.im", "message.mpim"])(

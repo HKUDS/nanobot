@@ -29,6 +29,7 @@ const VOICE_MIME_CANDIDATES = [
 export type VoiceRecorderState = "idle" | "recording" | "transcribing";
 export type VoiceRecorderErrorKey =
   | "failed"
+  | "noDevice"
   | "noInput"
   | "notConfigured"
   | "permission"
@@ -181,14 +182,17 @@ export function useVoiceRecorder({
 
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    onClearError();
+    const mediaDevices = navigator.mediaDevices;
+    const MediaRecorderCtor = mediaRecorderConstructor();
+    if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
       onError("unsupported");
       return;
     }
     startPendingRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, mediaRecorderOptions());
+      const stream = await mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorderCtor(stream, mediaRecorderOptions(MediaRecorderCtor));
       chunksRef.current = [];
       streamRef.current = stream;
       mediaRecorderRef.current = recorder;
@@ -251,10 +255,10 @@ export function useVoiceRecorder({
         noInputHintVisibleRef.current = true;
         onError("noInput");
       }, VOICE_NO_INPUT_HINT_MS);
-    } catch {
+    } catch (error) {
       cleanupRecording();
       setState("idle");
-      onError("permission");
+      onError(recordingErrorKey(error));
     }
   }, [
     cleanupRecording,
@@ -370,10 +374,19 @@ function clearTimer(ref: { current: ReturnType<typeof setTimeout> | null }) {
   }
 }
 
-function mediaRecorderOptions(): MediaRecorderOptions | undefined {
-  if (typeof MediaRecorder === "undefined") return undefined;
-  const mimeType = VOICE_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type));
+function mediaRecorderOptions(MediaRecorderCtor: MediaRecorderConstructor): MediaRecorderOptions | undefined {
+  const mimeType = VOICE_MIME_CANDIDATES.find((type) => MediaRecorderCtor.isTypeSupported?.(type));
   return mimeType ? { mimeType } : undefined;
+}
+
+type MediaRecorderConstructor = typeof MediaRecorder;
+
+function mediaRecorderConstructor(): MediaRecorderConstructor | undefined {
+  if (typeof window === "undefined") return undefined;
+  const browserWindow = window as Window & {
+    MediaRecorder?: MediaRecorderConstructor;
+  };
+  return browserWindow.MediaRecorder;
 }
 
 function formatVoiceElapsed(ms: number): string {
@@ -509,4 +522,10 @@ function transcriptionErrorKey(error: unknown): VoiceRecorderErrorKey {
   if (detail === "not_configured") return "notConfigured";
   if (detail === "duration") return "tooLong";
   return "failed";
+}
+
+function recordingErrorKey(error: unknown): VoiceRecorderErrorKey {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotFoundError") return "noDevice";
+  return "permission";
 }

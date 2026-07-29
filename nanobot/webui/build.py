@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 BuildMode = Literal["auto", "prompt", "warn", "skip"]
 
@@ -90,6 +90,10 @@ def iter_webui_source_files(source_dir: Path) -> list[Path]:
         if not root.is_dir():
             continue
         files.extend(path for path in root.rglob("*") if path.is_file())
+    channel_root = source_dir.parent / "nanobot" / "channels"
+    if channel_root.is_dir():
+        for channel_webui in channel_root.glob("*/webui"):
+            files.extend(path for path in channel_webui.rglob("*") if path.is_file())
     return files
 
 
@@ -182,7 +186,7 @@ def build_webui_bundle(
     source_dir: Path | None = None,
     dist_dir: Path | None = None,
     runner: str | None = None,
-    subprocess_run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run,
     output: Callable[[str], None] | None = None,
 ) -> WebUIBundleStatus:
     """Install frontend dependencies and build the WebUI bundle."""
@@ -217,7 +221,7 @@ def ensure_webui_bundle(
     output: Callable[[str], None] | None = None,
     runner: str | None = None,
     environ: Mapping[str, str] | None = None,
-    subprocess_run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run,
 ) -> WebUIBundleStatus:
     """Ensure or warn about a stale WebUI bundle according to the selected mode."""
     env = environ or os.environ
@@ -262,8 +266,8 @@ def ensure_webui_bundle(
 def pick_webui_build_runner() -> str | None:
     """Pick the frontend package manager used to build the WebUI."""
     for candidate in ("bun", "npm"):
-        if shutil.which(candidate):
-            return candidate
+        if executable := shutil.which(candidate):
+            return executable
     return None
 
 
@@ -271,7 +275,7 @@ def _run_frontend_command(
     command: list[str],
     *,
     cwd: Path,
-    subprocess_run: Callable[..., subprocess.CompletedProcess],
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]],
 ) -> None:
     try:
         subprocess_run(command, cwd=cwd, check=True)

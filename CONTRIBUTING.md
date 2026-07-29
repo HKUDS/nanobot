@@ -78,6 +78,20 @@ ruff check nanobot/
 ruff format <files-you-changed>
 ```
 
+### Strict Type Checking
+
+Strict type checking covers optional providers and channels. Reproduce the CI environment
+with the same dependency sources and commands:
+
+```bash
+uv sync --all-extras --dev
+uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
+uv run --no-sync basedpyright
+```
+
+Keep `--no-sync` on the final commands: channel dependencies come from their package
+manifests and are installed explicitly by the setup step.
+
 ## Contribution License
 
 By submitting a contribution, you confirm that you have the right to submit it
