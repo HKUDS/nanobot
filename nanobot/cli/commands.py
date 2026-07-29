@@ -2048,6 +2048,22 @@ def _run_gateway(
                     await writer.drain()
                 except (asyncio.TimeoutError, ConnectionError):
                     pass
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    try:
+                        err_body = _json.dumps({"error": str(e)})
+                        err_resp = (
+                            f"HTTP/1.0 500 Internal Server Error\r\n"
+                            f"Content-Type: application/json\r\n"
+                            f"Content-Length: {len(err_body)}\r\n"
+                            "Connection: close\r\n"
+                            f"\r\n{err_body}"
+                        )
+                        writer.write(err_resp.encode())
+                        await writer.drain()
+                    except Exception:
+                        pass
                 finally:
                     writer.close()
 

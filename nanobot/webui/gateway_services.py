@@ -38,7 +38,6 @@ def build_gateway_services(
     *,
     config: Any,
     bus: Any,
-    runtime_events: Any | None = None,
     session_manager: Any | None,
     static_dist_path: Path | None,
     workspace_path: Path,
