@@ -186,6 +186,12 @@ class ImageGenerationTool(Tool):
                 f"({self.config.max_images_per_turn})"
             )
 
+        allowed_models = {"gemini-2.5-flash-image", "gpt-image-2", "gpt-image-1", "dall-e-3"}
+        if model and model not in allowed_models:
+            return ToolResult.error(
+                f"Error: unsupported model '{model}'. "
+                f"Allowed models: {', '.join(sorted(allowed_models))}"
+            )
         effective_model = model if model else self.config.model
 
         try:
