@@ -138,10 +138,10 @@ function UserDeliveryStatus({ status }: { status: MessageDeliveryStatus | undefi
   const failed = status === "failed";
   return (
     <span
-      role="status"
+      role={failed ? undefined : "status"}
       className={cn(
         "inline-flex items-center gap-1 text-[12px] leading-none",
-        failed ? "text-destructive" : "text-muted-foreground",
+        failed ? "text-destructive/80 dark:text-red-400/80" : "text-muted-foreground",
       )}
     >
       {failed ? (
@@ -229,7 +229,6 @@ export function MessageBubble({
             className={cn(
               "ml-auto w-fit max-w-full min-w-0 rounded-[18px] bg-secondary/70 px-4 py-2",
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
-              message.deliveryStatus === "failed" && "ring-1 ring-inset ring-destructive/30",
             )}
           >
             {messageText}

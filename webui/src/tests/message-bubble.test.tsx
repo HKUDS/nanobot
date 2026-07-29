@@ -130,8 +130,13 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "failed" }} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Not sent");
-    expect(screen.getByText("hello")).toHaveClass("ring-destructive/30");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("Not sent")).toHaveClass(
+      "text-destructive/80",
+      "dark:text-red-400/80",
+    );
+    expect(screen.getByText("hello")).not.toHaveClass("ring-1");
+    expect(screen.getByText("hello")).not.toHaveClass("ring-destructive/30");
   });
 
   it("styles only generated quoted context in user messages", () => {
