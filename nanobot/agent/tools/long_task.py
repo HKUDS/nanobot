@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.goal_permission import (
@@ -14,7 +16,9 @@ from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
+from nanobot.goals import GoalConflictError, GoalError, GoalStore, compact_ref, projection
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
+from nanobot.session.automation_turns import is_automation_turn
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
@@ -32,7 +36,7 @@ if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
 
 
-_GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
+_GOAL_ACTIONS = ("complete", "cancel", "block", "replace", "resume")
 _CREATE_UNAVAILABLE_ERROR = (
     "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
     "objective as `/goal <task>`."
@@ -54,9 +58,14 @@ class _GoalToolsMixin:
         self,
         sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
+        *,
+        workspace: str | Path | None = None,
+        goal_store_root: str | Path | None = None,
     ) -> None:
         self._sessions = sessions
         self._runtime_events = runtime_events
+        self._workspace = Path(workspace or sessions.workspace).expanduser().resolve(strict=False)
+        self._goal_store_root = Path(goal_store_root) if goal_store_root is not None else None
 
     def _session(self):
         request_ctx = current_request_context()
@@ -69,6 +78,20 @@ class _GoalToolsMixin:
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
+
+    def _active_workspace(self) -> Path:
+        request = current_request_context()
+        return (
+            Path(request.workspace).expanduser().resolve(strict=False)
+            if request is not None and request.workspace is not None
+            else self._workspace
+        )
+
+    def _store(self, workspace: str | Path | None = None) -> GoalStore:
+        return GoalStore.for_workspace(
+            workspace or self._active_workspace(),
+            root=self._goal_store_root,
+        )
 
     def _save_goal_state(
         self,
@@ -134,8 +157,17 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         self,
         sessions: Any,
         runtime_events: RuntimeEventBus | None = None,
+        *,
+        workspace: str | Path | None = None,
+        goal_store_root: str | Path | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(
+            self,
+            sessions,
+            runtime_events,
+            workspace=workspace,
+            goal_store_root=goal_store_root,
+        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -144,6 +176,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=getattr(ctx, "runtime_events", None),
+            workspace=getattr(ctx, "workspace", None),
         )
 
     @classmethod
@@ -184,7 +217,71 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             goal_start_requested=goal_start_requested,
             goal_active=goal_active,
         )
-        state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
+        state_lines = goal_state_runtime_lines(session.metadata)
+        ref = parse_goal_state(goal_state_raw(session.metadata))
+        if isinstance(ref, dict) and isinstance(ref.get("goal_id"), str):
+            try:
+                store = self._store(request.workspace)
+                stored = await asyncio.to_thread(store.get, ref["goal_id"])
+                if stored is not None and stored.status not in {"active", "waiting"}:
+                    current = await asyncio.to_thread(store.current, request.session_key)
+                    if current is not None:
+                        stored = current
+                    self._save_goal_state(
+                        session,
+                        compact_ref(stored, request.workspace or self._workspace),
+                    )
+                if stored is not None:
+                    view = projection(stored)
+                    state_lines = [
+                        f"Goal {stored.id} ({stored.status}, version {stored.version}):",
+                        str(view["objective"]),
+                        f"Plan revision: {view['revision']}; nodes: {view['node_count']}",
+                    ]
+                    if view["expandable"]:
+                        state_lines.append(
+                            "Expandable: "
+                            + ", ".join(
+                                f"{node['id']} ({node['title']})"
+                                for node in view["expandable"]
+                            )
+                        )
+                    if view["frontier"]:
+                        state_lines.append(
+                            "Ready: "
+                            + ", ".join(
+                                f"{node['id']} ({node['title']})" for node in view["frontier"]
+                            )
+                        )
+                    if view["running"]:
+                        state_lines.append(
+                            "Running: " + ", ".join(node["id"] for node in view["running"])
+                        )
+                    if view["blocked"]:
+                        state_lines.append(
+                            "Blocked paths: "
+                            + ", ".join(
+                                f"{node['id']}: {node.get('failure', '')}"
+                                for node in view["blocked"]
+                            )
+                        )
+                    if view["needs_replan"]:
+                        state_lines.append(
+                            "Call replan_goal for a blocked path using the current version; "
+                            "independent ready nodes may continue."
+                        )
+                    state_lines.append(
+                        "Recovery attempts: "
+                        f"{view['recovery_attempts']}/{view['max_recovery_attempts']}."
+                    )
+                    if stored.status == "waiting":
+                        state_lines.append(
+                            "Goal is waiting for user intervention: "
+                            + (view["status_reason"] or "reason not recorded")
+                        )
+            except (GoalError, ValueError):
+                state_lines = ["Goal reference could not be resolved from durable storage."]
+        state = wrap_runtime_context_lines(state_lines)
         content = "\n\n".join(part for part in (guidance, state) if part)
         return RuntimeContextBlock(source="goal", content=content)
 
@@ -202,7 +299,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         if not self._goal_mutation_allowed():
             return ToolResult.error(_CREATE_UNAVAILABLE_ERROR)
         prior = parse_goal_state(goal_state_raw(sess.metadata))
-        if isinstance(prior, dict) and prior.get("status") == "active":
+        if isinstance(prior, dict) and sustained_goal_active(sess.metadata):
             return ToolResult.error(
                 "Error: a sustained goal is already active. Use update_goal with "
                 "action='replace' only if the user explicitly changes the objective."
@@ -216,18 +313,28 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
                 f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
             )
         summary = (ui_summary or "").strip()[:120]
-        blob = {
-            "status": "active",
-            "objective": objective_text,
-            "ui_summary": summary,
-            "started_at": _iso_now(),
-        }
+        request = current_request_context()
+        route = {
+            "channel": request.channel,
+            "chat_id": request.chat_id or "",
+        } if request is not None else {}
+        try:
+            stored = await asyncio.to_thread(
+                self._store().create,
+                sess.key,
+                objective_text,
+                summary,
+                route,
+            )
+        except (GoalConflictError, GoalError, ValueError) as exc:
+            return ToolResult.error(f"Error: could not create durable Goal: {exc}")
+        blob = compact_ref(stored, self._active_workspace())
         self._save_goal_state(sess, blob, reset_continuation=True)
         await self._publish_goal_state_changed(sess.metadata)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
-            "Goal recorded. Keep working toward the objective using ordinary tools. "
-            "When fully done and verified, call update_goal with action='complete'."
+            "Goal recorded durably. Create its initial state graph with plan_goal, then execute "
+            "ready nodes. Complete the Goal only after every retained node succeeds."
             f"{extra}"
         )
 
@@ -264,8 +371,17 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         self,
         sessions: Any,
         runtime_events: RuntimeEventBus | None = None,
+        *,
+        workspace: str | Path | None = None,
+        goal_store_root: str | Path | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(
+            self,
+            sessions,
+            runtime_events,
+            workspace=workspace,
+            goal_store_root=goal_store_root,
+        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -274,6 +390,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=getattr(ctx, "runtime_events", None),
+            workspace=getattr(ctx, "workspace", None),
         )
 
     @classmethod
@@ -287,10 +404,10 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Update the active sustained goal. Use action='complete' only after the objective "
-            "is actually achieved and verified. Use action='cancel' when the user cancels, "
-            "action='block' when progress is genuinely blocked, and action='replace' only when "
-            "the requested objective changes."
+            "Update the current sustained goal. Use action='complete' only after the objective "
+            "is actually achieved and verified, action='cancel' when the user cancels, and "
+            "action='resume' only after the user resolves a waiting condition. Durable Goal path "
+            "failures must use update_goal_node action='block'; they do not close the Goal."
         )
 
     async def execute(
@@ -305,13 +422,98 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         if sess is None:
             return ToolResult.error("Error: update_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
-        if not isinstance(prior, dict) or prior.get("status") != "active":
-            return "No active goal to update."
+        if not isinstance(prior, dict) or not sustained_goal_active(sess.metadata):
+            return "No active or waiting goal to update."
 
         normalized = (action or "").strip().lower()
         if normalized not in _GOAL_ACTIONS:
             return ToolResult.error(
-                "Error: action must be one of complete, cancel, block, or replace."
+                "Error: action must be one of complete, cancel, block, replace, or resume."
+            )
+        request = current_request_context()
+        if normalized in {"block", "cancel", "resume"} and is_automation_turn(
+            request.metadata if request is not None else None
+        ):
+            return ToolResult.error(
+                f"Error: an automation turn cannot {normalized} the user's Goal."
+            )
+
+        goal_id = prior.get("goal_id")
+        if isinstance(goal_id, str):
+            try:
+                store = self._store()
+                current = await asyncio.to_thread(store.current, sess.key)
+                if current is not None and current.id != goal_id:
+                    self._save_goal_state(
+                        sess,
+                        compact_ref(current, self._active_workspace()),
+                        reset_continuation=normalized == "replace",
+                    )
+                    if (
+                        normalized == "replace"
+                        and current.state.get("objective") == (objective or "").strip()
+                    ):
+                        await self._publish_goal_state_changed(sess.metadata)
+                        return "Goal replaced; create a new initial plan."
+                    goal_id = current.id
+                    prior = compact_ref(current, self._active_workspace())
+                if normalized == "block":
+                    return ToolResult.error(
+                        "Error: block the affected path with update_goal_node action='block'; "
+                        "a blocked node does not terminate the Goal."
+                    )
+                if normalized == "replace":
+                    if not self._goal_mutation_allowed():
+                        return ToolResult.error(_REPLACE_UNAVAILABLE_ERROR)
+                    objective_text = (objective or "").strip()
+                    if not objective_text:
+                        return ToolResult.error(
+                            "Error: update_goal action='replace' requires a replacement objective."
+                        )
+                    if len(objective_text) > MAX_GOAL_OBJECTIVE_CHARS:
+                        return ToolResult.error(
+                            "Error: objective must not exceed "
+                            f"{MAX_GOAL_OBJECTIVE_CHARS} characters."
+                        )
+                    stored = await asyncio.to_thread(
+                        store.replace,
+                        goal_id,
+                        int(prior.get("version", 0)),
+                        objective_text,
+                        (ui_summary or "").strip()[:120],
+                    )
+                elif normalized == "resume":
+                    stored = await asyncio.to_thread(
+                        store.set_status,
+                        goal_id,
+                        int(prior.get("version", 0)),
+                        "active",
+                        (recap or "").strip(),
+                    )
+                else:
+                    stored = await asyncio.to_thread(
+                        store.close,
+                        goal_id,
+                        int(prior.get("version", 0)),
+                        "completed" if normalized == "complete" else "cancelled",
+                        (recap or "").strip(),
+                    )
+            except (GoalConflictError, GoalError, TypeError, ValueError) as exc:
+                return ToolResult.error(f"Error: durable Goal update was rejected: {exc}")
+            self._save_goal_state(
+                sess,
+                compact_ref(stored, self._active_workspace()),
+                reset_continuation=normalized == "replace",
+            )
+            if normalized != "replace":
+                revoke_goal_mutation_permission()
+            await self._publish_goal_state_changed(sess.metadata)
+            return (
+                "Goal replaced; create a new initial plan."
+                if normalized == "replace"
+                else "Goal resumed."
+                if normalized == "resume"
+                else f"Goal marked {'complete' if normalized == 'complete' else 'cancelled'}."
             )
 
         if normalized == "replace":
@@ -340,6 +542,12 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             await self._publish_goal_state_changed(sess.metadata)
             extra = f"\nSummary line: {summary}" if summary else ""
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
+
+        if normalized == "resume":
+            blob = {**prior, "status": "active", "recap": (recap or "").strip()}
+            self._save_goal_state(sess, blob)
+            await self._publish_goal_state_changed(sess.metadata)
+            return "Goal resumed."
 
         ended = _iso_now()
         status = {

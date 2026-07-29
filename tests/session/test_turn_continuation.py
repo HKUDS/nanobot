@@ -139,6 +139,10 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
         pending_queue_available=True,
         session_metadata={},
     )
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata={GOAL_STATE_KEY: {"status": "waiting"}},
+    )
 
 
 def test_save_skip_matches_prefix_when_current_message_merged():

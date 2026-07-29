@@ -56,9 +56,10 @@ def automation_history_overrides_for_spec(
 def _automation_specs() -> tuple[AutomationTurnSpec, ...]:
     # Source modules import the generic helpers above, so keep spec loading lazy.
     from nanobot.cron.session_turns import CRON_AUTOMATION_SPEC
+    from nanobot.goal_driver import GOAL_DRIVER_AUTOMATION_SPEC
     from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_AUTOMATION_SPEC
 
-    return (CRON_AUTOMATION_SPEC, LOCAL_TRIGGER_AUTOMATION_SPEC)
+    return (CRON_AUTOMATION_SPEC, LOCAL_TRIGGER_AUTOMATION_SPEC, GOAL_DRIVER_AUTOMATION_SPEC)
 
 
 def automation_history_overrides(
@@ -70,6 +71,10 @@ def automation_history_overrides(
         if extra:
             return text, extra
     return None, {}
+
+
+def is_automation_turn(metadata: Mapping[str, Any] | None) -> bool:
+    return any(automation_trigger(metadata, spec) is not None for spec in _automation_specs())
 
 
 def is_automation_history_message(message: Mapping[str, Any] | None) -> bool:

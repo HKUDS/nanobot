@@ -12,6 +12,7 @@ from nanobot.session.goal_state import (
     parse_goal_state,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
+    sustained_goal_runnable,
 )
 from nanobot.session.manager import SessionManager
 
@@ -98,6 +99,9 @@ def test_goal_state_ws_blob_active_shape():
             "ui_summary": "feat",
         },
     }
+
+    waiting = {GOAL_STATE_KEY: {"status": "waiting", "goal_id": "g", "version": 2}}
+    assert goal_state_ws_blob(waiting) == {"active": True, "goal_id": "g", "version": 2}
     assert goal_state_ws_blob(meta) == {
         "active": True,
         "ui_summary": "feat",
@@ -114,6 +118,18 @@ def test_sustained_goal_active_false_when_missing_or_completed():
 def test_sustained_goal_active_true_when_active():
     meta = {GOAL_STATE_KEY: {"status": "active", "objective": "Run long task."}}
     assert sustained_goal_active(meta) is True
+
+
+def test_only_active_goal_is_runnable():
+    active = {GOAL_STATE_KEY: {"status": "active"}}
+    waiting = {GOAL_STATE_KEY: {"status": "waiting"}}
+    blocked = {GOAL_STATE_KEY: {"status": "blocked"}}
+
+    assert sustained_goal_runnable(active) is True
+    assert sustained_goal_active(waiting) is True
+    assert sustained_goal_active(blocked) is True
+    assert sustained_goal_runnable(waiting) is False
+    assert sustained_goal_runnable(blocked) is False
 
 
 def test_sustained_goal_active_respects_legacy_thread_goal_key():
