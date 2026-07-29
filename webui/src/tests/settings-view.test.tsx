@@ -504,7 +504,9 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start API server" }));
+    const startButton = await screen.findByRole("button", { name: "Start API server" });
+    await waitFor(() => expect(startButton).toBeEnabled());
+    fireEvent.click(startButton);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
