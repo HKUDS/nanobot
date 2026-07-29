@@ -231,37 +231,42 @@ class ImageGenerationTool(Tool):
 
         人像 / 图内文字 / 复杂场景 → gpt-image-2；
         其他 → 默认便宜档。
+
+        关键词经过收紧，避免误升档浪费费用。
         """
         prompt_lower = prompt.lower()
 
-        # 人像 / 人脸检测
+        # 人像 / 人脸检测（必须是明确的人像意图）
         portrait_keywords = [
-            "portrait", "person", "people", "face", "faces", "human",
-            "woman", "man", "girl", "boy", "child", "baby",
-            "人像", "人脸", "人物", "肖像", "女孩", "男孩", "女人", "男人",
-            "照片", "photo", "selfie", "headshot", "profile photo",
+            "portrait", "portraits",
+            "selfie", "selfies",
+            "headshot", "headshots",
+            "profile photo", "profile picture",
+            "人像", "肖像", "自拍",
+            "证件照", "头像照",
         ]
         for kw in portrait_keywords:
             if kw in prompt_lower:
                 return "gpt-image-2"
 
-        # 图内文字检测
-        text_in_image_patterns = [
-            "text", "sign", "banner", "poster", "label", "title",
-            "writing", "written", "says", "reading", "quote",
-            "文字", "写字", "牌子", "标语", "标题", "签名",
-            '"', "'",
+        # 图内文字检测（必须有明确的"文字出现在图中"意图）
+        text_in_image_keywords = [
+            "sign that says", "sign reading", "sign with",
+            "banner that says", "poster with text",
+            "label that reads", "text that says",
+            "writing on the", "written on the",
+            "写着", "牌子", "标语", "横幅",
+            "文字", "字母",
         ]
-        for kw in text_in_image_patterns:
+        for kw in text_in_image_keywords:
             if kw in prompt_lower:
                 return "gpt-image-2"
 
-        # 高精度 / 写实检测
+        # 高精度 / 写实检测（必须是明确的写实风格要求）
         quality_keywords = [
-            "photorealistic", "photograph", "realistic", "cinematic",
-            "professional", "high quality", "high resolution", "4k", "8k",
-            "写实", "高清", "高质量", "专业", "产品", "product",
-            "architecture", "architectural",
+            "photorealistic", "hyperrealistic", "realistic photo",
+            "cinematic photo", "dslr", "8k render",
+            "写实风", "超写实", "电影级",
         ]
         for kw in quality_keywords:
             if kw in prompt_lower:
