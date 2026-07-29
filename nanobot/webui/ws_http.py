@@ -97,6 +97,7 @@ _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -151,7 +152,7 @@ class GatewayHTTPHandler:
     def __init__(
         self,
         *,
-        config: Any,  # WebSocketConfig
+        config: WebSocketConfig,
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,

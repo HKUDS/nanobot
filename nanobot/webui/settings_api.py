@@ -31,7 +31,7 @@ from nanobot.audio.transcription_registry import (
     transcription_provider_names,
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
-from nanobot.config.schema import FallbackCandidate, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -534,8 +534,8 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     )
 
 
-def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
-    model_extra = cast(dict[str, Any], config.providers.model_extra or {})
+def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
+    model_extra = config.providers.model_extra or {}
     return [
         (name, provider_config)
         for name, provider_config in model_extra.items()
@@ -544,7 +544,7 @@ def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
 
 
 def _resolve_settings_provider(
-    config: Any,
+    config: Config,
     provider_name: str,
 ) -> tuple[Any, str, ProviderConfig] | None:
     spec = find_by_name(provider_name)
@@ -630,7 +630,7 @@ def _provider_settings_row(
     return row
 
 
-def _provider_settings_rows(config: Any, selected_provider: str | None) -> list[dict[str, Any]]:
+def _provider_settings_rows(config: Config, selected_provider: str | None) -> list[dict[str, Any]]:
     """Return one Settings row per provider family while preserving legacy configs."""
     aliases: dict[str, list[Any]] = {}
     for spec in PROVIDERS:
@@ -938,7 +938,7 @@ def _model_configuration_slug(label: str) -> str:
     return normalized
 
 
-def _custom_provider_key(config: Any, display_name: str) -> str:
+def _custom_provider_key(config: Config, display_name: str) -> str:
     slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
     base = f"custom-{slug or 'provider'}"
     if len(base) > 56:
@@ -956,7 +956,7 @@ def _custom_provider_key(config: Any, display_name: str) -> str:
 
 
 def _provider_display_name_exists(
-    config: Any,
+    config: Config,
     display_name: str,
     *,
     exclude_key: str | None = None,
@@ -976,7 +976,7 @@ def _provider_display_name_exists(
     return False
 
 
-def _unique_model_configuration_name(config: Any, label: str) -> str:
+def _unique_model_configuration_name(config: Config, label: str) -> str:
     """Return a stable, unused preset name for a migrated model configuration."""
     try:
         base = _model_configuration_slug(label)
@@ -994,7 +994,7 @@ def _model_configuration_label(model: str) -> str:
     return model.rsplit("/", 1)[-1] or model
 
 
-def _model_call_order_state(config: Any) -> tuple[list[str], bool]:
+def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
     defaults = config.agents.defaults
     primary = defaults.model_preset
     if not primary or primary == "default" or primary not in config.model_presets:
@@ -1007,7 +1007,7 @@ def _model_call_order_state(config: Any) -> tuple[list[str], bool]:
     return order, True
 
 
-def _validate_configured_provider(config: Any, provider: str) -> None:
+def _validate_configured_provider(config: Config, provider: str) -> None:
     if provider == "auto":
         return
     resolved_provider = _resolve_settings_provider(config, provider)
@@ -1020,7 +1020,7 @@ def _validate_configured_provider(config: Any, provider: str) -> None:
         raise WebUISettingsError("provider is not configured")
 
 
-def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
+def _image_generation_provider_rows(config: Config) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in image_gen_provider_names():
         image_provider = get_image_gen_provider(name)
@@ -1093,7 +1093,7 @@ def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
     return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
-def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
+def _transcription_provider_rows(config: Config) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in transcription_provider_names():
         spec = find_by_name(name)

@@ -18,13 +18,14 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
     MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
+    ExecSessionManager,
     clamp_session_int,
     format_session_poll,
 )
@@ -174,11 +175,11 @@ class ExecTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
@@ -193,7 +194,7 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
-            session_manager=getattr(ctx, "exec_session_manager", None),
+            session_manager=ctx.exec_session_manager,
         )
 
     def __init__(
@@ -211,7 +212,7 @@ class ExecTool(Tool):
         sandbox_ro_binds: list[str] | None = None,
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
-        session_manager: Any | None = None,
+        session_manager: ExecSessionManager | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir

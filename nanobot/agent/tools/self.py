@@ -19,6 +19,7 @@ from nanobot.config_base import Base
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentStatus
+    from nanobot.agent.tools.context import ToolContext
 
 
 class MyToolConfig(Base):
@@ -57,7 +58,7 @@ class MyTool(Tool):
         return MyToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.my.enable
 
     BLOCKED = frozenset({

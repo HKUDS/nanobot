@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -489,7 +489,7 @@ class WriteStdinTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -500,8 +500,8 @@ class WriteStdinTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls(manager=getattr(ctx, "exec_session_manager", None))
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def exclusive(self) -> bool:
@@ -633,7 +633,7 @@ class ListExecSessionsTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -644,8 +644,8 @@ class ListExecSessionsTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls(manager=getattr(ctx, "exec_session_manager", None))
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def name(self) -> str:

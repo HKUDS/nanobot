@@ -12,14 +12,12 @@ from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
+    from nanobot.gateway.runtime import GatewayRuntime
     from nanobot.providers.registry import ProviderSpec
 
-
-class _ReconfigurableTextStream(Protocol):
-    def reconfigure(self, *, encoding: str, errors: str) -> None: ...
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -27,12 +25,10 @@ if sys.platform == "win32":
         os.environ["PYTHONIOENCODING"] = "utf-8"
         # Re-open stdout/stderr with UTF-8 encoding
         with suppress(Exception):
-            cast(_ReconfigurableTextStream, sys.stdout).reconfigure(
-                encoding="utf-8", errors="replace"
-            )
-            cast(_ReconfigurableTextStream, sys.stderr).reconfigure(
-                encoding="utf-8", errors="replace"
-            )
+            for stream in (sys.stdout, sys.stderr):
+                reconfigure = getattr(stream, "reconfigure", None)
+                if callable(reconfigure):
+                    reconfigure(encoding="utf-8", errors="replace")
 
 # Keep console encoding setup before importing CLI UI/logging libraries.
 import typer  # noqa: E402
@@ -1352,7 +1348,7 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
 
 
-def _attach_to_background_gateway(runtime: Any) -> None:
+def _attach_to_background_gateway(runtime: GatewayRuntime) -> None:
     """Keep a foreground WebUI command attached to a managed gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
@@ -1793,7 +1789,6 @@ def _run_gateway(
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
-    from nanobot.agent.model_runtime import LLMRuntime
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
@@ -1978,7 +1973,7 @@ def _run_gateway(
             session_manager.save(session)
         await bus.publish_outbound(msg)
 
-    message_tool = getattr(agent, "tools", {}).get("message")
+    message_tool = agent.tools.get("message")
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
 
@@ -2006,11 +2001,7 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
-                resolve_dream_runtime = getattr(agent, "dream_runtime", None)
-                dream_runtime = cast(
-                    LLMRuntime | None,
-                    resolve_dream_runtime() if callable(resolve_dream_runtime) else None,
-                )
+                dream_runtime = agent.dream_runtime()
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
@@ -2146,11 +2137,7 @@ def _run_gateway(
     cron.on_job = on_cron_job
 
     def _webui_runtime_model_name() -> str | None:
-        model = getattr(agent, "model", None)
-        if isinstance(model, str):
-            stripped = model.strip()
-            return stripped or None
-        return None
+        return agent.model.strip() or None
 
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
@@ -2161,12 +2148,8 @@ def _run_gateway(
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
-        webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
-        webui_local_trigger_pending_ids=getattr(
-            agent,
-            "pending_local_trigger_ids_for_session",
-            None,
-        ),
+        webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
+        webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -2345,7 +2328,7 @@ def _run_gateway(
                 asyncio.create_task(
                     run_local_trigger_queue(
                         store=trigger_store,
-                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                        submit_turn=agent.submit_local_trigger_turn,
                         is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
@@ -2619,7 +2602,7 @@ def agent(
 
                         if await _maybe_print_interactive_progress(
                             msg,
-                            cast(ThinkingSpinner | None, renderer),
+                            None,
                             agent_loop.channels_config,
                             renderer,
                             reasoning_buffer,

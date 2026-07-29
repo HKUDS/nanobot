@@ -73,6 +73,11 @@ class _WebsocketTurn:
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
 
 
+def _validated_llm_runtime(value: object) -> LLMRuntime | None:
+    """Keep runtime-event consumers defensive if an external publisher violates the contract."""
+    return value if isinstance(value, LLMRuntime) else None
+
+
 def _sync_websocket_turn_projection(chat_id: str) -> None:
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if not turns:
@@ -599,11 +604,10 @@ class WebuiTurnCoordinator:
         )
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
-        title_context = event.runtime
+        title_context = _validated_llm_runtime(event.runtime)
         if (
             event.context.metadata.get("webui") is not True
             or title_context is None
-            or not isinstance(title_context, LLMRuntime)
         ):
             return
 

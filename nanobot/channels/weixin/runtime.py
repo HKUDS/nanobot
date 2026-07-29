@@ -444,6 +444,60 @@ class WeixinChannel(BaseChannel):
                 return True
         return False
 
+    @property
+    def connect_base_url(self) -> str:
+        """Base URL currently selected for the interactive connection flow."""
+        return self.config.base_url
+
+    def connect_reset_pending_credentials(self) -> None:
+        """Clear only in-memory credentials while a replacement QR login is pending."""
+        self._token = ""
+        self._get_updates_buf = ""
+
+    def connect_load_state(self) -> bool:
+        """Load an existing account for the interactive connection flow."""
+        return self._load_state()
+
+    def connect_open_client(self) -> None:
+        """Open the short-lived HTTP client used by WebUI QR login."""
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60, connect=30),
+            follow_redirects=True,
+        )
+        self._running = True
+
+    async def connect_fetch_qr_code(self) -> tuple[str, str]:
+        return await self._fetch_qr_code()
+
+    async def connect_poll_qr_code(
+        self,
+        *,
+        base_url: str,
+        qrcode_id: str,
+    ) -> dict[str, Any]:
+        return await self._api_get_with_base(
+            base_url=base_url,
+            endpoint="ilink/bot/get_qrcode_status",
+            params={"qrcode": qrcode_id},
+            auth=False,
+        )
+
+    def connect_poll_error_is_retryable(self, err: Exception) -> bool:
+        return self._is_retryable_qr_poll_error(err)
+
+    def connect_commit_account(self, *, token: str, base_url: str) -> None:
+        self._token = token
+        if base_url:
+            self.config.base_url = base_url
+        self._save_state()
+
+    async def connect_close_client(self) -> None:
+        self._running = False
+        if self._client is not None:
+            with suppress(Exception):
+                await self._client.aclose()
+            self._client = None
+
     @staticmethod
     def _print_qr_code(url: str) -> None:
         try:

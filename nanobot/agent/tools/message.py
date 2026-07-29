@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, cast
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
@@ -75,7 +75,7 @@ class MessageTool(Tool):
         )
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
         return cls(
             send_callback=send_callback,

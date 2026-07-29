@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -19,6 +19,9 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
 
 WEBUI_WORKSPACE_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 128 * 1024
@@ -174,7 +177,7 @@ class WebUIWorkspaceController:
     def __init__(
         self,
         *,
-        session_manager: Any | None,
+        session_manager: SessionManager | None,
         default_workspace: Path,
         default_restrict_to_workspace: bool,
     ) -> None:
@@ -191,12 +194,8 @@ class WebUIWorkspaceController:
     def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         if self._sessions is None:
             return self.default_scope()
-        metadata_reader = getattr(self._sessions, "read_session_metadata", None)
-        if callable(metadata_reader):
-            data = metadata_reader(session_key)
-        else:
-            data = self._sessions.read_session_file(session_key)
-        session_data = cast(dict[str, Any], data) if isinstance(data, dict) else {}
+        data = self._sessions.read_session_metadata(session_key)
+        session_data = data if data is not None else {}
         metadata = session_data.get("metadata", {})
         if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
             return self.default_scope()

@@ -44,7 +44,7 @@ class _StreamBuf:
     """Per-chat streaming accumulator for progressive Discord message edits."""
 
     text: str = ""
-    message: Any | None = None
+    message: discord.Message | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
 
@@ -509,7 +509,7 @@ class DiscordChannel(BaseChannel):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
-            await self._finalize_stream(chat_id, buf)
+            await self._finalize_stream(chat_id, buf, buf.message)
             return
 
         buf = self._stream_bufs.get(chat_id)
@@ -637,7 +637,12 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("channel {} unavailable: {}", chat_id, e)
             return None
 
-    async def _finalize_stream(self, chat_id: str, buf: _StreamBuf) -> None:
+    async def _finalize_stream(
+        self,
+        chat_id: str,
+        buf: _StreamBuf,
+        message: discord.Message,
+    ) -> None:
         """Commit the final streamed content and flush overflow chunks."""
         chunks = DiscordBotClient._build_chunks(buf.text, [], False)
         if not chunks:
@@ -645,16 +650,12 @@ class DiscordChannel(BaseChannel):
             return
 
         try:
-            await cast(Any, buf.message).edit(content=chunks[0])
+            await message.edit(content=chunks[0])
         except Exception as e:
             self.logger.warning("final stream edit failed: {}", e)
             raise
 
-        target = getattr(buf.message, "channel", None) or await self._resolve_channel(chat_id)
-        if target is None:
-            self.logger.warning("stream follow-up target {} unavailable", chat_id)
-            self._stream_bufs.pop(chat_id, None)
-            return
+        target = message.channel
 
         for extra_chunk in chunks[1:]:
             await target.send(content=extra_chunk)

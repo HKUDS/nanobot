@@ -555,7 +555,9 @@ class OpenAICompatProvider(LLMProvider):
                 AsyncOpenAI = _AsyncOpenAI
 
             self._build_client()
-            return cast("AsyncOpenAIType", self._client)
+            if self._client is None:
+                raise RuntimeError("OpenAI client initialization did not produce a client")
+            return self._client
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
         """Set environment variables based on provider spec."""

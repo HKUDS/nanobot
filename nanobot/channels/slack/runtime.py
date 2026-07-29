@@ -3,7 +3,7 @@
 import asyncio
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import httpx
 from pydantic import Field
@@ -32,6 +32,20 @@ def _as_json_object(value: Any) -> dict[str, Any] | None:
 def _as_json_list(value: Any) -> list[Any] | None:
     """Narrow Slack's untyped Socket Mode arrays at the boundary."""
     return cast(list[Any], value) if isinstance(value, list) else None
+
+
+class _SlackWebAPI(Protocol):
+    """Subset of slack-sdk's dynamically typed Web API used by this channel."""
+
+    async def auth_test(self, **kwargs: Any) -> Any: ...
+    async def chat_postMessage(self, **kwargs: Any) -> Any: ...  # noqa: N802
+    async def conversations_list(self, **kwargs: Any) -> Any: ...
+    async def conversations_open(self, **kwargs: Any) -> Any: ...
+    async def conversations_replies(self, **kwargs: Any) -> Any: ...
+    async def files_upload_v2(self, **kwargs: Any) -> Any: ...
+    async def reactions_add(self, **kwargs: Any) -> Any: ...
+    async def reactions_remove(self, **kwargs: Any) -> Any: ...
+    async def users_list(self, **kwargs: Any) -> Any: ...
 
 
 class SlackDMConfig(Base):
@@ -101,6 +115,13 @@ class SlackChannel(BaseChannel):
         self._target_cache: dict[str, str] = {}
         self._thread_context_attempted: set[str] = set()
 
+    def _require_web_api(self) -> _SlackWebAPI:
+        if self._web_client is None:
+            raise RuntimeError("Slack Web API client is not started")
+        # slack-sdk's public methods are runtime-stable but its annotations do
+        # not expose a useful shared interface, so narrow once at the SDK edge.
+        return cast(_SlackWebAPI, self._web_client)
+
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
         if not self.config.bot_token or not self.config.app_token:
@@ -122,7 +143,7 @@ class SlackChannel(BaseChannel):
 
         # Resolve bot user ID for mention handling
         try:
-            web_api = cast(Any, self._web_client)
+            web_api = self._require_web_api()
             auth = await web_api.auth_test()
             self._bot_user_id = auth.get("user_id")
             self.logger.info("bot connected as {}", self._bot_user_id)
@@ -167,7 +188,7 @@ class SlackChannel(BaseChannel):
             self.logger.warning("client not running")
             return
         try:
-            web_api = cast(Any, self._web_client)
+            web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)
             raw_slack_meta: Any = msg.metadata.get("slack", {}) if msg.metadata else {}
             slack_meta: dict[str, Any] = (
@@ -277,7 +298,7 @@ class SlackChannel(BaseChannel):
             return self._target_cache[cache_key]
 
         cursor: str | None = None
-        web_api = cast(Any, self._web_client)
+        web_api = self._require_web_api()
         while True:
             response = cast(dict[str, Any], await web_api.conversations_list(
                 types="public_channel,private_channel",
@@ -315,7 +336,7 @@ class SlackChannel(BaseChannel):
             return self._target_cache[cache_key]
 
         cursor: str | None = None
-        web_api = cast(Any, self._web_client)
+        web_api = self._require_web_api()
         while True:
             response = cast(
                 dict[str, Any],
@@ -343,7 +364,7 @@ class SlackChannel(BaseChannel):
         )
 
     async def _open_dm_for_user(self, user_id: str) -> str:
-        web_api = cast(Any, self._web_client)
+        web_api = self._require_web_api()
         response = cast(
             dict[str, Any],
             await web_api.conversations_open(users=user_id),
@@ -463,7 +484,7 @@ class SlackChannel(BaseChannel):
         # Add :eyes: reaction to the triggering message (best-effort)
         try:
             if self._web_client and event_ts:
-                web_api = cast(Any, self._web_client)
+                web_api = self._require_web_api()
                 await web_api.reactions_add(
                     channel=chat_id,
                     name=self.config.react_emoji,
@@ -639,7 +660,7 @@ class SlackChannel(BaseChannel):
         self._thread_context_attempted.add(key)
 
         try:
-            web_api = cast(Any, self._web_client)
+            web_api = self._require_web_api()
             response = cast(dict[str, Any], await web_api.conversations_replies(
                 channel=chat_id,
                 ts=thread_ts,
@@ -699,7 +720,7 @@ class SlackChannel(BaseChannel):
         """Remove the in-progress reaction and optionally add a done reaction."""
         if not self._web_client or not ts:
             return
-        web_api = cast(Any, self._web_client)
+        web_api = self._require_web_api()
         try:
             await web_api.reactions_remove(
                 channel=chat_id,

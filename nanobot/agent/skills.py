@@ -145,7 +145,7 @@ class SkillsLoader:
                 skill_name = entry["name"]
                 meta = self._get_skill_meta(skill_name)
                 available = self._check_requirements(meta)
-                desc = self._get_skill_description(skill_name)
+                desc = self.get_skill_description(skill_name)
                 suffix = ""
                 if not available:
                     missing = self._get_missing_requirements(meta)
@@ -191,7 +191,7 @@ class SkillsLoader:
             "missing_env": [value for value in env if not os.environ.get(value)],
         }
 
-    def _get_skill_description(self, name: str) -> str:
+    def get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""
         meta = self.get_skill_metadata(name)
         description = meta.get("description") if meta else None

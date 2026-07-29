@@ -618,18 +618,23 @@ class MattermostChannel(BaseChannel):
 
     # API helpers ---------------------------------------------------------------
 
+    def _require_http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            raise RuntimeError("Mattermost client is not started")
+        return self._http_client
+
     async def _api_get(self, path: str) -> dict[str, Any]:
-        resp = await cast(httpx.AsyncClient, self._http_client).get(path)
+        resp = await self._require_http_client().get(path)
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
     async def _api_post(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await cast(httpx.AsyncClient, self._http_client).post(path, json=json_data)
+        resp = await self._require_http_client().post(path, json=json_data)
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
     async def _api_put(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await cast(httpx.AsyncClient, self._http_client).put(path, json=json_data)
+        resp = await self._require_http_client().put(path, json=json_data)
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
@@ -662,7 +667,7 @@ class MattermostChannel(BaseChannel):
 
         try:
             files = {"files": (path.name, path.read_bytes())}
-            resp = await cast(httpx.AsyncClient, self._http_client).post(
+            resp = await self._require_http_client().post(
                 "/api/v4/files",
                 data={"channel_id": channel_id},
                 files=files,
@@ -678,7 +683,7 @@ class MattermostChannel(BaseChannel):
 
     async def _download_file(self, file_id: str) -> str | None:
         try:
-            client = cast(httpx.AsyncClient, self._http_client)
+            client = self._require_http_client()
             info_resp = await client.get(f"/api/v4/files/{file_id}/info")
             info_resp.raise_for_status()
             info = cast(dict[str, Any], info_resp.json())
@@ -706,7 +711,7 @@ class MattermostChannel(BaseChannel):
     async def _remove_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
-        resp = await cast(httpx.AsyncClient, self._http_client).delete(
+        resp = await self._require_http_client().delete(
             f"/api/v4/users/{self._self_id}/posts/{post_id}/reactions/{emoji}",
         )
         if resp.status_code >= 400:

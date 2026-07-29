@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cli import commands as cli_commands
@@ -69,6 +70,26 @@ def _fake_provider():
 
 class _StopGatewayError(RuntimeError):
     pass
+
+
+class _GatewayAgentContractStub:
+    """Minimal stable AgentLoop surface required by gateway assembly tests."""
+
+    tools = ToolRegistry()
+
+    @staticmethod
+    def pending_cron_job_ids_for_session(_session_key: str) -> set[str]:
+        return set()
+
+    @staticmethod
+    def pending_local_trigger_ids_for_session(_session_key: str) -> set[str]:
+        return set()
+
+    async def submit_local_trigger_turn(
+        self,
+        _msg: InboundMessage,
+    ) -> OutboundMessage | None:
+        return None
 
 
 def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
@@ -1949,7 +1970,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         def register_system_job(self, _job: CronJob) -> None:
             raise _StopGatewayError("stop")
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -2615,7 +2636,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
             self.on_job = None
             seen["cron"] = self
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -2731,7 +2752,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
         def write_run_record(self, run_id: str, record: dict[str, object]) -> None:
             seen["run_records"].append((run_id, record))
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -2947,7 +2968,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         def register_system_job(self, _job) -> None:
             return None
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             seen["agent_from_config_kwargs"] = extra
@@ -3200,7 +3221,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -3393,7 +3414,7 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -3492,7 +3513,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)

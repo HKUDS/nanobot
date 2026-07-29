@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
@@ -343,14 +343,14 @@ def channel_instance_specs(
             f"ChannelPlugin.management.instance_specs for '{plugin.name}' must return an iterable"
         )
     specs = list(cast(Iterable[object], raw_specs))
+    if not _all_channel_instance_specs(specs):
+        raise TypeError(
+            f"ChannelPlugin.management.instance_specs for '{plugin.name}' returned an invalid item"
+        )
 
     instance_ids: set[str] = set()
     runtime_names: set[str] = set()
     for spec in specs:
-        if not isinstance(spec, ChannelInstanceSpec):
-            raise TypeError(
-                f"ChannelPlugin.management.instance_specs for '{plugin.name}' returned an invalid item"
-            )
         instance_id = cast(object, spec.instance_id)
         if not isinstance(instance_id, str) or not instance_id.strip():
             raise ValueError(
@@ -369,7 +369,13 @@ def channel_instance_specs(
             )
         instance_ids.add(spec.instance_id)
         runtime_names.add(runtime_name)
-    return cast(list[ChannelInstanceSpec], specs)
+    return specs
+
+
+def _all_channel_instance_specs(
+    values: list[object],
+) -> TypeGuard[list[ChannelInstanceSpec]]:
+    return all(isinstance(value, ChannelInstanceSpec) for value in values)
 
 
 def resolve_channel_action_target(

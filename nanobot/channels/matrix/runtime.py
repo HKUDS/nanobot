@@ -12,7 +12,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, TypeAlias, cast
+from typing import Any, Callable, Literal, Protocol, TypeAlias, cast
 from urllib.parse import quote, unquote, urlparse
 
 from pydantic import Field
@@ -75,6 +75,18 @@ _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.f
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
+
+
+class _MatrixCallbackRegistrar(Protocol):
+    """Runtime callback surface whose upstream stubs reject valid filtered handlers."""
+
+    def add_event_callback(self, callback: Callable[..., Any], event_filter: Any) -> None: ...
+    def add_to_device_callback(
+        self,
+        callback: Callable[..., Any],
+        event_filter: Any,
+    ) -> None: ...
+    def add_response_callback(self, callback: Callable[..., Any], response_filter: Any) -> None: ...
 
 
 class _MediaTooLargeError(Exception):
@@ -328,7 +340,7 @@ class MatrixChannel(BaseChannel):
         self.client = AsyncClient(
             homeserver=self.config.homeserver,
             user=self.config.user_id,
-            store_path=cast(str, self.store_path),
+            store_path=str(self.store_path),
             config=AsyncClientConfig(
                 store_sync_tokens=True,
                 encryption_enabled=self.config.e2ee_enabled,
@@ -388,6 +400,16 @@ class MatrixChannel(BaseChannel):
             return
 
         self._sync_task = asyncio.create_task(self._sync_loop())
+
+    def _require_client(self) -> AsyncClient:
+        if self.client is None:
+            raise RuntimeError("Matrix client is not started")
+        return self.client
+
+    def _callback_registrar(self) -> _MatrixCallbackRegistrar:
+        # matrix-nio's callback annotations do not model filtered subtype or
+        # async handlers, although the runtime API supports both.
+        return cast(_MatrixCallbackRegistrar, self._require_client())
 
     async def stop(self) -> None:
         """Stop the Matrix channel with graceful sync shutdown."""
@@ -661,21 +683,21 @@ class MatrixChannel(BaseChannel):
 
 
     def _register_event_callbacks(self) -> None:
-        client = cast(Any, self.client)
+        client = self._callback_registrar()
         client.add_event_callback(self._on_message, RoomMessageText)
         client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
         client.add_event_callback(self._on_room_invite, InviteEvent)
 
     def _register_to_device_callbacks(self) -> None:
         if self.config.e2ee_enabled and self.config.sas_verification:
-            client = cast(Any, self.client)
+            client = self._callback_registrar()
             client.add_to_device_callback(
                 self._on_key_verification_event,
                 (KeyVerificationEvent,),
             )
 
     def _register_response_callbacks(self) -> None:
-        client = cast(Any, self.client)
+        client = self._callback_registrar()
         client.add_response_callback(self._on_sync_error, SyncError)
         client.add_response_callback(self._on_join_error, JoinError)
         client.add_response_callback(self._on_send_error, RoomSendError)
@@ -803,7 +825,7 @@ class MatrixChannel(BaseChannel):
         backoff = 2.0
         while self._running:
             try:
-                client = cast(AsyncClient, self.client)
+                client = self._require_client()
                 await client.sync_forever(timeout=30000, full_state=True)
                 backoff = 2.0
             except asyncio.CancelledError:
@@ -816,7 +838,7 @@ class MatrixChannel(BaseChannel):
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         if self.is_allowed(event.sender):
-            client = cast(AsyncClient, self.client)
+            client = self._require_client()
             await client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:

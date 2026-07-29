@@ -548,7 +548,9 @@ class WecomChannel(BaseChannel):
                 # Both progress and final messages must use reply_stream (cmd="aibot_respond_msg").
                 # The plain reply() uses cmd="reply" which does not support "text" msgtype
                 # and causes errcode=40008 from WeCom API.
-                generate_req_id = cast(Callable[[str], str], self._generate_req_id)
+                generate_req_id = self._generate_req_id
+                if generate_req_id is None:
+                    raise RuntimeError("WeCom request-id generator is not initialized")
                 stream_id = generate_req_id("stream")
                 await self._client.reply_stream(
                     frame,

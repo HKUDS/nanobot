@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
@@ -161,10 +160,11 @@ def _make_provider_core(
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-        azure_config = cast(ProviderConfig, p)
+        if p is None or p.api_base is None:
+            raise RuntimeError("validated Azure provider setup is missing api_base")
         provider = AzureOpenAIProvider(
-            api_key=azure_config.api_key or "",
-            api_base=cast(str, azure_config.api_base),
+            api_key=p.api_key or "",
+            api_base=p.api_base,
             default_model=model,
         )
     elif backend == "github_copilot":

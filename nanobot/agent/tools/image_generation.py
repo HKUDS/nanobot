@@ -23,6 +23,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD,
     InboundMessage,
 )
+from nanobot.bus.queue import MessageBus
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
@@ -41,6 +42,7 @@ from nanobot.utils.artifacts import (
 from nanobot.utils.helpers import detect_image_mime
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.context import ToolContext
     from nanobot.config.schema import ProviderConfig
 
 
@@ -89,11 +91,11 @@ class ImageGenerationTool(Tool):
         return ImageGenerationToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.image_generation.enabled
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             workspace=ctx.workspace,
             config=ctx.config.image_generation,
@@ -273,7 +275,7 @@ async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> di
 
 
 async def request_image_generation_reload(
-    bus: Any,
+    bus: MessageBus,
     *,
     timeout: float = 5.0,
 ) -> dict[str, Any]:

@@ -296,6 +296,30 @@ class WebSocketChannel(BaseChannel):
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
 
+    async def send_webui_protocol_error(self, connection: Any, detail: str) -> None:
+        """Send a stable protocol error from a WebUI-owned orchestration helper."""
+        await self._send_event(connection, "error", detail=detail)
+
+    async def attach_webui_fork(
+        self,
+        connection: Any,
+        *,
+        fork_id: str,
+        fork_key: str,
+    ) -> None:
+        """Attach and hydrate a newly created WebUI chat fork."""
+        scope = self._workspaces.scope_for_session_key(fork_key)
+        self._attach(connection, fork_id)
+        await self._send_event(connection, "attached", chat_id=fork_id)
+        await self._send_event(
+            connection,
+            "session_updated",
+            chat_id=fork_id,
+            scope="metadata",
+            workspace_scope=scope.payload(),
+        )
+        await self._hydrate_after_subscribe(fork_id)
+
     def _cleanup_connection(self, connection: Any) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         chat_ids = self._conn_chats.pop(connection, set())
@@ -319,7 +343,7 @@ class WebSocketChannel(BaseChannel):
         if self.gateway.session_manager is None:
             return
         row = self.gateway.session_manager.read_session_file(f"websocket:{chat_id}")
-        row_data = cast(dict[str, Any], row) if isinstance(row, dict) else {}
+        row_data = row if isinstance(row, dict) else {}
         meta = row_data.get("metadata", {})
         if not isinstance(meta, dict):
             meta = {}

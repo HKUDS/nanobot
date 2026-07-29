@@ -360,7 +360,7 @@ class _QueuedTelegramUpdate:
 
     kind: Literal["command", "message"]
     update: Update
-    context: Any
+    context: ContextTypes.DEFAULT_TYPE
     sort_key: tuple[int, int]
 
 
@@ -477,6 +477,11 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task[None]] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
+
+    def _require_app(self) -> TelegramApplication:
+        if self._app is None:
+            raise RuntimeError("Telegram application is not started")
+        return self._app
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -911,10 +916,11 @@ class TelegramChannel(BaseChannel):
         reply_markup: InlineKeyboardMarkup | None = None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
+        app = self._require_app()
         try:
             html = _tool_hint_to_telegram_blockquote(text) if render_as_blockquote else _markdown_to_telegram_html(text)
             await self._call_with_retry(
-                cast(TelegramApplication, self._app).bot.send_message,
+                app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
                 reply_markup=reply_markup,
@@ -924,7 +930,7 @@ class TelegramChannel(BaseChannel):
             self.logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._call_with_retry(
-                    cast(TelegramApplication, self._app).bot.send_message,
+                    app.bot.send_message,
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
@@ -1108,10 +1114,11 @@ class TelegramChannel(BaseChannel):
         chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
         if len(chunks) <= 1:
             return
+        app = self._require_app()
         first_markdown, first_html = chunks[0]
         try:
             await self._call_with_retry(
-                cast(TelegramApplication, self._app).bot.edit_message_text,
+                app.bot.edit_message_text,
                 chat_id=chat_id, message_id=buf.message_id,
                 text=first_html,
                 parse_mode="HTML",
@@ -1123,7 +1130,7 @@ class TelegramChannel(BaseChannel):
                 )
                 try:
                     await self._call_with_retry(
-                        cast(TelegramApplication, self._app).bot.edit_message_text,
+                        app.bot.edit_message_text,
                         chat_id=chat_id, message_id=buf.message_id,
                         text=first_markdown,
                     )
@@ -1138,7 +1145,7 @@ class TelegramChannel(BaseChannel):
         async def send_chunk(markdown: str, html: str) -> Any:
             try:
                 return await self._call_with_retry(
-                    cast(TelegramApplication, self._app).bot.send_message,
+                    app.bot.send_message,
                     chat_id=chat_id, text=html, parse_mode="HTML", **thread_kwargs,
                 )
             except BadRequest as e:
@@ -1146,7 +1153,7 @@ class TelegramChannel(BaseChannel):
                     "Stream overflow HTML send failed, falling back to plain text: {}", e
                 )
                 return await self._call_with_retry(
-                    cast(TelegramApplication, self._app).bot.send_message,
+                    app.bot.send_message,
                     chat_id=chat_id, text=markdown, **thread_kwargs,
                 )
 

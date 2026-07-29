@@ -23,6 +23,7 @@ from nanobot.utils.helpers import (
 from nanobot.utils.runtime import ensure_nonempty_tool_result
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.providers.base import LLMProvider
 
 SNIP_SAFETY_BUFFER = 1024
@@ -59,7 +60,7 @@ def _tool_call_name_is_valid(tool_call: Any) -> bool:
 class ContextGovernanceConfig:
     provider: LLMProvider
     model: str
-    tools: Any
+    tools: ToolRegistry
     workspace: Path | None
     session_key: str | None
     max_tool_result_chars: int

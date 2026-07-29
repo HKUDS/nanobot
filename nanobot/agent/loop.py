@@ -96,11 +96,13 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
         ChannelsConfig,
+        Config,
         MCPServerConfig,
         ProviderConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.triggers.local_store import LocalTriggerStore
 
 _T = TypeVar("_T")
 
@@ -281,7 +283,7 @@ class AgentLoop:
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
-        local_trigger_store: Any | None = None,
+        local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
     ):
         from nanobot.config.schema import ToolsConfig
@@ -445,7 +447,7 @@ class AgentLoop:
     @classmethod
     def from_config(
         cls,
-        config: Any,
+        config: Config,
         bus: MessageBus | None = None,
         **extra: Any,
     ) -> AgentLoop:

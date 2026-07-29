@@ -782,7 +782,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
 
 
 def estimate_prompt_tokens_chain(
-    provider: Any,
+    provider: object,
     model: str | None,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,

@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import urllib.parse
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, cast
 from weakref import WeakKeyDictionary
@@ -23,6 +23,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
+from nanobot.bus.queue import MessageBus
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
@@ -113,7 +114,7 @@ class _MalformedProgressNotificationFilter:
     def __init__(self, read_stream: Any, server_name: str) -> None:
         self._read_stream = read_stream
         self._server_name = server_name
-        self._iterator: Any | None = None
+        self._iterator: AsyncIterator[Any] | None = None
 
     async def __aenter__(self) -> "_MalformedProgressNotificationFilter":
         await self._read_stream.__aenter__()
@@ -127,12 +128,13 @@ class _MalformedProgressNotificationFilter:
         return self
 
     async def __anext__(self) -> Any:
-        if self._iterator is None:
-            self._iterator = self._read_stream.__aiter__()
-        iterator = cast(Any, self._iterator)
+        iterator = self._iterator
+        if iterator is None:
+            iterator = self._read_stream.__aiter__()
+            self._iterator = iterator
 
         while True:
-            message = await iterator.__anext__()
+            message = await anext(iterator)
             if _is_malformed_mcp_progress_notification(message):
                 logger.debug(
                     "MCP server '{}': dropped progress notification without progressToken",
@@ -1382,7 +1384,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         }
 
 
-async def request_mcp_reload(bus: Any, *, timeout: float = 15.0) -> dict[str, Any]:
+async def request_mcp_reload(
+    bus: MessageBus,
+    *,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
     """Ask the running agent loop to reconcile live MCP connections."""
     loop = asyncio.get_running_loop()
     ack: asyncio.Future[dict[str, Any]] = loop.create_future()
