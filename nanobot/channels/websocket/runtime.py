@@ -250,6 +250,11 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats: dict[Any, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[Any, str] = {}
+        # Set of connections that are push bridges (degraded channel).
+        # These are excluded from is_chat_connected to avoid false "online" state.
+        self._bridge_connections: set[Any] = set()
+        # connection -> gateway token (for push notification device lookup).
+        self._conn_tokens: dict[Any, str] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -284,6 +289,21 @@ class WebSocketChannel(BaseChannel):
             if not subs:
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
+        self._bridge_connections.discard(connection)
+        self._conn_tokens.pop(connection, None)
+
+    def is_chat_connected(self, chat_id: str) -> bool:
+        """Return True if at least one non-bridge connection is subscribed to chat_id.
+
+        Bridge connections (PushBridgeService) are excluded to avoid false
+        "online" detection — a bridge connection alone does not mean the user
+        is actively viewing the chat.
+        """
+        conns = self._subs.get(chat_id)
+        if not conns:
+            return False
+        # Check if there's at least one non-bridge connection
+        return any(c not in self._bridge_connections for c in conns)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -368,24 +388,28 @@ class WebSocketChannel(BaseChannel):
         return await self._http_router.dispatch(connection, request)
 
     def _authorize_websocket_handshake(self, connection: Any, query: dict[str, list[str]]) -> Any:
-        supplied = _query_first(query, "token")
-        static_token = self.config.token.strip()
+         supplied = _query_first(query, "token")
+         static_token = self.config.token.strip()
 
-        if static_token:
-            if supplied and hmac.compare_digest(supplied, static_token):
-                return None
-            if supplied and self._tokens.take_issued_token_if_valid(supplied):
-                return None
-            return connection.respond(401, "Unauthorized")
+         if static_token:
+             if supplied and hmac.compare_digest(supplied, static_token):
+                 self._conn_tokens[connection] = supplied
+                 return None
+             if supplied and self._tokens.take_issued_token_if_valid(supplied):
+                 self._conn_tokens[connection] = supplied
+                 return None
+             return connection.respond(401, "Unauthorized")
 
-        if self.config.websocket_requires_token:
-            if supplied and self._tokens.take_issued_token_if_valid(supplied):
-                return None
-            return connection.respond(401, "Unauthorized")
+         if self.config.websocket_requires_token:
+             if supplied and self._tokens.take_issued_token_if_valid(supplied):
+                 self._conn_tokens[connection] = supplied
+                 return None
+             return connection.respond(401, "Unauthorized")
 
-        if supplied:
-            self._tokens.take_issued_token_if_valid(supplied)
-        return None
+         if supplied:
+             self._tokens.take_issued_token_if_valid(supplied)
+             self._conn_tokens[connection] = supplied
+         return None
 
     # -- Server lifecycle and connection ingress ---------------------------
 
@@ -525,11 +549,15 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
+                legacy_metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
+                conn_token_legacy = self._conn_tokens.get(connection)
+                if conn_token_legacy:
+                    legacy_metadata["gateway_token"] = conn_token_legacy
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=default_chat_id,
                     content=content,
-                    metadata={"remote": getattr(connection, "remote_address", None)},
+                    metadata=legacy_metadata,
                     is_dm=False,
                 )
         except Exception as e:
@@ -676,6 +704,10 @@ class WebSocketChannel(BaseChannel):
                 return
 
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
+            # Include gateway token for push notification device lookup
+            conn_token = self._conn_tokens.get(connection)
+            if conn_token:
+                metadata["gateway_token"] = conn_token
             if envelope.get("webui") is True:
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
