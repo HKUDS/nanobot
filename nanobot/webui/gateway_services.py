@@ -38,6 +38,7 @@ def build_gateway_services(
     *,
     config: Any,
     bus: Any,
+    runtime_events: Any | None = None,
     session_manager: Any | None,
     static_dist_path: Path | None,
     workspace_path: Path,
@@ -78,6 +79,7 @@ def build_gateway_services(
     )
     # Push service: optional, requires RuntimeEventBus
     push_service = None
+    logger.debug("build_gateway_services: runtime_events={}", runtime_events)
     if runtime_events is not None:
         try:
             from nanobot.push.service import init_push_service
@@ -85,6 +87,8 @@ def build_gateway_services(
             logger.info("push notification service initialized")
         except Exception as e:
             logger.warning("failed to init push service: {}", e)
+    else:
+        logger.warning("build_gateway_services: runtime_events is None, push service not started")
 
     http = GatewayHTTPHandler(
         config=config,
