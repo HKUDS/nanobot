@@ -129,6 +129,10 @@ jobs:
         if: matrix.coverage
         run: uv run --no-sync ruff check nanobot tests conftest.py
 
+      - name: Type check with BasedPyright (strict)
+        if: matrix.coverage
+        run: uv run --no-sync basedpyright
+
       - name: Run tests with coverage
         if: matrix.coverage
         run: >-

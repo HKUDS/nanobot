@@ -6,6 +6,7 @@ import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from nanobot.process_runtime import (
     ManagedProcessRuntime,
@@ -40,21 +41,22 @@ class ApiRuntime(ManagedProcessRuntime):
 
     service_name = "api"
 
-    def _build_child_command(self, options: ApiStartOptions) -> list[str]:
+    def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
+        api_options = cast(ApiStartOptions, options)
         command = [
             self.python_executable or sys.executable,
             "-m",
             "nanobot",
             "serve",
             "--host",
-            options.host,
+            api_options.host,
             "--port",
-            str(options.port),
+            str(api_options.port),
         ]
-        if options.verbose:
+        if api_options.verbose:
             command.append("--verbose")
-        if options.workspace:
-            command.extend(["--workspace", options.workspace])
-        if options.config_path:
-            command.extend(["--config", options.config_path])
+        if api_options.workspace:
+            command.extend(["--workspace", api_options.workspace])
+        if api_options.config_path:
+            command.extend(["--config", api_options.config_path])
         return command

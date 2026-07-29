@@ -16,7 +16,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from loguru import logger
@@ -410,7 +410,7 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        cleaned = []
+        cleaned: list[dict[str, Any]] = []
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
@@ -440,9 +440,15 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         messages = data.get("messages")
         if isinstance(messages, list):
-            scrub_subagent_messages_for_channel(messages)
+            session_messages = cast(list[dict[str, Any]], messages)
+            scrub_subagent_messages_for_channel(session_messages)
+            raw_session_messages = cast(list[Any], messages)
             data["messages"] = public_history_messages(
-                message for message in messages if isinstance(message, dict)
+                [
+                    cast(dict[str, Any], message)
+                    for message in raw_session_messages
+                    if isinstance(message, dict)
+                ]
             )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
@@ -461,7 +467,12 @@ class GatewayHTTPHandler:
             session_data = self.session_manager.read_session_file(decoded_key)
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
             if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
+                raw_session_messages = cast(list[Any], raw_messages)
+                session_messages = [
+                    cast(dict[str, Any], raw_message)
+                    for raw_message in raw_session_messages
+                    if isinstance(raw_message, dict)
+                ]
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -854,7 +865,7 @@ class GatewayHTTPHandler:
         if not isinstance(decoded, dict):
             return _http_error(400, "state must be an object")
         try:
-            state = write_webui_sidebar_state(decoded)
+            state = write_webui_sidebar_state(cast(dict[str, Any], decoded))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:
@@ -915,7 +926,7 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
             values = json.loads(unquote(raw))
         except Exception:
             return None
-    return values if isinstance(values, dict) else None
+    return cast(dict[str, Any], values) if isinstance(values, dict) else None
 
 
 def _parse_automation_update(
@@ -944,7 +955,7 @@ def _parse_automation_update(
         raw_schedule = values.get("schedule")
         if not isinstance(raw_schedule, dict):
             return "schedule must be an object"
-        parsed_schedule = _parse_automation_schedule(raw_schedule)
+        parsed_schedule = _parse_automation_schedule(cast(dict[str, Any], raw_schedule))
         if isinstance(parsed_schedule, str):
             return parsed_schedule
         if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
@@ -1034,7 +1045,7 @@ def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
 
         tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
         base = datetime.now(tz=tz)
-        croniter(schedule.expr, base).get_next(datetime)
+        croniter(cast(str, schedule.expr), base).get_next(datetime)
     except Exception:
         return "cron schedule is invalid"
     return None

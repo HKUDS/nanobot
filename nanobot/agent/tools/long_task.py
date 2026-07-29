@@ -1,5 +1,7 @@
 """Sustained-goal tools with explicit user opt-in at the execution boundary."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from copy import deepcopy

@@ -7,6 +7,7 @@ import ipaddress
 import re
 import socket
 from contextlib import contextmanager, suppress
+from typing import Any, cast
 from urllib.parse import urlparse
 from urllib.request import getproxies, proxy_bypass
 
@@ -45,7 +46,7 @@ def is_loopback_host(host: str) -> bool:
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
     global _allowed_networks
-    nets = []
+    nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     for cidr in cidrs:
         with suppress(ValueError):
             nets.append(ipaddress.ip_network(cidr, strict=False))
@@ -229,10 +230,17 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
     pinned_host = hostname.rstrip(".").lower()
     original_getaddrinfo = socket.getaddrinfo
 
-    def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+    def _getaddrinfo(
+        host: Any,
+        port: Any,
+        family: int = 0,
+        type: int = 0,  # noqa: A002
+        proto: int = 0,
+        flags: int = 0,
+    ) -> list[Any]:
         if str(host).rstrip(".").lower() != pinned_host:
             return original_getaddrinfo(host, port, family, type, proto, flags)
-        infos = []
+        infos: list[Any] = []
         for ip in resolved_ips:
             addr = ipaddress.ip_address(ip)
             addr_family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
@@ -242,7 +250,7 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
             infos.append((addr_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
         return infos
 
-    socket.getaddrinfo = _getaddrinfo
+    socket.getaddrinfo = cast(Any, _getaddrinfo)
     try:
         yield
     finally:

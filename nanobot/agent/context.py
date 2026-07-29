@@ -4,7 +4,7 @@ import base64
 import mimetypes
 import platform
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -148,7 +148,12 @@ class ContextBuilder:
 
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
-                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
+                return [
+                    cast(dict[str, Any], item)
+                    if isinstance(item, dict)
+                    else {"type": "text", "text": str(item)}
+                    for item in cast(list[Any], value)
+                ]
             if value is None:
                 return []
             return [{"type": "text", "text": str(value)}]
@@ -157,7 +162,7 @@ class ContextBuilder:
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
         """Load project instructions plus the agent's global profile files."""
-        parts = []
+        parts: list[str] = []
         project_root = workspace or self.workspace
         sources = [
             ("AGENTS.md", project_root),
@@ -212,7 +217,7 @@ class ContextBuilder:
         user_content = self.build_user_content(current_message, image_paths=media)
         blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
         merged, runtime_context_meta = append_runtime_context(user_content, blocks)
-        messages = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": self.build_system_prompt(
@@ -235,7 +240,7 @@ class ContextBuilder:
                 last["_meta"] = internal_meta
             messages[-1] = last
             return messages
-        current = {"role": current_role, "content": merged}
+        current: dict[str, Any] = {"role": current_role, "content": merged}
         if current_role == "user" and runtime_context_meta is not None:
             current["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta}
         messages.append(current)
@@ -250,7 +255,7 @@ class ContextBuilder:
         if not image_paths:
             return text
 
-        image_blocks = []
+        image_blocks: list[dict[str, Any]] = []
         for path in image_paths:
             p = Path(path)
             if not p.is_file():

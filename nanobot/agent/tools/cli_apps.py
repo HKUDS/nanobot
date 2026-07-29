@@ -1,5 +1,7 @@
 """Controlled runner for installed CLI Apps."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from pathlib import Path

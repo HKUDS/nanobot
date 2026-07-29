@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import httpx
 from pydantic import Field, computed_field, field_validator
@@ -53,12 +53,33 @@ _SIG_TOKEN_RE = re.compile(r"\x00C(\d+)\x00")
 # stripper needs a fixed, narrow subset (no single-asterisk italic, no
 # single-tilde strikethrough) and benefits from each pattern's group 1 being
 # the content directly.
-_SIG_CELL_STRIP_PATTERNS: tuple[tuple[re.Pattern, str], ...] = (
+_SIG_CELL_STRIP_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\*\*(.+?)\*\*"), r"\1"),
     (re.compile(r"__(.+?)__"), r"\1"),
     (re.compile(r"~~(.+?)~~"), r"\1"),
     (re.compile(r"`([^`]+)`"), r"\1"),
 )
+
+
+def _as_json_object(value: object) -> dict[str, Any] | None:
+    """Return an untrusted JSON value only when it is an object."""
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return None
+
+
+def _as_json_object_list(value: object) -> list[dict[str, Any]]:
+    """Return the object members of an untrusted JSON array."""
+    if not isinstance(value, list):
+        return []
+    return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
+
+
+class _BufferedMessage(TypedDict):
+    sender_name: str
+    sender_number: str
+    content: str
+    timestamp: int | None
 
 
 def _utf16_len(s: str) -> int:
@@ -118,7 +139,7 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     # so they're protected from inline-style processing.
     protected: list[str] = []
 
-    def save_code(m: re.Match) -> str:
+    def save_code(m: re.Match[str]) -> str:
         protected.append(m.group(1))
         return f"\x00C{len(protected) - 1}\x00"
 
@@ -149,8 +170,8 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     runs: list[_Run] = [_Run(text)]
 
     def transform(
-        pattern: re.Pattern,
-        make_runs: Callable[[re.Match, frozenset[str]], list[_Run]],
+        pattern: re.Pattern[str],
+        make_runs: Callable[[re.Match[str], frozenset[str]], list[_Run]],
     ) -> None:
         new_runs: list[_Run] = []
         for run in runs:
@@ -189,7 +210,7 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     transform(_SIG_OLIST_RE, lambda m, s: [_Run(m.group(1) + ". ", s)])
 
     # Links → "text (url)" or bare url when text equals url.
-    def _link_runs(m: re.Match, s: frozenset) -> list[_Run]:
+    def _link_runs(m: re.Match[str], s: frozenset[str]) -> list[_Run]:
         link_text, url = m.group(1), m.group(2)
 
         def _norm(u: str) -> str:
@@ -357,15 +378,15 @@ class SignalChannel(BaseChannel):
         self.config: SignalConfig = config
         self._http: httpx.AsyncClient | None = None
         self._request_id = 0
-        self._sse_task: asyncio.Task | None = None
-        self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._sse_task: asyncio.Task[None] | None = None
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._typing_uuid_warnings: set[str] = set()
         self._account_id_aliases: set[str] = set()
         self._remember_account_id_alias(self.config.phone_number)
 
         # Rolling message buffer for group context (group_id -> deque of messages)
         # Each message is a dict with: sender_name, sender_number, content, timestamp
-        self._group_buffers: dict[str, deque] = {}
+        self._group_buffers: dict[str, deque[_BufferedMessage]] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Override base check to normalize and split pipe-joined identifiers.
@@ -409,6 +430,7 @@ class SignalChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
+        authorization_id: str | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -418,6 +440,7 @@ class SignalChannel(BaseChannel):
         ``super()._handle_message`` instead, which goes through
         ``is_allowed`` and issues a pairing code.
         """
+        del authorization_id
         meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
@@ -594,7 +617,7 @@ class SignalChannel(BaseChannel):
                 self.logger.info("Subscribed to Signal messages via SSE")
 
                 # Buffer for accumulating SSE data across multiple lines
-                event_buffer = []
+                event_buffer: list[str] = []
 
                 async for line in response.aiter_lines():
                     if not self._running:
@@ -605,7 +628,7 @@ class SignalChannel(BaseChannel):
                         self.logger.debug("SSE line received: {}", line[:200])
 
                     # SSE format handling
-                    if isinstance(line, str):
+                    if isinstance(line, str):  # pyright: ignore[reportUnnecessaryIsInstance]
                         # Empty line signals end of event
                         if not line or line == ":":
                             if event_buffer:
@@ -613,7 +636,10 @@ class SignalChannel(BaseChannel):
                                 data_str = ""
                                 try:
                                     data_str = "\n".join(event_buffer)
-                                    data = json.loads(data_str)
+                                    data = _as_json_object(json.loads(data_str))
+                                    if data is None:
+                                        self.logger.warning("Ignoring non-object SSE event: {}", data_str[:200])
+                                        continue
                                     self.logger.debug("SSE event parsed: {}", data)
                                     await self._handle_receive_notification(data)
                                 except json.JSONDecodeError as e:
@@ -644,7 +670,7 @@ class SignalChannel(BaseChannel):
             self.logger.error("Error in SSE receive loop: {}", e)
             raise
 
-    @asynccontextmanager
+    @asynccontextmanager  # pyright: ignore[reportDeprecated]
     async def _safe_handle(self, action: str, payload: Any = None) -> AsyncIterator[None]:
         """Swallow and log any exception from a top-level handler block.
 
@@ -666,17 +692,18 @@ class SignalChannel(BaseChannel):
         self.logger.debug("_handle_receive_notification called with: {}", params)
         async with self._safe_handle("receive notification", params):
             # Extract envelope from SSE notification: {"envelope": {...}}
-            envelope = params.get("envelope", {})
+            envelope = _as_json_object(params.get("envelope"))
 
             self.logger.debug("Extracted envelope: {}", envelope)
 
-            if not envelope:
+            if envelope is None:
                 self.logger.debug("No envelope found in params")
                 return
 
             # Extract sender information
             sender_parts = self._collect_sender_id_parts(envelope)
-            source_name = envelope.get("sourceName")
+            source_name_value = envelope.get("sourceName")
+            source_name = source_name_value if isinstance(source_name_value, str) else None
 
             if not sender_parts:
                 self.logger.debug("Received message without source, skipping")
@@ -691,10 +718,10 @@ class SignalChannel(BaseChannel):
                     self._remember_account_id_alias(part)
 
             # Check different message types
-            data_message = envelope.get("dataMessage")
-            sync_message = envelope.get("syncMessage")
-            typing_message = envelope.get("typingMessage")
-            receipt_message = envelope.get("receiptMessage")
+            data_message = _as_json_object(envelope.get("dataMessage"))
+            sync_message = _as_json_object(envelope.get("syncMessage"))
+            typing_message = _as_json_object(envelope.get("typingMessage"))
+            receipt_message = _as_json_object(envelope.get("receiptMessage"))
 
             # Ignore receipt messages (delivery/read receipts)
             if receipt_message:
@@ -705,8 +732,7 @@ class SignalChannel(BaseChannel):
                 await self._handle_data_message(sender_id, sender_number, data_message, source_name)
 
             # Handle sync messages (messages sent from another device)
-            elif sync_message and sync_message.get("sentMessage"):
-                sent_msg = sync_message["sentMessage"]
+            elif sync_message and (sent_msg := _as_json_object(sync_message.get("sentMessage"))):
                 destination = sent_msg.get("destination") or sent_msg.get("destinationNumber")
                 if destination:
                     self.logger.debug(
@@ -725,10 +751,12 @@ class SignalChannel(BaseChannel):
         sender_name: str | None,
     ) -> None:
         """Handle a data message (text, attachments, etc.)."""
-        message_text = data_message.get("message") or ""
-        attachments = data_message.get("attachments", [])
-        mentions = data_message.get("mentions", [])
-        timestamp = data_message.get("timestamp")
+        message_value = data_message.get("message")
+        message_text = message_value if isinstance(message_value, str) else ""
+        attachments = _as_json_object_list(data_message.get("attachments"))
+        mentions = _as_json_object_list(data_message.get("mentions"))
+        timestamp_value = data_message.get("timestamp")
+        timestamp = timestamp_value if isinstance(timestamp_value, int) else None
 
         self.logger.info(
             "Data message from {}: groupInfo={}, groupV2={}, keys={}",
@@ -815,7 +843,7 @@ class SignalChannel(BaseChannel):
         group_id: str | None,
         is_group_message: bool,
         message_text: str,
-        mentions: list,
+        mentions: list[dict[str, Any]],
         sender_name: str | None,
         timestamp: int | None,
     ) -> tuple[bool, str]:
@@ -877,8 +905,8 @@ class SignalChannel(BaseChannel):
         sender_name: str | None,
         sender_number: str,
         message_text: str,
-        attachments: list,
-        mentions: list,
+        attachments: list[dict[str, Any]],
+        mentions: list[dict[str, Any]],
         is_group_message: bool,
         chat_id: str,
     ) -> tuple[str, list[str]]:
@@ -952,7 +980,9 @@ class SignalChannel(BaseChannel):
         """
         # Create buffer for this group if it doesn't exist
         if group_id not in self._group_buffers:
-            self._group_buffers[group_id] = deque(maxlen=self.config.group_message_buffer_size)
+            self._group_buffers[group_id] = deque[_BufferedMessage](
+                maxlen=self.config.group_message_buffer_size
+            )
 
         # Add message to buffer (deque will automatically drop oldest when full)
         self._group_buffers[group_id].append(
@@ -992,7 +1022,7 @@ class SignalChannel(BaseChannel):
         # We want to show context BEFORE the mention
         context_messages = list(buffer)[:-1]  # Exclude the last (current) message
 
-        lines = []
+        lines: list[str] = []
         for msg in context_messages:
             sender = msg["sender_name"]
             content = msg["content"][:200]  # Limit to 200 chars per message
@@ -1053,16 +1083,12 @@ class SignalChannel(BaseChannel):
         """Remember known bot identifiers for mention matching."""
         if not value:
             return
-        if not isinstance(value, str):
-            return
         for candidate in self._normalize_signal_id(value):
             self._account_id_aliases.add(candidate)
 
     def _id_matches_account(self, value: str | None) -> bool:
         """Return True when an identifier refers to the bot account."""
         if not value:
-            return False
-        if not isinstance(value, str):
             return False
         return any(
             candidate in self._account_id_aliases for candidate in self._normalize_signal_id(value)
@@ -1097,13 +1123,14 @@ class SignalChannel(BaseChannel):
         return sender_parts[0] if sender_parts else ""
 
     @staticmethod
-    def _extract_group_id(group_info: Any, group_v2: Any) -> str | None:
+    def _extract_group_id(group_info: object, group_v2: object) -> str | None:
         """Extract group ID from groupInfo/groupV2 payloads across signal-cli variants."""
         for group_obj in (group_info, group_v2):
             if not isinstance(group_obj, dict):
                 continue
+            group = cast(dict[str, Any], group_obj)
             for key in ("groupId", "id", "groupID"):
-                value = group_obj.get(key)
+                value = group.get(key)
                 if isinstance(value, str) and value:
                     return value
         return None
@@ -1113,18 +1140,19 @@ class SignalChannel(BaseChannel):
         """Extract possible identifier fields from a mention payload."""
         ids: list[str] = []
 
-        def _walk(value: dict[str, Any] | Any, depth: int = 0) -> None:
+        def _walk(value: object, depth: int = 0) -> None:
             if depth > 2:
                 return
             if not isinstance(value, dict):
                 return
-            for key, child in value.items():
-                key_lower = str(key).lower()
+            object_value = cast(dict[str, Any], value)
+            for key, child in object_value.items():
+                key_lower = key.lower()
                 if isinstance(child, str) and child:
                     if any(token in key_lower for token in ("number", "uuid", "serviceid", "aci")):
                         ids.append(child)
                 elif isinstance(child, dict):
-                    _walk(child, depth + 1)
+                    _walk(cast(object, child), depth + 1)
 
         _walk(mention)
         return list(dict.fromkeys(ids))
@@ -1187,8 +1215,6 @@ class SignalChannel(BaseChannel):
 
         # If mention is required, check if bot was mentioned.
         for mention in mentions:
-            if not isinstance(mention, dict):
-                continue
             for mention_id in self._mention_id_candidates(mention):
                 if self._id_matches_account(mention_id):
                     return True
@@ -1197,15 +1223,13 @@ class SignalChannel(BaseChannel):
         # (for handle-style mentions). Accept a leading identifier-less mention
         # as a mention of the bot to avoid false negatives.
         for mention in mentions:
-            if not isinstance(mention, dict):
-                continue
             if self._mention_id_candidates(mention):
                 continue
             span = self._mention_span(mention)
             if not span:
                 continue
             start, _ = span
-            if message_text is not None and not message_text[:start].strip():
+            if not message_text[:start].strip():
                 self.logger.debug("Accepting identifier-less leading mention as bot mention")
                 return True
 
@@ -1241,10 +1265,8 @@ class SignalChannel(BaseChannel):
             return text
 
         # Build a list of (start, length) tuples for our bot's mentions
-        bot_mentions = []
+        bot_mentions: list[tuple[int, int]] = []
         for mention in mentions:
-            if not isinstance(mention, dict):
-                continue
             mention_ids = self._mention_id_candidates(mention)
             span = self._mention_span(mention)
             if not span:
@@ -1382,7 +1404,7 @@ class SignalChannel(BaseChannel):
         request_id = self._request_id
 
         # Build JSON-RPC request
-        request = {"jsonrpc": "2.0", "method": method, "id": request_id}
+        request: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": request_id}
 
         if params:
             request["params"] = params
@@ -1397,7 +1419,10 @@ class SignalChannel(BaseChannel):
         try:
             response = await self._http.post("/api/v1/rpc", json=request)
             response.raise_for_status()
-            return response.json()
+            response_json = _as_json_object(response.json())
+            if response_json is None:
+                return {"error": {"message": "signal-cli returned a non-object JSON-RPC response"}}
+            return response_json
         except Exception as e:
             self.logger.error("HTTP request failed: {}", e)
             return {"error": {"message": str(e)}}

@@ -1,5 +1,7 @@
 """File system tools: read, write, edit, list."""
 
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
+
 import difflib
 import mimetypes
 import os
@@ -408,7 +410,8 @@ class ReadFileTool(_FsTool):
             result = "\n".join(numbered)
 
             if len(result) > self._MAX_CHARS:
-                trimmed, chars = [], 0
+                trimmed: list[str] = []
+                chars = 0
                 for line in numbered:
                     chars += len(line) + 1
                     if chars > self._MAX_CHARS:

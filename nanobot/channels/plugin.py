@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 
@@ -49,12 +49,12 @@ class ChannelPlugin:
         _target_parts(self.runtime, label="runtime")
         if self.connector is not None:
             _target_parts(self.connector, label="connector")
-        if self.setup is not None and not isinstance(self.setup, ChannelSetupSpec):
+        if self.setup is not None and not isinstance(cast(object, self.setup), ChannelSetupSpec):
             raise TypeError("channel plugin setup must be a ChannelSetupSpec or None")
-        if not isinstance(self.management, ChannelManagementSpec):
+        if not isinstance(cast(object, self.management), ChannelManagementSpec):
             raise TypeError("channel plugin management must be a ChannelManagementSpec")
-        if not isinstance(self.dependencies, tuple) or not all(
-            isinstance(requirement, str) and requirement.strip()
+        if not isinstance(cast(object, self.dependencies), tuple) or not all(
+            isinstance(cast(object, requirement), str) and requirement.strip()
             for requirement in self.dependencies
         ):
             raise TypeError("channel plugin dependencies must be a tuple of requirements")

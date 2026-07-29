@@ -12,7 +12,7 @@ from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tiktoken
 from loguru import logger
@@ -21,7 +21,7 @@ _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
 
 
-def sanitize_surrogates(text: str) -> str:
+def sanitize_surrogates(text: Any) -> Any:
     """Reconstruct surrogate pairs and replace unpaired surrogates.
 
     Lone UTF-16 surrogate code points (``U+D800``..``U+DFFF``) cannot be
@@ -62,24 +62,29 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     if isinstance(value, list):
         result_list: list[Any] = []
         mutated = False
-        for item in value:
+        for item in cast(list[Any], value):
             new_item = sanitize_surrogates_deep(item)
             if new_item is not item:
                 mutated = True
             result_list.append(new_item)
-        return result_list if mutated else value
+        return result_list if mutated else cast(Any, value)
     if isinstance(value, dict):
         result_dict: dict[Any, Any] = {}
         mutated = False
-        for key, item in value.items():
+        for key, item in cast(dict[Any, Any], value).items():
             new_item = sanitize_surrogates_deep(item)
             if new_item is not item:
                 mutated = True
             result_dict[key] = new_item
-        return result_dict if mutated else value
+        return result_dict if mutated else cast(Any, value)
     if isinstance(value, tuple):
-        result_tuple = tuple(sanitize_surrogates_deep(item) for item in value)
-        return result_tuple if any(a is not b for a, b in zip(result_tuple, value)) else value
+        tuple_value = cast(tuple[Any, ...], value)
+        result_tuple = tuple(sanitize_surrogates_deep(item) for item in tuple_value)
+        return (
+            result_tuple
+            if any(a is not b for a, b in zip(result_tuple, tuple_value))
+            else cast(Any, value)
+        )
     return value
 
 
@@ -289,7 +294,7 @@ def extract_reasoning(
         parts = [
             strip_reasoning_tags(tb.get("thinking", ""))
             for tb in thinking_blocks
-            if isinstance(tb, dict) and tb.get("type") == "thinking"
+            if tb.get("type") == "thinking"
         ]
         joined = "\n\n".join(p for p in parts if p)
         return (joined or None), strip_think(content) if content else content
@@ -377,7 +382,7 @@ def content_with_media_breadcrumbs(
         return content
     breadcrumbs = "\n".join(
         image_placeholder_text(path)
-        for path in media
+        for path in cast(list[object], media)
         if isinstance(path, str) and path
     )
     if not breadcrumbs:
@@ -468,9 +473,10 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     for i, msg in enumerate(messages):
         role = msg.get("role")
         if role == "assistant":
-            for tc in msg.get("tool_calls") or []:
-                if isinstance(tc, dict) and tc.get("id"):
-                    declared.add(str(tc["id"]))
+            for raw_call in cast(list[object], msg.get("tool_calls") or []):
+                tool_call = cast(dict[str, Any], raw_call) if isinstance(raw_call, dict) else None
+                if tool_call is not None and tool_call.get("id"):
+                    declared.add(str(tool_call["id"]))
         elif role == "tool":
             tid = msg.get("tool_call_id")
             if tid and str(tid) not in declared:
@@ -479,11 +485,12 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     return start
 
 
-def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
+def stringify_text_blocks(content: list[object]) -> str | None:
     parts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
+    for raw_block in content:
+        if not isinstance(raw_block, dict):
             return None
+        block = cast(dict[str, Any], raw_block)
         if block.get("type") != "text":
             return None
         text = block.get("text")
@@ -574,15 +581,15 @@ def maybe_persist_tool_result(
     if isinstance(content, str):
         text_payload = content
     elif isinstance(content, list):
-        text_payload = stringify_text_blocks(content)
+        text_payload = stringify_text_blocks(cast(list[object], content))
         if text_payload is None:
-            return content
+            return cast(Any, content)
         suffix = "json"
     else:
         return content
 
     if len(text_payload) <= max_chars:
-        return content
+        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -645,7 +652,7 @@ def build_assistant_message(
     content: str | None,
     tool_calls: list[dict[str, Any]] | None = None,
     reasoning_content: str | None = None,
-    thinking_blocks: list[dict] | None = None,
+    thinking_blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a provider-safe assistant message with optional reasoning fields."""
     msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
@@ -677,11 +684,12 @@ def _estimate_prompt_tokens_with_source(
         if isinstance(content, str):
             parts.append(content)
         elif isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    txt = part.get("text", "")
-                    if txt:
-                        parts.append(txt)
+            for raw_part in cast(list[object], content):
+                part = cast(dict[str, Any], raw_part) if isinstance(raw_part, dict) else None
+                if part is not None and part.get("type") == "text":
+                    text = part.get("text", "")
+                    if isinstance(text, str) and text:
+                        parts.append(text)
 
         tc = msg.get("tool_calls")
         if tc:
@@ -732,13 +740,14 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if isinstance(content, str):
         parts.append(content)
     elif isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
+        for raw_part in cast(list[object], content):
+            part = cast(dict[str, Any], raw_part) if isinstance(raw_part, dict) else None
+            if part is not None and part.get("type") == "text":
                 text = part.get("text", "")
-                if text:
+                if isinstance(text, str) and text:
                     parts.append(text)
             else:
-                parts.append(json.dumps(part, ensure_ascii=False))
+                parts.append(json.dumps(raw_part, ensure_ascii=False))
     elif content is not None:
         parts.append(json.dumps(content, ensure_ascii=False))
 
@@ -773,7 +782,7 @@ def estimate_prompt_tokens_chain(
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         with suppress(Exception):
-            tokens, source = provider_counter(messages, tools, model)
+            tokens, source = cast(tuple[object, object], provider_counter(messages, tools, model))
             if isinstance(tokens, (int, float)) and tokens > 0:
                 return int(tokens), str(source or "provider_counter")
     estimated, source = _estimate_prompt_tokens_with_source(messages, tools)
@@ -851,7 +860,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     added: list[str] = []
 
-    def _write(src, dest: Path):
+    def _write(src: Any, dest: Path) -> None:
         content = src.read_text(encoding="utf-8") if src else ""
         if dest.exists():
             return

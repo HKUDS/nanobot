@@ -1,8 +1,10 @@
 """Cron tool for scheduling reminders and tasks."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime
 from typing import Any
 
@@ -79,11 +81,11 @@ class CronTool(Tool):
         )
         return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
 
-    def set_cron_context(self, active: bool):
+    def set_cron_context(self, active: bool) -> Token[bool]:
         """Mark whether the tool is executing inside a cron job callback."""
         return self._in_cron_context.set(active)
 
-    def reset_cron_context(self, token) -> None:
+    def reset_cron_context(self, token: Token[bool]) -> None:
         """Restore previous cron context."""
         self._in_cron_context.reset(token)
 
@@ -257,7 +259,7 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = []
+        lines: list[str] = []
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]

@@ -1,3 +1,4 @@
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportUnusedFunction=false
 """WhatsApp channel implementation using neonize."""
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import time
 from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 from pydantic import Field
 
@@ -100,7 +101,8 @@ def _has_field(message: Any, name: str) -> bool:
     list_fields = getattr(message, "ListFields", None)
     if callable(list_fields):
         try:
-            return any(getattr(field, "name", "") == name for field, _ in list_fields())
+            fields = cast(list[tuple[Any, Any]], list_fields())
+            return any(getattr(field, "name", "") == name for field, _ in fields)
         except Exception:
             pass
 
@@ -277,7 +279,10 @@ class WhatsAppChannel(BaseChannel):
         return WhatsAppConfig().model_dump(by_alias=True)
 
     def __init__(self, config: Any, bus: MessageBus):
-        legacy_bridge_fields = _legacy_bridge_config_fields(config) if isinstance(config, dict) else []
+        legacy_bridge_fields = (
+            _legacy_bridge_config_fields(cast(dict[str, Any], config))
+            if isinstance(config, dict) else []
+        )
         if isinstance(config, dict):
             config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
@@ -649,12 +654,13 @@ class WhatsAppChannel(BaseChannel):
         if not self._self_jids:
             return False
         for context in _context_infos(message):
-            mentioned = (
+            raw_mentioned: Any = (
                 _safe_attr(context, "mentionedJID")
                 or _safe_attr(context, "mentionedJid")
                 or _safe_attr(context, "mentioned_jid")
                 or []
             )
+            mentioned: list[Any] = cast(list[Any], raw_mentioned)
             for jid in mentioned:
                 normalized = _normalize_jid(jid)
                 if normalized in self._self_jids or _bare_jid(normalized) in self._self_jids:

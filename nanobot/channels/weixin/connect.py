@@ -6,7 +6,7 @@ import secrets
 import time
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -128,7 +128,8 @@ class WeixinConnectStore:
         if not isinstance(status_data, dict):
             return self._pending_payload(session)
 
-        status = status_data.get("status", "")
+        status_payload = cast(dict[str, Any], status_data)
+        status = status_payload.get("status", "")
         if status == "confirmed":
             if self._sessions.get(session_id) is not session:
                 return {
@@ -136,7 +137,7 @@ class WeixinConnectStore:
                     "status": "cancelled",
                     "message": "WeChat login cancelled.",
                 }
-            token = str(status_data.get("bot_token", "") or "")
+            token = str(status_payload.get("bot_token", "") or "")
             if not token:
                 self._sessions.pop(session_id, None)
                 await self._close_channel(session.channel)
@@ -145,7 +146,7 @@ class WeixinConnectStore:
                     "status": "failed",
                     "message": "WeChat confirmed the scan but returned no token.",
                 }
-            base_url = str(status_data.get("baseurl", "") or "")
+            base_url = str(status_payload.get("baseurl", "") or "")
             session.channel._token = token
             if base_url:
                 session.channel.config.base_url = base_url
@@ -156,11 +157,11 @@ class WeixinConnectStore:
                 "session_id": session_id,
                 "status": "succeeded",
                 "message": "WeChat is connected.",
-                "account": str(status_data.get("ilink_user_id", "") or ""),
+                "account": str(status_payload.get("ilink_user_id", "") or ""),
             }
 
         if status == "scaned_but_redirect":
-            redirect_host = str(status_data.get("redirect_host", "") or "").strip()
+            redirect_host = str(status_payload.get("redirect_host", "") or "").strip()
             if redirect_host:
                 session.current_poll_base_url = (
                     redirect_host
@@ -224,10 +225,10 @@ class WeixinConnectStore:
         from nanobot.channels.weixin.runtime import WeixinChannel
 
         section = getattr(load_config().channels, "weixin", None)
-        if hasattr(section, "model_dump"):
+        if section is not None and hasattr(section, "model_dump"):
             config = section.model_dump(mode="json", by_alias=True)
         elif isinstance(section, dict):
-            config = dict(section)
+            config = dict(cast(dict[str, Any], section))
         else:
             config = {}
         return WeixinChannel(config, MessageBus())

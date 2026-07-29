@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
@@ -58,12 +58,14 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
     """Sanitize structured CLI app mentions sent by the WebUI."""
     if not isinstance(raw, list):
         return []
+    raw_items = cast(list[Any], raw)
     out: list[dict[str, str]] = []
     seen: set[str] = set()
-    for item in raw[:8]:
+    for item in raw_items[:8]:
         if not isinstance(item, dict):
             continue
-        name = _clip_ws_string(item.get("name"), 64)
+        app_data = cast(dict[str, Any], item)
+        name = _clip_ws_string(app_data.get("name"), 64)
         if not name or _CLI_APP_NAME_RE.match(name) is None:
             continue
         key = name.lower()
@@ -72,7 +74,10 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
         seen.add(key)
         row: dict[str, str] = {"name": key}
         for field in _CLI_APP_ATTACHMENT_KEYS[1:]:
-            value = _clip_ws_string(item.get(field), 512 if field == "logo_url" else 160)
+            value = _clip_ws_string(
+                app_data.get(field),
+                512 if field == "logo_url" else 160,
+            )
             if value:
                 row[field] = value
         out.append(row)

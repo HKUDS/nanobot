@@ -6,7 +6,7 @@ import dataclasses
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -62,7 +62,7 @@ class TurnDeliveryFactory:
         route = self._default_route(msg, session_key)
         if self.route_policy is not None:
             route = self.route_policy(msg, session_key, route)
-            if not isinstance(route, TurnRoute):
+            if not isinstance(cast(object, route), TurnRoute):
                 raise TypeError("turn route policy must return TurnRoute")
         return TurnDelivery(
             bus=self.bus,

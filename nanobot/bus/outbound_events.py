@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from nanobot.bus.events import OutboundMessage
 
@@ -153,7 +153,11 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
         )
     if meta.get("_goal_state_sync"):
         goal_state = meta.get("goal_state")
-        return GoalStateSyncEvent(goal_state if isinstance(goal_state, dict) else {"active": False})
+        return GoalStateSyncEvent(
+            cast(dict[str, Any], goal_state)
+            if isinstance(goal_state, dict)
+            else {"active": False}
+        )
     if meta.get("_goal_status"):
         status = meta.get("goal_status")
         if not isinstance(status, str) or not status:
@@ -166,7 +170,7 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
         goal_state = meta.get("goal_state")
         return TurnEndEvent(
             latency_ms=_metadata_int(meta, "latency_ms"),
-            goal_state=goal_state if isinstance(goal_state, dict) else None,
+            goal_state=cast(dict[str, Any], goal_state) if isinstance(goal_state, dict) else None,
         )
     if meta.get("_session_updated"):
         return SessionUpdatedEvent(scope=_metadata_str(meta, "_session_update_scope"))
@@ -203,8 +207,12 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
             reasoning_delta=bool(meta.get("_reasoning_delta")),
             reasoning_end=bool(meta.get("_reasoning_end")),
             stream_id=_metadata_str(meta, "_stream_id"),
-            tool_events=tool_events if isinstance(tool_events, list) else None,
-            file_edit_events=file_edit_events if isinstance(file_edit_events, list) else None,
+            tool_events=cast(list[dict[str, Any]], tool_events)
+            if isinstance(tool_events, list)
+            else None,
+            file_edit_events=cast(list[dict[str, Any]], file_edit_events)
+            if isinstance(file_edit_events, list)
+            else None,
         )
     return None
 

@@ -1,5 +1,7 @@
 """Web tools: web_search and web_fetch."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +9,8 @@ import html
 import json
 import os
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any, cast
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
@@ -15,6 +18,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -291,8 +295,8 @@ class WebSearchTool(Tool):
     """Search the web using configured provider."""
     _scopes = {"core", "subagent"}
 
-    name = "web_search"
-    description = (
+    name = "web_search"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
+    description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         "Search the web. Returns titles, URLs, and snippets. "
         "count defaults to 5 (max 10). "
         "Some providers support timeRange, authLevel, and queryRewrite. "
@@ -302,20 +306,21 @@ class WebSearchTool(Tool):
     config_key = "web"
 
     @classmethod
-    def config_cls(cls):
+    def config_cls(cls) -> type[WebToolsConfig]:
         return WebToolsConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.web.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        config_loader = None
+    def create(cls, ctx: ToolContext) -> Tool:
+        config_loader: Callable[[], WebSearchConfig] | None = None
         if ctx.provider_snapshot_loader is not None:
-            def config_loader():
+            def _load_search_config() -> WebSearchConfig:
                 from nanobot.config.loader import load_config, resolve_config_env_vars
                 return resolve_config_env_vars(load_config()).tools.web.search
+            config_loader = _load_search_config
         return cls(
             config=ctx.config.web.search,
             proxy=ctx.config.web.proxy,
@@ -404,7 +409,7 @@ class WebSearchTool(Tool):
         auth_level: int | None = None,
         query_rewrite: bool | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
         self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
@@ -448,15 +453,20 @@ class WebSearchTool(Tool):
 
     async def _search_olostep(self, query: str, n: int) -> str:
         try:
-            from olostep import AsyncOlostep, Olostep_BaseError
+            from olostep import (  # pyright: ignore[reportMissingImports]
+                AsyncOlostep,  # pyright: ignore[reportUnknownVariableType]
+                Olostep_BaseError,  # pyright: ignore[reportUnknownVariableType]
+            )
         except ImportError:
             return ToolResult.error("Error: olostep package not installed. Run: pip install olostep")
+        async_olostep = cast(Any, AsyncOlostep)
+        olostep_base_error = cast(type[Exception], Olostep_BaseError)
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
         if not api_key:
             logger.warning("OLOSTEP_API_KEY not set, falling back to DuckDuckGo")
             return await self._search_duckduckgo(query, n)
         try:
-            async with AsyncOlostep(api_key=api_key) as client:
+            async with async_olostep(api_key=api_key) as client:
                 if self.proxy:
                     transport = getattr(client, "_transport", None)
                     http_client = getattr(transport, "_client", None)
@@ -472,14 +482,16 @@ class WebSearchTool(Tool):
                             ),
                             http2=True,
                         )
-                result = await client.answers.create(task=query)
+                result: Any = await client.answers.create(task=query)
 
-            sources = getattr(result, "sources", None) or []
-            source_lines = []
-            for i, source in enumerate(sources[:n], 1):
+            sources = cast(list[Any], getattr(result, "sources", None) or [])
+            source_lines: list[str] = []
+            for i, source_value in enumerate(sources[:n], 1):
+                source: Any = source_value
                 if isinstance(source, dict):
-                    title = source.get("title", "")
-                    url = source.get("url", "")
+                    source_dict = cast(dict[str, Any], source)
+                    title = source_dict.get("title", "")
+                    url = source_dict.get("url", "")
                 else:
                     title = getattr(source, "title", "")
                     url = getattr(source, "url", "")
@@ -493,7 +505,7 @@ class WebSearchTool(Tool):
             answer_text = getattr(result, "answer", "") or ""
             items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
             return _format_results(query, items, n)
-        except Olostep_BaseError as e:
+        except olostep_base_error as e:
             return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
@@ -510,6 +522,7 @@ class WebSearchTool(Tool):
                 "User-Agent": self.user_agent,
             }
             async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r: httpx.Response | None = None
                 for attempt in range(2):
                     r = await client.get(
                         "https://api.search.brave.com/res/v1/web/search",
@@ -522,6 +535,7 @@ class WebSearchTool(Tool):
                     if attempt == 0:
                         logger.warning("Brave search rate limited; retrying once in 1.0s")
                         await asyncio.sleep(1.0)
+                assert r is not None
                 r.raise_for_status()
             items = [
                 {"title": x.get("title", ""), "url": x.get("url", ""), "content": x.get("description", "")}
@@ -691,13 +705,19 @@ class WebSearchTool(Tool):
                     timeout=float(self.config.timeout),
                 )
                 r.raise_for_status()
-            items = []
-            for result in r.json().get("results", []):
-                if not isinstance(result, dict):
+            data = cast(dict[str, Any], r.json())
+            items: list[dict[str, Any]] = []
+            for result_value in cast(list[object], data.get("results", [])):
+                if not isinstance(result_value, dict):
                     continue
-                highlights = result.get("highlights") or []
+                result = cast(dict[str, Any], result_value)
+                highlights: Any = result.get("highlights") or []
                 if isinstance(highlights, list):
-                    content = "\n".join(str(highlight) for highlight in highlights if highlight)
+                    content = "\n".join(
+                        str(highlight)
+                        for highlight in cast(list[object], highlights)
+                        if highlight
+                    )
                 else:
                     content = str(highlights)
                 if not content:
@@ -737,14 +757,17 @@ class WebSearchTool(Tool):
                     timeout=float(self.config.timeout),
                 )
                 r.raise_for_status()
-            items = [
+            data = cast(dict[str, Any], r.json())
+            organic = cast(list[object], data.get("organic", []))
+            items: list[dict[str, Any]] = [
                 {
                     "title": result.get("title", ""),
                     "url": result.get("link", ""),
                     "content": result.get("snippet", ""),
                 }
-                for result in r.json().get("organic", [])
-                if isinstance(result, dict)
+                for result_value in organic
+                if isinstance(result_value, dict)
+                for result in (cast(dict[str, Any], result_value),)
             ]
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
@@ -806,7 +829,7 @@ class WebSearchTool(Tool):
                     timeout=float(self.config.timeout),
                 )
                 r.raise_for_status()
-            data = r.json()
+            data = cast(dict[str, Any], r.json())
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 return ToolResult.error("Error: Volcengine search rate limited. Try again later or reduce search frequency.")
@@ -814,20 +837,36 @@ class WebSearchTool(Tool):
         except Exception as e:
             return ToolResult.error(f"Error: Volcengine search failed: {e}")
 
-        error = (data.get("ResponseMetadata") or {}).get("Error") or data.get("Error") or data.get("error")
+        response_metadata = cast(
+            dict[str, Any],
+            data.get("ResponseMetadata") or {},
+        )
+        error = (
+            response_metadata.get("Error")
+            or data.get("Error")
+            or data.get("error")
+        )
         if error:
             if isinstance(error, dict):
+                error = cast(dict[str, Any], error)
                 code = error.get("Code") or error.get("code") or "unknown"
                 message = error.get("Message") or error.get("message") or error
                 return ToolResult.error(f"Error: Volcengine search error {code}: {message}")
             return ToolResult.error(f"Error: Volcengine search error: {error}")
 
-        result = data.get("Result") or data
-        web_results = result.get("WebResults") or result.get("webResults") or result.get("results") or []
+        result = cast(dict[str, Any], data.get("Result") or data)
+        web_results = cast(
+            list[object],
+            result.get("WebResults")
+            or result.get("webResults")
+            or result.get("results")
+            or [],
+        )
         items: list[dict[str, Any]] = []
-        for item in web_results:
-            if not isinstance(item, dict):
+        for item_value in web_results:
+            if not isinstance(item_value, dict):
                 continue
+            item = cast(dict[str, Any], item_value)
             meta_parts = [
                 str(part)
                 for part in (
@@ -837,7 +876,7 @@ class WebSearchTool(Tool):
                 )
                 if part
             ]
-            summary = (
+            summary = cast(str, (
                 item.get("Summary")
                 or item.get("summary")
                 or item.get("Snippet")
@@ -845,7 +884,7 @@ class WebSearchTool(Tool):
                 or item.get("Content")
                 or item.get("content")
                 or ""
-            )
+            ))
             content = "\n".join(part for part in (" | ".join(meta_parts), summary) if part)
             items.append(
                 {
@@ -861,18 +900,20 @@ class WebSearchTool(Tool):
         try:
             # Note: duckduckgo_search is synchronous and does its own requests
             # We run it in a thread to avoid blocking the loop
-            from ddgs import DDGS
+            from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
-            ddgs = DDGS(timeout=10, proxy=self.proxy)
+            ddgs_type = cast(Any, DDGS)
+            ddgs = ddgs_type(timeout=10, proxy=self.proxy)
             raw = await asyncio.wait_for(
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
             )
             if not raw:
                 return f"No results for: {query}"
-            items = [
+            raw_items = cast(list[dict[str, Any]], raw)
+            items: list[dict[str, Any]] = [
                 {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
-                for r in raw
+                for r in raw_items
             ]
             return _format_results(query, items, n)
         except Exception as e:
@@ -907,15 +948,19 @@ class WebSearchTool(Tool):
                 if r.status_code == 429:
                     return ToolResult.error("Error: Bocha search rate-limited (HTTP 429). Wait and retry.")
                 r.raise_for_status()
-            data = r.json()
-            wrapped_data = data.get("data") if isinstance(data, dict) else None
-            result_data = wrapped_data if isinstance(wrapped_data, dict) else data
-            web_pages = (
-                result_data.get("webPages", {}).get("value", [])
-                if isinstance(result_data, dict)
-                else []
+            data = cast(dict[str, Any], r.json())
+            wrapped_data = data.get("data")
+            result_data = (
+                cast(dict[str, Any], wrapped_data)
+                if isinstance(wrapped_data, dict)
+                else data
             )
-            items = [
+            web_pages_data = cast(
+                dict[str, Any],
+                result_data.get("webPages", {}),
+            )
+            web_pages = cast(list[dict[str, Any]], web_pages_data.get("value", []))
+            items: list[dict[str, Any]] = [
                 {
                     "title": x.get("name", ""),
                     "url": x.get("url", ""),
@@ -946,8 +991,8 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
     _scopes = {"core", "subagent"}
 
-    name = "web_fetch"
-    description = (
+    name = "web_fetch"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
+    description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         "Fetch a URL and extract readable content (HTML → markdown/text). "
         "Output is capped at maxChars (default 50 000). "
         "Works for most web pages and docs; may fail on login-walled or JS-heavy sites."
@@ -956,15 +1001,15 @@ class WebFetchTool(Tool):
     config_key = "web"
 
     @classmethod
-    def config_cls(cls):
+    def config_cls(cls) -> type[WebToolsConfig]:
         return WebToolsConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.web.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             config=ctx.config.web.fetch,
             proxy=ctx.config.web.proxy,
@@ -987,10 +1032,10 @@ class WebFetchTool(Tool):
         extract_mode: str = "markdown",
         max_chars: int | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> Any:  # pyright: ignore[reportIncompatibleMethodOverride]
         url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
-        max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars
+        max_chars = cast(int, kwargs.pop("maxChars", max_chars) or self.max_chars)
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
@@ -1119,10 +1164,10 @@ class WebFetchTool(Tool):
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
 
     def _extract_readable_html(self, html_content: str, extract_mode: str) -> str:
-        from readability import Document
+        from readability import Document  # pyright: ignore[reportMissingTypeStubs]
 
         doc = Document(html_content)
-        summary = doc.summary()
+        summary = cast(str, doc.summary())
         content = self._to_markdown(summary) if extract_mode == "markdown" else _strip_tags(summary)
         return f"# {doc.title()}\n\n{content}" if doc.title() else content
 

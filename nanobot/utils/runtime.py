@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -61,10 +61,10 @@ def ensure_nonempty_tool_result(tool_name: str, content: Any) -> Any:
     if isinstance(content, list):
         if not content:
             return empty_tool_result_message(tool_name)
-        text_payload = stringify_text_blocks(content)
+        text_payload = stringify_text_blocks(cast(list[Any], content))
         if text_payload is not None and not text_payload.strip():
             return empty_tool_result_message(tool_name)
-    return content
+    return cast(Any, content)
 
 
 def is_blank_text(content: str | None) -> bool:
@@ -106,6 +106,7 @@ def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
     """Stable signature for repeated external lookups we want to throttle."""
     if not isinstance(arguments, dict):
         return None
+    arguments = cast(dict[str, Any], arguments)
     if tool_name == "web_fetch":
         url = str(arguments.get("url") or "").strip()
         if url:
@@ -153,6 +154,7 @@ def workspace_violation_signature(
     """Return a stable cross-tool signature for the outside-workspace target."""
     if not isinstance(arguments, dict):
         return None
+    arguments = cast(dict[str, Any], arguments)
     for key in ("path", "file_path", "target", "source", "destination"):
         val = arguments.get(key)
         if isinstance(val, str) and val.strip():

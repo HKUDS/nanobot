@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
@@ -19,7 +19,7 @@ from nanobot.webui.transcript import (
 _WEBUI_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 
 
-def _valid_webui_chat_id(value: Any) -> bool:
+def _valid_webui_chat_id(value: Any) -> TypeGuard[str]:
     return isinstance(value, str) and _WEBUI_CHAT_ID_RE.match(value) is not None
 
 

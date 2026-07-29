@@ -1,5 +1,7 @@
 """Spawn tool for creating background subagents."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -201,13 +201,21 @@ class BaseChannel(ABC):
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        config_mapping = cast(dict[str, Any], cfg) if isinstance(cfg, dict) else None
+        streaming: Any = (
+            config_mapping.get("streaming", False)
+            if config_mapping is not None
+            else getattr(cast(Any, cfg), "streaming", False)
+        )
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check sender permission: star > allowlist > pairing store > deny."""
         if isinstance(self.config, dict):
-            allow_list = self.config.get("allow_from") or self.config.get("allowFrom") or []
+            config_mapping = cast(dict[str, Any], self.config)
+            allow_list: Any = (
+                config_mapping.get("allow_from") or config_mapping.get("allowFrom") or []
+            )
         else:
             allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:

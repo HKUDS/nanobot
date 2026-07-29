@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from typing import cast
 
+from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
@@ -29,12 +31,15 @@ _PATH_IN_CMD_RE = re.compile(
 )
 
 
-def format_tool_hints(tool_calls: list, max_length: int = 40) -> str:
+ToolFormat = tuple[list[str], str, bool, bool]
+
+
+def format_tool_hints(tool_calls: list[ToolCallRequest], max_length: int = 40) -> str:
     """Format tool calls as concise hints with smart abbreviation."""
     if not tool_calls:
         return ""
 
-    formatted = []
+    formatted: list[str] = []
     for tc in tool_calls:
         name = getattr(tc, "name", None)
         if not isinstance(name, str) or not name:
@@ -49,7 +54,7 @@ def format_tool_hints(tool_calls: list, max_length: int = 40) -> str:
         else:
             formatted.append(_fmt_fallback(tc, max_length))
 
-    hints = []
+    hints: list[tuple[str, int]] = []
     for hint in formatted:
         if hints and hints[-1][0] == hint:
             hints[-1] = (hint, hints[-1][1] + 1)
@@ -61,22 +66,23 @@ def format_tool_hints(tool_calls: list, max_length: int = 40) -> str:
     )
 
 
-def _get_args(tc) -> dict:
+def _get_args(tc: ToolCallRequest) -> dict[str, object]:
     """Extract args dict from tc.arguments, handling list/dict/None/empty."""
     if tc.arguments is None:
         return {}
-    if isinstance(tc.arguments, list):
-        return tc.arguments[0] if tc.arguments else {}
-    if isinstance(tc.arguments, dict):
-        return tc.arguments
+    arguments = tc.arguments
+    if isinstance(arguments, list):
+        argument_list = cast(list[object], arguments)
+        first_argument = argument_list[0] if argument_list else None
+        return cast(dict[str, object], first_argument) if isinstance(first_argument, dict) else {}
+    if isinstance(arguments, dict):
+        return cast(dict[str, object], arguments)
     return {}
 
 
-def _extract_arg(tc, key_args: list[str]) -> str | None:
+def _extract_arg(tc: ToolCallRequest, key_args: list[str]) -> str | None:
     """Extract the first available value from preferred key names."""
     args = _get_args(tc)
-    if not isinstance(args, dict):
-        return None
     for key in key_args:
         val = args.get(key)
         if isinstance(val, str) and val:
@@ -87,7 +93,7 @@ def _extract_arg(tc, key_args: list[str]) -> str | None:
     return None
 
 
-def _fmt_known(tc, fmt: tuple, max_length: int = 40) -> str:
+def _fmt_known(tc: ToolCallRequest, fmt: ToolFormat, max_length: int = 40) -> str:
     """Format a registered tool using its template."""
     if not fmt[0] and "{}" not in fmt[1]:
         return fmt[1]
@@ -118,7 +124,7 @@ def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     return abbreviated[:max_len - 1] + "\u2026"
 
 
-def _fmt_mcp(tc, max_length: int = 40) -> str:
+def _fmt_mcp(tc: ToolCallRequest, max_length: int = 40) -> str:
     """Format MCP tool as server::tool."""
     name = tc.name
     if "__" in name:
@@ -139,10 +145,10 @@ def _fmt_mcp(tc, max_length: int = 40) -> str:
     return f'{server}::{tool}("{abbreviate_path(val, max_length)}")'
 
 
-def _fmt_fallback(tc, max_length: int = 40) -> str:
+def _fmt_fallback(tc: ToolCallRequest, max_length: int = 40) -> str:
     """Original formatting logic for unregistered tools."""
     args = _get_args(tc)
-    val = next(iter(args.values()), None) if isinstance(args, dict) else None
+    val = next(iter(args.values()), None)
     if not isinstance(val, str):
         return tc.name
     return f'{tc.name}("{abbreviate_path(val, max_length)}")' if len(val) > max_length else f'{tc.name}("{val}")'

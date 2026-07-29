@@ -181,7 +181,7 @@ def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
 
     # Unresolved reference degrades to a falsy key rather than the literal
     # "${...}" string, so the config reports itself as not configured.
-    assert not resolved.api_key
+    assert resolved.api_key == ""
     assert resolved.configured is False
 
 

@@ -1,3 +1,4 @@
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false
 """DingTalk/DingDing channel implementation using Stream Mode."""
 
 import asyncio
@@ -10,7 +11,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
@@ -36,11 +37,17 @@ def _escape_markdown_sender_name(value: str) -> str:
         for char in normalized
     )
 
+DINGTALK_AVAILABLE = False
+AckMessage: Any = None
+CallbackHandler: Any = object
+Credential: Any = None
+DingTalkStreamClient: Any = None
+ChatbotMessage: Any = None
+
 try:
     from dingtalk_stream import (
         AckMessage,
         CallbackHandler,
-        CallbackMessage,
         Credential,
         DingTalkStreamClient,
     )
@@ -48,41 +55,41 @@ try:
 
     DINGTALK_AVAILABLE = True
 except ImportError:
-    DINGTALK_AVAILABLE = False
-    # Fallback so class definitions don't crash at module level
-    CallbackHandler = object  # type: ignore[assignment,misc]
-    CallbackMessage = None  # type: ignore[assignment,misc]
-    AckMessage = None  # type: ignore[assignment,misc]
-    ChatbotMessage = None  # type: ignore[assignment,misc]
+    pass
 
 
-class NanobotDingTalkHandler(CallbackHandler):
+_CallbackHandlerBase = CallbackHandler
+
+
+class NanobotDingTalkHandler(_CallbackHandlerBase):
     """
     Standard DingTalk Stream SDK Callback Handler.
     Parses incoming messages and forwards them to the Nanobot channel.
     """
 
     def __init__(self, channel: "DingTalkChannel"):
-        super().__init__()
+        super().__init__()  # pyright: ignore[reportUnknownMemberType]
         self.channel = channel
 
-    async def process(self, message: CallbackMessage):
+    async def process(self, message: Any) -> tuple[Any, str]:
         """Process incoming stream message."""
         try:
             # Parse using SDK's ChatbotMessage for robust handling
-            chatbot_msg = ChatbotMessage.from_dict(message.data)
+            chatbot_msg: Any = ChatbotMessage.from_dict(message.data)
+            message_data = cast(dict[str, Any], message.data)
 
             # Extract text content; fall back to raw dict if SDK object is empty
             content = ""
             if chatbot_msg.text:
-                content = chatbot_msg.text.content.strip()
+                content = cast(str, chatbot_msg.text.content).strip()
             elif chatbot_msg.extensions.get("content", {}).get("recognition"):
-                content = chatbot_msg.extensions["content"]["recognition"].strip()
+                content = cast(str, chatbot_msg.extensions["content"]["recognition"]).strip()
             if not content:
-                content = message.data.get("text", {}).get("content", "").strip()
+                text_data = cast(dict[str, Any], message_data.get("text", {}))
+                content = cast(str, text_data.get("content", "")).strip()
 
             # Handle file/image messages
-            file_paths = []
+            file_paths: list[str] = []
             if chatbot_msg.message_type == "picture" and chatbot_msg.image_content:
                 download_code = chatbot_msg.image_content.download_code
                 if download_code:
@@ -93,8 +100,18 @@ class NanobotDingTalkHandler(CallbackHandler):
                         content = content or "[Image]"
 
             elif chatbot_msg.message_type == "file":
-                download_code = message.data.get("content", {}).get("downloadCode") or message.data.get("downloadCode")
-                fname = message.data.get("content", {}).get("fileName") or message.data.get("fileName") or "file"
+                message_content = cast(dict[str, Any], message_data.get("content", {}))
+                download_code = cast(
+                    str,
+                    message_content.get("downloadCode")
+                    or message_data.get("downloadCode"),
+                )
+                fname = cast(
+                    str,
+                    message_content.get("fileName")
+                    or message_data.get("fileName")
+                    or "file",
+                )
                 if download_code:
                     sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
                     fp = await self.channel._download_dingtalk_file(download_code, fname, sender_uid)
@@ -103,13 +120,17 @@ class NanobotDingTalkHandler(CallbackHandler):
                         content = content or "[File]"
 
             elif chatbot_msg.message_type == "richText" and chatbot_msg.rich_text_content:
-                rich_list = chatbot_msg.rich_text_content.rich_text_list or []
-                for item in rich_list:
-                    if not isinstance(item, dict):
+                rich_list = cast(
+                    list[object],
+                    chatbot_msg.rich_text_content.rich_text_list or [],
+                )
+                for item_value in rich_list:
+                    if not isinstance(item_value, dict):
                         continue
+                    item = cast(dict[str, Any], item_value)
                     # A rich-text item may carry text and/or a downloadCode; the
                     # DingTalk SDK treats them independently, so handle both.
-                    t = item.get("text", "").strip()
+                    t = cast(str, item.get("text", "")).strip()
                     if t:
                         fmt = item.get("type", "")
                         if fmt == "bold":
@@ -124,8 +145,8 @@ class NanobotDingTalkHandler(CallbackHandler):
                             formatted = t
                         content = (content + " " + formatted).strip() if content else formatted
                     if item.get("downloadCode"):
-                        dc = item["downloadCode"]
-                        fname = item.get("fileName") or "file"
+                        dc = cast(str, item["downloadCode"])
+                        fname = cast(str, item.get("fileName") or "file")
                         sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
                         fp = await self.channel._download_dingtalk_file(dc, fname, sender_uid)
                         if fp:
@@ -143,13 +164,22 @@ class NanobotDingTalkHandler(CallbackHandler):
                 )
                 return AckMessage.STATUS_OK, "OK"
 
-            sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
-            sender_name = chatbot_msg.sender_nick or "Unknown"
+            sender_id = cast(
+                str | None,
+                chatbot_msg.sender_staff_id or chatbot_msg.sender_id,
+            )
+            sender_name = cast(str, chatbot_msg.sender_nick or "Unknown")
 
-            conversation_type = message.data.get("conversationType")
+            conversation_type = cast(
+                str | None,
+                message_data.get("conversationType"),
+            )
             conversation_id = (
-                message.data.get("conversationId")
-                or message.data.get("openConversationId")
+                cast(
+                    str | None,
+                    message_data.get("conversationId")
+                    or message_data.get("openConversationId"),
+                )
             )
 
             self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
@@ -218,14 +248,14 @@ class DingTalkChannel(BaseChannel):
         self.config: DingTalkConfig = config
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
-        self._start_task: asyncio.Task | None = None
+        self._start_task: asyncio.Task[Any] | None = None
 
         # Access Token management for sending messages
         self._access_token: str | None = None
         self._token_expiry: float = 0
 
         # Hold references to background tasks to prevent GC
-        self._background_tasks: set[asyncio.Task] = set()
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""
@@ -575,7 +605,11 @@ class DingTalkChannel(BaseChannel):
         try:
             resp = await self._http.post(url, files=files)
             text = resp.text
-            result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            result = (
+                cast(dict[str, Any], resp.json())
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
             if resp.status_code >= 400:
                 self.logger.error("media upload failed status={} type={} body={}", resp.status_code, media_type, text[:500])
                 return None
@@ -583,7 +617,7 @@ class DingTalkChannel(BaseChannel):
             if errcode != 0:
                 self.logger.error("media upload api error type={} errcode={} body={}", media_type, errcode, text[:500])
                 return None
-            sub = result.get("result") or {}
+            sub = cast(dict[str, Any], result.get("result") or {})
             media_id = result.get("media_id") or result.get("mediaId") or sub.get("media_id") or sub.get("mediaId")
             if not media_id:
                 self.logger.error("media upload missing media_id body={}", text[:500])
@@ -634,7 +668,7 @@ class DingTalkChannel(BaseChannel):
                 self.logger.error("send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
                 return False
             try:
-                result = resp.json()
+                result = cast(dict[str, Any], resp.json())
             except Exception:
                 result = {}
             errcode = result.get("errcode")

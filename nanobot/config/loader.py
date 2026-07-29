@@ -4,18 +4,26 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
-from nanobot.config.schema import Config, _resolve_tool_config_refs
-from nanobot.utils.helpers import _write_text_atomic
+from nanobot.config.schema import (
+    Config,
+    _resolve_tool_config_refs,  # pyright: ignore[reportPrivateUsage]
+)
+from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 _schema_refs_ready = False
+
+
+def _as_config_object(value: object) -> dict[str, Any] | None:
+    """Narrow an untrusted JSON configuration value to an object."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def set_config_path(path: Path) -> None:
@@ -110,7 +118,7 @@ def load_config(config_path: Path | None = None) -> Config:
             ),
         )
 
-    data = _migrate_config(data)
+    data = _migrate_config(cast(dict[str, Any], data))
     try:
         config = Config.model_validate(data)
     except ValidationError as exc:
@@ -164,13 +172,15 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def merge_missing_defaults(existing: Any, defaults: Any) -> Any:
+def merge_missing_defaults(existing: object, defaults: object) -> object:
     """Recursively add missing defaults without replacing configured values."""
     if not isinstance(existing, dict) or not isinstance(defaults, dict):
-        return existing
+        return cast(object, existing)
 
-    merged = dict(existing)
-    for key, value in defaults.items():
+    existing_dict = cast(dict[str, object], existing)
+    defaults_dict = cast(dict[str, object], defaults)
+    merged = dict(existing_dict)
+    for key, value in defaults_dict.items():
         if key not in merged:
             merged[key] = value
         else:
@@ -213,8 +223,6 @@ def resolve_env_refs(value: str) -> str:
     missing variable degrades to "not configured" instead of producing a partial
     value. Non-string input is returned unchanged.
     """
-    if not isinstance(value, str):
-        return value
     names = _ENV_REF_PATTERN.findall(value)
     if any(name not in os.environ for name in names):
         return ""
@@ -245,11 +253,21 @@ def _resolve_in_place(obj: Any) -> Any:
             copy.__pydantic_extra__ = new_extras
         return copy
     if isinstance(obj, dict):
-        resolved = {k: _resolve_in_place(v) for k, v in obj.items()}
-        return resolved if any(resolved[k] is not obj[k] for k in obj) else obj
+        object_dict = cast(dict[str, Any], obj)
+        resolved = {key: _resolve_in_place(value) for key, value in object_dict.items()}
+        return (
+            resolved
+            if any(resolved[key] is not object_dict[key] for key in object_dict)
+            else cast(object, obj)
+        )
     if isinstance(obj, list):
-        resolved = [_resolve_in_place(v) for v in obj]
-        return resolved if any(nv is not ov for nv, ov in zip(resolved, obj)) else obj
+        object_list = cast(list[Any], obj)
+        resolved = [_resolve_in_place(value) for value in object_list]
+        return (
+            resolved
+            if any(new is not old for new, old in zip(resolved, object_list))
+            else cast(object, obj)
+        )
     return obj
 
 
@@ -270,20 +288,21 @@ def _missing_env_issues(
         issues: list[ConfigIssue] = []
         for name, field in type(obj).model_fields.items():
             alias = field.serialization_alias or field.alias or name
-            part = alias if isinstance(alias, str) else name
+            part = alias
             issues.extend(_missing_env_issues(getattr(obj, name), (*path, part)))
         for name, value in (obj.__pydantic_extra__ or {}).items():
             issues.extend(_missing_env_issues(value, (*path, name)))
         return issues
     if isinstance(obj, dict):
+        object_dict = cast(dict[str | int, Any], obj)
         issues = []
-        for name, value in obj.items():
-            part = name if isinstance(name, (str, int)) else str(name)
+        for name, value in object_dict.items():
+            part = name
             issues.extend(_missing_env_issues(value, (*path, part)))
         return issues
     if isinstance(obj, list):
         issues = []
-        for index, value in enumerate(obj):
+        for index, value in enumerate(cast(list[Any], obj)):
             issues.extend(_missing_env_issues(value, (*path, index)))
         return issues
     return []
@@ -294,9 +313,12 @@ def _resolve_env_vars(obj: object) -> object:
     if isinstance(obj, str):
         return _ENV_REF_PATTERN.sub(_env_replace, obj)
     if isinstance(obj, dict):
-        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+        return {
+            key: _resolve_env_vars(value)
+            for key, value in cast(dict[str, object], obj).items()
+        }
     if isinstance(obj, list):
-        return [_resolve_env_vars(v) for v in obj]
+        return [_resolve_env_vars(value) for value in cast(list[object], obj)]
     return obj
 
 
@@ -310,15 +332,16 @@ def _env_replace(match: re.Match[str]) -> str:
     return value
 
 
-def _migrate_config(data: dict) -> dict:
+def _migrate_config(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate old config formats to current."""
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
-    tools = data.get("tools", {})
-    if not isinstance(tools, dict):
+    tools_value = data.get("tools", {})
+    if not isinstance(tools_value, dict):
         return data
-    exec_cfg = tools.get("exec", {})
+    tools = cast(dict[str, Any], tools_value)
+    exec_cfg = _as_config_object(tools.get("exec", {}))
     if (
-        isinstance(exec_cfg, dict)
+        exec_cfg is not None
         and "restrictToWorkspace" in exec_cfg
         and "restrictToWorkspace" not in tools
     ):
@@ -334,6 +357,7 @@ def _migrate_config(data: dict) -> dict:
             tools["my"] = my_cfg
         if not isinstance(my_cfg, dict):
             return data
+        my_cfg = cast(dict[str, Any], my_cfg)
         if "myEnabled" in tools and "enable" not in my_cfg:
             my_cfg["enable"] = tools.pop("myEnabled")
         else:

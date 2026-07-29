@@ -94,7 +94,7 @@ def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
             return env_key
 
     env_key = spec.env_key if spec else ""
-    return os.environ.get(env_key) if env_key else ""
+    return os.environ.get(env_key, "") if env_key else ""
 
 
 def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:

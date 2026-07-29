@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from weakref import WeakValueDictionary
 
 from loguru import logger
@@ -53,6 +53,13 @@ _FORK_VOLATILE_METADATA_KEYS = {
 }
 
 
+def _json_object(value: object) -> dict[str, Any]:
+    """Narrow a decoded JSON object while preserving its original values."""
+    if not isinstance(value, dict):
+        raise ValueError("session records must be JSON objects")
+    return cast(dict[str, Any], value)
+
+
 def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
     if not context_window_tokens or context_window_tokens <= 0:
         return FILE_MAX_MESSAGES
@@ -78,15 +85,18 @@ def _sanitize_assistant_replay_text(content: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _text_preview(content: Any) -> str:
+def _text_preview(content: object) -> str:
     """Return compact display text for session lists."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
         parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                value = block.get("text")
+        for block in cast(list[object], content):
+            if isinstance(block, dict):
+                block_data = cast(dict[object, object], block)
+                if block_data.get("type") != "text":
+                    continue
+                value = block_data.get("text")
                 if isinstance(value, str):
                     parts.append(value)
         text = " ".join(parts)
@@ -102,26 +112,27 @@ def _text_preview(content: Any) -> str:
 def _message_preview_text(message: dict[str, Any]) -> str:
     """Session list preview text; subagent inject blobs are shortened for display."""
     message = public_history_message(message)
-    content: Any = message.get("content")
+    content = cast(object, message.get("content"))
     if message.get("injected_event") == "subagent_result" and isinstance(content, str):
         content = scrub_subagent_announce_body(content)
     return _text_preview(content)
 
 
-def _metadata_title(metadata: Any) -> str:
+def _metadata_title(metadata: object) -> str:
     if not isinstance(metadata, dict):
         return ""
-    title = metadata.get("title")
+    metadata_data = cast(dict[object, object], metadata)
+    title = metadata_data.get("title")
     if not isinstance(title, str):
         return ""
-    if metadata.get("title_user_edited") is True:
+    if metadata_data.get("title_user_edited") is True:
         return title
     return strip_think(title)
 
 
 @dataclass
 class RetentionResult:
-    dropped: list[dict]
+    dropped: list[dict[str, Any]]
     already_consolidated_count: int
 
 
@@ -137,13 +148,14 @@ class Session:
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
     def __post_init__(self) -> None:
-        if not isinstance(self.metadata, dict):
+        if not isinstance(cast(object, self.metadata), dict):
             self.metadata = {}
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
+        last_consolidated = cast(object, self.last_consolidated)
         if (
-            isinstance(self.last_consolidated, bool)
-            or not isinstance(self.last_consolidated, int)
-            or not 0 <= self.last_consolidated <= len(self.messages)
+            isinstance(last_consolidated, bool)
+            or not isinstance(last_consolidated, int)
+            or not 0 <= last_consolidated <= len(self.messages)
         ):
             self.last_consolidated = 0
 
@@ -219,7 +231,7 @@ class Session:
                 content,
                 message.get("media"),
             )
-            cli_apps = message.get("cli_apps")
+            cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
                 and not has_persisted_runtime_context
@@ -229,15 +241,18 @@ class Session:
                 and isinstance(content, str)
             ):
                 cli_lines: list[str] = []
-                for item in cli_apps[:8]:
+                for item in cast(list[object], cli_apps[:8]):
                     if not isinstance(item, dict):
                         continue
-                    name = str(item.get("name") or "").strip().lower()
+                    item_data = cast(dict[object, object], item)
+                    name = str(item_data.get("name") or "").strip().lower()
                     if not name:
                         continue
-                    entry = str(item.get("entry_point") or "unknown").strip() or "unknown"
+                    entry_point = (
+                        str(item_data.get("entry_point") or "unknown").strip() or "unknown"
+                    )
                     cli_lines.append(
-                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry}; "
+                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry_point}; "
                         f"skill=skills/cli-app-{name}/SKILL.md]"
                     )
                 if cli_lines:
@@ -389,7 +404,7 @@ class Session:
 
     def enforce_file_cap(
         self,
-        on_archive: Any = None,
+        on_archive: Callable[[list[dict[str, Any]]], None] | None = None,
         limit: int = FILE_MAX_MESSAGES,
     ) -> None:
         """Bound session message growth by archiving and trimming old prefixes."""
@@ -449,6 +464,10 @@ class SessionManager:
             self._remember(session)
         return session
 
+    def get_cached(self, key: str) -> Session | None:
+        """Return a cached session without creating or loading one from disk."""
+        return self._cached(key)
+
     def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
         """Archive unconsolidated overflow whenever a session is persisted."""
         self._file_cap_archiver = archiver
@@ -474,6 +493,11 @@ class SessionManager:
             return base64.urlsafe_b64decode(stem).decode("utf-8")
         except _SESSION_DATA_ERRORS:
             return None
+
+    @staticmethod
+    def decode_storage_key(stem: str) -> str | None:
+        """Public decoder for components that inspect canonical session filenames."""
+        return SessionManager._decode_storage_key(stem)
 
     @classmethod
     def _session_key_from_path(cls, path: Path) -> str | None:
@@ -523,11 +547,11 @@ class SessionManager:
             return None
 
         try:
-            messages = []
-            metadata = {}
-            created_at = None
-            updated_at = None
-            last_consolidated = 0
+            messages: list[dict[str, Any]] = []
+            metadata: object = {}
+            created_at: datetime | None = None
+            updated_at: datetime | None = None
+            last_consolidated: object = 0
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -535,15 +559,27 @@ class SessionManager:
                     if not line:
                         continue
 
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
 
                     if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
-                        last_consolidated = data.get("last_consolidated", 0)
+                        metadata = cast(object, data.get("metadata", {}))
+                        created_at_value = cast(object, data.get("created_at"))
+                        updated_at_value = cast(object, data.get("updated_at"))
+                        created_at = (
+                            datetime.fromisoformat(cast(str, created_at_value))
+                            if created_at_value
+                            else None
+                        )
+                        updated_at = (
+                            datetime.fromisoformat(cast(str, updated_at_value))
+                            if updated_at_value
+                            else None
+                        )
+                        last_consolidated = cast(
+                            object,
+                            data.get("last_consolidated", 0),
+                        )
                     else:
                         messages.append(data)
 
@@ -552,8 +588,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
-                metadata=metadata,
-                last_consolidated=last_consolidated
+                metadata=cast(dict[str, Any], metadata),
+                last_consolidated=cast(int, last_consolidated),
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -571,10 +607,10 @@ class SessionManager:
 
         try:
             messages: list[dict[str, Any]] = []
-            metadata: dict[str, Any] = {}
+            metadata: object = {}
             created_at: datetime | None = None
             updated_at: datetime | None = None
-            last_consolidated = 0
+            last_consolidated: object = 0
             skipped = 0
 
             with open(path, encoding="utf-8") as f:
@@ -583,23 +619,33 @@ class SessionManager:
                     if not line:
                         continue
                     try:
-                        data = json.loads(line)
+                        raw_data: object = json.loads(line)
                     except json.JSONDecodeError:
                         skipped += 1
                         continue
-                    if not isinstance(data, dict):
+                    if not isinstance(raw_data, dict):
                         skipped += 1
                         continue
+                    data = cast(dict[str, Any], raw_data)
 
                     if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        if data.get("created_at"):
+                        metadata = cast(object, data.get("metadata", {}))
+                        created_at_value = cast(object, data.get("created_at"))
+                        if created_at_value:
                             with suppress(ValueError, TypeError):
-                                created_at = datetime.fromisoformat(data["created_at"])
-                        if data.get("updated_at"):
+                                created_at = datetime.fromisoformat(
+                                    cast(str, created_at_value)
+                                )
+                        updated_at_value = cast(object, data.get("updated_at"))
+                        if updated_at_value:
                             with suppress(ValueError, TypeError):
-                                updated_at = datetime.fromisoformat(data["updated_at"])
-                        last_consolidated = data.get("last_consolidated", 0)
+                                updated_at = datetime.fromisoformat(
+                                    cast(str, updated_at_value)
+                                )
+                        last_consolidated = cast(
+                            object,
+                            data.get("last_consolidated", 0),
+                        )
                     else:
                         messages.append(data)
 
@@ -614,8 +660,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
-                metadata=metadata,
-                last_consolidated=last_consolidated
+                metadata=cast(dict[str, Any], metadata),
+                last_consolidated=cast(int, last_consolidated),
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -641,9 +687,10 @@ class SessionManager:
         write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
         the most recent writes.
         """
-        if self._file_cap_archiver is not None:
+        archiver = self._file_cap_archiver
+        if archiver is not None:
             session.enforce_file_cap(
-                on_archive=lambda messages: self._file_cap_archiver(
+                on_archive=lambda messages: archiver(
                     messages,
                     session_key=session.key,
                 )
@@ -803,21 +850,22 @@ class SessionManager:
             return None
         try:
             messages: list[dict[str, Any]] = []
-            metadata: dict[str, Any] = {}
-            created_at: str | None = None
-            updated_at: str | None = None
-            stored_key: str | None = None
+            metadata: object = {}
+            created_at: object = None
+            updated_at: object = None
+            stored_key: object = None
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
-                    data = json.loads(line)
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
                     if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        created_at = data.get("created_at")
-                        updated_at = data.get("updated_at")
-                        stored_key = data.get("key")
+                        metadata = cast(object, data.get("metadata", {}))
+                        created_at = cast(object, data.get("created_at"))
+                        updated_at = cast(object, data.get("updated_at"))
+                        stored_key = cast(object, data.get("key"))
                     else:
                         messages.append(data)
             return {
@@ -850,17 +898,20 @@ class SessionManager:
                     line = line.strip()
                     if not line:
                         continue
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
                     if data.get("_type") != "metadata":
                         return None
-                    metadata = data.get("metadata", {})
+                    metadata = cast(object, data.get("metadata", {}))
                     return {
                         "key": data.get("key") or key,
                         "created_at": data.get("created_at"),
                         "updated_at": data.get("updated_at"),
-                        "metadata": metadata if isinstance(metadata, dict) else {},
+                        "metadata": (
+                            cast(dict[str, Any], metadata)
+                            if isinstance(metadata, dict)
+                            else {}
+                        ),
                     }
             return None
         except _SESSION_DATA_ERRORS as e:
@@ -883,7 +934,7 @@ class SessionManager:
         Returns:
             List of session info dicts.
         """
-        sessions = []
+        sessions: list[dict[str, Any]] = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
             storage_key = self._session_key_from_path(path)
@@ -894,12 +945,11 @@ class SessionManager:
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
-                        data = json.loads(first_line)
-                        if not isinstance(data, dict):
-                            raise ValueError("session records must be JSON objects")
+                        raw_data: object = json.loads(first_line)
+                        data = _json_object(raw_data)
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or storage_key
-                            metadata = data.get("metadata", {})
+                            key = cast(object, data.get("key")) or storage_key
+                            metadata = cast(object, data.get("metadata", {}))
                             title = _metadata_title(metadata)
                             preview = ""
                             fallback_preview = ""
@@ -915,9 +965,8 @@ class SessionManager:
                                     or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
                                 ):
                                     break
-                                item = json.loads(line)
-                                if not isinstance(item, dict):
-                                    raise ValueError("session records must be JSON objects")
+                                raw_item: object = json.loads(line)
+                                item = _json_object(raw_item)
                                 if item.get("_type") == "metadata":
                                     continue
                                 text = _message_preview_text(item)
@@ -963,4 +1012,8 @@ class SessionManager:
                         }
                     )
                 continue
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        return sorted(
+            sessions,
+            key=lambda item: cast(str, item.get("updated_at", "")),
+            reverse=True,
+        )

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 
 from loguru import logger
 
@@ -48,6 +49,10 @@ from nanobot.utils.runtime import (
 )
 
 GoalContinueMessage = str | Callable[[], str | None]
+ProgressCallback = Callable[[str], Awaitable[None]]
+RetryWaitCallback = Callable[[str], Awaitable[None]]
+CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
+InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -90,11 +95,11 @@ class AgentRunSpec:
     session_key: str | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
-    progress_callback: Any | None = None
+    progress_callback: ProgressCallback | None = None
     stream_progress_deltas: bool = True
-    retry_wait_callback: Any | None = None
-    checkpoint_callback: Any | None = None
-    injection_callback: Any | None = None
+    retry_wait_callback: RetryWaitCallback | None = None
+    checkpoint_callback: CheckpointCallback | None = None
+    injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
@@ -131,8 +136,10 @@ class AgentRunner:
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
                 return [
-                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
-                    for item in value
+                    cast(dict[str, Any], item)
+                    if isinstance(item, dict)
+                    else {"type": "text", "text": str(item)}
+                    for item in cast(list[Any], value)
                 ]
             if value is None:
                 return []
@@ -158,25 +165,37 @@ class AgentRunner:
                 merged = dict(messages[-1])
                 left_meta = merged.get("_meta")
                 right_meta = injection.get("_meta")
+                left_meta_dict = cast(dict[str, Any], left_meta) if isinstance(left_meta, dict) else None
+                right_meta_dict = (
+                    cast(dict[str, Any], right_meta) if isinstance(right_meta, dict) else None
+                )
                 left_marker = (
-                    left_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
-                    if isinstance(left_meta, dict)
+                    left_meta_dict.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if left_meta_dict is not None
                     else None
                 )
                 right_marker = (
-                    right_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
-                    if isinstance(right_meta, dict)
+                    right_meta_dict.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if right_meta_dict is not None
                     else None
                 )
+                left_marker_dict = (
+                    cast(dict[str, Any], left_marker) if isinstance(left_marker, dict) else None
+                )
+                right_marker_dict = (
+                    cast(dict[str, Any], right_marker) if isinstance(right_marker, dict) else None
+                )
+                empty_sources: list[str] = []
+                empty_blocks: list[dict[str, Any]] = []
                 detached_left = (
-                    detach_runtime_context(merged.get("content"), left_marker)
-                    if isinstance(left_marker, dict)
-                    else (merged.get("content"), [], [])
+                    detach_runtime_context(merged.get("content"), left_marker_dict)
+                    if left_marker_dict is not None
+                    else (merged.get("content"), empty_sources, empty_blocks)
                 )
                 detached_right = (
-                    detach_runtime_context(injection.get("content"), right_marker)
-                    if isinstance(right_marker, dict)
-                    else (injection.get("content"), [], [])
+                    detach_runtime_context(injection.get("content"), right_marker_dict)
+                    if right_marker_dict is not None
+                    else (injection.get("content"), empty_sources, empty_blocks)
                 )
                 if detached_left is not None and detached_right is not None:
                     left_content, left_sources, left_blocks = detached_left
@@ -189,9 +208,9 @@ class AgentRunner:
                             [*left_sources, *right_sources],
                             context_blocks,
                         )
-                        internal_meta = dict(left_meta) if isinstance(left_meta, dict) else {}
-                        if isinstance(right_meta, dict):
-                            for key, value in right_meta.items():
+                        internal_meta = dict(left_meta_dict) if left_meta_dict is not None else {}
+                        if right_meta_dict is not None:
+                            for key, value in right_meta_dict.items():
                                 internal_meta.setdefault(key, value)
                         internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
                         merged["_meta"] = internal_meta
@@ -302,11 +321,11 @@ class AgentRunner:
         for item in items:
             if item is None:
                 continue
-            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
-                if self._has_injection_content(item.get("content")):
-                    injected_messages.append(item)
-                continue
             if isinstance(item, dict):
+                message_item = cast(dict[str, Any], item)
+                if message_item.get("role") == "user" and "content" in message_item:
+                    if self._has_injection_content(message_item.get("content")):
+                        injected_messages.append(message_item)
                 continue
             content = getattr(item, "content") if hasattr(item, "content") else str(item)
             if self._has_injection_content(content):
@@ -327,7 +346,7 @@ class AgentRunner:
         if isinstance(content, str):
             return bool(content.strip())
         if isinstance(content, list):
-            return bool(content)
+            return bool(cast(list[Any], content))
         return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
@@ -592,7 +611,7 @@ class AgentRunner:
             if response.finish_reason == "length" and not is_blank_text(clean):
                 if len(length_recovery_parts) < _MAX_LENGTH_RECOVERIES:
                     length_recovery_parts.append(
-                        _restore_outer_whitespace(clean, original_content)
+                        _restore_outer_whitespace(clean or "", original_content)
                     )
                     logger.info(
                         "Output truncated on turn {} for {} ({}/{}); continuing",
@@ -609,7 +628,7 @@ class AgentRunner:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
-                    messages.append(build_length_recovery_message(clean))
+                    messages.append(build_length_recovery_message(clean or ""))
                     await hook.after_iteration(context)
                     continue
 
@@ -626,7 +645,7 @@ class AgentRunner:
             ):
                 await hook.on_stream(
                     context,
-                    _restore_outer_whitespace(clean, original_content),
+                    _restore_outer_whitespace(clean or "", original_content),
                 )
                 context.streamed_content = True
 
@@ -717,7 +736,7 @@ class AgentRunner:
             if length_recovery_parts:
                 final_content = (
                     "".join(length_recovery_parts)
-                    + _restore_outer_whitespace(clean, original_content)
+                    + _restore_outer_whitespace(clean or "", original_content)
                 ).strip()
             else:
                 final_content = clean
@@ -798,7 +817,7 @@ class AgentRunner:
         context: AgentHookContext,
         *,
         malformed_retry: bool = False,
-    ):
+    ) -> LLMResponse:
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
@@ -809,7 +828,7 @@ class AgentRunner:
                 timeout_s = float(raw)
             except (TypeError, ValueError):
                 timeout_s = 300.0
-        if timeout_s is not None and timeout_s <= 0:
+        if timeout_s <= 0:
             timeout_s = None
 
         kwargs = self._build_request_kwargs(
@@ -818,10 +837,11 @@ class AgentRunner:
             tools=spec.tools.get_definitions(),
         )
         wants_streaming = hook.wants_streaming()
+        progress_callback = spec.progress_callback
         wants_progress_streaming = (
             not wants_streaming
             and spec.stream_progress_deltas
-            and spec.progress_callback is not None
+            and progress_callback is not None
             and getattr(spec.runtime.provider, "supports_progress_deltas", False) is True
         )
 
@@ -894,7 +914,9 @@ class AgentRunner:
                         await hook.emit_reasoning_end()
                         progress_state["reasoning_open"] = False
                     context.streamed_content = True
-                    await spec.progress_callback(incremental)
+                    callback = progress_callback
+                    if callback is not None:
+                        await callback(incremental)
 
             coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
@@ -1038,7 +1060,7 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
-    ):
+    ) -> LLMResponse:
         retry_messages = self._finalization_retry_messages(messages)
         return await self._request_no_tools(spec, retry_messages)
 
@@ -1224,7 +1246,7 @@ class AgentRunner:
                 ))
                 tool_results.extend(batch_results)
             else:
-                batch_results = []
+                batch_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
                 for tool_call in batch:
                     result = await self._run_tool(
                         spec,
@@ -1273,12 +1295,17 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + hint, event, RuntimeError(lookup_error)
             return lookup_error + hint, event, None
-        prepare_call = getattr(spec.tools, "prepare_call", None)
+        prepare_call = cast(
+            Callable[[str, Any], object] | None,
+            getattr(spec.tools, "prepare_call", None),
+        )
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
             prepared = prepare_call(tool_call.name, tool_call.arguments)
-            if isinstance(prepared, tuple) and len(prepared) == 3:
-                tool, params, prep_error = prepared
+            if isinstance(prepared, tuple):
+                prepared_tuple = cast(tuple[object, ...], prepared)
+                if len(prepared_tuple) == 3:
+                    tool, params, prep_error = cast(tuple[Any, Any, str | None], prepared_tuple)
         if prep_error:
             event = {
                 "name": tool_call.name,
@@ -1490,7 +1517,7 @@ class AgentRunner:
         batches: list[list[ToolCallRequest]] = []
         current: list[ToolCallRequest] = []
         for tool_call in tool_calls:
-            get_tool = getattr(spec.tools, "get", None)
+            get_tool = cast(Callable[[str], Any] | None, getattr(spec.tools, "get", None))
             tool = get_tool(tool_call.name) if callable(get_tool) else None
             can_batch = bool(tool and tool.concurrency_safe)
             if can_batch:

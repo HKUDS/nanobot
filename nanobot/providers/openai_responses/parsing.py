@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, cast
 
 import httpx
 from loguru import logger
@@ -19,23 +19,58 @@ FINISH_REASON_MAP = {
 }
 
 
+def _as_json_object(value: object) -> dict[str, Any] | None:
+    """Narrow untyped Responses API JSON payloads at the wire boundary."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def _response_object(value: object) -> dict[str, Any] | None:
+    """Convert a Responses SDK model or JSON object to a dictionary."""
+    object_value = _as_json_object(value)
+    if object_value is not None:
+        return object_value
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        return _as_json_object(dump())
+    try:
+        return _as_json_object(vars(value))
+    except TypeError:
+        return None
+
+
+def _response_object_list(value: object) -> list[dict[str, Any]]:
+    """Normalize a Responses API array that may contain SDK model objects."""
+    if not isinstance(value, list):
+        return []
+    return [
+        item
+        for raw in cast(list[object], value)
+        if (item := _response_object(raw)) is not None
+    ]
+
+
 def map_finish_reason(status: str | None) -> str:
     """Map a Responses API status string to a Chat-Completions-style finish_reason."""
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
-def _usage_from_response_obj(response: Any) -> dict[str, int]:
-    usage_raw = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+def _usage_from_response_obj(response: object) -> dict[str, int]:
+    response_object = _response_object(response)
+    usage_raw: object = (
+        response_object.get("usage")
+        if response_object is not None
+        else getattr(response, "usage", None)
+    )
     if not usage_raw:
         return {}
-    if not isinstance(usage_raw, dict):
-        dump = getattr(usage_raw, "model_dump", None)
-        usage_raw = dump() if callable(dump) else vars(usage_raw)
-    prompt_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0)
+    usage = _response_object(usage_raw)
+    if usage is None:
+        return {}
+    prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
     completion_tokens = int(
-        usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0
+        usage.get("output_tokens") or usage.get("completion_tokens") or 0
     )
-    total_tokens = int(usage_raw.get("total_tokens") or prompt_tokens + completion_tokens)
+    total_tokens = int(usage.get("total_tokens") or prompt_tokens + completion_tokens)
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -77,7 +112,7 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
         if not data or data == "[DONE]":
             return None
         try:
-            return json.loads(data)
+            return _as_json_object(json.loads(data))
         except Exception:
             logger.warning("Failed to parse SSE event JSON: {}", data[:200])
             return None
@@ -134,7 +169,7 @@ async def consume_sse_with_reasoning(
             await on_response_event(event)
         event_type = event.get("type")
         if event_type == "response.output_item.added":
-            item = event.get("item") or {}
+            item = _as_json_object(event.get("item")) or {}
             if item.get("type") == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
@@ -170,7 +205,7 @@ async def consume_sse_with_reasoning(
                 if on_reasoning_delta:
                     await on_reasoning_delta(text)
         elif event_type == "response.reasoning_summary_part.done":
-            part = event.get("part") or {}
+            part = _as_json_object(event.get("part")) or {}
             text = part.get("text") if part.get("type") == "summary_text" else None
             if text and not streamed_reasoning and not reasoning_content:
                 reasoning_content = text
@@ -203,7 +238,7 @@ async def consume_sse_with_reasoning(
                         "arguments": "" if arguments is None else str(arguments),
                     })
         elif event_type == "response.output_item.done":
-            item = event.get("item") or {}
+            item = _as_json_object(event.get("item")) or {}
             if item.get("type") == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
@@ -235,12 +270,12 @@ async def consume_sse_with_reasoning(
                     if on_reasoning_delta:
                         await on_reasoning_delta(summary)
         elif event_type == "response.completed":
-            response_obj = event.get("response") or {}
+            response_obj = _response_object(event.get("response")) or {}
             status = response_obj.get("status")
             finish_reason = map_finish_reason(status)
             usage = _usage_from_response_obj(response_obj) or usage
             if not reasoning_content:
-                summary = _extract_reasoning_summary_from_output(response_obj.get("output") or [])
+                summary = _extract_reasoning_summary_from_output(response_obj.get("output"))
                 if summary:
                     reasoning_content = summary
                     if on_reasoning_delta:
@@ -252,54 +287,42 @@ async def consume_sse_with_reasoning(
     return content, tool_calls, finish_reason, usage, reasoning_content
 
 
-def _extract_reasoning_summary_from_output(output: Any) -> str | None:
+def _extract_reasoning_summary_from_output(output: object) -> str | None:
     parts: list[str] = []
-    for item in output or []:
-        if not isinstance(item, dict):
-            dump = getattr(item, "model_dump", None)
-            item = dump() if callable(dump) else vars(item)
+    for item in _response_object_list(output):
         if item.get("type") != "reasoning":
             continue
-        for summary in item.get("summary") or []:
-            if not isinstance(summary, dict):
-                dump = getattr(summary, "model_dump", None)
-                summary = dump() if callable(dump) else vars(summary)
+        for summary in _response_object_list(item.get("summary")):
             if summary.get("type") == "summary_text" and summary.get("text"):
-                parts.append(summary["text"])
+                text = summary.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
     return "".join(parts) or None
 
 
-def parse_response_output(response: Any) -> LLMResponse:
+def parse_response_output(response: object) -> LLMResponse:
     """Parse an SDK ``Response`` object into an ``LLMResponse``."""
-    if not isinstance(response, dict):
-        dump = getattr(response, "model_dump", None)
-        response = dump() if callable(dump) else vars(response)
+    response_object = _response_object(response) or {}
 
-    output = response.get("output") or []
+    output = _response_object_list(response_object.get("output"))
     content_parts: list[str] = []
     tool_calls: list[ToolCallRequest] = []
     reasoning_content: str | None = None
 
     for item in output:
-        if not isinstance(item, dict):
-            dump = getattr(item, "model_dump", None)
-            item = dump() if callable(dump) else vars(item)
-
         item_type = item.get("type")
         if item_type == "message":
-            for block in item.get("content") or []:
-                if not isinstance(block, dict):
-                    dump = getattr(block, "model_dump", None)
-                    block = dump() if callable(dump) else vars(block)
+            for block in _response_object_list(item.get("content")):
                 if block.get("type") == "output_text":
-                    content_parts.append(block.get("text") or "")
+                    text = block.get("text")
+                    if isinstance(text, str):
+                        content_parts.append(text)
         elif item_type == "reasoning":
-            for s in item.get("summary") or []:
-                if not isinstance(s, dict):
-                    dump = getattr(s, "model_dump", None)
-                    s = dump() if callable(dump) else vars(s)
+            for s in _response_object_list(item.get("summary")):
                 if s.get("type") == "summary_text" and s.get("text"):
-                    reasoning_content = (reasoning_content or "") + s["text"]
+                    text = s.get("text")
+                    if isinstance(text, str):
+                        reasoning_content = (reasoning_content or "") + text
         elif item_type == "function_call":
             call_id = item.get("call_id") or ""
             item_id = item.get("id") or "fc_0"
@@ -311,10 +334,10 @@ def parse_response_output(response: Any) -> LLMResponse:
                 arguments=args,
             ))
 
-    usage = _usage_from_response_obj(response)
+    usage = _usage_from_response_obj(response_object)
 
-    status = response.get("status")
-    finish_reason = map_finish_reason(status)
+    status = response_object.get("status")
+    finish_reason = map_finish_reason(status if isinstance(status, str) else None)
 
     return LLMResponse(
         content="".join(content_parts) or None,
@@ -339,7 +362,8 @@ async def consume_sdk_stream(
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
 
-    async for event in stream:
+    async for raw_event in stream:
+        event: Any = raw_event
         event_type = getattr(event, "type", None)
         if event_type == "response.output_item.added":
             item = getattr(event, "item", None)
@@ -431,9 +455,9 @@ async def consume_sdk_stream(
                         "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
                         "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
                     }
-                for out_item in getattr(resp, "output", None) or []:
+                for out_item in cast(list[Any], getattr(resp, "output", None) or []):
                     if getattr(out_item, "type", None) == "reasoning":
-                        for s in getattr(out_item, "summary", None) or []:
+                        for s in cast(list[Any], getattr(out_item, "summary", None) or []):
                             if getattr(s, "type", None) == "summary_text":
                                 text = getattr(s, "text", None)
                                 if text:

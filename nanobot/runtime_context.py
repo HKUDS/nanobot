@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import RequestContext
@@ -79,7 +79,10 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
     """Return validated, non-empty blocks while preserving provider order."""
     if result is None:
         return []
-    values = [result] if isinstance(result, RuntimeContextBlock) else list(result)
+    if isinstance(cast(object, result), RuntimeContextBlock):
+        values: list[object] = [result]
+    else:
+        values = list(cast(Sequence[object], result))
     blocks: list[RuntimeContextBlock] = []
     for block in values:
         if not isinstance(block, RuntimeContextBlock):
@@ -147,16 +150,17 @@ def detach_runtime_context(
     marker: Mapping[str, Any],
 ) -> tuple[Any, list[str], list[dict[str, Any]]] | None:
     """Detach one validated runtime-context suffix for safe message merging."""
-    if marker.get("version") != 1:
+    marker_data = marker
+    if marker_data.get("version") != 1:
         return None
-    raw_sources = marker.get("sources")
-    sources = [
+    raw_sources = marker_data.get("sources")
+    sources: list[str] = [
         source
-        for source in raw_sources
+        for source in cast(list[Any], raw_sources)
         if isinstance(source, str) and source
     ] if isinstance(raw_sources, list) else []
 
-    suffix = marker.get("suffix")
+    suffix = marker_data.get("suffix")
     if isinstance(content, str) and isinstance(suffix, str) and suffix:
         if content == suffix:
             clean_content = ""
@@ -166,12 +170,14 @@ def detach_runtime_context(
             return None
         return clean_content, sources, [{"type": "text", "text": suffix}]
 
-    expected = marker.get("blocks")
+    expected = marker_data.get("blocks")
     if isinstance(content, list) and isinstance(expected, list) and expected:
-        count = len(expected)
-        if content[-count:] != expected:
+        content_blocks = cast(list[Any], content)
+        expected_blocks = cast(list[dict[str, Any]], expected)
+        count = len(expected_blocks)
+        if content_blocks[-count:] != expected_blocks:
             return None
-        return content[:-count], sources, deepcopy(expected)
+        return content_blocks[:-count], sources, deepcopy(expected_blocks)
     return None
 
 
@@ -194,8 +200,8 @@ def reattach_runtime_context(
             "suffix": suffix,
         }
 
-    visible_blocks = (
-        [*content]
+    visible_blocks: list[Any] = (
+        [*cast(list[Any], content)]
         if isinstance(content, list)
         else ([] if content is None else [{"type": "text", "text": str(content)}])
     )
@@ -210,11 +216,14 @@ def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:
     """Return a user-visible copy with trusted runtime context removed exactly."""
     cleaned = deepcopy(dict(message))
     marker = cleaned.pop(RUNTIME_CONTEXT_HISTORY_META, None)
-    if not isinstance(marker, Mapping) or marker.get("version") != 1:
+    if not isinstance(marker, Mapping):
+        return cleaned
+    marker_data = cast(Mapping[str, Any], marker)
+    if marker_data.get("version") != 1:
         return cleaned
 
     content = cleaned.get("content")
-    suffix = marker.get("suffix")
+    suffix = marker_data.get("suffix")
     if isinstance(content, str) and isinstance(suffix, str) and suffix:
         if content == suffix:
             cleaned["content"] = ""
@@ -222,10 +231,11 @@ def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:
             cleaned["content"] = content[: -(len(suffix) + 2)]
         return cleaned
 
-    expected = marker.get("blocks")
+    expected = marker_data.get("blocks")
     if isinstance(content, list) and isinstance(expected, list) and expected:
-        count = len(expected)
-        if content[-count:] == expected:
+        expected_blocks = cast(list[Any], expected)
+        count = len(expected_blocks)
+        if content[-count:] == expected_blocks:
             cleaned["content"] = content[:-count]
     return cleaned
 

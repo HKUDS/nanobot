@@ -11,7 +11,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import aiohttp
 from loguru import logger
@@ -103,7 +103,7 @@ class NapcatChannel(BaseChannel):
                 await asyncio.sleep(next(backoff, 30))
 
     async def _run_once(self) -> None:
-        headers = []
+        headers: list[tuple[str, str]] = []
         if self.config.access_token:
             headers.append(("Authorization", f"Bearer {self.config.access_token}"))
 
@@ -132,12 +132,17 @@ class NapcatChannel(BaseChannel):
                         payload = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    if isinstance(payload, dict) and payload.get("echo") == echo:
-                        data = payload.get("data") or {}
+                    if isinstance(payload, dict):
+                        login_payload = cast(dict[str, Any], payload)
+                    else:
+                        login_payload = None
+                    if login_payload is not None and login_payload.get("echo") == echo:
+                        data = login_payload.get("data")
+                        login_data = cast(dict[str, Any], data) if isinstance(data, dict) else {}
                         logger.info(
                             "napcat: logged in as {} (user_id={})",
-                            data.get("nickname"),
-                            data.get("user_id"),
+                            login_data.get("nickname"),
+                            login_data.get("user_id"),
                         )
                         break
                     await self._dispatch_frame(raw)
@@ -189,26 +194,27 @@ class NapcatChannel(BaseChannel):
             return
         if not isinstance(payload, dict):
             return
+        frame = cast(dict[str, Any], payload)
 
         # Action response: identified by `echo` and absence of post_type.
-        if "echo" in payload and payload.get("post_type") is None:
-            echo = payload.get("echo")
+        if "echo" in frame and frame.get("post_type") is None:
+            echo = frame.get("echo")
             fut = self._pending.pop(echo, None) if isinstance(echo, str) else None
             if fut and not fut.done():
-                fut.set_result(payload)
+                fut.set_result(frame)
             return
 
-        if (sid := payload.get("self_id")) is not None:
+        if (sid := frame.get("self_id")) is not None:
             try:
                 self._self_id = int(sid)
             except (TypeError, ValueError):
                 pass
 
-        post_type = payload.get("post_type")
+        post_type = frame.get("post_type")
         if post_type == "message":
-            self._create_background_task(self._on_message(payload), "message")
+            self._create_background_task(self._on_message(frame), "message")
         elif post_type == "notice":
-            self._create_background_task(self._on_notice(payload), "notice")
+            self._create_background_task(self._on_notice(frame), "notice")
 
     def _create_background_task(self, coro: Any, kind: str) -> None:
         task = asyncio.create_task(coro)
@@ -249,7 +255,8 @@ class NapcatChannel(BaseChannel):
             if local := await self._download_image(info):
                 media_paths.append(local)
 
-        sender = ev.get("sender") or {}
+        sender_raw = ev.get("sender")
+        sender = cast(dict[str, Any], sender_raw) if isinstance(sender_raw, dict) else {}
         nickname = sender.get("card") or sender.get("nickname")
 
         if message_type == "group":
@@ -270,7 +277,7 @@ class NapcatChannel(BaseChannel):
             chat_id = f"group:{group_id}"
             content = self._format_group_content(
                 text=text,
-                nickname=nickname,
+                nickname=cast(str, nickname),
                 user_id=user_id,
             )
         else:
@@ -299,7 +306,7 @@ class NapcatChannel(BaseChannel):
         # segment rather than parsing CQ codes — that path is fragile and
         # users can configure napcat to emit arrays.
         if isinstance(message, list):
-            return [seg for seg in message if isinstance(seg, dict)]
+            return [cast(dict[str, Any], seg) for seg in cast(list[Any], message) if isinstance(seg, dict)]
         if isinstance(message, str) and message:
             return [{"type": "text", "data": {"text": message}}]
         return []
@@ -315,7 +322,8 @@ class NapcatChannel(BaseChannel):
 
         for seg in segments:
             stype = seg.get("type")
-            data = seg.get("data") or {}
+            raw_data = seg.get("data")
+            data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
             if stype == "text":
                 if txt := data.get("text"):
                     parts.append(str(txt))
@@ -455,7 +463,8 @@ class NapcatChannel(BaseChannel):
             params["user_id"] = int(target)
 
         resp = await self._call_action("send_msg", params)
-        data = resp.get("data") or {}
+        raw_data = resp.get("data")
+        data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
         if (mid := data.get("message_id")) is not None:
             self._bot_outbound_ids.append(int(mid))
 

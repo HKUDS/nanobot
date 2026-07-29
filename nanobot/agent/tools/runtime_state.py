@@ -1,5 +1,6 @@
 """RuntimeState protocol: agent loop state exposed to MyTool."""
 
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -25,7 +26,7 @@ class RuntimeState(Protocol):
     def tool_names(self) -> list[str]: ...
 
     @property
-    def workspace(self) -> str: ...
+    def workspace(self) -> Path: ...
 
     @property
     def provider_retry_mode(self) -> str: ...
@@ -41,9 +42,6 @@ class RuntimeState(Protocol):
 
     @property
     def exec_config(self) -> Any: ...
-
-    @property
-    def workspace_sandbox(self) -> Any: ...
 
     @property
     def subagents(self) -> Any: ...

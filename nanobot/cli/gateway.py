@@ -1,5 +1,7 @@
 """Typer commands for foreground and background gateway control."""
 
+# pyright: reportUnusedFunction=false
+
 from __future__ import annotations
 
 import subprocess

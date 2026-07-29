@@ -94,6 +94,7 @@ dev = [
     "pytest-cov>=6.0.0,<7.0.0",
     "pytest-xdist>=3.8.0,<4.0.0",
     "ruff>=0.1.0",
+    "basedpyright>=1.39.0,<2.0.0",
     "pymupdf>=1.25.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
@@ -101,6 +102,19 @@ dev = [
     "python-pptx>=1.0.0,<2.0.0",
     "python-socketio>=5.16.0,<6.0.0",
     "msgpack>=1.1.0,<2.0.0",
+    "lark-oapi>=1.5.0,<2.0.0",
+    "matrix-nio[e2e]>=0.25.2",
+    "mistune>=3.0.0,<4.0.0",
+    "nh3>=0.2.17,<1.0.0",
+    "discord.py>=2.5.2,<3.0.0",
+    "dingtalk-stream>=0.24.0,<1.0.0",
+    "qq-botpy>=1.2.0,<2.0.0",
+    "slack-sdk>=3.39.0,<4.0.0",
+    "slackify-markdown>=0.2.0,<1.0.0",
+    "wecom-aibot-sdk-python>=0.1.5",
+    "neonize>=0.3.18.post0,<0.4.0",
+    "segno>=1.6.1,<2.0.0",
+    "python-telegram-bot[socks,webhooks]>=22.6,<23.0",
 ]
 
 [project.scripts]
@@ -163,6 +177,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 ignore = ["E501"]
+
+[tool.basedpyright]
+include = ["nanobot"]
+exclude = ["**/tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

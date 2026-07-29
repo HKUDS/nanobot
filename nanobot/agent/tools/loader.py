@@ -1,4 +1,7 @@
 """Tool discovery and registration via package scanning."""
+
+# pyright: reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import importlib

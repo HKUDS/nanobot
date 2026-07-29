@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from nanobot.providers.base import tool_arguments_json_for_replay
+
+
+def _as_json_object(value: object) -> dict[str, Any] | None:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -39,8 +43,11 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
                     "content": [{"type": "output_text", "text": content}],
                     "status": "completed", "id": message_id,
                 })
-            for tool_call in msg.get("tool_calls", []) or []:
-                fn = tool_call.get("function") or {}
+            for raw_tool_call in cast(list[object], msg.get("tool_calls", []) or []):
+                tool_call = _as_json_object(raw_tool_call)
+                if tool_call is None:
+                    continue
+                fn = _as_json_object(tool_call.get("function")) or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
                 response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
                 input_items.append({
@@ -70,13 +77,15 @@ def convert_user_message(content: Any) -> dict[str, Any]:
         return {"role": "user", "content": [{"type": "input_text", "text": content}]}
     if isinstance(content, list):
         converted: list[dict[str, Any]] = []
-        for item in content:
-            if not isinstance(item, dict):
+        for raw_item in cast(list[object], content):
+            item = _as_json_object(raw_item)
+            if item is None:
                 continue
             if item.get("type") == "text":
                 converted.append({"type": "input_text", "text": item.get("text", "")})
             elif item.get("type") == "image_url":
-                url = (item.get("image_url") or {}).get("url")
+                image = _as_json_object(item.get("image_url")) or {}
+                url = image.get("url")
                 if url:
                     converted.append({"type": "input_image", "image_url": url, "detail": "auto"})
         if converted:
@@ -97,8 +106,9 @@ def convert_tool_output(content: Any) -> str | list[dict[str, Any]]:
         return content
     if isinstance(content, list):
         converted: list[dict[str, Any]] = []
-        for item in content:
-            if not isinstance(item, dict):
+        for raw_item in cast(list[object], content):
+            item = _as_json_object(raw_item)
+            if item is None:
                 break
             item_type = item.get("type")
             if item_type in {"text", "input_text"}:
@@ -110,15 +120,16 @@ def convert_tool_output(content: Any) -> str | list[dict[str, Any]]:
                 converted.append({"type": "input_text", "text": text})
             elif item_type in {"image_url", "input_image"}:
                 image = item.get("image_url")
-                if isinstance(image, dict) and set(image) - {"url", "detail"}:
+                image_object = _as_json_object(image)
+                if image_object is not None and set(image_object) - {"url", "detail"}:
                     break
                 if set(item) - {"type", "image_url", "file_id", "detail", "_meta"}:
                     break
-                url = image.get("url") if isinstance(image, dict) else image
+                url = image_object.get("url") if image_object is not None else image
                 file_id = item.get("file_id")
                 detail = item.get(
                     "detail",
-                    image.get("detail", "auto") if isinstance(image, dict) else "auto",
+                    image_object.get("detail", "auto") if image_object is not None else "auto",
                 )
                 if detail not in {"low", "high", "auto", "original"}:
                     break
@@ -160,11 +171,11 @@ def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert OpenAI function-calling tool schema to Responses API flat format."""
     converted: list[dict[str, Any]] = []
     for tool in tools:
-        fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+        fn = _as_json_object(tool.get("function")) or {} if tool.get("type") == "function" else tool
         name = fn.get("name")
         if not name:
             continue
-        params = fn.get("parameters") or {}
+        params: object = fn.get("parameters") or {}
         converted.append({
             "type": "function",
             "name": name,

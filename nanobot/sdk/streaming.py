@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from copy import deepcopy
+from typing import cast
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.sdk.types import (
@@ -59,7 +60,7 @@ class RunStream:
                 if item is _STREAM_SENTINEL:
                     self._events_done = True
                     break
-                yield item
+                yield cast(StreamEvent, item)
         finally:
             self._stream_active = False
             if not self._events_done:

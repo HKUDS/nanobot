@@ -1,5 +1,7 @@
 """GitHub Copilot OAuth-backed provider."""
 
+# pyright: reportMissingTypeStubs=false
+
 from __future__ import annotations
 
 import asyncio
@@ -8,11 +10,13 @@ import time
 import webbrowser
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from typing import Any, cast
 
 import httpx
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
+from nanobot.providers.base import LLMResponse
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 DEFAULT_GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -232,19 +236,19 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         token = await self._get_copilot_access_token()
         client = await self._ensure_client()
         self.api_key = token
-        client.api_key = token
+        cast(Any, client).api_key = token
         return token
 
     async def chat(
         self,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]] | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
-        tool_choice: str | dict[str, object] | None = None,
-    ):
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat(
             messages=messages,
@@ -258,17 +262,17 @@ class GitHubCopilotProvider(OpenAICompatProvider):
 
     async def chat_stream(
         self,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]] | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
-        tool_choice: str | dict[str, object] | None = None,
-        on_content_delta: Callable[[str], None] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
-        on_tool_call_delta: Callable[[dict[str, object]], Awaitable[None]] | None = None,
-    ):
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat_stream(
             messages=messages,

@@ -9,7 +9,7 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
 from nanobot.agent.goal_permission import goal_mutation_permission
@@ -18,6 +18,11 @@ from nanobot.command.router import CommandContext, CommandRouter, normalize_comm
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
+
+if TYPE_CHECKING:
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import Session
+    from nanobot.utils.gitstore import CommitInfo
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -197,11 +202,11 @@ def builtin_command_starts_agent_turn(text: str) -> bool:
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
-    loop = ctx.loop
+    loop = cast("AgentLoop", ctx.loop)
     msg = ctx.msg
-    total = await loop._cancel_active_tasks(ctx.key)
+    total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     # Also drain pending queue to prevent mid-turn injection deadlock
-    pending = loop._pending_queues.pop(ctx.key, None)
+    pending = loop._pending_queues.pop(ctx.key, None)  # pyright: ignore[reportPrivateUsage]
     if pending is not None:
         while not pending.empty():
             try:
@@ -235,7 +240,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
             os.execv(sys.executable, argv)
             return
         if mode == "spawn":
-            kwargs = {}
+            kwargs: dict[str, Any] = {}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             subprocess.Popen(argv, **kwargs)
@@ -250,7 +255,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
-    loop = ctx.loop
+    loop = cast("AgentLoop", ctx.loop)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     runtime = ctx.runtime or loop.runtime_for_session(session)
     ctx_est = 0
@@ -260,7 +265,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             runtime=runtime,
         )
     if ctx_est <= 0:
-        ctx_est = loop._last_usage.get("prompt_tokens", 0)
+        ctx_est = loop._last_usage.get("prompt_tokens", 0)  # pyright: ignore[reportPrivateUsage]
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
@@ -274,7 +279,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             api_key = getattr(search_cfg, "api_key", "") or None
             usage = await fetch_search_usage(provider=provider, api_key=api_key)
             search_usage_text = usage.format()
-    active_tasks = loop._active_tasks.get(ctx.key, [])
+    active_tasks = loop._active_tasks.get(ctx.key, [])  # pyright: ignore[reportPrivateUsage]
     task_count = sum(1 for t in active_tasks if not t.done())
     with suppress(Exception):
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
@@ -283,7 +288,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
             version=__version__, model=runtime.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,
+            start_time=loop._start_time, last_usage=loop._last_usage,  # pyright: ignore[reportPrivateUsage]
             context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
@@ -297,18 +302,19 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
-    loop = ctx.loop
-    await loop._cancel_active_tasks(ctx.key)
+    loop = cast("AgentLoop", ctx.loop)
+    await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
+    runtime = None
     if snapshot:
         runtime = ctx.runtime or loop.runtime_for_session(session)
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot:
-        loop._schedule_background(
-            loop.consolidator.archive(
+    if snapshot and runtime is not None:
+        loop._schedule_background(  # pyright: ignore[reportPrivateUsage]
+            loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
                 snapshot,
                 runtime=runtime,
                 session_key=ctx.key,
@@ -325,7 +331,7 @@ def _format_preset_names(names: list[str]) -> str:
     return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
 
 
-def _model_preset_names(loop) -> list[str]:
+def _model_preset_names(loop: AgentLoop) -> list[str]:
     names = set(loop.model_presets)
     names.add("default")
     return ["default", *sorted(name for name in names if name != "default")]
@@ -335,7 +341,7 @@ def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop, session) -> str:
+def _model_command_status(loop: AgentLoop, session: Session) -> str:
     names = _model_preset_names(loop)
     try:
         runtime = loop.runtime_for_session(session, recover_removed=False)
@@ -357,7 +363,7 @@ def _model_command_status(loop, session) -> str:
 
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     """Show or switch model presets."""
-    loop = ctx.loop
+    loop = cast("AgentLoop", ctx.loop)
     args = ctx.args.strip()
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
@@ -401,8 +407,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         f"- Model: `{runtime.model}`",
         f"- Context window: {runtime.context_window_tokens}",
     ]
-    if max_tokens is not None:
-        lines.append(f"- Max output tokens: {max_tokens}")
+    lines.append(f"- Max output tokens: {max_tokens}")
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -640,7 +645,12 @@ def _format_changed_files(diff: str) -> str:
 _DREAM_COMMIT_PREFIX = "dream:"
 
 
-def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
+def _format_dream_log_content(
+    commit: CommitInfo,
+    diff: str,
+    *,
+    requested_sha: str | None = None,
+) -> str:
     files_line = _format_changed_files(diff)
     lines = [
         "## Dream Update",
@@ -668,7 +678,7 @@ def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = 
     return "\n".join(lines)
 
 
-def _format_dream_restore_list(commits: list) -> str:
+def _format_dream_restore_list(commits: list[CommitInfo]) -> str:
     lines = [
         "## Dream Restore",
         "",
@@ -806,14 +816,20 @@ _HISTORY_MAX_COUNT = 50
 _HISTORY_MAX_CONTENT_CHARS = 200
 
 
-def _format_history_message(msg: dict) -> str | None:
+def _format_history_message(msg: dict[str, Any]) -> str | None:
     """Format a single history message for display. Returns None to skip."""
     role = msg.get("role")
     if role not in ("user", "assistant"):
         return None
     content = msg.get("content") or ""
     if isinstance(content, list):
-        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        parts = [
+            text
+            for block in cast(list[object], content)
+            if (item := cast(dict[str, Any], block) if isinstance(block, dict) else None)
+            and item.get("type") == "text"
+            and isinstance(text := item.get("text"), str)
+        ]
         content = " ".join(parts)
     content = str(content).strip()
     if not content:

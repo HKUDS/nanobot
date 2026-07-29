@@ -1,12 +1,14 @@
 """OpenAI Codex Responses Provider."""
 
+# pyright: reportMissingTypeStubs=false, reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from loguru import logger
@@ -83,7 +85,7 @@ class OpenAICodexProvider(LLMProvider):
         stage = "oauth_token"
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
-            headers = _build_headers(token.account_id, token.access)
+            headers = _build_headers(cast(str, token.account_id), token.access)
 
             stage = "codex_request"
             try:

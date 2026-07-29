@@ -12,7 +12,7 @@ import inspect
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote
 
 from websockets.http11 import Request as WsRequest
@@ -25,6 +25,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError
 from nanobot.channels.contracts import (
+    RouteFieldType,
     channel_instance_config,
     channel_update_instance_config,
 )
@@ -270,6 +271,7 @@ class WebUISettingsRouter:
             raise WebUISettingsError("invalid MCP settings payload") from exc
         if not isinstance(payload, dict):
             raise WebUISettingsError("MCP settings payload must be a JSON object")
+        payload = cast(dict[object, Any], payload)
         merged = {key: list(values) for key, values in query.items()}
         for key, value in payload.items():
             if not isinstance(key, str) or not key:
@@ -300,6 +302,7 @@ class WebUISettingsRouter:
                 raise WebUISettingsError("invalid provider settings payload") from exc
         if not isinstance(payload, dict):
             raise WebUISettingsError("provider settings payload must be a JSON object")
+        payload = cast(dict[object, Any], payload)
 
         merged = {key: list(values) for key, values in query.items()}
         for key, value in payload.items():
@@ -553,6 +556,7 @@ class WebUISettingsRouter:
             raise WebUISettingsError("invalid API service settings payload") from exc
         if not isinstance(payload, dict):
             raise WebUISettingsError("API service settings payload must be a JSON object")
+        payload = cast(dict[str, Any], payload)
 
         unknown = set(payload) - {"api_key"}
         if unknown:
@@ -787,7 +791,10 @@ class WebUISettingsRouter:
                 message=f"{name} channel config was saved, but hot reload failed: {exc}",
             )
 
-        if not isinstance(result, dict) or not result.get("handled"):
+        if not isinstance(result, dict):
+            return payload
+        result = cast(dict[str, Any], result)
+        if not result.get("handled"):
             return payload
 
         payload = dict(payload)
@@ -914,7 +921,7 @@ class WebUISettingsRouter:
             raise WebUISettingsError("invalid channel settings payload") from exc
         if not isinstance(payload, dict):
             raise WebUISettingsError("channel settings payload must be a JSON object")
-        return payload
+        return cast(dict[str, Any], payload)
 
     def _save_channel_config_values(
         self,
@@ -946,7 +953,7 @@ class WebUISettingsRouter:
         saved: list[str] = []
         prefix = f"channels.{name}."
         for raw_key, raw_value in raw_values.items():
-            if not isinstance(raw_key, str) or not raw_key:
+            if not raw_key:
                 raise WebUISettingsError("channel settings payload contains an invalid key")
             field = raw_key[len(prefix):] if raw_key.startswith(prefix) else raw_key
             value_type = field_types.get(field)
@@ -975,7 +982,11 @@ class WebUISettingsRouter:
         return saved
 
     @staticmethod
-    def _coerce_channel_value(raw_key: str, raw_value: Any, value_type: Any) -> Any:
+    def _coerce_channel_value(
+        raw_key: str,
+        raw_value: Any,
+        value_type: RouteFieldType,
+    ) -> Any:
         if isinstance(value_type, tuple):
             kind = value_type[0]
             allowed = value_type[1]
@@ -995,7 +1006,7 @@ class WebUISettingsRouter:
             if isinstance(raw_value, str):
                 return [item.strip() for item in raw_value.split(",") if item.strip()]
             if isinstance(raw_value, list):
-                return [str(item).strip() for item in raw_value if str(item).strip()]
+                return [str(item).strip() for item in cast(list[Any], raw_value) if str(item).strip()]
             raise WebUISettingsError(f"'{raw_key}' must be a comma-separated list")
 
         if kind == "int":
@@ -1020,8 +1031,8 @@ class WebUISettingsRouter:
             value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
             if not value:
                 return _SKIP_FIELD
-            if value not in allowed:
-                options = ", ".join(sorted(allowed))
+            if allowed is None or value not in allowed:
+                options = ", ".join(sorted(allowed or ()))
                 raise WebUISettingsError(f"'{raw_key}' must be one of: {options}")
             return value
 
@@ -1029,14 +1040,14 @@ class WebUISettingsRouter:
 
     @staticmethod
     def _assign_channel_config_value(channel_config: dict[str, Any], field: str, value: Any) -> None:
-        target = channel_config
+        target: dict[str, Any] = channel_config
         parts = field.split(".")
         for part in parts[:-1]:
-            current = target.get(part)
+            current: object = target.get(part)
             if not isinstance(current, dict):
                 current = {}
                 target[part] = current
-            target = current
+            target = cast(dict[str, Any], current)
         target[parts[-1]] = value
 
     async def _handle_settings_channel_connect(
@@ -1162,7 +1173,7 @@ class WebUISettingsRouter:
 
 def _pairing_payload(last_action: dict[str, Any] | None = None) -> dict[str, Any]:
     now = time.time()
-    requests = []
+    requests: list[dict[str, Any]] = []
     for item in list_pending():
         expires_at = float(item.get("expires_at", 0) or 0)
         created_at = float(item.get("created_at", 0) or 0)

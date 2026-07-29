@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, TypeGuard, cast
 
 from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve, unix_serve
@@ -191,12 +191,13 @@ def _parse_inbound_payload(raw: str) -> str | None:
         return None
     if text.startswith("{"):
         try:
-            data = json.loads(text)
+            data = cast(object, json.loads(text))
         except json.JSONDecodeError:
             return text
         if isinstance(data, dict):
+            payload = cast(dict[str, Any], data)
             for key in ("content", "text", "message"):
-                value = data.get(key)
+                value = payload.get(key)
                 if isinstance(value, str) and value.strip():
                     return value
             return None
@@ -209,7 +210,7 @@ def _parse_inbound_payload(raw: str) -> str | None:
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 
 
-def _is_valid_chat_id(value: Any) -> bool:
+def _is_valid_chat_id(value: Any) -> TypeGuard[str]:
     return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
 
 
@@ -224,15 +225,16 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
     if not text.startswith("{"):
         return None
     try:
-        data = json.loads(text)
+        data = cast(object, json.loads(text))
     except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None
-    t = data.get("type")
+    envelope = cast(dict[str, Any], data)
+    t = envelope.get("type")
     if not isinstance(t, str):
         return None
-    return data
+    return envelope
 
 
 def _is_websocket_upgrade(request: WsRequest) -> bool:
@@ -317,10 +319,11 @@ class WebSocketChannel(BaseChannel):
         if self.gateway.session_manager is None:
             return
         row = self.gateway.session_manager.read_session_file(f"websocket:{chat_id}")
-        meta = row.get("metadata", {}) if isinstance(row, dict) else {}
+        row_data = cast(dict[str, Any], row) if isinstance(row, dict) else {}
+        meta = row_data.get("metadata", {})
         if not isinstance(meta, dict):
             meta = {}
-        blob = goal_state_ws_blob(meta)
+        blob = goal_state_ws_blob(cast(dict[str, Any], meta))
         if not blob.get("active"):
             return
         await self.send_goal_state(chat_id, blob)
@@ -700,7 +703,7 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
-                media_paths, reason = self._media.store_inbound_attachments(raw_media)
+                media_paths, reason = self._media.store_inbound_attachments(cast(list[Any], raw_media))
                 if reason is not None:
                     await self._send_event(
                         connection,
@@ -841,7 +844,8 @@ class WebSocketChannel(BaseChannel):
             try:
                 await self._server_task
             except asyncio.CancelledError:
-                if asyncio.current_task() and asyncio.current_task().cancelling():
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
                     raise
                 self.logger.debug("server task was already cancelled during shutdown")
             except Exception as e:

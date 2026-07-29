@@ -344,7 +344,7 @@ class ExecTool(Tool):
             # misses it, leaving a zombie.
             _reap_pid(process.pid)
 
-            output_parts = []
+            output_parts: list[str] = []
 
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
@@ -504,7 +504,7 @@ class ExecTool(Tool):
         )
 
     def _compose_path(self, current_path: str) -> str:
-        parts = []
+        parts: list[str] = []
         if self.path_prepend:
             parts.append(self.path_prepend)
         if current_path:
@@ -514,7 +514,7 @@ class ExecTool(Tool):
         return os.pathsep.join(parts)
 
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
-        segments = []
+        segments: list[str] = []
         if self.path_prepend:
             env["NANOBOT_PATH_PREPEND"] = self.path_prepend
             segments.append("$NANOBOT_PATH_PREPEND")
@@ -568,11 +568,21 @@ class ExecTool(Tool):
                 env=env,
             )
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args = [shell_program]
+        args: list[str] = [shell_program]
         shell_name = Path(shell_program).name.lower()
         if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
             args.append("-l")
         args.extend(["-c", command])
+        if process_tree:
+            return await asyncio.create_subprocess_exec(
+                *args,
+                stdin=stdin,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=env,
+                start_new_session=True,
+            )
         return await asyncio.create_subprocess_exec(
             *args,
             stdin=stdin,
@@ -580,7 +590,6 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
-            **({"start_new_session": True} if process_tree else {}),
         )
 
     @staticmethod

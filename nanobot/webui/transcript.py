@@ -11,7 +11,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple
+from typing import Any, Callable, Mapping, NamedTuple, cast
 from urllib.parse import unquote, urlparse
 
 from loguru import logger
@@ -176,7 +176,7 @@ def _read_transcript_file(path: Path) -> list[dict[str, Any]]:
                     logger.warning("bad jsonl at {} line {}", path, line_no)
                     continue
                 if isinstance(obj, dict):
-                    lines_out.append(obj)
+                    lines_out.append(cast(dict[str, Any], obj))
     except OSError as e:
         logger.warning("read transcript failed {}: {}", path, e)
         return []
@@ -247,12 +247,13 @@ def _non_negative_int(value: Any) -> int | None:
 def _normalize_manifest_entry(session_key: str, entry: Any) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
-    segment_id = entry.get("id")
+    manifest_entry = cast(dict[str, Any], entry)
+    segment_id = manifest_entry.get("id")
     if not isinstance(segment_id, str) or not _TRANSCRIPT_SEGMENT_RE.fullmatch(f"{segment_id}.jsonl"):
         return None
     segment_path = _segment_file_path(session_key, segment_id)
     values = {
-        key: _non_negative_int(entry.get(key))
+        key: _non_negative_int(manifest_entry.get(key))
         for key in ("bytes", "turn_count", "user_count")
     }
     if not segment_path.is_file() or values["bytes"] != segment_path.stat().st_size:
@@ -306,11 +307,16 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
         return _rebuilt_segment_manifest_entries(session_key)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        raw_segments = data.get("segments") if isinstance(data, dict) else None
-        if data.get("version") != _TRANSCRIPT_SEGMENT_MANIFEST_VERSION or not isinstance(raw_segments, list):
+        manifest = cast(dict[str, Any], data) if isinstance(data, dict) else None
+        raw_segments = manifest.get("segments") if manifest is not None else None
+        if (
+            manifest is None
+            or manifest.get("version") != _TRANSCRIPT_SEGMENT_MANIFEST_VERSION
+            or not isinstance(raw_segments, list)
+        ):
             return _rebuilt_segment_manifest_entries(session_key)
         entries: list[dict[str, Any]] = []
-        for entry in raw_segments:
+        for entry in cast(list[Any], raw_segments):
             normalized = _normalize_manifest_entry(session_key, entry)
             if normalized is None:
                 return _rebuilt_segment_manifest_entries(session_key)
@@ -423,7 +429,8 @@ def _decode_page_cursor(value: str | None) -> int | None:
         return None
     if not isinstance(data, dict):
         return None
-    before_turn = data.get("before_turn")
+    cursor_data = cast(dict[str, Any], data)
+    before_turn = cursor_data.get("before_turn")
     if (
         isinstance(before_turn, bool)
         or not isinstance(before_turn, int)
@@ -630,11 +637,12 @@ def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | No
     raw = (metadata or {}).get(WEBUI_MESSAGE_SOURCE_METADATA_KEY)
     if not isinstance(raw, dict):
         return None
-    kind = raw.get("kind")
-    if not is_automation_kind(kind):
+    source_metadata = cast(dict[str, Any], raw)
+    kind = source_metadata.get("kind")
+    if not isinstance(kind, str) or not is_automation_kind(kind):
         return None
     source: dict[str, str] = {"kind": kind}
-    label = raw.get("label")
+    label = source_metadata.get("label")
     if isinstance(label, str) and label.strip():
         source["label"] = label.strip()
     return source
@@ -824,7 +832,9 @@ def write_session_messages_as_transcript(
             row: dict[str, Any] = {"event": "user", "chat_id": target_chat_id, "text": text}
             media = msg.get("media")
             if isinstance(media, list) and media:
-                row["media_paths"] = [str(p) for p in media if isinstance(p, str) and p]
+                row["media_paths"] = [
+                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
+                ]
             for key in ("cli_apps", "mcp_presets"):
                 value = msg.get(key)
                 if isinstance(value, list) and value:
@@ -833,7 +843,9 @@ def write_session_messages_as_transcript(
             row = {"event": "message", "chat_id": target_chat_id, "text": text}
             media = msg.get("media")
             if isinstance(media, list) and media:
-                row["media"] = [str(p) for p in media if isinstance(p, str) and p]
+                row["media"] = [
+                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
+                ]
         else:
             continue
         rows.append(row)
@@ -878,10 +890,18 @@ def build_user_transcript_event(
     }
     if paths:
         event["media_paths"] = paths
-    apps = [dict(app) for app in (cli_apps or []) if isinstance(app, Mapping)]
+    apps = [
+        dict(cast(Mapping[str, Any], app))
+        for app in (cli_apps or [])
+        if isinstance(app, Mapping)
+    ]
     if apps:
         event["cli_apps"] = apps
-    presets = [dict(preset) for preset in (mcp_presets or []) if isinstance(preset, Mapping)]
+    presets = [
+        dict(cast(Mapping[str, Any], preset))
+        for preset in (mcp_presets or [])
+        if isinstance(preset, Mapping)
+    ]
     if presets:
         event["mcp_presets"] = presets
     return event
@@ -920,9 +940,9 @@ def _session_user_event(
     return build_user_transcript_event(
         chat_id,
         text,
-        media_paths=media if isinstance(media, list) else None,
-        cli_apps=cli_apps if isinstance(cli_apps, list) else None,
-        mcp_presets=mcp_presets if isinstance(mcp_presets, list) else None,
+        media_paths=cast(list[Any], media) if isinstance(media, list) else None,
+        cli_apps=cast(list[Any], cli_apps) if isinstance(cli_apps, list) else None,
+        mcp_presets=cast(list[Any], mcp_presets) if isinstance(mcp_presets, list) else None,
     )
 
 
@@ -940,7 +960,7 @@ def _session_assistant_event(
     content = message.get("content")
     text = content if isinstance(content, str) else ""
     media = message.get("media")
-    media_paths = [str(path) for path in media] if isinstance(media, list) else []
+    media_paths = [str(path) for path in cast(list[Any], media)] if isinstance(media, list) else []
     media_paths = [path for path in media_paths if path]
     if not text.strip() and not media_paths:
         return None
@@ -1172,14 +1192,18 @@ def inject_missing_user_events_from_session(
 def _format_tool_call_trace(call: Any) -> str | None:
     if not call or not isinstance(call, dict):
         return None
-    fn = call.get("function")
-    name = fn.get("name") if isinstance(fn, dict) else None
+    call_data = cast(dict[str, Any], call)
+    fn = call_data.get("function")
+    function_data = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
+    name = function_data.get("name") if function_data is not None else None
     if not isinstance(name, str) or not name:
-        raw_name = call.get("name")
+        raw_name = call_data.get("name")
         name = raw_name if isinstance(raw_name, str) else ""
     if not name:
         return None
-    args = (fn.get("arguments") if isinstance(fn, dict) else None) or call.get("arguments")
+    args = (
+        function_data.get("arguments") if function_data is not None else None
+    ) or call_data.get("arguments")
     if isinstance(args, str) and args.strip():
         return f"{name}({args})"
     if args and isinstance(args, dict):
@@ -1192,17 +1216,18 @@ def tool_trace_lines_from_events(events: Any) -> list[str]:
         return []
     lines: list[str] = []
     seen: set[str] = set()
-    for event in events:
+    for event in cast(list[Any], events):
         if not event or not isinstance(event, dict):
             continue
-        if event.get("phase") not in {"start", "end", "error"}:
+        tool_event = cast(dict[str, Any], event)
+        if tool_event.get("phase") not in {"start", "end", "error"}:
             continue
-        call_id = event.get("call_id")
+        call_id = tool_event.get("call_id")
         if isinstance(call_id, str) and call_id:
             if call_id in seen:
                 continue
             seen.add(call_id)
-        t = _format_tool_call_trace(event)
+        t = _format_tool_call_trace(tool_event)
         if t:
             lines.append(t)
     return lines
@@ -1215,16 +1240,18 @@ def _normalize_tool_events(events: Any) -> list[dict[str, Any]]:
     if not isinstance(events, list):
         return []
     out: list[dict[str, Any]] = []
-    for event in events:
+    for event in cast(list[Any], events):
         if not event or not isinstance(event, dict):
             continue
-        if event.get("phase") not in {"start", "end", "error"}:
+        tool_event = cast(dict[str, Any], event)
+        if tool_event.get("phase") not in {"start", "end", "error"}:
             continue
-        if not isinstance(event.get("name"), str):
-            fn = event.get("function")
-            if not (isinstance(fn, dict) and isinstance(fn.get("name"), str)):
+        if not isinstance(tool_event.get("name"), str):
+            fn = tool_event.get("function")
+            function = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
+            if function is None or not isinstance(function.get("name"), str):
                 continue
-        out.append(dict(event))
+        out.append(tool_event)
     return out
 
 
@@ -1242,7 +1269,8 @@ def _tool_event_file_edit_key(event: dict[str, Any]) -> str | None:
     name = event.get("name")
     if not isinstance(name, str) or not name:
         fn = event.get("function")
-        name = fn.get("name") if isinstance(fn, dict) else ""
+        function = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
+        name = function.get("name") if function is not None else ""
     if not isinstance(name, str) or name not in _FILE_EDIT_TOOL_NAMES:
         return None
     return f"{call_id}|{name}"
@@ -1252,8 +1280,16 @@ def _merge_tool_events(previous: Any, incoming: list[dict[str, Any]]) -> list[di
     if not isinstance(previous, list) or not previous:
         return incoming
     if not incoming:
-        return [dict(event) for event in previous if isinstance(event, dict)]
-    merged = [dict(event) for event in previous if isinstance(event, dict)]
+        return [
+            cast(dict[str, Any], event)
+            for event in cast(list[Any], previous)
+            if isinstance(event, dict)
+        ]
+    merged = [
+        cast(dict[str, Any], event)
+        for event in cast(list[Any], previous)
+        if isinstance(event, dict)
+    ]
     index_by_key = {_tool_event_key(event): idx for idx, event in enumerate(merged)}
     for event in incoming:
         key = _tool_event_key(event)
@@ -1300,8 +1336,9 @@ def _message_has_file_edit_for_tool_event(
     if not isinstance(edits, list):
         return False
     return any(
-        isinstance(edit, dict) and _file_edit_tool_event_key(edit) == key
-        for edit in edits
+        _file_edit_tool_event_key(cast(dict[str, Any], edit)) == key
+        for edit in cast(list[Any], edits)
+        if isinstance(edit, dict)
     )
 
 
@@ -1325,7 +1362,6 @@ def _strip_covered_file_edit_tool_hints(
     incoming_keys = {
         _file_edit_tool_event_key(edit)
         for edit in edits
-        if isinstance(edit, dict)
     }
     events = message.get("toolEvents")
     if not incoming_keys or not isinstance(events, list):
@@ -1334,21 +1370,24 @@ def _strip_covered_file_edit_tool_hints(
     kept_events: list[dict[str, Any]] = []
     removed_trace_lines: set[str] = set()
     changed = False
-    for event in events:
+    for event in cast(list[Any], events):
         if not isinstance(event, dict):
             continue
-        key = _tool_event_file_edit_key(event)
+        tool_event = cast(dict[str, Any], event)
+        key = _tool_event_file_edit_key(tool_event)
         if key and key in incoming_keys:
             changed = True
-            removed_trace_lines.update(tool_trace_lines_from_events([event]))
+            removed_trace_lines.update(tool_trace_lines_from_events([tool_event]))
             continue
-        kept_events.append(event)
+        kept_events.append(tool_event)
     if not changed:
         return message
 
     raw_traces = message.get("traces")
     if isinstance(raw_traces, list):
-        previous_traces = [trace for trace in raw_traces if isinstance(trace, str)]
+        previous_traces = [
+            trace for trace in cast(list[Any], raw_traces) if isinstance(trace, str)
+        ]
     else:
         content = message.get("content")
         previous_traces = [content] if isinstance(content, str) and content else []
@@ -1383,14 +1422,17 @@ def _merge_unique_tool_trace_lines(
 
 def _media_from_signed_urls(value: Any) -> list[dict[str, Any]]:
     media: list[dict[str, Any]] = []
-    urls = value if isinstance(value, list) else []
+    urls = cast(list[Any], value) if isinstance(value, list) else []
     for m in urls:
-        if isinstance(m, dict) and m.get("url"):
-            name = str(m.get("name") or "")
+        if isinstance(m, dict):
+            media_item = cast(dict[str, Any], m)
+            if not media_item.get("url"):
+                continue
+            name = str(media_item.get("name") or "")
             media.append(
                 {
                     "kind": _media_kind_from_name(name),
-                    "url": str(m["url"]),
+                    "url": str(media_item["url"]),
                     "name": name,
                 },
             )
@@ -1465,11 +1507,12 @@ def replay_transcript_to_ui_messages(
         source = rec.get("source")
         if not isinstance(source, dict):
             return {}
-        kind = source.get("kind")
-        if not is_automation_kind(kind):
+        source_data = cast(dict[str, Any], source)
+        kind = source_data.get("kind")
+        if not isinstance(kind, str) or not is_automation_kind(kind):
             return {}
         out: dict[str, Any] = {"source": {"kind": kind}}
-        label = source.get("label")
+        label = source_data.get("label")
         if isinstance(label, str) and label.strip():
             out["source"]["label"] = label.strip()
         return out
@@ -1669,11 +1712,10 @@ def replay_transcript_to_ui_messages(
         segment: str | None,
         edits: list[dict[str, Any]],
     ) -> int | None:
-        incoming_keys = {_file_edit_key(edit) for edit in edits if isinstance(edit, dict)}
+        incoming_keys = {_file_edit_key(edit) for edit in edits}
         incoming_tool_event_keys = {
             _file_edit_tool_event_key(edit)
             for edit in edits
-            if isinstance(edit, dict)
         }
         for i in range(len(messages) - 1, -1, -1):
             candidate = messages[i]
@@ -1685,15 +1727,16 @@ def replay_transcript_to_ui_messages(
                 return i
             existing_edits = candidate.get("fileEdits")
             if isinstance(existing_edits, list):
-                for existing in existing_edits:
+                for existing in cast(list[Any], existing_edits):
                     if not isinstance(existing, dict):
                         continue
+                    existing_edit = cast(dict[str, Any], existing)
                     if (
-                        _file_edit_key(existing) in incoming_keys
+                        _file_edit_key(existing_edit) in incoming_keys
                         or (
-                            not existing.get("path")
-                            and existing.get("pending")
-                            and _file_edit_tool_event_key(existing) in incoming_tool_event_keys
+                            not existing_edit.get("path")
+                            and existing_edit.get("pending")
+                            and _file_edit_tool_event_key(existing_edit) in incoming_tool_event_keys
                         )
                     ):
                         return i
@@ -1702,7 +1745,10 @@ def replay_transcript_to_ui_messages(
     def trace_message_is_empty(message: dict[str, Any]) -> bool:
         traces = message.get("traces")
         if isinstance(traces, list):
-            has_trace = any(isinstance(trace, str) and trace.strip() for trace in traces)
+            has_trace = any(
+                isinstance(trace, str) and trace.strip()
+                for trace in cast(list[Any], traces)
+            )
         else:
             has_trace = bool(str(message.get("content") or "").strip())
         return (
@@ -1784,15 +1830,14 @@ def replay_transcript_to_ui_messages(
         if not segment:
             segment = _new_activity_segment(activate=False)
             active_file_edit_segment_id = segment
-        existing = list(last.get("fileEdits") or [])
+        raw_existing: Any = last.get("fileEdits") or []
+        existing: list[Any] = list(cast(list[Any], raw_existing)) if isinstance(raw_existing, list) else []
         index_by_key = {
-            _file_edit_key(edit): pos
+            _file_edit_key(cast(dict[str, Any], edit)): pos
             for pos, edit in enumerate(existing)
             if isinstance(edit, dict)
         }
         for edit in edits:
-            if not isinstance(edit, dict):
-                continue
             key = _file_edit_key(edit)
             pos = index_by_key.get(key)
             if pos is None and edit.get("path"):
@@ -1800,9 +1845,9 @@ def replay_transcript_to_ui_messages(
                 for existing_pos, existing_edit in enumerate(existing):
                     if (
                         isinstance(existing_edit, dict)
-                        and not existing_edit.get("path")
-                        and existing_edit.get("pending")
-                        and _file_edit_tool_event_key(existing_edit) == event_key
+                        and not cast(dict[str, Any], existing_edit).get("path")
+                        and cast(dict[str, Any], existing_edit).get("pending")
+                        and _file_edit_tool_event_key(cast(dict[str, Any], existing_edit)) == event_key
                     ):
                         pos = existing_pos
                         break
@@ -1832,7 +1877,7 @@ def replay_transcript_to_ui_messages(
             media_paths = rec.get("media_paths")
             paths: list[str] = []
             if isinstance(media_paths, list):
-                paths = [str(p) for p in media_paths if p]
+                paths = [str(p) for p in cast(list[Any], media_paths) if p]
             media_att: list[dict[str, Any]] | None = None
             if paths and augment_user_media is not None:
                 media_att = augment_user_media(paths)
@@ -1849,11 +1894,15 @@ def replay_transcript_to_ui_messages(
                     row["images"] = [{"url": m.get("url"), "name": m.get("name")} for m in media_att]
             cli_apps = rec.get("cli_apps")
             if isinstance(cli_apps, list) and cli_apps:
-                row["cliApps"] = [dict(app) for app in cli_apps if isinstance(app, dict)]
+                row["cliApps"] = [
+                    dict(cast(dict[str, Any], app)) for app in cast(list[Any], cli_apps) if isinstance(app, dict)
+                ]
             mcp_presets = rec.get("mcp_presets")
             if isinstance(mcp_presets, list) and mcp_presets:
                 row["mcpPresets"] = [
-                    dict(preset) for preset in mcp_presets if isinstance(preset, dict)
+                    dict(cast(dict[str, Any], preset))
+                    for preset in cast(list[Any], mcp_presets)
+                    if isinstance(preset, dict)
                 ]
             messages.append(row)
             continue
@@ -1862,7 +1911,7 @@ def replay_transcript_to_ui_messages(
             raw_edits = rec.get("edits")
             if isinstance(raw_edits, list):
                 upsert_file_edits(
-                    [e for e in raw_edits if isinstance(e, dict)],
+                    [cast(dict[str, Any], e) for e in cast(list[Any], raw_edits) if isinstance(e, dict)],
                     idx,
                     _turn_fields(rec, "activity"),
                     _created_at_ms(rec, idx),
@@ -2011,7 +2060,11 @@ def replay_transcript_to_ui_messages(
                     and not last.get("isStreaming")
                     and (last.get("activitySegmentId") in (None, segment))
                 ):
-                    prev_traces = list(last.get("traces") or [last.get("content")])
+                    prev_traces = [
+                        trace
+                        for trace in cast(list[Any], last.get("traces") or [last.get("content")])
+                        if isinstance(trace, str)
+                    ]
                     if structured:
                         merged_traces, added = _merge_unique_tool_trace_lines(prev_traces, structured)
                         if not added and not visible_structured_events:
@@ -2051,7 +2104,7 @@ def replay_transcript_to_ui_messages(
             content_s = text if isinstance(text, str) else ""
             media: list[dict[str, Any]] = []
             raw_media = rec.get("media")
-            raw_media_list = raw_media if isinstance(raw_media, list) else []
+            raw_media_list = cast(list[Any], raw_media) if isinstance(raw_media, list) else []
             media_paths = [path for path in raw_media_list if isinstance(path, str) and path]
             if media_paths and augment_assistant_media is not None:
                 media = augment_assistant_media(media_paths)
@@ -2218,7 +2271,7 @@ def build_webui_thread_response(
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
     )
-    payload = {
+    payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
         "messages": msgs,

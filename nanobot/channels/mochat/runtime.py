@@ -1,3 +1,4 @@
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false
 """Mochat channel implementation using Socket.IO with HTTP polling fallback."""
 
 from __future__ import annotations
@@ -5,10 +6,11 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import Field
@@ -27,7 +29,7 @@ except ImportError:
     SOCKETIO_AVAILABLE = False
 
 try:
-    import msgpack  # noqa: F401
+    import msgpack  # noqa: F401  # pyright: ignore[reportUnusedImport]
     MSGPACK_AVAILABLE = True
 except ImportError:
     MSGPACK_AVAILABLE = False
@@ -57,7 +59,7 @@ class DelayState:
     """Per-target delayed message state."""
     entries: list[MochatBufferedEntry] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    timer: asyncio.Task | None = None
+    timer: asyncio.Task[None] | None = None
 
 
 @dataclass
@@ -71,12 +73,12 @@ class MochatTarget:
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-def _safe_dict(value: Any) -> dict:
+def _safe_dict(value: Any) -> dict[str, Any]:
     """Return *value* if it's a dict, else empty dict."""
-    return value if isinstance(value, dict) else {}
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
-def _str_field(src: dict, *keys: str) -> str:
+def _str_field(src: dict[str, Any], *keys: str) -> str:
     """Return the first non-empty str value found for *keys*, stripped."""
     for k in keys:
         v = src.get(k)
@@ -100,7 +102,7 @@ def _make_synthetic_event(
         payload["authorInfo"] = _safe_dict(author_info)
     return {
         "type": "message.add",
-        "timestamp": timestamp or datetime.utcnow().isoformat(),
+        "timestamp": timestamp or datetime.utcnow().isoformat(),  # pyright: ignore[reportDeprecated]
         "payload": payload,
     }
 
@@ -141,11 +143,12 @@ def extract_mention_ids(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     ids: list[str] = []
-    for item in value:
+    for item in cast(list[object], value):
         if isinstance(item, str):
             if item.strip():
                 ids.append(item.strip())
         elif isinstance(item, dict):
+            item = cast(dict[str, Any], item)
             for key in ("id", "userId", "_id"):
                 candidate = item.get(key)
                 if isinstance(candidate, str) and candidate.strip():
@@ -158,6 +161,7 @@ def resolve_was_mentioned(payload: dict[str, Any], agent_user_id: str) -> bool:
     """Resolve mention state from payload metadata and text fallback."""
     meta = payload.get("meta")
     if isinstance(meta, dict):
+        meta = cast(dict[str, Any], meta)
         if meta.get("mentioned") is True or meta.get("wasMentioned") is True:
             return True
         for f in ("mentions", "mentionIds", "mentionedUserIds", "mentionedUsers"):
@@ -278,7 +282,7 @@ class MochatChannel(BaseChannel):
         self._state_dir = get_runtime_subdir("mochat")
         self._cursor_path = self._state_dir / "session_cursors.json"
         self._session_cursor: dict[str, int] = {}
-        self._cursor_save_task: asyncio.Task | None = None
+        self._cursor_save_task: asyncio.Task[None] | None = None
 
         self._session_set: set[str] = set()
         self._panel_set: set[str] = set()
@@ -292,9 +296,9 @@ class MochatChannel(BaseChannel):
         self._delay_states: dict[str, DelayState] = {}
 
         self._fallback_mode = False
-        self._session_fallback_tasks: dict[str, asyncio.Task] = {}
-        self._panel_fallback_tasks: dict[str, asyncio.Task] = {}
-        self._refresh_task: asyncio.Task | None = None
+        self._session_fallback_tasks: dict[str, asyncio.Task[None]] = {}
+        self._panel_fallback_tasks: dict[str, asyncio.Task[None]] = {}
+        self._refresh_task: asyncio.Task[None] | None = None
         self._target_locks: dict[str, asyncio.Lock] = {}
 
     # ---- lifecycle ---------------------------------------------------------
@@ -352,7 +356,11 @@ class MochatChannel(BaseChannel):
 
         parts = ([msg.content.strip()] if msg.content and msg.content.strip() else [])
         if msg.media:
-            parts.extend(m for m in msg.media if isinstance(m, str) and m.strip())
+            parts.extend(
+                m
+                for m in msg.media
+                if isinstance(cast(object, m), str) and m.strip()
+            )
         content = "\n".join(parts).strip()
         if not content:
             return
@@ -404,7 +412,8 @@ class MochatChannel(BaseChannel):
             else:
                 self.logger.warning("msgpack not installed but socket_disable_msgpack=false; using JSON")
 
-        client = socketio.AsyncClient(
+        socketio_module = cast(Any, socketio)
+        client: Any = socketio_module.AsyncClient(
             reconnection=True,
             reconnection_attempts=self.config.max_retry_attempts or None,
             reconnection_delay=max(0.1, self.config.socket_reconnect_delay_ms / 1000.0),
@@ -412,7 +421,6 @@ class MochatChannel(BaseChannel):
             logger=False, engineio_logger=False, serializer=serializer,
         )
 
-        @client.event
         async def connect() -> None:
             self._ws_connected, self._ws_ready = True, False
             self.logger.info("websocket connected")
@@ -420,7 +428,6 @@ class MochatChannel(BaseChannel):
             self._ws_ready = subscribed
             await (self._stop_fallback_workers() if subscribed else self._ensure_fallback_workers())
 
-        @client.event
         async def disconnect() -> None:
             if not self._running:
                 return
@@ -428,17 +435,20 @@ class MochatChannel(BaseChannel):
             self.logger.warning("websocket disconnected")
             await self._ensure_fallback_workers()
 
-        @client.event
         async def connect_error(data: Any) -> None:
             self.logger.error("websocket connect error: {}", data)
 
-        @client.on("claw.session.events")
         async def on_session_events(payload: dict[str, Any]) -> None:
             await self._handle_watch_payload(payload, "session")
 
-        @client.on("claw.panel.events")
         async def on_panel_events(payload: dict[str, Any]) -> None:
             await self._handle_watch_payload(payload, "panel")
+
+        client.event(connect)
+        client.event(disconnect)
+        client.event(connect_error)
+        client.on("claw.session.events", on_session_events)
+        client.on("claw.panel.events", on_panel_events)
 
         for ev in ("notify:chat.inbox.append", "notify:chat.message.add",
                     "notify:chat.message.update", "notify:chat.message.recall",
@@ -463,7 +473,10 @@ class MochatChannel(BaseChannel):
             self._socket = None
             return False
 
-    def _build_notify_handler(self, event_name: str):
+    def _build_notify_handler(
+        self,
+        event_name: str,
+    ) -> Callable[[Any], Awaitable[None]]:
         async def handler(payload: Any) -> None:
             if event_name == "notify:chat.inbox.append":
                 await self._handle_notify_inbox_append(payload)
@@ -498,11 +511,20 @@ class MochatChannel(BaseChannel):
         data = ack.get("data")
         items: list[dict[str, Any]] = []
         if isinstance(data, list):
-            items = [i for i in data if isinstance(i, dict)]
+            items = [
+                cast(dict[str, Any], item)
+                for item in cast(list[object], data)
+                if isinstance(item, dict)
+            ]
         elif isinstance(data, dict):
+            data = cast(dict[str, Any], data)
             sessions = data.get("sessions")
             if isinstance(sessions, list):
-                items = [i for i in sessions if isinstance(i, dict)]
+                items = [
+                    cast(dict[str, Any], item)
+                    for item in cast(list[object], sessions)
+                    if isinstance(item, dict)
+                ]
             elif "sessionId" in data:
                 items = [data]
         for p in items:
@@ -525,7 +547,11 @@ class MochatChannel(BaseChannel):
             raw = await self._socket.call(event_name, payload, timeout=10)
         except Exception as e:
             return {"result": False, "message": str(e)}
-        return raw if isinstance(raw, dict) else {"result": True, "data": raw}
+        return (
+            cast(dict[str, Any], raw)
+            if isinstance(raw, dict)
+            else {"result": True, "data": raw}
+        )
 
     # ---- refresh / discovery -----------------------------------------------
 
@@ -558,10 +584,11 @@ class MochatChannel(BaseChannel):
             return
 
         new_ids: list[str] = []
-        for s in sessions:
-            if not isinstance(s, dict):
+        for session_value in cast(list[object], sessions):
+            if not isinstance(session_value, dict):
                 continue
-            sid = _str_field(s, "sessionId")
+            session = cast(dict[str, Any], session_value)
+            sid = _str_field(session, "sessionId")
             if not sid:
                 continue
             if sid not in self._session_set:
@@ -569,7 +596,7 @@ class MochatChannel(BaseChannel):
                 new_ids.append(sid)
                 if sid not in self._session_cursor:
                     self._cold_sessions.add(sid)
-            cid = _str_field(s, "converseId")
+            cid = _str_field(session, "converseId")
             if cid:
                 self._session_by_converse[cid] = sid
 
@@ -592,13 +619,14 @@ class MochatChannel(BaseChannel):
             return
 
         new_ids: list[str] = []
-        for p in raw_panels:
-            if not isinstance(p, dict):
+        for panel_value in cast(list[object], raw_panels):
+            if not isinstance(panel_value, dict):
                 continue
-            pt = p.get("type")
+            panel = cast(dict[str, Any], panel_value)
+            pt = panel.get("type")
             if isinstance(pt, int) and pt != 0:
                 continue
-            pid = _str_field(p, "id", "_id")
+            pid = _str_field(panel, "id", "_id")
             if pid and pid not in self._panel_set:
                 self._panel_set.add(pid)
                 new_ids.append(pid)
@@ -658,16 +686,19 @@ class MochatChannel(BaseChannel):
                 })
                 msgs = resp.get("messages")
                 if isinstance(msgs, list):
-                    for m in reversed(msgs):
-                        if not isinstance(m, dict):
+                    for message_value in reversed(cast(list[object], msgs)):
+                        if not isinstance(message_value, dict):
                             continue
+                        message = cast(dict[str, Any], message_value)
                         evt = _make_synthetic_event(
-                            message_id=str(m.get("messageId") or ""),
-                            author=str(m.get("author") or ""),
-                            content=m.get("content"),
-                            meta=m.get("meta"), group_id=str(resp.get("groupId") or ""),
-                            converse_id=panel_id, timestamp=m.get("createdAt"),
-                            author_info=m.get("authorInfo"),
+                            message_id=str(message.get("messageId") or ""),
+                            author=str(message.get("author") or ""),
+                            content=message.get("content"),
+                            meta=message.get("meta"),
+                            group_id=str(resp.get("groupId") or ""),
+                            converse_id=panel_id,
+                            timestamp=message.get("createdAt"),
+                            author_info=message.get("authorInfo"),
                         )
                         await self._process_inbound_event(panel_id, evt, "panel")
             except asyncio.CancelledError:
@@ -679,7 +710,7 @@ class MochatChannel(BaseChannel):
     # ---- inbound event processing ------------------------------------------
 
     async def _handle_watch_payload(self, payload: dict[str, Any], target_kind: str) -> None:
-        if not isinstance(payload, dict):
+        if not isinstance(cast(object, payload), dict):
             return
         target_id = _str_field(payload, "sessionId")
         if not target_id:
@@ -699,9 +730,10 @@ class MochatChannel(BaseChannel):
                 self._cold_sessions.discard(target_id)
                 return
 
-            for event in raw_events:
-                if not isinstance(event, dict):
+            for event_value in cast(list[object], raw_events):
+                if not isinstance(event_value, dict):
                     continue
+                event = cast(dict[str, Any], event_value)
                 seq = event.get("seq")
                 if target_kind == "session" and isinstance(seq, int) and seq > self._session_cursor.get(target_id, prev):
                     self._mark_session_cursor(target_id, seq)
@@ -712,6 +744,7 @@ class MochatChannel(BaseChannel):
         payload = event.get("payload")
         if not isinstance(payload, dict):
             return
+        payload = cast(dict[str, Any], payload)
 
         author = _str_field(payload, "author")
         if not author or (self.config.agent_user_id and author == self.config.agent_user_id):
@@ -821,6 +854,7 @@ class MochatChannel(BaseChannel):
     async def _handle_notify_chat_message(self, payload: Any) -> None:
         if not isinstance(payload, dict):
             return
+        payload = cast(dict[str, Any], payload)
         group_id = _str_field(payload, "groupId")
         panel_id = _str_field(payload, "converseId", "panelId")
         if not group_id or not panel_id:
@@ -838,11 +872,15 @@ class MochatChannel(BaseChannel):
         await self._process_inbound_event(panel_id, evt, "panel")
 
     async def _handle_notify_inbox_append(self, payload: Any) -> None:
-        if not isinstance(payload, dict) or payload.get("type") != "message":
+        if not isinstance(payload, dict):
+            return
+        payload = cast(dict[str, Any], payload)
+        if payload.get("type") != "message":
             return
         detail = payload.get("payload")
         if not isinstance(detail, dict):
             return
+        detail = cast(dict[str, Any], detail)
         if _str_field(detail, "groupId"):
             return
         converse_id = _str_field(detail, "converseId")
@@ -886,9 +924,14 @@ class MochatChannel(BaseChannel):
         except Exception as e:
             self.logger.warning("Failed to read cursor file: {}", e)
             return
-        cursors = data.get("cursors") if isinstance(data, dict) else None
+        data_object = cast(object, data)
+        cursors = (
+            cast(dict[str, Any], data_object).get("cursors")
+            if isinstance(data_object, dict)
+            else None
+        )
         if isinstance(cursors, dict):
-            for sid, cur in cursors.items():
+            for sid, cur in cast(dict[object, object], cursors).items():
                 if isinstance(sid, str) and isinstance(cur, int) and cur >= 0:
                     self._session_cursor[sid] = cur
 
@@ -896,7 +939,8 @@ class MochatChannel(BaseChannel):
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             self._cursor_path.write_text(json.dumps({
-                "schemaVersion": 1, "updatedAt": datetime.utcnow().isoformat(),
+                "schemaVersion": 1,
+                "updatedAt": datetime.utcnow().isoformat(),  # pyright: ignore[reportDeprecated]
                 "cursors": self._session_cursor,
             }, ensure_ascii=False, indent=2) + "\n", "utf-8")
         except Exception as e:
@@ -917,13 +961,22 @@ class MochatChannel(BaseChannel):
             parsed = response.json()
         except Exception:
             parsed = response.text
-        if isinstance(parsed, dict) and isinstance(parsed.get("code"), int):
-            if parsed["code"] != 200:
-                msg = str(parsed.get("message") or parsed.get("name") or "request failed")
-                raise RuntimeError(f"Mochat API error: {msg} (code={parsed['code']})")
-            data = parsed.get("data")
-            return data if isinstance(data, dict) else {}
-        return parsed if isinstance(parsed, dict) else {}
+        if isinstance(parsed, dict):
+            parsed_dict = cast(dict[str, Any], parsed)
+            if isinstance(parsed_dict.get("code"), int):
+                if parsed_dict["code"] != 200:
+                    msg = str(
+                        parsed_dict.get("message")
+                        or parsed_dict.get("name")
+                        or "request failed"
+                    )
+                    raise RuntimeError(
+                        f"Mochat API error: {msg} (code={parsed_dict['code']})"
+                    )
+                data = parsed_dict.get("data")
+                return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+            return parsed_dict
+        return {}
 
     async def _api_send(self, path: str, id_key: str, id_val: str,
                         content: str, reply_to: str | None, group_id: str | None = None) -> dict[str, Any]:
@@ -937,7 +990,7 @@ class MochatChannel(BaseChannel):
 
     @staticmethod
     def _read_group_id(metadata: dict[str, Any]) -> str | None:
-        if not isinstance(metadata, dict):
+        if not isinstance(cast(object, metadata), dict):
             return None
         value = metadata.get("group_id") or metadata.get("groupId")
         return value.strip() if isinstance(value, str) and value.strip() else None
