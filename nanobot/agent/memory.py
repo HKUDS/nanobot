@@ -706,7 +706,7 @@ class MemoryStore:
             tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
                 f"[{message.get('timestamp', '?')[:16]}] "
-                f"{message['role'].upper()}{tools}: {content}"
+                f"{message.get('role', 'unknown').upper()}{tools}: {content}"
             )
         return "\n".join(lines)
 

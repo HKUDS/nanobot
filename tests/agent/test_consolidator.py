@@ -110,6 +110,11 @@ class TestConsolidatorSummarize:
 
         assert formatted == f"[2026-07-27] USER: [image: {path}]"
 
+    def test_format_messages_defaults_missing_role(self):
+        formatted = MemoryStore._format_messages([{"content": "hello"}])
+
+        assert formatted == "[?] UNKNOWN: hello"
+
     async def test_archive_excludes_model_only_runtime_context(
         self, consolidator, mock_provider, runtime
     ):
