@@ -466,11 +466,11 @@ class _MCPWrapperBase(Tool):
     """Common reconnect handling for wrappers bound to one MCP server session."""
 
     _plugin_discoverable = False
-    _session: ClientSession
+    _session: "ClientSession"
     _server_name: str
     _name: str
 
-    def _set_mcp_connection(self, session: ClientSession, server_name: str) -> None:
+    def _set_mcp_connection(self, session: "ClientSession", server_name: str) -> None:
         self._session = session
         self._server_name = server_name
         self._reconnect: _ReconnectCallback | None = None
@@ -560,9 +560,9 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: ClientSession,
+        session: "ClientSession",
         server_name: str,
-        tool_def: MCPToolDefinition,
+        tool_def: "MCPToolDefinition",
         tool_timeout: int = 30,
     ):
         self._set_mcp_connection(session, server_name)
@@ -722,9 +722,9 @@ class MCPResourceWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: ClientSession,
+        session: "ClientSession",
         server_name: str,
-        resource_def: Resource,
+        resource_def: "Resource",
         resource_timeout: int = 30,
     ):
         self._set_mcp_connection(session, server_name)
@@ -826,9 +826,9 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: ClientSession,
+        session: "ClientSession",
         server_name: str,
-        prompt_def: Prompt,
+        prompt_def: "Prompt",
         prompt_timeout: int = 30,
     ):
         self._set_mcp_connection(session, server_name)
@@ -959,7 +959,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict[str, MCPServerConfig], registry: ToolRegistry
+    mcp_servers: "dict[str, MCPServerConfig]", registry: ToolRegistry
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -973,7 +973,7 @@ async def connect_mcp_servers(
     from mcp.client.streamable_http import streamable_http_client
 
     async def open_single_server(
-        name: str, cfg: MCPServerConfig
+        name: str, cfg: "MCPServerConfig"
     ) -> tuple[str, AsyncExitStack | None]:
         server_stack = AsyncExitStack()
         await server_stack.__aenter__()
@@ -1194,7 +1194,7 @@ async def connect_mcp_servers(
             return name, None
 
     async def connect_single_server(
-        name: str, cfg: MCPServerConfig
+        name: str, cfg: "MCPServerConfig"
     ) -> tuple[str, MCPConnection | None]:
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[bool] = loop.create_future()

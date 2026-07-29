@@ -26,6 +26,14 @@ from nanobot.config.schema import MCPServerConfig
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
+def test_type_checking_only_mcp_annotations_are_deferred() -> None:
+    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "ClientSession"
+    assert MCPToolWrapper.__init__.__annotations__["session"] == "ClientSession"
+    assert MCPResourceWrapper.__init__.__annotations__["resource_def"] == "Resource"
+    assert MCPPromptWrapper.__init__.__annotations__["prompt_def"] == "Prompt"
+    assert connect_mcp_servers.__annotations__["mcp_servers"] == "dict[str, MCPServerConfig]"
+
+
 class _FakeTextContent:
     def __init__(self, text: str) -> None:
         self.text = text
