@@ -75,6 +75,131 @@ def _tool_round(call_id: str) -> list[dict]:
 
 
 class TestConsolidatorSummarize:
+    async def test_archive_persists_media_path_when_summary_omits_it(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        path = "/home/user/.nanobot/media/websocket/upload_photo.png"
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User uploaded a photo.",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "please inspect this", "media": [path]}],
+            runtime=runtime,
+        )
+
+        prompt = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        persisted = "\n".join(
+            entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert path in prompt
+        assert result is not None and path in result
+        assert path in persisted
+
+    async def test_archive_does_not_duplicate_media_path_already_in_summary(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        path = "/home/user/.nanobot/media/websocket/already-there.png"
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=f"User uploaded [image: {path}]",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "", "media": [path]}],
+            runtime=runtime,
+        )
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert result is not None and result.count(path) == 1
+        assert len(entries) == 1
+        assert entries[0]["content"].count(path) == 1
+
+    async def test_archive_recovers_path_removed_by_summary_truncation(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        path = "/media/late-path.png"
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=f"{'S' * (_ARCHIVE_SUMMARY_MAX_CHARS * 2)} [image: {path}]",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "", "media": [path]}],
+            runtime=runtime,
+        )
+
+        persisted = "\n".join(
+            entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert result is not None and path in result
+        assert persisted.count(path) == 1
+
+    async def test_archive_recovers_path_removed_with_unclosed_thinking(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        path = "/media/private.png"
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=f"<think>internal [image: {path}]",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "", "media": [path]}],
+            runtime=runtime,
+        )
+
+        persisted = "\n".join(
+            entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert result is not None and path in result
+        assert "internal" not in persisted
+
+    async def test_archive_manifest_only_covers_removed_messages(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        archived_path = "/media/archived.png"
+        retained_path = "/media/still-live.png"
+        archived = {"role": "user", "content": "old", "media": [archived_path]}
+        retained = {"role": "user", "content": "new", "media": [retained_path]}
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+
+        await consolidator.archive(
+            [archived],
+            summary_messages=[archived, retained],
+            runtime=runtime,
+        )
+
+        prompt = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        persisted = "\n".join(
+            entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert archived_path in prompt and retained_path in prompt
+        assert archived_path in persisted
+        assert retained_path not in persisted
+
+    def test_format_messages_keeps_media_only_user_turn(self):
+        path = "/home/user/.nanobot/media/websocket/clip.mp4"
+
+        formatted = MemoryStore._format_messages([
+            {
+                "role": "user",
+                "content": "",
+                "media": [path],
+                "timestamp": "2026-07-27",
+            }
+        ])
+
+        assert formatted == f"[2026-07-27] USER: [image: {path}]"
+
     async def test_archive_excludes_model_only_runtime_context(
         self, consolidator, mock_provider, runtime
     ):
@@ -599,6 +724,39 @@ class TestCompactIdleSession:
         assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
+    async def test_media_path_survives_idle_compact(
+        self, real_consolidator, mock_provider, store, runtime
+    ):
+        path = "/home/user/.nanobot/media/websocket/upload_photo.png"
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User shared a photo.",
+            finish_reason="stop",
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("websocket:media")
+        session.add_message("user", "", media=[path])
+        session.add_message("assistant", "photo received")
+        for i in range(12):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "websocket:media",
+            runtime=runtime,
+            max_suffix=8,
+        )
+
+        reloaded = sessions.get_or_create("websocket:media")
+        persisted = "\n".join(
+            entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert result is not None and path in result
+        assert path in reloaded.metadata["_last_summary"]["text"]
+        assert path in persisted
+
+    @pytest.mark.asyncio
     async def test_summarizes_retained_suffix_not_just_dropped_prefix(
         self, real_consolidator, mock_provider, runtime
     ):
@@ -992,6 +1150,19 @@ class TestRawArchiveTruncation:
         assert len(entries) == 1
         assert "hello" in entries[0]["content"]
 
+    def test_raw_archive_recovers_media_path_after_content_truncation(self, store):
+        path = "/home/user/.nanobot/media/websocket/upload_photo.png"
+
+        store.raw_archive([
+            {"role": "user", "content": "x" * 30_000, "media": [path]}
+        ])
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        persisted = "\n".join(entry["content"] for entry in entries)
+        assert len(entries) == 2
+        assert persisted.count(path) == 1
+        assert any("[RAW]" in entry["content"] for entry in entries)
+
     def test_raw_archive_excludes_model_only_runtime_context(self, store):
         content, marker = append_runtime_context(
             "ship the feature",
@@ -1041,6 +1212,49 @@ class TestArchiveTruncation:
         user_content = call_args.kwargs["messages"][1]["content"]
         # Should be significantly shorter than 100K
         assert len(user_content) < 50_000
+
+    async def test_archive_without_media_keeps_existing_return_contract(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        summary = "S" * (_ARCHIVE_SUMMARY_MAX_CHARS * 2)
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=summary,
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "hello"}],
+            runtime=runtime,
+        )
+
+        persisted = store.read_unprocessed_history(since_cursor=0)[0]["content"]
+        assert result == summary
+        assert len(persisted) <= _ARCHIVE_SUMMARY_MAX_CHARS + 50
+
+    async def test_large_media_manifest_is_durable_but_session_summary_is_bounded(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        paths = [
+            f"/media/{index:03d}-{'x' * 80}.png"
+            for index in range(80)
+        ]
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="(nothing)",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "", "media": paths}],
+            runtime=runtime,
+        )
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        persisted = "\n".join(entry["content"] for entry in entries)
+        assert len(entries) > 1
+        assert result is not None
+        assert len(result) <= _ARCHIVE_SUMMARY_MAX_CHARS + 50
+        for path in paths:
+            assert persisted.count(path) == 1
 
     async def test_archive_truncates_with_small_token_budget(
         self, consolidator, mock_provider, store, runtime

@@ -22,10 +22,10 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     recent_message_start_index,
     safe_filename,
     strip_think,
@@ -214,12 +214,11 @@ class Session:
             # image used to be. Without this, an image-only user turn
             # replays as an empty user message — the assistant's reply then
             # looks like it's responding to nothing.
-            media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            content = content_with_media_breadcrumbs(
+                role,
+                content,
+                message.get("media"),
+            )
             cli_apps = message.get("cli_apps")
             if (
                 include_runtime_context
