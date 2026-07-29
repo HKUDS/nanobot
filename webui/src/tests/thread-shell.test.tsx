@@ -2847,7 +2847,7 @@ describe("ThreadShell", () => {
     expect(historyCalls).toBe(1);
   });
 
-  it("does not refetch thread history for metadata-only session updates", async () => {
+  it("keeps rendered media mounted for metadata-only session updates", async () => {
     const client = makeClient();
     let historyCalls = 0;
     vi.stubGlobal(
@@ -2856,12 +2856,16 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Achat-a/webui-thread")) {
           historyCalls += 1;
-          return httpJson(
-            transcriptFromSimpleMessages([
-              { role: "user", content: "question" },
-              { role: "assistant", content: "answer" },
-            ]),
-          );
+          const thread = transcriptFromSimpleMessages([
+            { role: "user", content: "question" },
+            { role: "assistant", content: "answer" },
+          ]);
+          thread.messages[1]!.media = [{
+            kind: "image",
+            url: "/api/media/stable/image",
+            name: "answer.png",
+          }];
+          return httpJson(thread);
         }
         return {
           ok: false,
@@ -2884,6 +2888,7 @@ describe("ThreadShell", () => {
     );
 
     await waitFor(() => expect(screen.getByText("answer")).toBeInTheDocument());
+    const image = screen.getByRole("img", { name: "answer.png" });
     expect(historyCalls).toBe(1);
 
     await act(async () => {
@@ -2891,6 +2896,7 @@ describe("ThreadShell", () => {
     });
 
     expect(historyCalls).toBe(1);
+    expect(screen.getByRole("img", { name: "answer.png" })).toBe(image);
   });
 
   it("does not scroll again when canonical history refreshes after a session update", async () => {

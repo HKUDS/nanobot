@@ -67,6 +67,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
@@ -1003,6 +1004,13 @@ class WebSocketChannel(BaseChannel):
             return
         # Signal that the agent has fully finished processing the current turn.
         if isinstance(event, TurnEndEvent):
+            turn_id = (msg.metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+            session_update_scope = (
+                "metadata"
+                if isinstance(turn_id, str)
+                and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)
+                else "thread"
+            )
             turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
             await self.send_turn_end(
                 msg.chat_id,
@@ -1011,7 +1019,7 @@ class WebSocketChannel(BaseChannel):
                 metadata=msg.metadata,
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
-            await self.send_session_updated(msg.chat_id, scope="thread")
+            await self.send_session_updated(msg.chat_id, scope=session_update_scope)
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:

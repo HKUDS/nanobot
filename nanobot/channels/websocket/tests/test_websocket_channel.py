@@ -49,7 +49,11 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
-from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
+    WEBUI_TURN_METADATA_KEY,
+)
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 from nanobot.webui.transcript import (
     append_transcript_object,
@@ -1615,6 +1619,43 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
     assert _sent_ws_payloads(mock_ws) == [
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_system_command_turn_end_only_refreshes_session_metadata() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-model")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-model",
+        content="",
+        metadata={
+            WEBUI_TURN_METADATA_KEY: f"{WEBUI_SYSTEM_COMMAND_TURN_PREFIX}model-switch",
+        },
+        event=TurnEndEvent(),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [
+        {
+            "event": "turn_end",
+            "chat_id": "chat-model",
+            "turn_id": f"{WEBUI_SYSTEM_COMMAND_TURN_PREFIX}model-switch",
+            "turn_phase": "complete",
+            "turn_seq": 1,
+        },
+        {
+            "event": "session_updated",
+            "chat_id": "chat-model",
+            "scope": "metadata",
+        },
     ]
 
 
