@@ -97,9 +97,11 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
+        runtime_events: Any | None = None,
     ):
         self.config = config
         self.bus = bus
+        self.runtime_events = runtime_events
         self._session_manager = session_manager
         self._cron_service = cron_service
         self._local_trigger_store = local_trigger_store
@@ -176,6 +178,7 @@ class ChannelManager:
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
                 logger=logger,
+                runtime_events=self.runtime_events,
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
