@@ -1158,6 +1158,10 @@
   },
   "message": {
     "streaming": "sedang mengalir",
+    "delivery": {
+      "sending": "Mengirim…",
+      "failed": "Belum terkirim"
+    },
     "assistantTyping": "Asisten sedang mengetik",
     "toolSingle": "Menggunakan sebuah alat",
     "toolMany": "Menggunakan {{count}} alat",

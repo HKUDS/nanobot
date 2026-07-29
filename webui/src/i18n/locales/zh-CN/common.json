@@ -1172,6 +1172,10 @@
   },
   "message": {
     "streaming": "流式输出中",
+    "delivery": {
+      "sending": "发送中…",
+      "failed": "未发送"
+    },
     "assistantTyping": "助手正在输入",
     "toolSingle": "正在使用工具",
     "toolMany": "已使用 {{count}} 个工具",

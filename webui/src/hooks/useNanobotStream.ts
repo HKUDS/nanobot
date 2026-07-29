@@ -17,6 +17,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
+  MessageDeliveryStatus,
   ToolProgressEvent,
   UIMediaAttachment,
   UIFileEdit,
@@ -519,6 +520,27 @@ function eventTurnId(ev: InboundEvent): string | undefined {
   return "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : undefined;
 }
 
+function transitionTurnDelivery(
+  messages: UIMessage[],
+  turnId: string,
+  status: MessageDeliveryStatus,
+): UIMessage[] {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (
+      message.role !== "user"
+      || message.turnId !== turnId
+      || message.deliveryStatus === status
+      || (status === "accepted" && message.deliveryStatus !== "sending")
+    ) {
+      return message;
+    }
+    changed = true;
+    return { ...message, deliveryStatus: status };
+  });
+  return changed ? next : messages;
+}
+
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
@@ -697,7 +719,11 @@ export function useNanobotStream(
       ) {
         fileEditSegmentRef.current = null;
       }
-      return prev.filter((message) => message.turnId !== rejectedTurnId);
+      return prev.flatMap((message) => {
+        if (message.turnId !== rejectedTurnId) return [message];
+        if (message.role !== "user") return [];
+        return [{ ...message, deliveryStatus: "failed" }];
+      });
     });
 
     const remainingStartedAt = client.getRunStartedAt(chatId);
@@ -975,6 +1001,11 @@ export function useNanobotStream(
         }
         return;
       }
+      const turnId = eventTurnId(ev);
+      if (turnId) {
+        setMessages((prev) => transitionTurnDelivery(prev, turnId, "accepted"));
+      }
+      if (ev.event === "message_accepted") return;
       const sideChannelEvent = isSideChannelEvent(ev);
       if (
         streamEndTimerRef.current !== null
@@ -1354,6 +1385,7 @@ export function useNanobotStream(
             turnId,
             turnPhase: "user",
             turnSeq: 0,
+            deliveryStatus: "sending",
             createdAt: Date.now(),
             ...(previews ? { media: previews } : {}),
             ...(options?.cliApps?.length ? { cliApps: options.cliApps } : {}),

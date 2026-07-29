@@ -1172,6 +1172,10 @@
   },
   "message": {
     "streaming": "transmitindo",
+    "delivery": {
+      "sending": "Enviando…",
+      "failed": "Não enviada"
+    },
     "assistantTyping": "Assistente está digitando",
     "toolSingle": "Usando uma ferramenta",
     "toolMany": "Foram usadas {{count}} ferramentas",

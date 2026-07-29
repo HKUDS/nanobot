@@ -1158,6 +1158,10 @@
   },
   "message": {
     "streaming": "串流輸出中",
+    "delivery": {
+      "sending": "傳送中…",
+      "failed": "未傳送"
+    },
     "assistantTyping": "助理正在輸入",
     "toolSingle": "正在使用工具",
     "toolMany": "已使用 {{count}} 個工具",

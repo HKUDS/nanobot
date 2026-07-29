@@ -1158,6 +1158,10 @@
   },
   "message": {
     "streaming": "生成中",
+    "delivery": {
+      "sending": "送信中…",
+      "failed": "未送信"
+    },
     "assistantTyping": "アシスタントが入力中",
     "toolSingle": "ツールを使用中",
     "toolMany": "{{count}} 個のツールを使用",

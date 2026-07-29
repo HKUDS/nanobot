@@ -90,6 +90,31 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("routes message acceptance acknowledgements to the matching chat handler", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onChat("chat-ack", handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    client.sendMessage("chat-ack", "hello", undefined, { turnId: "turn-ack" });
+
+    lastSocket().fakeMessage({
+      event: "message_accepted",
+      chat_id: "chat-ack",
+      turn_id: "turn-ack",
+    });
+
+    expect(handler).toHaveBeenCalledWith({
+      event: "message_accepted",
+      chat_id: "chat-ack",
+      turn_id: "turn-ack",
+    });
+  });
+
   it("can swap the socket factory when the runtime URL changes", () => {
     const browserFactory = vi.fn(
       (url: string) => new FakeSocket(`browser:${url}`) as unknown as WebSocket,

@@ -1158,6 +1158,10 @@
   },
   "message": {
     "streaming": "생성 중",
+    "delivery": {
+      "sending": "전송 중…",
+      "failed": "전송되지 않음"
+    },
     "assistantTyping": "도우미가 입력 중",
     "toolSingle": "도구 사용 중",
     "toolMany": "도구 {{count}}개 사용됨",

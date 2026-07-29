@@ -5,6 +5,7 @@ export type Role = "user" | "assistant" | "tool" | "system";
 export type MessageKind = "message" | "trace";
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
+export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
 
 /** One image attached to a UIMessage.
  *
@@ -76,6 +77,8 @@ export interface UIMessage {
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** Ephemeral delivery lifecycle for optimistic user messages. */
+  deliveryStatus?: MessageDeliveryStatus;
 }
 
 export interface UICliAppAttachment {

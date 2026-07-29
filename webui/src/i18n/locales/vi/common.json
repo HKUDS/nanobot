@@ -1158,6 +1158,10 @@
   },
   "message": {
     "streaming": "đang truyền",
+    "delivery": {
+      "sending": "Đang gửi…",
+      "failed": "Chưa gửi"
+    },
     "assistantTyping": "Trợ lý đang nhập",
     "toolSingle": "Đang dùng một công cụ",
     "toolMany": "Đã dùng {{count}} công cụ",

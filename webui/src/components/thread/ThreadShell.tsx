@@ -222,7 +222,11 @@ function latestActiveTurnId(messages: UIMessage[]): string | null {
   }
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === "user" && message.turnId) return message.turnId;
+    if (
+      message.role === "user"
+      && message.deliveryStatus !== "failed"
+      && message.turnId
+    ) return message.turnId;
   }
   return null;
 }

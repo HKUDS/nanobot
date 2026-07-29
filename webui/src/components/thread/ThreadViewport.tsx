@@ -250,7 +250,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const hiddenUserMessageCount =
     userMessageOffset
     + (hiddenMessageCount > 0
-      ? messages.slice(0, hiddenMessageCount).filter((message) => message.role === "user").length
+      ? messages.slice(0, hiddenMessageCount).filter(
+        (message) => message.role === "user" && message.deliveryStatus !== "failed",
+      ).length
       : 0);
   const visibleForkBoundaryMessageCount =
     forkBoundaryMessageCount !== null && forkBoundaryMessageCount > hiddenMessageCount

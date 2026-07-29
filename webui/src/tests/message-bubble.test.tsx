@@ -113,6 +113,27 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("renders sending and failed delivery states without persistent accepted chrome", () => {
+    const message: UIMessage = {
+      id: "u-delivery",
+      role: "user",
+      content: "hello",
+      createdAt: Date.now(),
+      deliveryStatus: "sending",
+    };
+
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+
+    rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ ...message, deliveryStatus: "failed" }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Not sent");
+    expect(screen.getByText("hello")).toHaveClass("ring-destructive/30");
+  });
+
   it("styles only generated quoted context in user messages", () => {
     const message: UIMessage = {
       id: "u-quote",
