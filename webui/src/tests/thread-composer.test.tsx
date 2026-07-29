@@ -825,10 +825,10 @@ describe("ThreadComposer", () => {
     expect(onTranscribeAudio).not.toHaveBeenCalled();
   });
 
-  it("warns during recording when microphone input is silent", async () => {
+  it("transcribes recorded audio even when waveform samples are silent", async () => {
     mockVoiceRecorder();
     mockVoiceAudioInput();
-    const onTranscribeAudio = vi.fn(async () => "should not appear");
+    const onTranscribeAudio = vi.fn(async () => "quiet voice");
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -843,9 +843,11 @@ describe("ThreadComposer", () => {
       await new Promise((resolve) => setTimeout(resolve, 1_150));
     });
 
-    expect(screen.getByText("No microphone input detected.")).toBeInTheDocument();
+    expect(screen.queryByText("No microphone input detected.")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
-    expect(onTranscribeAudio).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue("quiet voice")).toBeInTheDocument();
   });
 
   it("does not treat unavailable microphone levels as silence", async () => {
