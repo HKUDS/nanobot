@@ -1348,7 +1348,7 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
 
 
-def _attach_to_background_gateway(runtime: GatewayRuntime) -> None:
+def _attach_to_background_gateway(runtime: "GatewayRuntime") -> None:
     """Keep a foreground WebUI command attached to a managed gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
