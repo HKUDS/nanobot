@@ -1148,7 +1148,10 @@ class CustomImageGenerationClient(ImageGenerationProvider):
             "Content-Type": "application/json",
         }
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            if "X-API-Key" not in self.extra_headers:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            else:
+                headers["X-API-Key"] = self.api_key
         headers.update(self.extra_headers)
 
         body: dict[str, Any] = {
