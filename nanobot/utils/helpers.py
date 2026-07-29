@@ -367,26 +367,19 @@ def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     return f"[image: {path}]" if path else empty
 
 
-def media_breadcrumb_texts(media: Any) -> list[str]:
-    """Render valid persisted media paths as single-line replay breadcrumbs."""
-    if not isinstance(media, list):
-        return []
-    return [
-        image_placeholder_text(path.replace("\r", " ").replace("\n", " "))
-        for path in media
-        if isinstance(path, str) and path
-    ]
-
-
 def content_with_media_breadcrumbs(
     role: str | None,
     content: Any,
     media: Any,
 ) -> Any:
     """Append persisted user-media breadcrumbs to plain-text content."""
-    if role != "user" or not isinstance(content, str):
+    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
         return content
-    breadcrumbs = "\n".join(media_breadcrumb_texts(media))
+    breadcrumbs = "\n".join(
+        image_placeholder_text(path)
+        for path in media
+        if isinstance(path, str) and path
+    )
     if not breadcrumbs:
         return content
     return f"{content}\n{breadcrumbs}" if content else breadcrumbs

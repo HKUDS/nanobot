@@ -405,20 +405,6 @@ def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
     assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
-def test_get_history_preserves_non_image_media_path():
-    session = Session(key="test:non-image-media")
-    session.messages.append(
-        {"role": "user", "content": "review", "media": ["/m/report.pdf"]}
-    )
-
-    history = session.get_history(max_messages=500)
-
-    assert history == [{
-        "role": "user",
-        "content": "review\n[image: /m/report.pdf]",
-    }]
-
-
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     session = Session(key="test:cli-app")
     session.messages.append(
