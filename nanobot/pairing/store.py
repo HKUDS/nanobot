@@ -47,11 +47,13 @@ def _load() -> dict[str, Any]:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
 
-    # JSON stores may contain null maps after partial edits; treat like {}.
+    # JSON stores may contain null or malformed maps after partial edits; treat like {}.
     data = cast(dict[str, Any], data)
-    approved: dict[str, Any] = cast(dict[str, Any], data.get("approved") or {})
+    raw_approved = data.get("approved")
+    approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
     data["approved"] = approved
-    pending: dict[str, Any] = cast(dict[str, Any], data.get("pending") or {})
+    raw_pending = data.get("pending")
+    pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
     data["pending"] = pending
 
     # Convert approved lists to str sets for O(1) lookup.
@@ -66,8 +68,10 @@ def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Convert sets back to lists for JSON serialization
-    approved = cast(dict[str, Any], data.get("approved") or {})
-    pending = cast(dict[str, Any], data.get("pending") or {})
+    raw_approved = data.get("approved")
+    approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
+    raw_pending = data.get("pending")
+    pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
     payload: dict[str, Any] = {
         "approved": {ch: sorted(list(cast(set[str], users))) for ch, users in approved.items()},
         "pending": dict(pending),

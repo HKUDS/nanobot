@@ -67,7 +67,8 @@ class ToolCallRequest:
         ``messages.content.N.tool_use.name: Input should be a valid string``),
         which permanently wedges the session.
         """
-        return bool(self.name)
+        runtime_name = cast(object, self.name)
+        return isinstance(runtime_name, str) and bool(runtime_name)
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""

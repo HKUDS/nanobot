@@ -22,12 +22,14 @@ class ChannelValidationContext:
     allow_local_service_access: bool = False
 
 
+# Keep callback contracts precise for static consumers. The public adapters below
+# still validate third-party implementations at runtime.
 SetupValidator = Callable[[dict[str, Any], ChannelValidationContext], dict[str, Any]]
-DefaultConfigFactory = Callable[[], object]
-InstanceSpecsFactory = Callable[..., object]
-InstanceConfigUpdater = Callable[..., object]
+DefaultConfigFactory = Callable[[], dict[str, Any]]
+InstanceSpecsFactory = Callable[..., Iterable["ChannelInstanceSpec"]]
+InstanceConfigUpdater = Callable[..., dict[str, Any]]
 RuntimeNameFactory = Callable[[str, str], str]
-FeatureInstancesFactory = Callable[..., object]
+FeatureInstancesFactory = Callable[..., list[dict[str, Any]] | None]
 LocalStatePresent = Callable[[Any], bool]
 
 __all__ = [
@@ -283,7 +285,7 @@ def channel_default_config(plugin: ChannelPlugin) -> dict[str, Any]:
     factory = plugin.management.default_config
     if factory is None:
         return defaults
-    values_raw = factory()
+    values_raw = cast(object, factory())
     if not isinstance(values_raw, dict):
         raise TypeError(f"ChannelPlugin.management.default_config for '{plugin.name}' must return a dict")
     values = cast(dict[str, Any], values_raw)
@@ -335,7 +337,7 @@ def channel_instance_specs(
             else [ChannelInstanceSpec(instance_id="default", config=section)]
         )
     else:
-        raw_specs = factory(section, enabled_only=enabled_only)
+        raw_specs = cast(object, factory(section, enabled_only=enabled_only))
     if not isinstance(raw_specs, Iterable):
         raise TypeError(
             f"ChannelPlugin.management.instance_specs for '{plugin.name}' must return an iterable"
@@ -421,7 +423,7 @@ def channel_update_instance_config(
         if instance_id not in {"", "default"}:
             raise ValueError(f"{plugin.name} does not support multiple instances")
         return values
-    updated = updater(section, values, instance_id=instance_id)
+    updated = cast(object, updater(section, values, instance_id=instance_id))
     if not isinstance(updated, dict):
         raise TypeError(f"ChannelPlugin.management.update_instance_config for '{plugin.name}' must return a dict")
     return cast(dict[str, Any], updated)
@@ -455,7 +457,11 @@ def channel_feature_instances(
     setup_spec: ChannelSetupSpec | None = None,
 ) -> list[dict[str, Any]] | None:
     factory = plugin.management.feature_instances
-    overrides = factory(section, setup_spec=setup_spec) if factory is not None else None
+    overrides = (
+        cast(object, factory(section, setup_spec=setup_spec))
+        if factory is not None
+        else None
+    )
     if overrides is None and not plugin.management.multi_instance:
         return None
     if overrides is not None and (

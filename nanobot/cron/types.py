@@ -149,13 +149,12 @@ class CronJob:
 
     @classmethod
     def from_dict(cls, kwargs: dict[str, Any]) -> CronJob:
-        state_kwargs = cast(dict[str, Any], kwargs.get("state", {}))
+        state_kwargs = dict(cast(dict[str, Any], kwargs.get("state", {})))
         state_kwargs["run_history"] = [
             record
             if isinstance(record, CronRunRecord)
             else CronRunRecord(**cast(dict[str, Any], record))
             for record in cast(list[object], state_kwargs.get("run_history", []))
-            if isinstance(record, (dict, CronRunRecord))
         ]
         kwargs["schedule"] = CronSchedule(
             **cast(dict[str, Any], kwargs.get("schedule", {"kind": "every"}))

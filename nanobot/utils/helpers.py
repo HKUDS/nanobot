@@ -12,13 +12,22 @@ from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast, overload
 
 import tiktoken
 from loguru import logger
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+_T = TypeVar("_T")
+
+
+@overload
+def sanitize_surrogates(text: str) -> str: ...
+
+
+@overload
+def sanitize_surrogates(text: _T) -> _T: ...
 
 
 def sanitize_surrogates(text: Any) -> Any:

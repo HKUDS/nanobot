@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from nanobot.pairing import __all__ as pairing_all
@@ -270,6 +272,23 @@ def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypat
     assert store.is_approved("telegram", "123") is False
     assert store.list_pending() == []
     assert store.get_approved("telegram") == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("approved", "corrupt"), ("pending", ["corrupt"])],
+)
+def test_load_treats_non_object_approved_and_pending_maps_as_empty(
+    tmp_path, monkeypatch, field, value
+):
+    path = tmp_path / "pairing.json"
+    payload = {"approved": {}, "pending": {}}
+    payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+
+    assert store.is_approved("telegram", "123") is False
+    assert store.list_pending() == []
 
 
 @pytest.mark.parametrize("payload", ["null", "[]", "true"])
