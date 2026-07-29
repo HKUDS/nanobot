@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import hmac
 import mimetypes
+import os
 import re
 import shutil
 import uuid
@@ -126,17 +127,33 @@ def sign_or_stage_media_path(
     signed = sign_media_path(path, secret=secret, media_dir=media_dir)
     if signed is not None:
         return {"url": signed, "name": path.name}
+    staged_tmp: Path | None = None
     try:
-        if not path.is_file():
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
             return None
+        source_stat = resolved.stat()
         target_dir = media_dir("websocket")
         safe_name = safe_filename(path.name) or "attachment"
-        staged = target_dir / f"{uuid.uuid4().hex[:12]}-{safe_name}"
-        shutil.copyfile(path, staged)
+        source_version = "\0".join((
+            os.path.normcase(str(resolved)),
+            str(source_stat.st_size),
+            str(source_stat.st_mtime_ns),
+            str(source_stat.st_ctime_ns),
+        ))
+        source_digest = hashlib.sha256(source_version.encode("utf-8")).hexdigest()[:20]
+        staged = target_dir / f"{source_digest}-{safe_name}"
+        if not staged.is_file() or staged.stat().st_size != source_stat.st_size:
+            staged_tmp = target_dir / f".{source_digest}-{uuid.uuid4().hex}.tmp"
+            shutil.copyfile(resolved, staged_tmp)
+            staged_tmp.replace(staged)
     except OSError as exc:
         if logger is not None:
             logger.warning("failed to stage outbound media {}: {}", path, exc)
         return None
+    finally:
+        if staged_tmp is not None:
+            staged_tmp.unlink(missing_ok=True)
     signed = sign_media_path(staged, secret=secret, media_dir=media_dir)
     if signed is None:
         return None

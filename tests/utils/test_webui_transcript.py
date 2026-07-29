@@ -107,6 +107,20 @@ def test_segmented_transcript_paginates_latest_and_older_without_overlap(
     assert older["page"]["user_message_offset"] == 2
     assert _message_contents(older) == _numbered_turn_texts(3, 4)
 
+    latest_again = build_webui_thread_response(key, limit=4, direction="latest")
+    full = build_webui_thread_response(key)
+    assert latest_again is not None
+    assert full is not None
+    assert [message["id"] for message in latest_again["messages"]] == [
+        message["id"] for message in latest["messages"]
+    ]
+    full_ids_by_content = {
+        message["content"]: message["id"] for message in full["messages"]
+    }
+    assert [full_ids_by_content[message["content"]] for message in latest["messages"]] == [
+        message["id"] for message in latest["messages"]
+    ]
+
 
 def test_page_cursor_survives_active_rotation_after_latest_page(
     tmp_path,
@@ -277,6 +291,21 @@ def test_write_session_messages_as_transcript_builds_canonical_prefix(
     ]
     msgs = replay_transcript_to_ui_messages(lines)
     assert [m["content"] for m in msgs] == ["round1", "answer1"]
+
+
+def test_direct_transcript_replay_generates_stable_message_ids() -> None:
+    lines = [
+        {"event": "user", "chat_id": "stable", "text": "question"},
+        {"event": "message", "chat_id": "stable", "text": "answer"},
+        {"event": "turn_end", "chat_id": "stable"},
+    ]
+
+    first = replay_transcript_to_ui_messages(lines)
+    second = replay_transcript_to_ui_messages(lines)
+
+    assert [message["id"] for message in second] == [
+        message["id"] for message in first
+    ]
 
 
 def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:

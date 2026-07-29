@@ -171,6 +171,7 @@ export interface FetchWebuiThreadOptions {
   limit?: number;
   direction?: "latest";
   before?: string | null;
+  signal?: AbortSignal;
 }
 
 export async function fetchWebuiThread(
@@ -192,6 +193,7 @@ export async function fetchWebuiThread(
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
     cache: "no-store",
+    signal: options?.signal,
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);

@@ -2937,6 +2937,17 @@ async def test_webui_thread_resigns_assistant_media_urls(
         assert media[0]["url"].startswith("/api/media/")
         assert media[0]["url"] != "/api/media/old-sig/old-payload"
 
+        repeated = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket:video-replay/webui-thread",
+            headers=auth,
+        )
+        repeated_assistant = next(
+            m for m in repeated.json()["messages"] if m["role"] == "assistant"
+        )
+        assert repeated_assistant["id"] == assistant["id"]
+        assert repeated_assistant["media"][0]["url"] == media[0]["url"]
+        assert len(list(websocket_media.iterdir())) == 1
+
         fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
         assert fetched.status_code == 200
         assert fetched.content == b"video"

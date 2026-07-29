@@ -302,7 +302,7 @@ function SkillDetailSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { token } = useClient();
+  const { getToken } = useClient();
   const { t } = useTranslation();
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -322,7 +322,7 @@ function SkillDetailSheet({
     setActionError("");
     setDeleteOpen(false);
     setDescriptionExpanded(false);
-    fetchSkillDetail(token, skill.name)
+    fetchSkillDetail(getToken(), skill.name)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
       })
@@ -335,7 +335,7 @@ function SkillDetailSheet({
     return () => {
       cancelled = true;
     };
-  }, [open, refreshKey, skill, token]);
+  }, [getToken, open, refreshKey, skill]);
 
   if (!skill) return null;
 
@@ -354,7 +354,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await updateSkillEnabled(token, activeSkill.name, !enabled);
+      const payload = await updateSkillEnabled(getToken(), activeSkill.name, !enabled);
       notifySkillsChanged(payload);
       const updated = payload.skills.find((item) => item.name === activeSkill.name);
       if (updated) {
@@ -378,7 +378,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await deleteSkill(token, activeSkill.name);
+      const payload = await deleteSkill(getToken(), activeSkill.name);
       notifySkillsChanged(payload);
       onOpenChange(false);
     } catch (reason) {

@@ -42,12 +42,16 @@ function fakeClient() {
   };
 }
 
-function wrap(client: ReturnType<typeof fakeClient>) {
+function wrap(
+  client: ReturnType<typeof fakeClient>,
+  tokenSource: string | { current: string } = "tok",
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
+    const token = typeof tokenSource === "string" ? tokenSource : tokenSource.current;
     return (
       <ClientProvider
         client={client as unknown as import("@/lib/nanobot-client").NanobotClient}
-        token="tok"
+        token={token}
       >
         {children}
       </ClientProvider>
@@ -188,6 +192,76 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
     expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces a same-task burst of session updates into one refresh", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.listSessions).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "metadata");
+      client.emitSessionUpdate("chat-a", "thread");
+      client.emitSessionUpdate("chat-b", "metadata");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one trailing refresh when an update arrives during a session request", async () => {
+    let resolveInFlight!: (rows: []) => void;
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveInFlight = resolve;
+      }))
+      .mockResolvedValueOnce([
+        {
+          key: "websocket:chat-a",
+          channel: "websocket",
+          chatId: "chat-a",
+          createdAt: "2026-04-16T10:00:00Z",
+          updatedAt: "2026-04-16T10:01:00Z",
+          title: "Latest title",
+          preview: "Latest preview",
+        },
+      ]);
+    const client = fakeClient();
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "metadata");
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "thread");
+      await Promise.resolve();
+    });
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveInFlight([]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions[0]?.title).toBe("Latest title");
   });
 
   it("keeps a newly created chat visible until the server session list catches up", async () => {
@@ -506,6 +580,73 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
+  it("does not reload history when only the auth token rotates", async () => {
+    const tokenSource = { current: "tok-old" };
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      messages: [
+        { id: "a1", role: "assistant", content: "stable", createdAt: 1 },
+      ],
+    });
+
+    const { result, rerender } = renderHook(
+      () => useSessionHistory("websocket:token-rotation"),
+      { wrapper: wrap(fakeClient(), tokenSource) },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(1);
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok-old",
+      "websocket:token-rotation",
+      expect.any(Object),
+    );
+
+    tokenSource.current = "tok-new";
+    rerender();
+    await act(async () => Promise.resolve());
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok-new",
+      "websocket:token-rotation",
+      expect.any(Object),
+    );
+  });
+
+  it("aborts a superseded latest-history request without surfacing an error", async () => {
+    let firstSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread)
+      .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((_resolve, reject) => {
+        if (typeof optionsOrBase !== "string") firstSignal = optionsOrBase?.signal;
+        firstSignal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }))
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "a2", role: "assistant", content: "latest", createdAt: 2 },
+        ],
+      });
+
+    const { result } = renderHook(
+      () => useSessionHistory("websocket:superseded"),
+      { wrapper: wrap(fakeClient()) },
+    );
+
+    await waitFor(() => expect(firstSignal).toBeDefined());
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+    expect(firstSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages.map((message) => message.id)).toEqual(["a2"]);
+  });
+
   it("loads older transcript pages before the current history", async () => {
     vi.mocked(api.fetchWebuiThread)
       .mockResolvedValueOnce({
@@ -540,10 +681,15 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
-      limit: 160,
-      direction: "latest",
-    });
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith(
+      "tok",
+      "websocket:paged",
+      expect.objectContaining({
+        limit: 160,
+        direction: "latest",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.current.hasMoreBefore).toBe(true);
     expect(result.current.userMessageOffset).toBe(1);
     const latestVersion = result.current.version;
@@ -554,10 +700,15 @@ describe("useSessions", () => {
       await result.current.loadOlder();
     });
 
-    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:paged", {
-      limit: 120,
-      before: "cursor-2",
-    });
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok",
+      "websocket:paged",
+      expect.objectContaining({
+        limit: 120,
+        before: "cursor-2",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.current.messages.map((message) => message.content)).toEqual([
       "old question",
       "old answer",
@@ -569,6 +720,46 @@ describe("useSessions", () => {
     expect(result.current.version).toBe(latestVersion);
     expect(result.current.lineage).toBe(latestLineage);
     expect(result.current.continuity).toBe("initial");
+  });
+
+  it("aborts an older-history request when the consumer unmounts", async () => {
+    let olderSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "latest question", createdAt: 2 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 1,
+          user_message_offset: 1,
+        },
+      })
+      .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((_resolve, reject) => {
+        if (typeof optionsOrBase !== "string") olderSignal = optionsOrBase?.signal;
+        olderSignal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }));
+
+    const { result, unmount } = renderHook(
+      () => useSessionHistory("websocket:unmount-older"),
+      { wrapper: wrap(fakeClient()) },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let olderRequest!: Promise<void>;
+    act(() => {
+      olderRequest = result.current.loadOlder();
+    });
+    await waitFor(() => expect(olderSignal).toBeDefined());
+
+    unmount();
+
+    expect(olderSignal?.aborted).toBe(true);
+    await expect(olderRequest).resolves.toBeUndefined();
   });
 
   it("preserves a loaded prefix when a canonical latest window overlaps its tail", async () => {

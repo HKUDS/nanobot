@@ -936,7 +936,7 @@ function Shell({
   onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
-  const { client, token } = useClient();
+  const { client, getToken } = useClient();
   const { theme, toggle } = useTheme();
   const {
     sessions,
@@ -981,13 +981,14 @@ function Shell({
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
+  const pairingRefreshRef = useRef<Promise<number> | null>(null);
   const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, number>>(
     () => new Map(),
   );
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
-  const skills = useSkills(token);
+  const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -1030,7 +1031,7 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
-    fetchSettings(token)
+    fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled) setSettingsSnapshot(payload);
       })
@@ -1040,7 +1041,7 @@ function Shell({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [getToken]);
 
   useEffect(() => {
     try {
@@ -1057,29 +1058,39 @@ function Shell({
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const refreshPairingRequests = useCallback(async (): Promise<number> => {
-    try {
-      const payload = await fetchPairingRequests(token);
-      const requests = Array.isArray(payload.requests) ? payload.requests : [];
-      setPairingRequests(requests);
-      setSnoozedPairingCodes((current) => {
-        if (current.size === 0) return current;
-        const activeCodes = new Set(requests.map((request) => request.code));
-        const now = Date.now();
-        const next = new Map(
-          Array.from(current).filter(
-            ([code, snoozedUntil]) => activeCodes.has(code) && snoozedUntil > now,
-          ),
-        );
-        return next.size === current.size ? current : next;
-      });
-      return requests.length;
-    } catch {
-      // Pairing is an opportunistic WebUI affordance. The slash command path
-      // remains available if this polling request fails.
-      return 0;
-    }
-  }, [token]);
+  const refreshPairingRequests = useCallback((): Promise<number> => {
+    if (pairingRefreshRef.current) return pairingRefreshRef.current;
+
+    const request = (async () => {
+      try {
+        const payload = await fetchPairingRequests(getToken());
+        const requests = Array.isArray(payload.requests) ? payload.requests : [];
+        setPairingRequests(requests);
+        setSnoozedPairingCodes((current) => {
+          if (current.size === 0) return current;
+          const activeCodes = new Set(requests.map((request) => request.code));
+          const now = Date.now();
+          const next = new Map(
+            Array.from(current).filter(
+              ([code, snoozedUntil]) => activeCodes.has(code) && snoozedUntil > now,
+            ),
+          );
+          return next.size === current.size ? current : next;
+        });
+        return requests.length;
+      } catch {
+        // Pairing is an opportunistic WebUI affordance. The slash command path
+        // remains available if this polling request fails.
+        return 0;
+      }
+    })();
+    const clearRequest = () => {
+      if (pairingRefreshRef.current === request) pairingRefreshRef.current = null;
+    };
+    pairingRefreshRef.current = request;
+    void request.then(clearRequest, clearRequest);
+    return request;
+  }, [getToken]);
 
   useEffect(() => {
     if (!pageVisible) return undefined;
@@ -1137,12 +1148,12 @@ function Shell({
 
   const refreshWorkspaces = useCallback(async () => {
     try {
-      const payload = await fetchWorkspaces(token);
+      const payload = await fetchWorkspaces(getToken());
       setWorkspaces(payload);
     } catch {
       setWorkspaces(null);
     }
-  }, [token]);
+  }, [getToken]);
 
   useEffect(() => {
     void refreshWorkspaces();
@@ -1824,7 +1835,7 @@ function Shell({
       setPairingBusyCode(code);
       setPairingError(null);
       try {
-        const payload = await runPairingAction(token, action, code);
+        const payload = await runPairingAction(getToken(), action, code);
         setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
         setSnoozedPairingCodes((current) => {
           if (!current.has(code)) return current;
@@ -1839,7 +1850,7 @@ function Shell({
         setPairingBusyCode(null);
       }
     },
-    [refreshPairingRequests, token],
+    [getToken, refreshPairingRequests],
   );
 
   const onDismissPairingRequest = useCallback((code: string) => {

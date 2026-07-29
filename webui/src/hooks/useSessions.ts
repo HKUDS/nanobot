@@ -24,6 +24,15 @@ const INITIAL_HISTORY_PAGE_LIMIT = 160;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "name" in error
+    && error.name === "AbortError"
+  );
+}
+
 export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
 
 function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
@@ -132,32 +141,46 @@ export function useSessions(): {
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
+  const refreshPendingRef = useRef(false);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
 
-  const refresh = useCallback(async () => {
-    try {
+  const refresh = useCallback((): Promise<void> => {
+    refreshPendingRef.current = true;
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    const request = (async () => {
       setLoading(true);
-      const rows = await listSessions(tokenRef.current);
-      const serverKeys = new Set(rows.map((row) => row.key));
-      setSessions((prev) => [
-        ...rows,
-        ...prev.filter(
-          (session) =>
-            optimisticKeysRef.current.has(session.key) &&
-            !serverKeys.has(session.key),
-        ),
-      ]);
-      for (const key of Array.from(optimisticKeysRef.current)) {
-        if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
+      try {
+        while (refreshPendingRef.current) {
+          refreshPendingRef.current = false;
+          try {
+            const rows = await listSessions(tokenRef.current);
+            const serverKeys = new Set(rows.map((row) => row.key));
+            setSessions((prev) => [
+              ...rows,
+              ...prev.filter(
+                (session) =>
+                  optimisticKeysRef.current.has(session.key)
+                  && !serverKeys.has(session.key),
+              ),
+            ]);
+            for (const key of Array.from(optimisticKeysRef.current)) {
+              if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
+            }
+            setError(null);
+          } catch (e) {
+            const msg =
+              e instanceof ApiError ? `HTTP ${e.status}` : (e as Error).message;
+            setError(msg);
+          }
+        }
+      } finally {
+        refreshInFlightRef.current = null;
+        setLoading(false);
       }
-      setError(null);
-    } catch (e) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status}` : (e as Error).message;
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    refreshInFlightRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -165,9 +188,20 @@ export function useSessions(): {
   }, [refresh]);
 
   useEffect(() => {
-    return client.onSessionUpdate(() => {
-      void refresh();
+    let disposed = false;
+    let refreshQueued = false;
+    const unsubscribe = client.onSessionUpdate(() => {
+      if (refreshQueued) return;
+      refreshQueued = true;
+      queueMicrotask(() => {
+        refreshQueued = false;
+        if (!disposed) void refresh();
+      });
     });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, [client, refresh]);
 
   const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
@@ -272,8 +306,9 @@ export function useSessionHistory(key: string | null): {
   /** Exact active turn when supplied by a current gateway. */
   activeTurnId: string | null;
 } {
-  const { token } = useClient();
+  const { getToken } = useClient();
   const loadingOlderRef = useRef(false);
+  const olderRequestAbortRef = useRef<AbortController | null>(null);
   const historyVersionRef = useRef(0);
   const [refreshSeq, setRefreshSeq] = useState(0);
   const refresh = useCallback(() => {
@@ -313,8 +348,17 @@ export function useSessionHistory(key: string | null): {
     activeTurnId: null,
   });
 
+  useEffect(() => () => {
+    olderRequestAbortRef.current?.abort();
+    olderRequestAbortRef.current = null;
+    loadingOlderRef.current = false;
+  }, []);
+
   useEffect(() => {
     if (!key) {
+      olderRequestAbortRef.current?.abort();
+      olderRequestAbortRef.current = null;
+      loadingOlderRef.current = false;
       setState({
         key: null,
         messages: [],
@@ -335,6 +379,10 @@ export function useSessionHistory(key: string | null): {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
+    olderRequestAbortRef.current?.abort();
+    olderRequestAbortRef.current = null;
+    loadingOlderRef.current = false;
     // Mark the new key as loading immediately so callers never see stale
     // messages from the previous session during the render right after a switch.
     setState((prev) => prev.key === key
@@ -358,9 +406,10 @@ export function useSessionHistory(key: string | null): {
         });
     (async () => {
       try {
-        const body = await fetchWebuiThread(token, key, {
+        const body = await fetchWebuiThread(getToken(), key, {
           limit: INITIAL_HISTORY_PAGE_LIMIT,
           direction: "latest",
+          signal: controller.signal,
         });
         if (cancelled) return;
         historyVersionRef.current += 1;
@@ -414,7 +463,7 @@ export function useSessionHistory(key: string | null): {
           };
         });
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || isAbortError(e)) return;
         if (e instanceof ApiError && e.status === 404) {
           historyVersionRef.current += 1;
           const responseVersion = historyVersionRef.current;
@@ -463,8 +512,9 @@ export function useSessionHistory(key: string | null): {
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [key, token, refreshSeq]);
+  }, [getToken, key, refreshSeq]);
 
   const loadOlder = useCallback(async () => {
     if (!key || loadingOlderRef.current) return;
@@ -478,13 +528,16 @@ export function useSessionHistory(key: string | null): {
       && candidate.beforeCursor === beforeCursor
     );
     loadingOlderRef.current = true;
+    const controller = new AbortController();
+    olderRequestAbortRef.current = controller;
     setState((prev) => matchesRequest(prev)
       ? { ...prev, loadingOlder: true, error: null }
       : prev);
     try {
-      const body = await fetchWebuiThread(token, requestKey, {
+      const body = await fetchWebuiThread(getToken(), requestKey, {
         limit: OLDER_HISTORY_PAGE_LIMIT,
         before: beforeCursor,
+        signal: controller.signal,
       });
       setState((prev) => {
         if (!matchesRequest(prev)) return prev;
@@ -518,6 +571,7 @@ export function useSessionHistory(key: string | null): {
         };
       });
     } catch (e) {
+      if (isAbortError(e)) return;
       setState((prev) => matchesRequest(prev)
         ? {
             ...prev,
@@ -526,7 +580,10 @@ export function useSessionHistory(key: string | null): {
           }
         : prev);
     } finally {
-      loadingOlderRef.current = false;
+      if (olderRequestAbortRef.current === controller) {
+        olderRequestAbortRef.current = null;
+        loadingOlderRef.current = false;
+      }
     }
   }, [
     key,
@@ -534,7 +591,7 @@ export function useSessionHistory(key: string | null): {
     state.hasMoreBefore,
     state.key,
     state.lineage,
-    token,
+    getToken,
   ]);
 
   if (!key) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,7 @@ _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
 _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
 )
@@ -192,6 +194,20 @@ def _records_bytes(records: list[dict[str, Any]]) -> int:
 
 def _flatten_turns(turns: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     return [record for turn in turns for record in turn]
+
+
+def _records_with_replay_identity(
+    records: list[dict[str, Any]],
+    *,
+    turn_ordinal: int,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            **record,
+            _WEBUI_REPLAY_IDENTITY_KEY: f"turn:{turn_ordinal}:record:{record_index}",
+        }
+        for record_index, record in enumerate(records)
+    ]
 
 
 def _write_records_to_path(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -543,7 +559,14 @@ def _select_transcript_page(
             break
 
     selected_chronological = list(reversed(selected))
-    lines = [record for ref in selected_chronological for record in ref.records]
+    lines = [
+        record
+        for ref in selected_chronological
+        for record in _records_with_replay_identity(
+            ref.records,
+            turn_ordinal=ref.ordinal,
+        )
+    ]
     if not selected_chronological:
         return [], {
             "before_cursor": None,
@@ -1030,6 +1053,74 @@ def _split_transcript_turns(lines: list[dict[str, Any]]) -> list[list[dict[str, 
     return turns
 
 
+def _annotate_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        record
+        for turn_ordinal, turn in enumerate(_split_transcript_turns(lines))
+        for record in _records_with_replay_identity(
+            turn,
+            turn_ordinal=turn_ordinal,
+        )
+    ]
+
+
+def _stable_record_digest(record: dict[str, Any]) -> str:
+    persisted = {
+        key: value
+        for key, value in record.items()
+        if key != _WEBUI_REPLAY_IDENTITY_KEY
+    }
+    raw = json.dumps(
+        persisted,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give backfilled/recovered rows a stable identity beside persisted rows."""
+    annotated: list[dict[str, Any]] = []
+    for fallback_turn_index, turn in enumerate(_split_transcript_turns(lines)):
+        anchor = next(
+            (
+                value
+                for record in turn
+                if isinstance(
+                    value := record.get(_WEBUI_REPLAY_IDENTITY_KEY),
+                    str,
+                )
+                and value
+            ),
+            None,
+        )
+        if anchor and ":record:" in anchor:
+            turn_identity = anchor.rsplit(":record:", 1)[0]
+        else:
+            turn_digest = hashlib.sha256(
+                "\n".join(_stable_record_digest(record) for record in turn).encode("ascii")
+            ).hexdigest()[:16]
+            turn_identity = f"legacy:{fallback_turn_index}:{turn_digest}"
+        synthetic_occurrences: dict[str, int] = {}
+        for record in turn:
+            identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
+            if isinstance(identity, str) and identity:
+                annotated.append(record)
+                continue
+            digest = _stable_record_digest(record)
+            occurrence = synthetic_occurrences.get(digest, 0)
+            synthetic_occurrences[digest] = occurrence + 1
+            annotated.append({
+                **record,
+                _WEBUI_REPLAY_IDENTITY_KEY: (
+                    f"{turn_identity}:synthetic:{digest}:{occurrence}"
+                ),
+            })
+    return annotated
+
+
 def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]:
     texts: list[str] = []
     for message in replay_transcript_to_ui_messages(records):
@@ -1464,9 +1555,18 @@ def replay_transcript_to_ui_messages(
     _ts_base = _now_ms()
     closed_turn_ids: set[str] = set()
     replay_turn_aliases: dict[str, str] = {}
+    generated_id_occurrences: dict[str, int] = {}
 
     def _new_id(prefix: str, idx: int) -> str:
-        return f"{prefix}-{idx}-{uuid.uuid4().hex[:8]}"
+        record = lines[idx] if 0 <= idx < len(lines) else {}
+        identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
+        if not isinstance(identity, str) or not identity:
+            identity = f"direct:{idx}:{_stable_record_digest(record)}"
+        digest = hashlib.sha256(f"{prefix}\0{identity}".encode("utf-8")).hexdigest()[:16]
+        base = f"{prefix}-{digest}"
+        occurrence = generated_id_occurrences.get(base, 0)
+        generated_id_occurrences[base] = occurrence + 1
+        return base if occurrence == 0 else f"{base}-{occurrence}"
 
     def _created_at_ms(rec: dict[str, Any], idx: int) -> int:
         created_at_ms = _valid_created_at_ms(rec.get("created_at_ms"))
@@ -2255,7 +2355,7 @@ def build_webui_thread_response(
     if paginated:
         lines, page = _select_transcript_page(session_key, limit=limit, before=before)
     else:
-        lines = read_transcript_lines(session_key)
+        lines = _annotate_replay_identities(read_transcript_lines(session_key))
     if not lines and active_turn_started_at is None:
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
@@ -2264,6 +2364,7 @@ def build_webui_thread_response(
         session_messages,
         session_key=session_key,
     )
+    lines = _ensure_replay_identities(lines)
     fork_boundary = fork_boundary_message_count(lines)
     msgs = replay_transcript_to_ui_messages(
         lines,

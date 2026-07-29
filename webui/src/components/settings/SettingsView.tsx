@@ -633,7 +633,7 @@ export function SettingsView({
   hostChromeInset = false,
 }: SettingsViewProps) {
   const { t } = useTranslation();
-  const { token } = useClient();
+  const { getToken, token } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -779,7 +779,7 @@ export function SettingsView({
     const poll = async () => {
       try {
         const payload = await completeProviderOAuth(
-          token,
+          getToken(),
           xaiOAuthFlow.provider,
           xaiOAuthFlow.flow_id,
         );
@@ -803,7 +803,7 @@ export function SettingsView({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [applyPayload, closeXaiOAuthFlow, token, xaiOAuthFlow]);
+  }, [applyPayload, closeXaiOAuthFlow, getToken, xaiOAuthFlow]);
 
   useEffect(() => {
     if (!initialSettings || settings !== null) return;
@@ -815,7 +815,7 @@ export function SettingsView({
     let cancelled = false;
     const showLoading = settings === null;
     if (showLoading) setLoading(true);
-    fetchSettings(token)
+    fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled) {
           applyPayload(payload);
@@ -831,30 +831,37 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [applyPayload, token]);
+  }, [applyPayload, getToken]);
 
   const hasSettings = settings !== null;
   useEffect(() => {
     if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
     let cancelled = false;
-    const refresh = () => {
-      fetchSettingsUsage(token)
-        .then((usage) => {
-          if (cancelled) return;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const usage = await fetchSettingsUsage(getToken());
+        if (!cancelled) {
           setSettings((current) => (current ? { ...current, usage } : current));
-        })
-        .catch(() => {});
+        }
+      } catch {
+        // Usage is best-effort telemetry; the settings snapshot remains usable.
+      } finally {
+        refreshing = false;
+      }
     };
     void refresh();
-    const interval = window.setInterval(refresh, 5000);
-    const onFocus = () => refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [activeSection, hasSettings, pageVisible, token]);
+  }, [activeSection, getToken, hasSettings, pageVisible]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -863,7 +870,7 @@ export function SettingsView({
     let retryCount = 0;
     const loadCliApps = (showLoading: boolean) => {
       if (showLoading) setCliAppsLoading(true);
-      fetchCliApps(token)
+      fetchCliApps(getToken())
         .then((payload) => {
           if (cancelled) return;
           if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
@@ -889,15 +896,23 @@ export function SettingsView({
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   useEffect(() => {
-    if (!["channels", "models", "browser", "runtime"].includes(activeSection)) return;
+    if (
+      !pageVisible
+      || !["channels", "models", "browser", "runtime"].includes(activeSection)
+    ) {
+      return;
+    }
     let cancelled = false;
-    const refresh = async (showLoading = false) => {
+    let refreshing = false;
+    const refresh = async (showLoading = false): Promise<void> => {
+      if (refreshing) return;
+      refreshing = true;
       if (showLoading) setNanobotFeaturesLoading(true);
       try {
-        const payload = await fetchNanobotFeatures(token);
+        const payload = await fetchNanobotFeatures(getToken());
         if (!cancelled) {
           setNanobotFeatures(payload);
           setNanobotFeaturesError(null);
@@ -906,6 +921,7 @@ export function SettingsView({
         const message = (err as Error).message;
         if (!cancelled && message !== "HTTP 404") setNanobotFeaturesError(message);
       } finally {
+        refreshing = false;
         if (!cancelled && showLoading) setNanobotFeaturesLoading(false);
       }
     };
@@ -926,13 +942,13 @@ export function SettingsView({
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken, pageVisible]);
 
   useEffect(() => {
     if (activeSection !== "runtime") return;
     let cancelled = false;
     setApiServiceLoading(true);
-    fetchApiService(token)
+    fetchApiService(getToken())
       .then((payload) => {
         if (!cancelled) {
           setApiService(payload);
@@ -948,13 +964,13 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
     let cancelled = false;
     setMcpPresetsLoading(true);
-    fetchMcpPresets(token)
+    fetchMcpPresets(getToken())
       .then((payload) => {
         if (!cancelled) {
           setMcpPresets(payload);
@@ -970,13 +986,13 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   const refreshAutomations = useCallback(
     async (showLoading = false) => {
       if (showLoading) setAutomationsLoading(true);
       try {
-        const payload = await fetchAutomations(token);
+        const payload = await fetchAutomations(getToken());
         setAutomations(payload);
         setAutomationsError(null);
       } catch (err) {
@@ -985,23 +1001,26 @@ export function SettingsView({
         if (showLoading) setAutomationsLoading(false);
       }
     },
-    [token],
+    [getToken],
   );
 
   useEffect(() => {
     if (activeSection !== "automations" || !pageVisible) return;
     let cancelled = false;
+    let refreshing = false;
     const refresh = async (showLoading = false) => {
-      if (cancelled) return;
+      if (cancelled || refreshing) return;
+      refreshing = true;
       if (showLoading) setAutomationsLoading(true);
       try {
-        const payload = await fetchAutomations(token);
+        const payload = await fetchAutomations(getToken());
         if (cancelled) return;
         setAutomations(payload);
         setAutomationsError(null);
       } catch (err) {
         if (!cancelled) setAutomationsError((err as Error).message);
       } finally {
+        refreshing = false;
         if (!cancelled && showLoading) setAutomationsLoading(false);
       }
     };
@@ -1014,7 +1033,7 @@ export function SettingsView({
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [activeSection, pageVisible, token]);
+  }, [activeSection, getToken, pageVisible]);
 
   useEffect(() => {
     writeLocalPreferences(localPrefs);
@@ -8899,6 +8918,8 @@ function ModelIdPicker({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
@@ -8967,7 +8988,7 @@ function ModelIdPicker({
     setPayload(null);
     setError(null);
     setLoading(true);
-    fetchProviderModels(token, effectiveProvider)
+    fetchProviderModels(tokenRef.current, effectiveProvider)
       .then((nextPayload) => {
         if (!cancelled) setPayload(nextPayload);
       })
@@ -8980,7 +9001,7 @@ function ModelIdPicker({
     return () => {
       cancelled = true;
     };
-  }, [effectiveProvider, open, shouldFetchModels, token]);
+  }, [effectiveProvider, open, shouldFetchModels]);
 
   const selectModel = (model: string) => {
     onChange(model);

@@ -2642,4 +2642,54 @@ describe("App layout", () => {
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
   });
+
+  it("reuses an in-flight pairing poll when the page becomes visible again", async () => {
+    let resolvePairing!: (response: Response) => void;
+    const pendingPairing = new Promise<Response>((resolve) => {
+      resolvePairing = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => (
+      String(input) === "/api/settings/pairing"
+        ? pendingPairing
+        : Promise.resolve({ ok: false, status: 404 } as Response)
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: state,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    try {
+      render(<App />);
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.filter(([input]) => (
+          String(input) === "/api/settings/pairing"
+        ))).toHaveLength(1);
+      });
+
+      act(() => setVisibility("hidden"));
+      act(() => setVisibility("visible"));
+
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/settings/pairing"
+      ))).toHaveLength(1);
+      await act(async () => {
+        resolvePairing(jsonResponse({ requests: [] }));
+        await pendingPairing;
+      });
+    } finally {
+      if (visibilityDescriptor) {
+        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      } else {
+        delete (document as Document & {
+          visibilityState?: DocumentVisibilityState;
+        }).visibilityState;
+      }
+    }
+  });
 });

@@ -496,7 +496,7 @@ interface PendingFirstMessage {
 }
 
 interface InstalledSettingItemsOptions<Payload, Item> {
-  token: string;
+  getToken: () => string;
   eventName: string;
   fetchPayload: (token: string) => Promise<Payload>;
   isPayload: (value: unknown) => value is Payload;
@@ -504,7 +504,7 @@ interface InstalledSettingItemsOptions<Payload, Item> {
 }
 
 function useInstalledSettingItems<Payload, Item>({
-  token,
+  getToken,
   eventName,
   fetchPayload,
   isPayload,
@@ -512,42 +512,65 @@ function useInstalledSettingItems<Payload, Item>({
 }: InstalledSettingItemsOptions<Payload, Item>): Item[] {
   const [items, setItems] = useState<Item[]>([]);
 
-  const refresh = useCallback(async (isCancelled?: () => boolean) => {
-    try {
-      const payload = await fetchPayload(token);
-      if (!isCancelled?.()) setItems(selectItems(payload));
-    } catch {
-      // Keep the last successful catalog during transient focus/visibility refresh failures.
-    }
-  }, [fetchPayload, selectItems, token]);
-
   useEffect(() => {
     let cancelled = false;
-    void refresh(() => cancelled);
-
-    const refreshOnFocus = () => {
-      if (document.visibilityState === "hidden") return;
-      void refresh();
+    let refreshQueued = false;
+    let refreshAfterFlight = false;
+    let refreshing = false;
+    let payloadVersion = 0;
+    const refresh = async (): Promise<void> => {
+      if (refreshing) return;
+      refreshing = true;
+      const version = payloadVersion;
+      try {
+        const payload = await fetchPayload(getToken());
+        if (!cancelled && version === payloadVersion) {
+          setItems(selectItems(payload));
+        }
+      } catch {
+        // Keep the last successful catalog during transient refresh failures.
+      } finally {
+        refreshing = false;
+        if (refreshAfterFlight && !cancelled) {
+          refreshAfterFlight = false;
+          void refresh();
+        }
+      }
     };
+    const queueRefresh = () => {
+      if (document.visibilityState === "hidden" || refreshQueued) return;
+      refreshQueued = true;
+      queueMicrotask(() => {
+        refreshQueued = false;
+        if (!cancelled) void refresh();
+      });
+    };
+    void refresh();
+
     const refreshOnChanged = (event: Event) => {
       const payload = (event as CustomEvent<unknown>).detail;
       if (isPayload(payload)) {
+        payloadVersion += 1;
         setItems(selectItems(payload));
         return;
       }
-      void refresh();
+      if (refreshing) {
+        refreshAfterFlight = true;
+        return;
+      }
+      queueRefresh();
     };
 
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
+    window.addEventListener("focus", queueRefresh);
+    document.addEventListener("visibilitychange", queueRefresh);
     window.addEventListener(eventName, refreshOnChanged);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
+      window.removeEventListener("focus", queueRefresh);
+      document.removeEventListener("visibilitychange", queueRefresh);
       window.removeEventListener(eventName, refreshOnChanged);
     };
-  }, [eventName, isPayload, refresh, selectItems]);
+  }, [eventName, fetchPayload, getToken, isPayload, selectItems]);
 
   return items;
 }
@@ -581,6 +604,7 @@ export function ThreadShell({
   const {
     messages: historical,
     loading,
+    error: historyError,
     loadingOlder,
     loadOlder,
     hasMoreBefore,
@@ -594,19 +618,19 @@ export function ThreadShell({
     version: historyVersion,
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
-  const { client, ingressLimits, modelName, token } = useClient();
+  const { client, getToken, ingressLimits, modelName, token } = useClient();
   const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const cliApps = useInstalledSettingItems({
-    token,
+    getToken,
     eventName: CLI_APPS_CHANGED_EVENT,
     fetchPayload: fetchInstalledCliApps,
     isPayload: isCliAppsPayload,
     selectItems: installedCliAppsFromPayload,
   });
   const mcpPresets = useInstalledSettingItems({
-    token,
+    getToken,
     eventName: MCP_PRESETS_CHANGED_EVENT,
     fetchPayload: fetchMcpPresets,
     isPayload: isMcpPresetsPayload,
@@ -738,7 +762,7 @@ export function ThreadShell({
   }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
-    [historyKey, token],
+    [historyKey],
   );
   const filePreviewAvailabilityRevision = displayMessages.length;
   const resolveFilePreviewAvailability = useCallback((path: string) => {
@@ -750,7 +774,7 @@ export function ThreadShell({
     ) {
       return cached.promise;
     }
-    const pending = fetchFilePreviewAvailability(token, historyKey, path).catch(
+    const pending = fetchFilePreviewAvailability(getToken(), historyKey, path).catch(
       (error: unknown) => {
         if (error instanceof ApiError) {
           if (error.status === 404 && /API route not found/i.test(error.message)) {
@@ -775,8 +799,8 @@ export function ThreadShell({
   }, [
     filePreviewAvailabilityCache,
     filePreviewAvailabilityRevision,
+    getToken,
     historyKey,
-    token,
   ]);
 
   const showHeroComposer = displayMessages.length === 0 && !loading;
@@ -829,11 +853,11 @@ export function ThreadShell({
 
   const refreshModelSettings = useCallback(async () => {
     try {
-      setSettings(await fetchSettings(token));
+      setSettings(await fetchSettings(getToken()));
     } catch {
       if (!settingsSnapshot) setSettings(null);
     }
-  }, [settingsSnapshot, token]);
+  }, [getToken, settingsSnapshot]);
 
   useEffect(() => {
     if (settingsSnapshot) {
@@ -1067,14 +1091,37 @@ export function ThreadShell({
     });
   }, [chatId, client, refreshCanonicalHistory]);
 
+  const wasPageHiddenRef = useRef(document.visibilityState === "hidden");
   useEffect(() => {
     const refreshOnReturn = () => {
-      if (document.visibilityState !== "visible") return;
+      if (document.visibilityState === "hidden") {
+        wasPageHiddenRef.current = true;
+        return;
+      }
+      if (!wasPageHiddenRef.current) return;
+      wasPageHiddenRef.current = false;
+      if (!chatId || client.status !== "open" || loading) return;
+      if (
+        !turnActive
+        && !hasPendingToolCalls
+        && !client.hasUnsettledRun(chatId)
+        && !historyError
+      ) {
+        return;
+      }
       refreshCanonicalHistory();
     };
     document.addEventListener("visibilitychange", refreshOnReturn);
     return () => document.removeEventListener("visibilitychange", refreshOnReturn);
-  }, [refreshCanonicalHistory]);
+  }, [
+    chatId,
+    client,
+    hasPendingToolCalls,
+    historyError,
+    loading,
+    refreshCanonicalHistory,
+    turnActive,
+  ]);
 
   useEffect(() => {
     let refreshOnNextOpen = client.status !== "open";
@@ -1154,7 +1201,7 @@ export function ThreadShell({
     let cancelled = false;
     (async () => {
       try {
-        const commands = await listSlashCommands(token);
+        const commands = await listSlashCommands(getToken());
         if (!cancelled) setSlashCommands(commands);
       } catch {
         if (!cancelled) setSlashCommands([]);
@@ -1163,7 +1210,7 @@ export function ThreadShell({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [getToken]);
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {

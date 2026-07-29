@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -437,6 +437,42 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+  });
+
+  it("coalesces focus refreshes while automations are already loading", async () => {
+    let resolveAutomations!: (response: Response) => void;
+    const pendingAutomations = new Promise<Response>((resolve) => {
+      resolveAutomations = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return pendingAutomations;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/webui/automations"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/webui/automations"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveAutomations(jsonResponse({ jobs: [] }));
+      await pendingAutomations;
+    });
   });
 
   it("starts the managed API server from System", async () => {
@@ -1966,6 +2002,53 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
+  });
+
+  it("coalesces focus refreshes while usage is already loading", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      usage: {
+        days: [],
+        total_tokens: 0,
+        total_tokens_30d: 0,
+        total_tokens_365d: 0,
+        peak_day_tokens: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        active_days_30d: 0,
+        requests_30d: 0,
+        updated_at: null,
+      },
+    };
+    let resolveUsage!: (response: Response) => void;
+    const pendingUsage = new Promise<Response>((resolve) => {
+      resolveUsage = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/usage") return pendingUsage;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "overview", initialSettings: payload });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/settings/usage"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/settings/usage"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveUsage(jsonResponse(payload.usage));
+      await pendingUsage;
+    });
   });
 
   it("aligns token activity days with the configured timezone", async () => {

@@ -4,13 +4,13 @@ import { fetchSkills } from "@/lib/api";
 import { isSkillsPayload, SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
 import type { SkillSummary } from "@/lib/types";
 
-export function useSkills(token: string): SkillSummary[] {
+export function useSkills(getToken: () => string): SkillSummary[] {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
-      fetchSkills(token)
+      fetchSkills(getToken())
         .then(({ skills: nextSkills }) => !cancelled && setSkills(nextSkills))
         .catch(() => !cancelled && setSkills([]));
     };
@@ -25,7 +25,7 @@ export function useSkills(token: string): SkillSummary[] {
       cancelled = true;
       window.removeEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
     };
-  }, [token]);
+  }, [getToken]);
 
   return skills;
 }

@@ -146,14 +146,39 @@ def test_local_markdown_image_is_staged_and_rewritten(
     channel = _ch(bus, workspace_path=workspace, port=0)
 
     with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
-        rewritten = channel.gateway.media.rewrite_local_markdown_images(
+        first = channel.gateway.media.rewrite_local_markdown_images(
+            "The result:\n![Cloud Architecture Diagram](demo_arch.png)"
+        )
+        second = channel.gateway.media.rewrite_local_markdown_images(
             "The result:\n![Cloud Architecture Diagram](demo_arch.png)"
         )
 
-    assert "![Cloud Architecture Diagram](/api/media/" in rewritten
+    assert "![Cloud Architecture Diagram](/api/media/" in first
+    assert second == first
     staged = list((media / "websocket").iterdir())
     assert len(staged) == 1
     assert staged[0].read_bytes() == _PNG_BYTES
+
+
+def test_modified_local_markdown_image_gets_a_new_immutable_url(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "demo_arch.png"
+    source.write_bytes(_PNG_BYTES)
+    media = tmp_path / "media"
+    channel = _ch(bus, workspace_path=workspace, port=0)
+    markdown = "![Cloud Architecture Diagram](demo_arch.png)"
+
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        first = channel.gateway.media.rewrite_local_markdown_images(markdown)
+        source.write_bytes(_PNG_BYTES + b"updated")
+        second = channel.gateway.media.rewrite_local_markdown_images(markdown)
+
+    assert second != first
+    assert len(list((media / "websocket").iterdir())) == 2
 
 
 def test_local_markdown_video_is_staged_and_rewritten(

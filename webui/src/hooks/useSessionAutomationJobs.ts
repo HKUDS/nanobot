@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { fetchSessionAutomations } from "@/lib/api";
@@ -12,20 +12,25 @@ export function useSessionAutomationJobs(open: boolean, token: string, sessionKe
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   useEffect(() => {
     if (!open || !pageVisible) return;
     let cancelled = false;
     let loadedOnce = false;
+    let refreshing = false;
 
     const refresh = async (showLoading = false) => {
+      if (refreshing) return;
+      refreshing = true;
       if (showLoading) {
         setLoading(true);
         setLoadFailed(false);
         setJobs([]);
       }
       try {
-        const next = await fetchSessionAutomations(token, sessionKey);
+        const next = await fetchSessionAutomations(tokenRef.current, sessionKey);
         if (cancelled) return;
         setJobs(next.jobs);
         setLoadFailed(false);
@@ -33,6 +38,7 @@ export function useSessionAutomationJobs(open: boolean, token: string, sessionKe
       } catch {
         if (!cancelled && !loadedOnce) setLoadFailed(true);
       } finally {
+        refreshing = false;
         if (!cancelled && showLoading) setLoading(false);
       }
     };
@@ -46,7 +52,7 @@ export function useSessionAutomationJobs(open: boolean, token: string, sessionKe
       window.clearInterval(refreshId);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [open, pageVisible, sessionKey, token]);
+  }, [open, pageVisible, sessionKey]);
 
   useEffect(() => {
     if (!open || !pageVisible) return;
