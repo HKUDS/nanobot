@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from nanobot.providers.base import (
@@ -57,6 +59,7 @@ _AUTHENTICATION_ERROR_TOKENS = (
     "access_denied",
     "account_deactivated",
     "organization_deactivated",
+    "not logged in",
 )
 _NON_FALLBACK_ERROR_KINDS = frozenset({
     "content_filter",
@@ -282,7 +285,14 @@ class FallbackProvider(LLMProvider):
 
         if self._primary_available():
             primary_was_attempted = True
-            response = await call(self._primary, kwargs)
+            response, primary_exception = await self._call_provider(
+                call, self._primary, kwargs
+            )
+            if primary_exception is not None:
+                logger.warning(
+                    "Primary model '{}' raised {} before responding",
+                    primary_model, type(primary_exception).__name__,
+                )
             if response.finish_reason != "error":
                 self._primary_failures = 0
                 self._primary_tripped_at = None
@@ -310,7 +320,7 @@ class FallbackProvider(LLMProvider):
 
             if not self._should_fallback(response):
                 logger.warning(
-                    "Primary model '{}' returned non-fallbackable error: {}",
+                    "Primary model '{}' failed with non-fallbackable error: {}",
                     primary_model,
                     (response.content or "")[:120],
                 )
@@ -397,7 +407,14 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs.pop("reasoning_effort", None)
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
-            fallback_response = await call(fallback_provider, fallback_kwargs)
+            fallback_response, fallback_exception = await self._call_provider(
+                call, fallback_provider, fallback_kwargs
+            )
+            if fallback_exception is not None:
+                logger.warning(
+                    "Fallback '{}' raised {}",
+                    fallback_model, type(fallback_exception).__name__,
+                )
 
             if fallback_response.finish_reason != "error":
                 logger.info(
@@ -429,6 +446,57 @@ class FallbackProvider(LLMProvider):
             finish_reason="error",
             preserve_provider_state_on_error=preserve_primary_state,
         )
+
+    @staticmethod
+    async def _call_provider(
+        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
+        provider: LLMProvider,
+        kwargs: dict[str, Any],
+    ) -> tuple[LLMResponse, Exception | None]:
+        """Turn provider exceptions into error responses without swallowing cancellation."""
+        try:
+            return await call(provider, kwargs), None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            error_name = type(exc).__name__.lower()
+            error_kind: str | None = None
+            error_should_retry: bool | None = None
+            if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                error_kind = "timeout"
+                error_should_retry = True
+            elif isinstance(exc, (httpx.NetworkError, httpx.TransportError, ConnectionError)):
+                error_kind = "connection"
+                error_should_retry = True
+            elif any(
+                token in error_name
+                for token in ("auth", "credential", "permissiondenied", "unauthor")
+            ):
+                error_kind = "authentication"
+            elif "ratelimit" in error_name or "throttl" in error_name:
+                error_kind = "rate_limit"
+                error_should_retry = True
+            elif "server" in error_name or "internal" in error_name:
+                error_kind = "server_error"
+                error_should_retry = True
+
+            response = getattr(exc, "response", None)
+            raw_status = getattr(exc, "status_code", None)
+            if raw_status is None and response is not None:
+                raw_status = getattr(response, "status_code", None)
+            try:
+                error_status_code = int(raw_status) if raw_status is not None else None
+            except (TypeError, ValueError):
+                error_status_code = None
+
+            detail = str(exc).strip() or type(exc).__name__
+            return LLMResponse(
+                content=f"Error calling LLM: {detail}",
+                finish_reason="error",
+                error_status_code=error_status_code,
+                error_kind=error_kind,
+                error_should_retry=error_should_retry,
+            ), exc
 
     async def _notify_fallback_model(self, model: str) -> None:
         if self._fallback_model_observer is None:
