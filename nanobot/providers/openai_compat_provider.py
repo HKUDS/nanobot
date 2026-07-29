@@ -35,6 +35,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.providers.openrouter_attribution import OPENROUTER_ATTRIBUTION_HEADERS
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -54,11 +55,6 @@ _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
 _STANDARD_FN_KEYS = frozenset({"name", "arguments"})
-_DEFAULT_OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
-    "X-OpenRouter-Title": "nanobot",
-    "X-OpenRouter-Categories": "cli-agent,personal-agent",
-}
 _KIMI_K3_MODEL = "kimi-k3"
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
@@ -450,7 +446,7 @@ class OpenAICompatProvider(LLMProvider):
         self._effective_base = effective_base
         self._default_headers = {"x-session-affinity": uuid.uuid4().hex}
         if _uses_openrouter_attribution(spec, effective_base):
-            self._default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
+            self._default_headers.update(OPENROUTER_ATTRIBUTION_HEADERS)
         if extra_headers:
             self._default_headers.update(extra_headers)
         self._api_key_for_client = api_key or "no-key"
