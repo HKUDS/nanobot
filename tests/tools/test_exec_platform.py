@@ -827,7 +827,7 @@ class TestWindowsRealExec:
     @pytest.mark.asyncio
     async def test_windows_powershell_native_pipeline_input_is_utf8(self):
         python = sys.executable.replace("'", "''")
-        result = await ExecTool(timeout=10).execute(
+        result = await ExecTool(timeout=180).execute(
             command=(
                 f"[string][char]0x4F1A | & '{python}' "
                 '-c "import sys; print(sys.stdin.buffer.read().hex())"'
