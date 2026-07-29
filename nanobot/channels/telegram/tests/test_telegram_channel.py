@@ -337,7 +337,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert api_req.kwargs["connection_pool_size"] == 32
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
-    assert builder.get_updates_request_value is poll_req
+    assert builder.get_updates_request_value.inner is poll_req
     assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
     assert any(cmd.command == "history" for cmd in app.bot.commands)
@@ -376,6 +376,161 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     assert api_req.kwargs["connection_pool_size"] == 32
     assert api_req.kwargs["pool_timeout"] == 10.0
     assert poll_req.kwargs["pool_timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_stalled_polling_triggers_pool_rebuild(monkeypatch) -> None:
+    """When no getUpdates round trip completes for too long, the app is rebuilt."""
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    apps: list[_FakeApp] = []
+
+    def on_start_polling() -> None:
+        if len(apps) >= 2:
+            channel._running = False
+
+    def make_builder():
+        app = _FakeApp(on_start_polling)
+        apps.append(app)
+        return _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=make_builder),
+    )
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.POLL_STALE_SECONDS", -1.0)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.POLL_WATCH_INTERVAL", 0.0)
+
+    await channel.start()
+
+    assert len(apps) == 2
+    assert apps[0].updater.start_polling_kwargs is not None
+    assert apps[1].updater.start_polling_kwargs is not None
+    # 2 fresh pools per app
+    assert len(_FakeHTTPXRequest.instances) == 4
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_retries_with_backoff(monkeypatch) -> None:
+    """Transient startup failures back off and retry until the app comes up."""
+    from telegram.error import NetworkError
+
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    apps: list[_FakeApp] = []
+
+    def make_builder():
+        app = _FakeApp(lambda: setattr(channel, "_running", False))
+        if len(apps) < 2:
+            async def _fail() -> None:
+                raise NetworkError("connect failed")
+
+            app.initialize = _fail
+        apps.append(app)
+        return _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=make_builder),
+    )
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.POLL_WATCH_INTERVAL", 0.0)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.RESTART_BACKOFF_INITIAL_SECONDS", 0.0)
+
+    await channel.start()
+
+    assert len(apps) == 3
+    assert apps[0].updater.start_polling_kwargs is None
+    assert apps[1].updater.start_polling_kwargs is None
+    assert apps[2].updater.start_polling_kwargs is not None
+
+
+@pytest.mark.asyncio
+async def test_invalid_token_stops_without_retry(monkeypatch) -> None:
+    """A rejected token is a config error: log it and give up instead of retrying."""
+    from telegram.error import InvalidToken
+
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    apps: list[_FakeApp] = []
+
+    def make_builder():
+        app = _FakeApp(lambda: None)
+
+        async def _reject() -> None:
+            raise InvalidToken("token rejected by Telegram")
+
+        app.initialize = _reject
+        apps.append(app)
+        return _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=make_builder),
+    )
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.RESTART_BACKOFF_INITIAL_SECONDS", 0.0)
+
+    await channel.start()
+
+    assert len(apps) == 1
+    assert channel._app is None
+
+
+@pytest.mark.asyncio
+async def test_stop_during_startup_does_not_leak_app(monkeypatch) -> None:
+    """stop() landing while _start_app() is mid-flight must not leave the app running."""
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    # Simulate stop() winning the race just before start_polling returns.
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    assert channel._app is None  # torn down, not leaked
+
+
+@pytest.mark.asyncio
+async def test_liveness_tracked_request_stamps_on_round_trip() -> None:
+    from nanobot.channels.telegram.runtime import _LivenessTrackedRequest
+
+    stamps: list[int] = []
+
+    class _Inner:
+        read_timeout = 5.0
+
+        async def initialize(self) -> None:
+            pass
+
+        async def shutdown(self) -> None:
+            pass
+
+        async def do_request(self, *args, **kwargs):
+            return 200, b"{}"
+
+    wrapped = _LivenessTrackedRequest(_Inner(), lambda: stamps.append(1))
+    assert await wrapped.do_request(url="https://example.org", method="POST") == (200, b"{}")
+    assert stamps == [1]
 
 
 def test_webhook_config_requires_https_url_and_secret() -> None:

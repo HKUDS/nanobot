@@ -25,9 +25,9 @@ from telegram import (
     Update,
     User,
 )
-from telegram.error import BadRequest, NetworkError, TimedOut
+from telegram.error import BadRequest, InvalidToken, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-from telegram.request import HTTPXRequest
+from telegram.request import BaseRequest, HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
@@ -38,6 +38,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
@@ -52,6 +53,39 @@ TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for repl
 # explicit rather than allowing unspecialized generics to spread Unknown.
 TelegramApplication: TypeAlias = Application[Any, Any, Any, Any, Any, Any]
 _T = TypeVar("_T")
+
+# A healthy getUpdates long poll completes every ~10s even with no traffic;
+# PTB retries timeouts silently, so stalls must be detected here.
+POLL_STALE_SECONDS = 120.0
+POLL_WATCH_INTERVAL = 1.0
+RESTART_BACKOFF_INITIAL_SECONDS = 5.0
+RESTART_BACKOFF_MAX_SECONDS = 300.0
+
+
+class _LivenessTrackedRequest(BaseRequest):
+    """Wrap the getUpdates request pool, reporting each completed round trip."""
+
+    __slots__ = ("inner", "_on_round_trip")
+
+    def __init__(self, inner: BaseRequest, on_round_trip: Callable[[], None]) -> None:
+        super().__init__()
+        self.inner = inner
+        self._on_round_trip = on_round_trip
+
+    @property
+    def read_timeout(self) -> float | None:
+        return self.inner.read_timeout
+
+    async def initialize(self) -> None:
+        await self.inner.initialize()
+
+    async def shutdown(self) -> None:
+        await self.inner.shutdown()
+
+    async def do_request(self, *args: Any, **kwargs: Any) -> tuple[int, bytes]:
+        result = await self.inner.do_request(*args, **kwargs)
+        self._on_round_trip()
+        return result
 
 
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
@@ -477,6 +511,7 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task[None]] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
+        self._last_poll_ok: float = 0.0  # monotonic time of last getUpdates round trip
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -516,13 +551,56 @@ class TelegramChannel(BaseChannel):
         return content
 
     async def start(self) -> None:
-        """Start the Telegram bot."""
+        """Start the Telegram bot, rebuilding the app whenever polling stalls."""
         if not self.config.token:
             self.logger.error("bot token not configured")
             return
 
-        self._running = True
+        redirect_lib_logging("telegram")
+        redirect_lib_logging("httpx", level="WARNING")
 
+        self._running = True
+        backoff = RESTART_BACKOFF_INITIAL_SECONDS
+        while self._running:
+            try:
+                await self._start_app()
+            except InvalidToken as e:
+                # A rejected token is a config error, not a transient network
+                # failure — retrying forever would only spam the log.
+                await self._teardown_app()
+                self.logger.error("bot token rejected: {}", self._format_telegram_error(e))
+                return
+            except Exception as e:
+                await self._teardown_app()
+                if not self._running:
+                    break
+                self.logger.error(
+                    "startup failed: {}; retrying in {:.0f}s",
+                    self._format_telegram_error(e),
+                    backoff,
+                )
+                await self._idle(backoff)
+                backoff = min(backoff * 2, RESTART_BACKOFF_MAX_SECONDS)
+                continue
+
+            backoff = RESTART_BACKOFF_INITIAL_SECONDS
+            if not self._running:
+                # stop() ran while _start_app() was mid-flight and tore down the
+                # previous (possibly None) app; this one would leak otherwise.
+                await self._teardown_app()
+                break
+            stalled = await self._watch_polling()
+            if not stalled or not self._running:
+                break
+            self.logger.warning(
+                "polling stalled: no getUpdates round trip for {:.0f}s; "
+                "rebuilding connection pools and restarting",
+                time.monotonic() - self._last_poll_ok,
+            )
+            await self._teardown_app()
+
+    async def _start_app(self) -> None:
+        """Build, initialize and start the Telegram application."""
         proxy = self.config.proxy or None
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
@@ -544,7 +622,7 @@ class TelegramChannel(BaseChannel):
             Application.builder()
             .token(self.config.token)
             .request(api_request)
-            .get_updates_request(poll_request)
+            .get_updates_request(_LivenessTrackedRequest(poll_request, self._note_poll_ok))
         )
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
@@ -621,16 +699,43 @@ class TelegramChannel(BaseChannel):
                 max_connections=self.config.webhook_max_connections,
             )
         else:
-            # Start polling (this runs until stopped)
+            self._last_poll_ok = time.monotonic()
             await cast(Any, self._app.updater).start_polling(
                 allowed_updates=allowed_updates,
                 drop_pending_updates=False,  # Process pending messages on startup
                 error_callback=self._on_polling_error,
             )
 
-        # Keep running until stopped
+    def _note_poll_ok(self) -> None:
+        # HTTP error statuses count too: the watchdog detects transport stalls,
+        # not logical failures.
+        self._last_poll_ok = time.monotonic()
+
+    async def _watch_polling(self) -> bool:
+        """Idle until stop(); in polling mode, return True when getUpdates goes stale."""
+        watch = self.config.mode != "webhook"
         while self._running:
-            await asyncio.sleep(1)
+            await asyncio.sleep(POLL_WATCH_INTERVAL)
+            if watch and time.monotonic() - self._last_poll_ok > POLL_STALE_SECONDS:
+                return True
+        return False
+
+    async def _idle(self, seconds: float) -> None:
+        """Sleep in short steps so stop() stays responsive."""
+        deadline = time.monotonic() + seconds
+        while self._running and time.monotonic() < deadline:
+            await asyncio.sleep(POLL_WATCH_INTERVAL)
+
+    async def _teardown_app(self) -> None:
+        """Shut down the application, tolerating partially started state."""
+        app, self._app = self._app, None
+        if not app:
+            return
+        for step in (cast(Any, app.updater).stop, app.stop, app.shutdown):
+            try:
+                await step()
+            except Exception as e:
+                self.logger.debug("teardown step failed: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -652,10 +757,7 @@ class TelegramChannel(BaseChannel):
 
         if self._app:
             self.logger.info("Stopping bot...")
-            await cast(Any, self._app.updater).stop()
-            await self._app.stop()
-            await self._app.shutdown()
-            self._app = None
+            await self._teardown_app()
 
     @staticmethod
     def _get_media_type(path: str) -> str:
