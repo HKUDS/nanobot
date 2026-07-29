@@ -1,6 +1,8 @@
 ---
 name: image-generation
 description: Generate images and iteratively edit saved image artifacts.
+metadata:
+  always: true
 ---
 
 # Image Generation
