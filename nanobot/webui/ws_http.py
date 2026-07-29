@@ -197,7 +197,9 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
-        self.disabled_skills = disabled_skills if disabled_skills is not None else set()
+        self.disabled_skills: set[str] = (
+            disabled_skills if disabled_skills is not None else set()
+        )
         self.skill_state_action = skill_state_action
         self._skill_install_lock = asyncio.Lock()
         self.cron_service = cron_service

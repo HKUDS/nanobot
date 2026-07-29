@@ -6,7 +6,7 @@ import json
 import shlex
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.loader import load_config, save_config
@@ -188,37 +188,42 @@ def _nanobot_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     raw = metadata.get("metadata")
     if isinstance(raw, str):
         try:
-            raw = json.loads(raw)
+            raw = cast(object, json.loads(raw))
         except (json.JSONDecodeError, TypeError):
             return {}
     if not isinstance(raw, dict):
         return {}
-    payload = raw.get("nanobot", raw.get("openclaw", {}))
-    return payload if isinstance(payload, dict) else {}
+    metadata_payload = cast(dict[str, Any], raw)
+    payload = metadata_payload.get("nanobot", metadata_payload.get("openclaw", {}))
+    return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
 
 def _install_options(metadata: dict[str, Any] | None) -> list[dict[str, str]]:
     """Return safe, copyable setup commands declared by a skill."""
-    install = _nanobot_metadata(metadata).get("install")
-    if not isinstance(install, list):
+    raw_install = _nanobot_metadata(metadata).get("install")
+    if not isinstance(raw_install, list):
         return []
+    install = cast(list[object], raw_install)
 
     options: list[dict[str, str]] = []
     for item in install:
         if not isinstance(item, dict):
             continue
-        kind = item.get("kind")
-        package = item.get("formula") if kind == "brew" else item.get("package")
+        install_item = cast(dict[str, object], item)
+        kind = install_item.get("kind")
+        if not isinstance(kind, str) or kind not in {"brew", "apt"}:
+            continue
+        package = (
+            install_item.get("formula") if kind == "brew" else install_item.get("package")
+        )
         if not isinstance(package, str) or not package.strip():
             continue
         if kind == "brew":
             command = f"brew install {shlex.quote(package.strip())}"
-        elif kind == "apt":
-            command = f"sudo apt-get install -y {shlex.quote(package.strip())}"
         else:
-            continue
-        option_id = item.get("id")
-        label = item.get("label")
+            command = f"sudo apt-get install -y {shlex.quote(package.strip())}"
+        option_id = install_item.get("id")
+        label = install_item.get("label")
         options.append(
             {
                 "id": option_id if isinstance(option_id, str) else kind,

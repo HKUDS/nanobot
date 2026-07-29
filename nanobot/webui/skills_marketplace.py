@@ -12,7 +12,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -54,6 +54,12 @@ _SKILLHUB_MAX_FILES = 1_000
 _CLI_AGENT = "openclaw"
 _weekly_cache: dict[tuple[str, str], list[int]] = {}
 _weekly_cache_expires_at = 0.0
+
+
+def _response_json_object(response: httpx.Response) -> dict[str, Any] | None:
+    """Narrow an untyped HTTP JSON response at the external-data boundary."""
+    payload = cast(object, response.json())
+    return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
 
 class SkillsMarketplaceError(Exception):
@@ -117,7 +123,7 @@ async def _trending_skills_sh_skills(
         async with _skills_client() as client:
             response = await client.get(_TRENDING_URL)
             response.raise_for_status()
-            payload = response.json()
+            payload = _response_json_object(response) or {}
     except (httpx.HTTPError, ValueError) as exc:
         raise SkillsMarketplaceError(
             "skills.sh trending skills are temporarily unavailable",
@@ -125,16 +131,17 @@ async def _trending_skills_sh_skills(
         ) from exc
 
     installed = _installed_skill_names(workspace_path)
-    rows = payload.get("skills", []) if isinstance(payload, dict) else []
+    rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
     for rank, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             continue
-        source = row.get("source")
+        row_payload = cast(dict[str, Any], row)
+        source = row_payload.get("source")
         if not isinstance(source, str) or source in seen_sources:
             continue
-        skill = _marketplace_skill(row, installed, rank=rank)
+        skill = _marketplace_skill(row_payload, installed, rank=rank)
         if skill is None:
             continue
         seen_sources.add(source)
@@ -207,7 +214,7 @@ async def _search_skills_sh_skills(
                 params={"q": normalized, "limit": min(max(limit, 1), 50)},
             )
             response.raise_for_status()
-            payload = response.json()
+            payload = _response_json_object(response) or {}
     except (httpx.HTTPError, ValueError) as exc:
         raise SkillsMarketplaceError(
             "skills.sh search is temporarily unavailable",
@@ -215,12 +222,12 @@ async def _search_skills_sh_skills(
         ) from exc
 
     installed = _installed_skill_names(workspace_path)
-    rows = payload.get("skills", []) if isinstance(payload, dict) else []
-    skills = []
+    rows = payload.get("skills", [])
+    skills: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        skill = _marketplace_skill(row, installed)
+        skill = _marketplace_skill(cast(dict[str, Any], row), installed)
         if skill is not None:
             skills.append(skill)
 
@@ -245,7 +252,7 @@ async def _search_skillhub_skills(
                 params={"q": normalized, "limit": min(max(limit, 1), 50)},
             )
             response.raise_for_status()
-            payload = response.json()
+            payload = _response_json_object(response) or {}
     except (httpx.HTTPError, ValueError) as exc:
         raise SkillsMarketplaceError(
             "SkillHub search is temporarily unavailable",
@@ -253,12 +260,12 @@ async def _search_skillhub_skills(
         ) from exc
 
     installed = _installed_skill_names(workspace_path)
-    rows = payload.get("results", []) if isinstance(payload, dict) else []
+    rows = payload.get("results", [])
     skills = [
         skill
         for row in rows
         if isinstance(row, dict)
-        if (skill := _skillhub_skill(row, installed)) is not None
+        if (skill := _skillhub_skill(cast(dict[str, Any], row), installed)) is not None
     ]
     return {
         "query": normalized,
@@ -277,7 +284,7 @@ async def _trending_skillhub_skills(
         async with _skillhub_client() as client:
             response = await client.get(_SKILLHUB_TRENDING_URL)
             response.raise_for_status()
-            payload = response.json()
+            payload = _response_json_object(response) or {}
     except (httpx.HTTPError, ValueError) as exc:
         raise SkillsMarketplaceError(
             "SkillHub trending skills are temporarily unavailable",
@@ -285,12 +292,12 @@ async def _trending_skillhub_skills(
         ) from exc
 
     installed = _installed_skill_names(workspace_path)
-    rows = payload.get("skills", []) if isinstance(payload, dict) else []
+    rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for rank, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             continue
-        skill = _skillhub_skill(row, installed, rank=rank)
+        skill = _skillhub_skill(cast(dict[str, Any], row), installed, rank=rank)
         if skill is not None:
             skills.append(skill)
         if len(skills) >= min(max(limit, 1), 20):
@@ -538,9 +545,10 @@ async def _skillhub_latest_version(client: httpx.AsyncClient, skill_id: str) -> 
         f"{_SKILLHUB_API_BASE_URL}/api/v1/skills/{quote(skill_id, safe='')}"
     )
     response.raise_for_status()
-    payload = response.json()
-    latest = payload.get("latestVersion", {}) if isinstance(payload, dict) else {}
-    version = latest.get("version") if isinstance(latest, dict) else None
+    payload = _response_json_object(response) or {}
+    raw_latest = payload.get("latestVersion", {})
+    latest = cast(dict[str, Any], raw_latest) if isinstance(raw_latest, dict) else {}
+    version = latest.get("version")
     if not isinstance(version, str) or _VERSION_RE.fullmatch(version) is None:
         raise SkillsMarketplaceError(
             "SkillHub did not return a valid skill version",
@@ -559,8 +567,8 @@ async def _skillhub_signature(
         f"{quote(skill_id, safe='')}/versions/{quote(version, safe='')}/signature"
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
+    payload = _response_json_object(response)
+    if payload is None:
         raise SkillsMarketplaceError(
             "SkillHub returned an invalid package fingerprint",
             status=502,
@@ -786,7 +794,8 @@ def _skillhub_skill(
         display_name = skill_id
 
     namespace = row.get("namespace")
-    handle = namespace.get("handle") if isinstance(namespace, dict) else None
+    namespace_payload = cast(dict[str, Any], namespace) if isinstance(namespace, dict) else {}
+    handle = namespace_payload.get("handle")
     if not isinstance(handle, str) or not handle.strip():
         owner = row.get("owner_name") or row.get("ownerName")
         handle = owner if isinstance(owner, str) and owner.strip() else "community"
@@ -795,11 +804,11 @@ def _skillhub_skill(
     installs = row.get("installs")
     downloads = row.get("downloads")
     publisher = row.get("publisher")
-    verified = bool(isinstance(publisher, dict) and publisher.get("verified") is True)
+    publisher_payload = cast(dict[str, Any], publisher) if isinstance(publisher, dict) else {}
+    verified = publisher_payload.get("verified") is True
     labels = row.get("labels")
-    requires_api_key = bool(
-        isinstance(labels, dict) and str(labels.get("requires_api_key", "")).lower() == "true"
-    )
+    labels_payload = cast(dict[str, Any], labels) if isinstance(labels, dict) else {}
+    requires_api_key = str(labels_payload.get("requires_api_key", "")).lower() == "true"
     version = row.get("version")
     if not isinstance(version, str) or _VERSION_RE.fullmatch(version) is None:
         version = ""
@@ -846,21 +855,22 @@ async def _load_weekly_installs(
             continue
         try:
             response.raise_for_status()
-            payload = response.json()
+            payload = _response_json_object(response) or {}
         except (httpx.HTTPError, ValueError):
             continue
         successful = True
-        rows = payload.get("skills", []) if isinstance(payload, dict) else []
+        rows = payload.get("skills", [])
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            source = row.get("source")
-            skill_id = row.get("skillId")
-            values = row.get("weeklyInstalls")
+            row_payload = cast(dict[str, Any], row)
+            source = row_payload.get("source")
+            skill_id = row_payload.get("skillId")
+            values = row_payload.get("weeklyInstalls")
             if isinstance(source, str) and isinstance(skill_id, str) and isinstance(values, list):
                 clean = [
                     value
-                    for value in values
+                    for value in cast(list[object], values)
                     if isinstance(value, int) and not isinstance(value, bool) and value >= 0
                 ]
                 if len(clean) >= 2:
@@ -875,7 +885,7 @@ async def _load_weekly_installs(
 def _valid_skill_refs(skill_ids: list[str]) -> list[tuple[str, str]]:
     refs: list[tuple[str, str]] = []
     for value in skill_ids[:20]:
-        if not isinstance(value, str) or "/" not in value:
+        if "/" not in value:
             continue
         source, skill_id = value.rsplit("/", 1)
         ref = (source, skill_id)
