@@ -113,7 +113,7 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
-  it("renders sending and failed delivery states without persistent accepted chrome", () => {
+  it("renders failed delivery details on focus without persistent accepted chrome", async () => {
     const message: UIMessage = {
       id: "u-delivery",
       role: "user",
@@ -129,14 +129,35 @@ describe("MessageBubble", () => {
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-    rerender(<MessageBubble message={{ ...message, deliveryStatus: "failed" }} />);
+    rerender(
+      <MessageBubble
+        message={{
+          ...message,
+          deliveryStatus: "failed",
+          deliveryErrorKind: "message_too_big",
+        }}
+      />,
+    );
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByText("Not sent")).toHaveClass(
+    const failedStatus = screen.getByRole("button", {
+      name: "Not sent: Message too large",
+    });
+    expect(failedStatus).toHaveClass(
       "text-destructive/80",
       "dark:text-red-400/80",
     );
     expect(screen.getByText("hello")).not.toHaveClass("ring-1");
     expect(screen.getByText("hello")).not.toHaveClass("ring-destructive/30");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.focus(failedStatus);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Message too large");
+    expect(tooltip).toHaveTextContent(
+      "The server rejected your last message because it exceeded the size limit.",
+    );
+    expect(screen.getByRole("alert")).toHaveClass("sr-only");
   });
 
   it("styles only generated quoted context in user messages", () => {

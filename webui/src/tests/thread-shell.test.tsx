@@ -6,7 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
-import type { CanonicalRunSnapshot } from "@/lib/nanobot-client";
+import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
 
@@ -14,7 +14,7 @@ const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
 function makeClient() {
-  const errorHandlers = new Set<(err: { kind: string }) => void>();
+  const errorHandlers = new Set<(err: StreamError) => void>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
   const runtimeModelHandlers = new Set<
@@ -107,6 +107,7 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
@@ -122,7 +123,7 @@ function makeClient() {
         handlers?.delete(handler);
       };
     },
-    onError: (handler: (err: { kind: string }) => void) => {
+    onError: (handler: (err: StreamError) => void) => {
       errorHandlers.add(handler);
       return () => {
         errorHandlers.delete(handler);
@@ -134,7 +135,7 @@ function makeClient() {
         sessionUpdateHandlers.delete(handler);
       };
     },
-    _emitError(err: { kind: string }) {
+    _emitError(err: StreamError) {
       for (const h of errorHandlers) h(err);
     },
     _emitStatus(nextStatus: ConnectionStatus) {
@@ -3208,7 +3209,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();
   });
 
-  it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
+  it("surfaces a dismissible banner for an uncorrelated message_too_big error", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
@@ -3241,6 +3242,52 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {
+    const client = makeClient();
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-inline-error")}
+          title="Chat inline error"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "oversized payload" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledTimes(1));
+    const turnId = client.sendMessage.mock.calls[0][3]?.turnId;
+    expect(turnId).toEqual(expect.any(String));
+
+    await act(async () => {
+      client._emitError({
+        kind: "message_too_big",
+        chatId: "chat-inline-error",
+        turnId,
+      });
+    });
+
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+    const status = screen.getByRole("button", {
+      name: "Not sent: Message too large",
+    });
+    expect(screen.getByRole("alert")).toHaveClass("sr-only");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.focus(status);
+
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "The server rejected your last message because it exceeded the size limit.",
+    );
   });
 
   it("clears the stream error banner when the user switches to another chat", async () => {

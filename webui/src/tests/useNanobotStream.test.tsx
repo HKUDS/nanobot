@@ -1738,6 +1738,7 @@ describe("useNanobotStream", () => {
         turnId: first!.turnId,
         content: "first",
         deliveryStatus: "failed",
+        deliveryErrorKind: "turn_rejected",
       }),
       expect.objectContaining({
         id: second!.userMessageId,
@@ -1829,6 +1830,7 @@ describe("useNanobotStream", () => {
       expect.objectContaining({
         id: submitted!.userMessageId,
         deliveryStatus: "failed",
+        deliveryErrorKind: "turn_rejected",
       }),
     ]);
     expect(result.current.runStartedAt).toBeNull();

@@ -722,7 +722,11 @@ export function useNanobotStream(
       return prev.flatMap((message) => {
         if (message.turnId !== rejectedTurnId) return [message];
         if (message.role !== "user") return [];
-        return [{ ...message, deliveryStatus: "failed" }];
+        return [{
+          ...message,
+          deliveryStatus: "failed",
+          deliveryErrorKind: err.kind,
+        }];
       });
     });
 
