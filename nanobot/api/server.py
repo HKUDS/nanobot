@@ -119,6 +119,21 @@ def _as_str(value: object) -> str:
     """Return *value* when it is text, otherwise an empty string."""
     return value if isinstance(value, str) else ""
 
+
+def _require_json_object(value: object, field: str) -> dict[str, Any]:
+    """Validate an object-valued field from an untrusted JSON request."""
+    if not isinstance(value, dict):
+        raise TypeError(f"{field} must be an object")
+    return cast(dict[str, Any], value)
+
+
+def _require_json_string(value: object, field: str) -> str:
+    """Validate a string-valued field from an untrusted JSON request."""
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # SSE helpers
 # ---------------------------------------------------------------------------
@@ -151,8 +166,11 @@ _SSE_DONE = b"data: [DONE]\n\n"
 
 def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
     """Parse JSON request body. Returns (text, media_paths)."""
-    messages = cast(list[Any] | None, body.get("messages"))
-    if not isinstance(messages, list) or len(messages) != 1:
+    messages_value = cast(object, body.get("messages"))
+    if not isinstance(messages_value, list):
+        raise ValueError("Only a single user message is supported")
+    messages = cast(list[object], messages_value)
+    if len(messages) != 1:
         raise ValueError("Only a single user message is supported")
     message_value: object = messages[0]
     if not isinstance(message_value, dict):
@@ -167,15 +185,26 @@ def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
 
     if isinstance(user_content, list):
         text_parts: list[str] = []
-        for part in cast(list[Any], user_content):
-            if not isinstance(part, dict):
+        for part_value in cast(list[object], user_content):
+            if not isinstance(part_value, dict):
                 continue
-            part = cast(dict[str, Any], part)
+            part = cast(dict[str, Any], part_value)
             if part.get("type") == "text":
-                text_parts.append(cast(str, part.get("text", "")))
+                text_parts.append(
+                    _require_json_string(
+                        cast(object, part.get("text", "")),
+                        "messages[0].content[].text",
+                    )
+                )
             elif part.get("type") == "image_url":
-                image_url = cast(dict[str, Any], part.get("image_url", {}))
-                url = cast(str, image_url.get("url", ""))
+                image_url = _require_json_object(
+                    cast(object, part.get("image_url", {})),
+                    "messages[0].content[].image_url",
+                )
+                url = _require_json_string(
+                    cast(object, image_url.get("url", "")),
+                    "messages[0].content[].image_url.url",
+                )
                 if url.startswith("data:"):
                     saved = _save_base64_data_url(url, media_dir)
                     if saved:

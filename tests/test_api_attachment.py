@@ -156,6 +156,28 @@ def test_parse_json_content_validates_user_role() -> None:
         _parse_json_content(body)
 
 
+@pytest.mark.parametrize(
+    ("part", "field"),
+    [
+        ({"type": "text", "text": 1}, r"content\[\]\.text"),
+        (
+            {"type": "image_url", "image_url": "not-an-object"},
+            r"content\[\]\.image_url",
+        ),
+        (
+            {"type": "image_url", "image_url": {"url": 1}},
+            r"image_url\.url",
+        ),
+    ],
+)
+def test_parse_json_content_validates_typed_block_fields(part, field) -> None:
+    """Dynamic content blocks are checked before their values reach typed code."""
+    body = {"messages": [{"role": "user", "content": [part]}]}
+
+    with pytest.raises(TypeError, match=field):
+        _parse_json_content(body)
+
+
 def test_parse_json_content_rejects_oversized_base64_file(tmp_path) -> None:
     """Oversized JSON data URLs should fail before writing to disk."""
     large_payload = base64.b64encode(b"x" * (11 * 1024 * 1024)).decode()

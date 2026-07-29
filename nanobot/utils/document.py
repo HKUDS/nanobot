@@ -103,7 +103,7 @@ class PdfExtraction:
     end_page: int
 
 
-def extract_text(path: Path) -> str | None:
+def extract_text(path: str | Path) -> str | None:
     """Extract text from a file.
 
     Args:
@@ -113,6 +113,7 @@ def extract_text(path: Path) -> str | None:
         Extracted text as string, None for unsupported types,
         or error string for failures.
     """
+    path = Path(path)
     if not path.exists():
         return f"[error: file not found: {path}]"
     try:

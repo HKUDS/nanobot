@@ -7,6 +7,7 @@ from nanobot.config.loader import (
     _resolve_env_vars,
     load_config,
     resolve_config_env_vars,
+    resolve_env_refs,
     save_config,
 )
 from nanobot.config.schema import Config
@@ -48,6 +49,12 @@ class TestResolveEnvVars:
     def test_missing_var_raises(self):
         with pytest.raises(ValueError, match="DOES_NOT_EXIST"):
             _resolve_env_vars("${DOES_NOT_EXIST}")
+
+
+class TestResolveSingleEnvRefs:
+    @pytest.mark.parametrize("value", [None, 42, True, {"key": "value"}])
+    def test_non_string_values_pass_through_unchanged(self, value):
+        assert resolve_env_refs(value) is value
 
 
 class TestResolveConfig:

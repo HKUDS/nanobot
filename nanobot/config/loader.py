@@ -4,7 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
@@ -213,7 +213,15 @@ def resolve_config_env_vars(
     return _resolve_in_place(config)
 
 
-def resolve_env_refs(value: str) -> str:
+@overload
+def resolve_env_refs(value: str) -> str: ...
+
+
+@overload
+def resolve_env_refs(value: object) -> object: ...
+
+
+def resolve_env_refs(value: object) -> object:
     """Resolve ``${VAR}`` references in a single string, leniently.
 
     Unlike :func:`resolve_config_env_vars` (which walks a whole ``Config`` and
@@ -223,6 +231,8 @@ def resolve_env_refs(value: str) -> str:
     missing variable degrades to "not configured" instead of producing a partial
     value. Non-string input is returned unchanged.
     """
+    if not isinstance(value, str):
+        return value
     names = _ENV_REF_PATTERN.findall(value)
     if any(name not in os.environ for name in names):
         return ""
