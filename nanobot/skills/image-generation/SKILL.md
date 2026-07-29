@@ -42,6 +42,27 @@ For follow-up edits, pass the prior artifact `path` to `reference_images`. If th
 
 Do not include internal replay markers such as `[Message Time: ...]`, `[image: /local/path]`, `generate_image(...)`, or `message(...)` in user-facing replies.
 
+## Model Selection
+
+The default model is `gemini-2.5-flash-image` (cheap tier). You may override per-call using the `model` parameter.
+
+**Upgrade to `gpt-image-2` ONLY when the current prompt inherently requires it:**
+- Human faces or portraits
+- Text that must appear in the image (signs, labels, titles)
+- Complex multi-subject compositions
+- Photorealistic or cinematic quality
+- Product photos or architectural renders
+
+**DO NOT upgrade when:**
+- The cheap tier simply "looks bad" — report the result to the user instead
+- The request failed or timed out — retry with the same model once, then report failure
+- The user asks for "better quality" without any of the above specific needs
+
+**Retry behavior:**
+1. First attempt uses the configured default model (`gemini-2.5-flash-image`).
+2. If generation fails or times out, retry exactly once with the **same** model.
+3. If retry also fails, report the error to the user. Never auto-upgrade to `gpt-image-2` due to failures.
+
 ## Examples
 
 Generate a new image:

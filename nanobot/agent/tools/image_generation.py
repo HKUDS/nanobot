@@ -66,6 +66,9 @@ class ImageGenerationToolConfig(Base):
             minimum=1,
             maximum=8,
         ),
+        model=StringSchema(
+            "Optional per-call model override. If specified, uses this model instead of the configured default. Use 'gpt-image-2' only for complex scenes, human faces, in-image text, or high-precision requirements.",
+        ),
         required=["prompt"],
     )
 )
@@ -169,6 +172,7 @@ class ImageGenerationTool(Tool):
         aspect_ratio: str | None = None,
         image_size: str | None = None,
         count: int | None = None,
+        model: str | None = None,
         **kwargs: Any,
     ) -> str:
         client = self._provider_client()
@@ -182,13 +186,15 @@ class ImageGenerationTool(Tool):
                 f"({self.config.max_images_per_turn})"
             )
 
+        effective_model = model if model else self.config.model
+
         try:
             refs = self._resolve_reference_images(reference_images)
             artifacts: list[dict[str, Any]] = []
             while len(artifacts) < requested:
                 response = await client.generate(
                     prompt=prompt,
-                    model=self.config.model,
+                    model=effective_model,
                     reference_images=refs,
                     aspect_ratio=aspect_ratio or self.config.default_aspect_ratio,
                     image_size=image_size or self.config.default_image_size,
@@ -197,7 +203,7 @@ class ImageGenerationTool(Tool):
                     artifact = store_generated_image_artifact(
                         image_data_url,
                         prompt=prompt,
-                        model=self.config.model,
+                        model=effective_model,
                         source_images=refs,
                         save_dir=self.config.save_dir,
                         provider=self.config.provider,
