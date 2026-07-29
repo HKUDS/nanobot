@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger
 
@@ -346,6 +348,190 @@ class TestNoFallbackWhenPrimarySucceeds:
         assert result.finish_reason == "stop"
         factory.assert_not_called()
 
+
+class _RaisingProvider(LLMProvider):
+    """Provider whose chat/chat_stream raise, like an auth/setup failure."""
+
+    def __init__(self, name: str = "raiser", exc: BaseException | None = None):
+        super().__init__()
+        self.name = name
+        self._exc = exc if exc is not None else RuntimeError("GitHub Copilot is not logged in.")
+
+    def get_default_model(self) -> str:
+        return f"{self.name}/model"
+
+    async def chat(self, **kwargs: Any) -> LLMResponse:
+        raise self._exc
+
+    async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+        raise self._exc
+
+
+class _StreamingThenRaisingProvider(_RaisingProvider):
+    async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+        on_content_delta = kwargs.get("on_content_delta")
+        if on_content_delta:
+            await on_content_delta("partial")
+        raise self._exc
+
+
+class TestFallbackWhenPrimaryRaises:
+    @pytest.mark.parametrize(
+        "exc",
+        [TimeoutError(), httpx.ReadTimeout(""), httpx.ConnectError("")],
+        ids=["asyncio-timeout", "httpx-timeout", "connection"],
+    )
+    @pytest.mark.asyncio
+    async def test_transient_exception_triggers_fallback(self, exc: Exception) -> None:
+        """Transient exceptions remain eligible even when their messages are empty."""
+        primary = _RaisingProvider("primary", exc)
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
+    async def test_primary_exception_triggers_fallback(self) -> None:
+        """A primary whose chat() raises must not abort failover.
+
+        GitHubCopilotProvider.chat refreshes its token before the request and
+        raises when not logged in; the exception must be treated as a
+        fallbackable primary error, not swallow the whole fallback chain.
+        """
+        primary = _RaisingProvider("primary")
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ValueError("unexpected response shape"),
+            PermissionError("local provider file access failed"),
+        ],
+        ids=["value-error", "local-permission-error"],
+    )
+    @pytest.mark.asyncio
+    async def test_non_fallbackable_primary_exception_does_not_trigger_fallback(
+        self, exc: Exception,
+    ) -> None:
+        """An unrelated provider bug must not silently switch models."""
+        primary = _RaisingProvider("primary", exc)
+        factory = MagicMock(
+            return_value=_FakeProvider("fallback", _make_response("fallback"))
+        )
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="primary-model",
+        )
+
+        assert result.finish_reason == "error"
+        assert result.content is not None
+        assert str(exc) in result.content
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fallback_exception_advances_to_next_fallback(self) -> None:
+        """A fallback whose chat() raises must advance to the next fallback."""
+        primary = _FakeProvider("primary", _error_response())
+        raising_fb = _RaisingProvider("fb1")
+        ok_fb = _FakeProvider("fb2", _make_response("second fallback ok"))
+        factory = MagicMock(side_effect=[raising_fb, ok_fb])
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a"), _fallback("fallback-b")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        assert result.content == "second fallback ok"
+        assert result.finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_primary_exception_stream_triggers_fallback(self) -> None:
+        """Streaming path: a raising primary still fails over when nothing streamed."""
+        primary = _RaisingProvider("primary")
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat_stream(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_primary_exception_after_streaming_does_not_duplicate_output(self) -> None:
+        """Once content was emitted, an exception must not start a replacement stream."""
+        primary = _StreamingThenRaisingProvider("primary")
+        factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("duplicate")))
+        deltas: list[str] = []
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        async def collect_delta(text: str) -> None:
+            deltas.append(text)
+
+        result = await fb.chat_stream(
+            messages=[{"role": "user", "content": "hi"}],
+            model="primary-model",
+            on_content_delta=collect_delta,
+        )
+
+        assert deltas == ["partial"]
+        assert result.finish_reason == "error"
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_primary_cancellation_is_not_converted_to_failover(self) -> None:
+        """Task cancellation must retain asyncio cancellation semantics."""
+        primary = _RaisingProvider("primary", asyncio.CancelledError())
+        factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("fallback")))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        factory.assert_not_called()
 
 class TestFallbackOnPrimaryError:
     @pytest.mark.asyncio
