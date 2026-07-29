@@ -192,18 +192,20 @@ class ImageGenerationTool(Tool):
                 f"Error: unsupported model '{model}'. "
                 f"Allowed models: {', '.join(sorted(allowed_models))}"
             )
-        effective_model = model if model else self.config.model
+
+        if model:
+            effective_model = model
+        else:
+            effective_model = self._select_model(prompt)
 
         try:
             refs = self._resolve_reference_images(reference_images)
             artifacts: list[dict[str, Any]] = []
             while len(artifacts) < requested:
-                response = await client.generate(
-                    prompt=prompt,
-                    model=effective_model,
-                    reference_images=refs,
-                    aspect_ratio=aspect_ratio or self.config.default_aspect_ratio,
-                    image_size=image_size or self.config.default_image_size,
+                response = await self._generate_with_retry(
+                    client, prompt, effective_model, refs,
+                    aspect_ratio or self.config.default_aspect_ratio,
+                    image_size or self.config.default_image_size,
                 )
                 for image_data_url in response.images:
                     artifact = store_generated_image_artifact(
@@ -220,3 +222,80 @@ class ImageGenerationTool(Tool):
             return generated_image_tool_result(artifacts)
         except (ArtifactError, ImageGenerationError, OSError) as exc:
             return ToolResult.error(f"Error: {exc}")
+
+    @staticmethod
+    def _select_model(prompt: str) -> str:
+        """根据 prompt 特征自动选择模型。
+
+        人像 / 图内文字 / 复杂场景 → gpt-image-2；
+        其他 → 默认便宜档。
+        """
+        prompt_lower = prompt.lower()
+
+        # 人像 / 人脸检测
+        portrait_keywords = [
+            "portrait", "person", "people", "face", "faces", "human",
+            "woman", "man", "girl", "boy", "child", "baby",
+            "人像", "人脸", "人物", "肖像", "女孩", "男孩", "女人", "男人",
+            "照片", "photo", "selfie", "headshot", "profile photo",
+        ]
+        for kw in portrait_keywords:
+            if kw in prompt_lower:
+                return "gpt-image-2"
+
+        # 图内文字检测
+        text_in_image_patterns = [
+            "text", "sign", "banner", "poster", "label", "title",
+            "writing", "written", "says", "reading", "quote",
+            "文字", "写字", "牌子", "标语", "标题", "签名",
+            '"', "'",
+        ]
+        for kw in text_in_image_patterns:
+            if kw in prompt_lower:
+                return "gpt-image-2"
+
+        # 高精度 / 写实检测
+        quality_keywords = [
+            "photorealistic", "photograph", "realistic", "cinematic",
+            "professional", "high quality", "high resolution", "4k", "8k",
+            "写实", "高清", "高质量", "专业", "产品", "product",
+            "architecture", "architectural",
+        ]
+        for kw in quality_keywords:
+            if kw in prompt_lower:
+                return "gpt-image-2"
+
+        return "gemini-2.5-flash-image"
+
+    async def _generate_with_retry(
+        self,
+        client: Any,
+        prompt: str,
+        model: str,
+        reference_images: list[str],
+        aspect_ratio: str,
+        image_size: str,
+    ) -> Any:
+        """调用生图 API，瞬时失败自动重试 1 次（同 model）。"""
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                return await client.generate(
+                    prompt=prompt,
+                    model=model,
+                    reference_images=reference_images,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                )
+            except (ImageGenerationError, OSError) as exc:
+                last_exc = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status and 400 <= status < 500:
+                    raise
+                if attempt == 0:
+                    logger.warning(
+                        "Image generation failed (attempt 1/2, model={}): {}. Retrying...",
+                        model, exc,
+                    )
+                    continue
+        raise last_exc  # type: ignore[misc]
