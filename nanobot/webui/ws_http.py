@@ -171,6 +171,7 @@ class GatewayHTTPHandler:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         log: Any = logger,
+        push_service: Any | None = None,
     ) -> None:
         self.config = config
         self.session_manager = session_manager
@@ -187,6 +188,7 @@ class GatewayHTTPHandler:
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
         self.local_trigger_pending_ids = local_trigger_pending_ids
+        self.push_service = push_service
         self._log = log
         self._runtime_surface = runtime_surface
 

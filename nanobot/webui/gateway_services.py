@@ -31,6 +31,7 @@ class GatewayServices:
     local_trigger_store: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    push_service: Any | None = None
 
 
 def build_gateway_services(
@@ -52,6 +53,7 @@ def build_gateway_services(
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     logger: Any = default_logger,
+    runtime_events: Any | None = None,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
     ingress = DEFAULT_WEBUI_INGRESS_POLICY
@@ -74,6 +76,16 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
+    # Push service: optional, requires RuntimeEventBus
+    push_service = None
+    if runtime_events is not None:
+        try:
+            from nanobot.push.service import init_push_service
+            push_service = init_push_service(bus=runtime_events)
+            logger.info("push notification service initialized")
+        except Exception as e:
+            logger.warning("failed to init push service: {}", e)
+
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -95,6 +107,7 @@ def build_gateway_services(
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         log=logger,
+        push_service=push_service,
     )
     return GatewayServices(
         http=http,

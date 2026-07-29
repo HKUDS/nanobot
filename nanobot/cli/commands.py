@@ -1952,6 +1952,13 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
+    def _extract_auth_token(raw_data: bytes) -> str:
+        """Extract Bearer token from Authorization header."""
+        for line in raw_data.split(b"\r\n"):
+            if line.lower().startswith(b"authorization: bearer "):
+                return line[21:].decode("utf-8", errors="replace").strip()
+        return ""
+
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
@@ -1981,6 +1988,49 @@ def _run_gateway(
                         body = _json.dumps({"status": "ok"})
                         status = "200 OK"
                         content_type = "application/json"
+                    elif method == "POST" and path in ("/api/push/register", "/api/push/unregister"):
+                        try:
+                            body_data = data.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in data else b"{}"
+                            payload = _json.loads(body_data.decode("utf-8", errors="replace"))
+                        except (IndexError, _json.JSONDecodeError, UnicodeDecodeError):
+                            payload = {}
+
+                        from nanobot.push.service import get_push_service
+                        push_svc = get_push_service()
+                        if push_svc is None:
+                            body = _json.dumps({"error": "push service not available"})
+                            status = "503 Service Unavailable"
+                            content_type = "application/json"
+                        elif path == "/api/push/register":
+                            device_id = payload.get("device_id")
+                            if not device_id:
+                                body = _json.dumps({"error": "missing device_id"})
+                                status = "400 Bad Request"
+                                content_type = "application/json"
+                            else:
+                                push_svc.register_device(
+                                    payload.get("user_token", ""),
+                                    device_id,
+                                    fcm_token=payload.get("fcm_token") or None,
+                                    xiaomi_reg_id=payload.get("xiaomi_reg_id") or None,
+                                )
+                                body = _json.dumps({"status": "registered", "device_id": device_id})
+                                status = "200 OK"
+                                content_type = "application/json"
+                        else:  # unregister
+                            device_id = payload.get("device_id")
+                            if not device_id:
+                                body = _json.dumps({"error": "missing device_id"})
+                                status = "400 Bad Request"
+                                content_type = "application/json"
+                            else:
+                                push_svc.unregister_device(
+                                    payload.get("user_token", ""),
+                                    device_id,
+                                )
+                                body = _json.dumps({"status": "unregistered", "device_id": device_id})
+                                status = "200 OK"
+                                content_type = "application/json"
                     else:
                         body = "Not Found"
                         status = "404 Not Found"
