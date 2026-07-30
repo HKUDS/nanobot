@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
+    "quickChat": "빠른 채팅",
     "newChat": "새 주제",
     "searchAria": "검색",
     "searchPlaceholder": "검색",
@@ -58,6 +59,17 @@
     "automations": "자동화",
     "skills": {
       "title": "스킬"
+    }
+  },
+  "quickChat": {
+    "greeting": "무슨 이야기를 나눠볼까요?",
+    "temporary": {
+      "title": "임시 채팅",
+      "enter": "임시 채팅",
+      "active": "임시 채팅 중",
+      "exit": "임시 채팅 종료",
+      "greeting": "임시 채팅 시작하기",
+      "description": "기록, 메모리, 도구, 프로젝트에 접근하지 않습니다. 내용은 선택한 모델 제공업체로 전송됩니다."
     }
   },
   "settings": {

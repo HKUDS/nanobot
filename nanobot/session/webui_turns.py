@@ -334,6 +334,16 @@ def clear_websocket_turn_if_current(
     return False
 
 
+def clear_websocket_turns(chat_id: str) -> int:
+    """Clear every in-memory lifecycle owner for a discarded chat."""
+    turns = _WEBSOCKET_ACTIVE_TURNS.pop(chat_id, None)
+    count = len(turns) if turns is not None else 0
+    _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
+    _WEBSOCKET_TURN_IDS.pop(chat_id, None)
+    _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+    return count
+
+
 def build_bus_progress_callback(
     bus: MessageBus,
     msg: InboundMessage,

@@ -723,6 +723,7 @@ class AgentLoop:
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
+            conversation_only=ctx.session.transient is True,
         )
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
@@ -750,10 +751,12 @@ class AgentLoop:
         self,
         ctx: TurnContext,
     ) -> list[RuntimeContextBlock]:
+        if ctx.require_session().transient is True:
+            return []
         assert ctx.request_context is not None
         return await self._resolve_runtime_context_for_request(
             ctx.request_context,
-            ctx.tools or self.tools,
+            ctx.tools if ctx.tools is not None else self.tools,
         )
 
     async def _resolve_runtime_context_for_request(
@@ -784,18 +787,24 @@ class AgentLoop:
         else:
             logger.warning("Command '{}' matched but dispatch returned None", raw)
 
-    async def _cancel_active_tasks(self, key: str) -> int:
-        """Cancel and await all active tasks and subagents for *key*.
+    async def cancel_active_turn(self, key: str) -> int:
+        """Cancel active work and discard queued follow-ups for *key*.
 
         Returns the total number of cancelled tasks + subagents.
         """
+        pending = self._pending_queues.pop(key, None)
+        queued = 0
+        if pending is not None:
+            while not pending.empty():
+                pending.get_nowait()
+                queued += 1
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
                 await t
         sub_cancelled = await self.subagents.cancel_by_session(key)
-        return cancelled + sub_cancelled
+        return queued + cancelled + sub_cancelled
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -922,7 +931,10 @@ class AgentLoop:
                     if isinstance(metadata_value, dict)
                     else {}
                 )
-                if pending_msg.channel != "system":
+                if (
+                    pending_msg.channel != "system"
+                    and not (session is not None and session.transient is True)
+                ):
                     scope = self.workspace_scopes.for_turn(
                         channel=pending_msg.channel,
                         message_metadata=metadata,
@@ -1002,7 +1014,7 @@ class AgentLoop:
             message_metadata=metadata,
             session_metadata=session.metadata if session is not None else None,
         )
-        effective_tools = tools or self.tools
+        effective_tools = tools if tools is not None else self.tools
         request_ctx = request_context or RequestContext(
             channel=channel,
             chat_id=chat_id,
@@ -1160,6 +1172,11 @@ class AgentLoop:
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
+                if (
+                    msg.transient_session
+                    and not self.sessions.is_transient_active(effective_key)
+                ):
+                    continue
                 if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
@@ -1271,6 +1288,8 @@ class AgentLoop:
                             session_key,
                             exc_info=True,
                         )
+                    if msg.transient_session:
+                        raise
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
                     # messages accumulated before /stop.  The checkpoint was
@@ -1573,13 +1592,16 @@ class AgentLoop:
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
+        if session.transient is True:
+            ctx.ephemeral = True
+            ctx.tools = ToolRegistry()
         self._remember_unified_session_route(
             session,
             msg,
             is_user_turn=ctx.original_user_text is not None,
         )
         await ctx.delivery.started()
-        if ctx.kind is TurnKind.USER:
+        if ctx.kind is TurnKind.USER and not session.transient:
             self.workspace_scopes.persist_message_scope(session, msg)
 
         if self._restore_runtime_checkpoint(session):
@@ -1589,6 +1611,8 @@ class AgentLoop:
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
+        if session.transient is True:
+            return
         ctx.session, pending = self.auto_compact.prepare_session(
             session,
             ctx.session_key,

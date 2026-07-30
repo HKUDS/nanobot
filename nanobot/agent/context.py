@@ -217,16 +217,18 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        conversation_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        root = workspace or self.workspace
-        active_skill_names = (
-            self.skills.get_explicitly_invoked_skills(current_message)
-            if current_role == "user"
-            else []
-        )
-        messages: list[dict[str, Any]] = [
-            {
+        messages = list(history)
+        if not conversation_only:
+            root = workspace or self.workspace
+            active_skill_names = (
+                self.skills.get_explicitly_invoked_skills(current_message)
+                if current_role == "user"
+                else []
+            )
+            messages.insert(0, {
                 "role": "system",
                 "content": self.build_system_prompt(
                     active_skill_names=active_skill_names,
@@ -237,16 +239,14 @@ class ContextBuilder:
                     session_key=session_key,
                     unified_session=unified_session,
                 ),
-            },
-            *history,
-        ]
+            })
         current = self.build_current_message(
             current_message,
             media=media,
             current_role=current_role,
             runtime_context_blocks=runtime_context_blocks,
         )
-        if messages[-1].get("role") == current_role:
+        if messages and messages[-1].get("role") == current_role:
             last = dict(messages[-1])
             last["content"] = self._merge_message_content(
                 last.get("content"),

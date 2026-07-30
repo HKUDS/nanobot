@@ -487,6 +487,7 @@ export interface SendOptions {
   finalizeActiveTurn?: boolean;
   /** Append guidance to the running turn without detaching its active answer segment. */
   continueActiveTurn?: boolean;
+  temporary?: boolean;
 }
 
 export interface SubmittedTurn {
@@ -546,6 +547,7 @@ export function useNanobotStream(
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
+  options?: { temporary?: boolean },
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -1341,7 +1343,9 @@ export function useNanobotStream(
       // ``attached`` frames aren't actionable here.
     };
 
-    const unsub = client.onChat(chatId, handle);
+    const unsub = options?.temporary
+      ? client.onChat(chatId, handle, { temporary: true })
+      : client.onChat(chatId, handle);
     return () => {
       unsub();
       buffer.current = null;
@@ -1363,6 +1367,7 @@ export function useNanobotStream(
     flushPendingStreamEvents,
     isSideChannelEvent,
     onTurnEnd,
+    options?.temporary,
     schedulePendingStreamFlush,
     scheduleStreamEndTimer,
   ]);
@@ -1450,8 +1455,18 @@ export function useNanobotStream(
       return prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
     });
     suppressStreamUntilTurnEndRef.current = false;
-    client.sendMessage(chatId, "/stop");
-  }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
+    if (options?.temporary) {
+      client.sendMessage(chatId, "/stop", undefined, { temporary: true });
+    } else {
+      client.sendMessage(chatId, "/stop");
+    }
+  }, [
+    chatId,
+    clearActivitySegment,
+    client,
+    flushPendingStreamEvents,
+    options?.temporary,
+  ]);
 
   const reconcileTurnComplete = useCallback(() => {
     cancelStreamEndTimer();

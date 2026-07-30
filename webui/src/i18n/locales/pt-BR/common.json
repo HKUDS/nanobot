@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",
+    "quickChat": "Chat rápido",
     "newChat": "Novo tópico",
     "searchAria": "Buscar",
     "searchPlaceholder": "Buscar",
@@ -58,6 +59,17 @@
     "automations": "Automações",
     "skills": {
       "title": "Skills"
+    }
+  },
+  "quickChat": {
+    "greeting": "O que você está pensando?",
+    "temporary": {
+      "title": "Chat temporário",
+      "enter": "Temporário",
+      "active": "Temporário",
+      "exit": "Sair do chat temporário",
+      "greeting": "Inicie um chat temporário",
+      "description": "Sem histórico, memória, ferramentas ou acesso ao projeto. O conteúdo ainda é enviado ao provedor do modelo escolhido."
     }
   },
   "settings": {

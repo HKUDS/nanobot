@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
+    "quickChat": "Discussion rapide",
     "newChat": "Nouveau sujet",
     "searchAria": "Rechercher",
     "searchPlaceholder": "Rechercher",
@@ -58,6 +59,17 @@
     "automations": "Automatisations",
     "skills": {
       "title": "Compétences"
+    }
+  },
+  "quickChat": {
+    "greeting": "De quoi avez-vous envie de parler ?",
+    "temporary": {
+      "title": "Discussion temporaire",
+      "enter": "Temporaire",
+      "active": "Temporaire",
+      "exit": "Quitter la discussion temporaire",
+      "greeting": "Démarrer une discussion temporaire",
+      "description": "Aucun historique, mémoire, outil ou accès au projet. Le contenu est transmis au fournisseur du modèle choisi."
     }
   },
   "settings": {

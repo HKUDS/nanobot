@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",
+    "quickChat": "輕鬆聊聊",
     "newChat": "新增話題",
     "searchAria": "搜尋",
     "searchPlaceholder": "搜尋",
@@ -58,6 +59,17 @@
     "automations": "自動任務",
     "skills": {
       "title": "技能"
+    }
+  },
+  "quickChat": {
+    "greeting": "想聊點什麼？",
+    "temporary": {
+      "title": "臨時聊天",
+      "enter": "臨時聊天",
+      "active": "臨時聊天中",
+      "exit": "退出臨時聊天",
+      "greeting": "開啟一次臨時聊天",
+      "description": "不儲存記錄，不讀取記憶或專案，也不使用工具；內容仍會傳送給你選擇的模型服務商。"
     }
   },
   "settings": {

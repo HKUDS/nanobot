@@ -2576,4 +2576,17 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("removes every attachment entry point when attachments are disabled", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        allowAttachments={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Attach image" })).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
 });

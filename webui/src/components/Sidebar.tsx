@@ -8,6 +8,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  MessageCircle,
   Menu,
   Search,
   Settings,
@@ -33,7 +34,9 @@ interface SidebarProps {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  quickChatActive: boolean;
   newChatActive: boolean;
+  onOpenQuickChat: () => void;
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
@@ -93,11 +96,13 @@ export function Sidebar(props: SidebarProps) {
   const toggleLabel = t("thread.header.toggleSidebar");
   const newChatShortcut = newChatShortcutLabel();
   const activeActionRef = useRef<HTMLButtonElement>(null);
-  const activeActionId = props.newChatActive
-    ? "new-chat"
-    : props.activeUtility
-      ? `utility:${props.activeUtility}`
-      : null;
+  const activeActionId = props.quickChatActive
+    ? "quick-chat"
+    : props.newChatActive
+      ? "new-chat"
+      : props.activeUtility
+        ? `utility:${props.activeUtility}`
+        : null;
 
   return (
     <nav
@@ -158,6 +163,14 @@ export function Sidebar(props: SidebarProps) {
           collapsed && "flex w-14 flex-col items-center px-0",
         )}
       >
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.quickChat")}
+          onClick={props.onOpenQuickChat}
+          active={props.quickChatActive}
+          selectionRef={activeActionRef}
+          icon={<MessageCircle className="h-4 w-4" />}
+        />
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.newChat")}

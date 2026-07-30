@@ -673,8 +673,12 @@ export class NanobotClient {
     }
   }
 
-  /** Subscribe to events for a given chat_id. Auto-attaches on the next open. */
-  onChat(chatId: string, handler: EventHandler): Unsubscribe {
+  /** Subscribe to events for a given chat_id. Auto-attaches unless it is temporary. */
+  onChat(
+    chatId: string,
+    handler: EventHandler,
+    options?: { temporary?: boolean },
+  ): Unsubscribe {
     let handlers = this.chatHandlers.get(chatId);
     if (!handlers) {
       handlers = new Set();
@@ -689,7 +693,7 @@ export class NanobotClient {
         handler(ev);
       }
     }
-    this.attach(chatId);
+    if (!options?.temporary) this.attach(chatId);
     return () => {
       const current = this.chatHandlers.get(chatId);
       if (!current) return;
@@ -809,9 +813,10 @@ export class NanobotClient {
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
+      temporary?: boolean;
     },
   ): void {
-    this.knownChats.add(chatId);
+    if (!options?.temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
       chat_id: chatId,
@@ -822,6 +827,7 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
+      ...(options?.temporary ? { temporary: true } : {}),
       webui: true,
     };
     if (!this.frameFitsTransport(frame)) {
@@ -843,7 +849,12 @@ export class NanobotClient {
     this.queueSend(frame);
   }
 
-  sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
+  sendSystemCommand(
+    chatId: string,
+    command: string,
+    timeoutMs = 5_000,
+    options?: { temporary?: boolean },
+  ): Promise<void> {
     const normalized = command.trim();
     const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
     return new Promise<void>((resolve, reject) => {
@@ -852,8 +863,44 @@ export class NanobotClient {
         reject(new Error("system command timed out"));
       }, timeoutMs);
       this.pendingSystemCommands.set(turnId, { resolve, reject, timer });
-      this.sendMessage(chatId, normalized, undefined, { turnId });
+      this.sendMessage(chatId, normalized, undefined, {
+        turnId,
+        temporary: options?.temporary,
+      });
     });
+  }
+
+  discardTemporaryChat(chatId: string): void {
+    this.knownChats.delete(chatId);
+    this.chatHandlers.delete(chatId);
+    this.pendingInboundByChat.delete(chatId);
+    this.runStartedAtByChatId.delete(chatId);
+    this.goalStateByChatId.delete(chatId);
+    this.runGenerationByChatId.delete(chatId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    this.unsettledRunTurnIdsByChatId.delete(chatId);
+    this.canonicalCompletedTurnIdsByChatId.delete(chatId);
+    const turnKeyPrefix = `${chatId}\u0000`;
+    for (const key of this.runStartedAtByTurnKey.keys()) {
+      if (key.startsWith(turnKeyPrefix)) this.runStartedAtByTurnKey.delete(key);
+    }
+    for (const [key, pending] of this.pendingMessageSends) {
+      if (pending.chatId !== chatId) continue;
+      if (isSystemCommandTurnId(pending.turnId)) {
+        this.rejectSystemCommand(pending.turnId, "temporary chat discarded");
+      }
+      this.pendingMessageSends.delete(key);
+      this.socketPendingMessageSendKeys.delete(key);
+    }
+    if (this.lastSocketMessageSendKey?.startsWith(turnKeyPrefix)) {
+      this.lastSocketMessageSendKey = null;
+    }
+    this.sendQueue = this.sendQueue.filter(
+      (frame) => !("chat_id" in frame) || frame.chat_id !== chatId,
+    );
+    if (this.socket?.readyState === WS_OPEN) {
+      this.rawSend({ type: "discard_temporary_chat", chat_id: chatId });
+    }
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
@@ -1004,6 +1051,11 @@ export class NanobotClient {
 
     if (parsed.event === "session_updated") {
       this.emitSessionUpdate(parsed.chat_id, parsed.scope, parsed.workspace_scope);
+      return;
+    }
+
+    if (parsed.event === "temporary_chat_discarded") {
+      this.pendingInboundByChat.delete(parsed.chat_id);
       return;
     }
 

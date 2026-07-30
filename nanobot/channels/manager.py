@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -97,6 +97,7 @@ class ChannelManager:
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        webui_cancel_active_turn: Callable[[str], Awaitable[int]] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
@@ -110,6 +111,7 @@ class ChannelManager:
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
         self._webui_local_trigger_pending_ids = webui_local_trigger_pending_ids
+        self._webui_cancel_active_turn = webui_cancel_active_turn
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
@@ -178,6 +180,7 @@ class ChannelManager:
                 local_trigger_store=self._local_trigger_store,
                 cron_pending_job_ids=self._webui_cron_pending_job_ids,
                 local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
+                cancel_active_turn=self._webui_cancel_active_turn,
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
                 skill_state_action=self._webui_skill_state_action,

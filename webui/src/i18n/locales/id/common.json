@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
+    "quickChat": "Obrolan cepat",
     "newChat": "Topik baru",
     "searchAria": "Cari",
     "searchPlaceholder": "Cari",
@@ -58,6 +59,17 @@
     "automations": "Otomasi",
     "skills": {
       "title": "Skill"
+    }
+  },
+  "quickChat": {
+    "greeting": "Apa yang sedang kamu pikirkan?",
+    "temporary": {
+      "title": "Obrolan sementara",
+      "enter": "Sementara",
+      "active": "Sementara",
+      "exit": "Keluar dari obrolan sementara",
+      "greeting": "Mulai obrolan sementara",
+      "description": "Tanpa riwayat, memori, alat, atau akses proyek. Konten tetap dikirim ke penyedia model pilihan Anda."
     }
   },
   "settings": {

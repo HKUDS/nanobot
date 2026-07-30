@@ -111,6 +111,7 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
         runtime_model_name=None,
         runtime_surface=kw.get("runtime_surface", "browser"),
         runtime_capabilities_overrides=kw.get("runtime_capabilities_overrides"),
+        cancel_active_turn=kw.get("cancel_active_turn"),
     )
 
 
@@ -188,6 +189,182 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
+
+
+@pytest.mark.asyncio
+async def test_temporary_message_registers_in_memory_session(bus, tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    cancel = AsyncMock(return_value=0)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=sessions,
+            cancel_active_turn=cancel,
+        ),
+    )
+    connection = AsyncMock()
+    connection.remote_address = None
+    channel._webui_connections.add(connection)
+    chat_id = "temporary-test"
+
+    await channel._dispatch_envelope(
+        connection,
+        "client",
+        {
+            "type": "message",
+            "chat_id": chat_id,
+            "content": "hello",
+            "turn_id": "turn-1",
+            "temporary": True,
+            "webui": True,
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.session_key == f"websocket:{chat_id}"
+    assert inbound.transient_session is True
+    assert sessions.is_transient_active(inbound.session_key) is True
+    assert sessions.get_cached(inbound.session_key).transient is True
+    assert read_transcript_lines(inbound.session_key) == []
+    assert json.loads(connection.send.await_args.args[0])["event"] == "message_accepted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"type": "attach", "chat_id": "temporary-test"},
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "temporary-test",
+            "workspace_scope": {},
+        },
+        {
+            "type": "message",
+            "chat_id": "temporary-test",
+            "content": "hello",
+            "temporary": True,
+            "media": [],
+        },
+        {
+            "type": "message",
+            "chat_id": "temporary-test",
+            "content": "/history",
+            "temporary": True,
+        },
+    ],
+)
+async def test_temporary_chat_rejects_persistent_capabilities(
+    bus,
+    tmp_path,
+    envelope,
+) -> None:
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=SessionManager(tmp_path),
+            cancel_active_turn=AsyncMock(return_value=0),
+        ),
+    )
+    connection = AsyncMock()
+    connection.remote_address = None
+    channel._webui_connections.add(connection)
+
+    await channel._dispatch_envelope(connection, "client", envelope)
+
+    payload = json.loads(connection.send.await_args.args[0])
+    assert payload["event"] == "error"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_discard_temporary_chat_cancels_then_forgets_session(bus, tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    cancel = AsyncMock(return_value=1)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=sessions,
+            cancel_active_turn=cancel,
+        ),
+    )
+    connection = AsyncMock()
+    connection.remote_address = None
+    channel._webui_connections.add(connection)
+    chat_id = "temporary-test"
+    session_key = channel._temporary_chats.claim(connection, chat_id)
+    sessions.get_cached(session_key).add_message("user", "private")
+
+    await channel._dispatch_envelope(
+        connection,
+        "client",
+        {"type": "discard_temporary_chat", "chat_id": chat_id},
+    )
+
+    cancel.assert_awaited_once_with(session_key)
+    assert sessions.get_cached(session_key) is None
+    assert chat_id not in channel._subs
+    assert json.loads(connection.send.await_args.args[0]) == {
+        "event": "temporary_chat_discarded",
+        "chat_id": chat_id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_discard_unused_temporary_chat_is_idempotent(bus, tmp_path) -> None:
+    cancel = AsyncMock(return_value=0)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=SessionManager(tmp_path),
+            cancel_active_turn=cancel,
+        ),
+    )
+    connection = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        "client",
+        {"type": "discard_temporary_chat", "chat_id": "temporary-unused"},
+    )
+
+    cancel.assert_not_awaited()
+    assert json.loads(connection.send.await_args.args[0]) == {
+        "event": "temporary_chat_discarded",
+        "chat_id": "temporary-unused",
+    }
+
+
+@pytest.mark.asyncio
+async def test_disconnect_discards_owned_temporary_chat(bus, tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    cancel = AsyncMock(return_value=1)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=sessions,
+            cancel_active_turn=cancel,
+        ),
+    )
+    connection = AsyncMock()
+    chat_id = "temporary-disconnect"
+    session_key = channel._temporary_chats.claim(connection, chat_id)
+
+    await channel._cleanup_connection(connection)
+
+    cancel.assert_awaited_once_with(session_key)
+    assert sessions.get_cached(session_key) is None
+    assert chat_id not in channel._subs
 
 
 @pytest.mark.asyncio

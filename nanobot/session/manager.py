@@ -157,6 +157,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    transient: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -964,6 +965,7 @@ class SessionManager:
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
+        self._transient_sessions: dict[str, Session] = {}
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
 
@@ -977,6 +979,10 @@ class SessionManager:
             self._overflow_cache[key] = evicted
 
     def _cached(self, key: str) -> Session | None:
+        transient = self._transient_sessions.get(key)
+        if transient is not None:
+            return transient
+
         session = self._cache.get(key)
         if session is not None:
             self._cache.move_to_end(key)
@@ -1053,6 +1059,24 @@ class SessionManager:
         self._remember(session)
         return session
 
+    def get_or_create_transient(self, key: str) -> Session:
+        """Return an active in-memory session that can never reach the store."""
+        session = self._transient_sessions.get(key)
+        if session is None:
+            self._cache.pop(key, None)
+            self._overflow_cache.pop(key, None)
+            session = Session(key=key, transient=True)
+            self._transient_sessions[key] = session
+        return session
+
+    def is_transient_active(self, key: str) -> bool:
+        """Return whether *key* still accepts transient turns."""
+        return key in self._transient_sessions
+
+    def discard_transient(self, key: str) -> bool:
+        """Forget all transient contents without retaining a discarded-key tombstone."""
+        return self._transient_sessions.pop(key, None) is not None
+
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
 
@@ -1066,6 +1090,9 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
+        if session.transient is True:
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(
@@ -1098,6 +1125,7 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
+        self._transient_sessions.pop(key, None)
         self._cache.pop(key, None)
         self._overflow_cache.pop(key, None)
 

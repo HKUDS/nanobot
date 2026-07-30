@@ -111,8 +111,50 @@ class TestHandleStop:
         assert all(e.is_set() for e in events)
         assert "2 task" in out.content
 
+    @pytest.mark.asyncio
+    async def test_cancel_active_turn_discards_pending_followups(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, _ = _make_loop()
+        pending = asyncio.Queue()
+        pending.put_nowait(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="next")
+        )
+        loop._pending_queues["test:c1"] = pending
+
+        assert await loop.cancel_active_turn("test:c1") == 1
+        assert "test:c1" not in loop._pending_queues
+
 
 class TestDispatch:
+    @pytest.mark.asyncio
+    async def test_run_drops_deactivated_transient_message(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        msg = InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="temporary-test",
+            content="private",
+            session_key_override="websocket:temporary-test",
+            transient_session=True,
+        )
+
+        async def consume_once():
+            loop.stop()
+            return msg
+
+        bus.consume_inbound = AsyncMock(side_effect=consume_once)
+        loop.sessions.is_transient_active.return_value = False
+        loop._dispatch = AsyncMock()
+        loop.close_mcp = AsyncMock()
+        loop._running = True
+
+        await loop.run()
+
+        loop._dispatch.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_run_logs_and_continues_after_leaked_cancelled_error(self, monkeypatch):
         loop, bus = _make_loop()

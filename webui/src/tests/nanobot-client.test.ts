@@ -70,6 +70,42 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("does not attach or retain temporary chats across reconnects", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onChat("temporary-one", handler, { temporary: true });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    expect(lastSocket().sent).toEqual([]);
+
+    client.sendMessage("temporary-one", "hello", undefined, {
+      temporary: true,
+      turnId: "turn-temp",
+    });
+    expect(JSON.parse(lastSocket().sent.at(-1)!)).toMatchObject({
+      type: "message",
+      chat_id: "temporary-one",
+      temporary: true,
+    });
+
+    client.discardTemporaryChat("temporary-one");
+    expect(JSON.parse(lastSocket().sent.at(-1)!)).toEqual({
+      type: "discard_temporary_chat",
+      chat_id: "temporary-one",
+    });
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temporary-one",
+      text: "late",
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("routes events to the matching chat handler", () => {
     const client = new NanobotClient({
       url: "ws://test",

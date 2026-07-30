@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
+    "quickChat": "クイックチャット",
     "newChat": "新しいトピック",
     "searchAria": "検索",
     "searchPlaceholder": "検索",
@@ -58,6 +59,17 @@
     "automations": "自動タスク",
     "skills": {
       "title": "スキル"
+    }
+  },
+  "quickChat": {
+    "greeting": "何について話しますか？",
+    "temporary": {
+      "title": "一時チャット",
+      "enter": "一時チャット",
+      "active": "一時チャット中",
+      "exit": "一時チャットを終了",
+      "greeting": "一時チャットを始める",
+      "description": "履歴、メモリ、ツール、プロジェクトにはアクセスしません。内容は選択したモデル提供元に送信されます。"
     }
   },
   "settings": {

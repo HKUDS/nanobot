@@ -202,6 +202,7 @@ interface ThreadComposerProps {
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
+  allowAttachments?: boolean;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -850,6 +851,7 @@ export function ThreadComposer({
   quotedContext = null,
   focusRequest = 0,
   onQuotedContextChange,
+  allowAttachments = true,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -913,6 +915,10 @@ export function ThreadComposer({
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages({ ingressLimits });
 
+  useEffect(() => {
+    if (!allowAttachments) clear();
+  }, [allowAttachments, clear]);
+
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
       const key = `thread.composer.imageRejected.${reason}`;
@@ -942,6 +948,7 @@ export function ThreadComposer({
 
   const addFiles = useCallback(
     (files: File[]) => {
+      if (!allowAttachments) return;
       if (files.length === 0) return;
       secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
@@ -951,7 +958,7 @@ export function ThreadComposer({
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection],
+    [allowAttachments, enqueue, formatRejection],
   );
 
   const {
@@ -1874,10 +1881,10 @@ export function ThreadComposer({
         e.preventDefault();
         submit();
       }}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      onDragEnter={allowAttachments ? onDragEnter : undefined}
+      onDragOver={allowAttachments ? onDragOver : undefined}
+      onDragLeave={allowAttachments ? onDragLeave : undefined}
+      onDrop={allowAttachments ? onDrop : undefined}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
       {showSlashMenu ? (
@@ -1907,7 +1914,9 @@ export function ThreadComposer({
             ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
           disabled && "opacity-60",
-          isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
+          allowAttachments
+            && isDragging
+            && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
           goalState?.active &&
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
@@ -2014,7 +2023,7 @@ export function ThreadComposer({
             onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
-            onPaste={onPaste}
+            onPaste={allowAttachments ? onPaste : undefined}
             rows={1}
             placeholder={resolvedPlaceholder}
             disabled={disabled}
@@ -2057,30 +2066,34 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPT_ATTR}
-              multiple
-              hidden
-              onChange={onFilePick}
-            />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              disabled={attachButtonDisabled}
-              aria-label={t("thread.composer.attachImage")}
-              onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                "thread-composer-action touch-target rounded-full text-muted-foreground hover:text-foreground",
-                isHero
-                  ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
-                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
-              )}
-            >
-              <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
-            </Button>
+            {allowAttachments ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPT_ATTR}
+                  multiple
+                  hidden
+                  onChange={onFilePick}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={attachButtonDisabled}
+                  aria-label={t("thread.composer.attachImage")}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "thread-composer-action touch-target rounded-full text-muted-foreground hover:text-foreground",
+                    isHero
+                      ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                      : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                  )}
+                >
+                  <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+                </Button>
+              </>
+            ) : null}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}

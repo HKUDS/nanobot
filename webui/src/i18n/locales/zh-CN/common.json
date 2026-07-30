@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",
+    "quickChat": "随便聊聊",
     "newChat": "新建话题",
     "searchAria": "搜索",
     "searchPlaceholder": "搜索",
@@ -58,6 +59,17 @@
     "automations": "自动任务",
     "skills": {
       "title": "技能"
+    }
+  },
+  "quickChat": {
+    "greeting": "想聊点什么？",
+    "temporary": {
+      "title": "临时聊天",
+      "enter": "临时聊天",
+      "active": "临时聊天中",
+      "exit": "退出临时聊天",
+      "greeting": "开启一次临时聊天",
+      "description": "不保存记录，不读取记忆或项目，也不使用工具；内容仍会发送给你选择的模型服务商。"
     }
   },
   "settings": {

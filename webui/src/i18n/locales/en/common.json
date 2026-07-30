@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",
+    "quickChat": "Quick Chat",
     "newChat": "New topic",
     "searchAria": "Search",
     "searchPlaceholder": "Search",
@@ -58,6 +59,17 @@
     "automations": "Automations",
     "skills": {
       "title": "Skills"
+    }
+  },
+  "quickChat": {
+    "greeting": "What's on your mind?",
+    "temporary": {
+      "title": "Temporary Chat",
+      "enter": "Temporary",
+      "active": "Temporary",
+      "exit": "Exit temporary chat",
+      "greeting": "Start a temporary chat",
+      "description": "No history, memory, tools, or project access. Content is still sent to your selected model provider."
     }
   },
   "settings": {

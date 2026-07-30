@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
@@ -33,6 +33,7 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import { TEMPORARY_CHAT_ID_PREFIX } from "@/lib/quick-chat";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -315,6 +316,12 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
+  allowConversationReset?: boolean;
+  showSessionInfo?: boolean;
+  emptyStateGreeting?: string;
+  emptyStateDescription?: string;
+  temporary?: boolean;
+  headerAction?: ReactNode;
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -597,10 +604,16 @@ export function ThreadShell({
   settingsSnapshot = null,
   onOpenModelSettings,
   skills = [],
+  allowConversationReset = true,
+  showSessionInfo = true,
+  emptyStateGreeting,
+  emptyStateDescription,
+  temporary = false,
+  headerAction,
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
-  const historyKey = session?.key ?? null;
+  const historyKey = temporary ? null : session?.key ?? null;
   const {
     messages: historical,
     loading,
@@ -622,6 +635,16 @@ export function ThreadShell({
   const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const availableSlashCommands = useMemo(
+    () => temporary
+      ? slashCommands.filter((command) =>
+          command.command === "/model" || command.command === "/stop",
+        )
+      : allowConversationReset
+        ? slashCommands
+        : slashCommands.filter((command) => command.command !== "/new"),
+    [allowConversationReset, slashCommands, temporary],
+  );
   const cliApps = useInstalledSettingItems({
     getToken,
     eventName: CLI_APPS_CHANGED_EVENT,
@@ -669,8 +692,9 @@ export function ThreadShell({
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
+    if (temporary) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
-  }, [chatId, historical]);
+  }, [chatId, historical, temporary]);
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
@@ -690,7 +714,13 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+  } = useNanobotStream(
+    chatId,
+    initial,
+    hasPendingToolCalls,
+    handleTurnEnd,
+    { temporary },
+  );
 
   useLayoutEffect(() => {
     if (currentUiMessagesRef.current === messages) return;
@@ -819,9 +849,12 @@ export function ThreadShell({
   const handleModelPresetChange = useCallback((name: string) => {
     setLocalModelPreset(name);
     if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+      const request = temporary
+        ? client.sendSystemCommand(chatId, `/model ${name}`, 5_000, { temporary: true })
+        : client.sendSystemCommand(chatId, `/model ${name}`);
+      void request.catch(() => {});
     }
-  }, [chatId, client]);
+  }, [chatId, client, temporary]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -842,13 +875,16 @@ export function ThreadShell({
 
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
+      if (temporary) {
+        return { ...(options ?? {}), temporary: true };
+      }
       if (!workspaceScope) return options;
       return {
         ...(options ?? {}),
         workspaceScope,
       };
     },
-    [workspaceScope],
+    [temporary, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {
@@ -882,11 +918,11 @@ export function ThreadShell({
     return client.onChat(chatId, (event) => {
       if (event.event !== "turn_model_updated") return;
       setFallbackModelName(event.model_name);
-    });
-  }, [chatId, client]);
+    }, { temporary });
+  }, [chatId, client, temporary]);
 
   useEffect(() => {
-    if (!chatId || loading) return;
+    if (!chatId || loading || temporary) return;
     const cached = messageCacheRef.current.get(chatId);
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
     const hasNewCanonicalHistory = (
@@ -1016,6 +1052,7 @@ export function ThreadShell({
     historyLineage,
     historyActiveTurnId,
     hasPendingToolCalls,
+    temporary,
   ]);
 
   useLayoutEffect(() => {
@@ -1067,7 +1104,7 @@ export function ThreadShell({
   }, [chatId, hasPendingToolCalls, historyVersion, messages, reconcileTurnComplete]);
 
   const refreshCanonicalHistory = useCallback(() => {
-    if (!chatId) return;
+    if (!chatId || temporary) return;
     pendingCanonicalHydrateRef.current.set(chatId, {
       historyLineage,
       historyVersion,
@@ -1077,7 +1114,7 @@ export function ThreadShell({
       uiRevision: uiRevisionRef.current,
     });
     refreshHistory();
-  }, [chatId, client, historyLineage, historyVersion, refreshHistory]);
+  }, [chatId, client, historyLineage, historyVersion, refreshHistory, temporary]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -1144,16 +1181,22 @@ export function ThreadShell({
     if (chatId) {
       const prev = prevChatIdForCacheRef.current;
       if (prev && prev !== chatId) {
-        messageCacheRef.current.set(prev, displayMessages);
+        if (prev.startsWith(TEMPORARY_CHAT_ID_PREFIX)) {
+          messageCacheRef.current.delete(prev);
+        } else {
+          messageCacheRef.current.set(prev, displayMessages);
+        }
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
     } else {
       if (prevChatIdForCacheRef.current) {
-        messageCacheRef.current.set(
-          prevChatIdForCacheRef.current,
-          displayMessages,
-        );
+        const prev = prevChatIdForCacheRef.current;
+        if (prev.startsWith(TEMPORARY_CHAT_ID_PREFIX)) {
+          messageCacheRef.current.delete(prev);
+        } else {
+          messageCacheRef.current.set(prev, displayMessages);
+        }
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = null;
@@ -1164,7 +1207,7 @@ export function ThreadShell({
   // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
   // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
   useEffect(() => {
-    if (!chatId) {
+    if (!chatId || temporary) {
       return;
     }
     if (skipLayoutCacheRef.current) {
@@ -1175,7 +1218,7 @@ export function ThreadShell({
       return;
     }
     messageCacheRef.current.set(chatId, displayMessages);
-  }, [chatId, displayMessages, loading]);
+  }, [chatId, displayMessages, loading, temporary]);
 
   // The landing composer queues the first message while `new_chat` is in flight.
   // Only the chat created for that send may consume it; selecting another chat
@@ -1374,12 +1417,12 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
-          slashCommands={slashCommands}
-          cliApps={cliApps}
-          mcpPresets={mcpPresets}
-          skills={skills}
+          slashCommands={availableSlashCommands}
+          cliApps={temporary ? [] : cliApps}
+          mcpPresets={temporary ? [] : mcpPresets}
+          skills={temporary ? [] : skills}
           onStop={stop}
-          onTranscribeAudio={transcribeAudio}
+          onTranscribeAudio={temporary ? undefined : transcribeAudio}
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
@@ -1394,6 +1437,7 @@ export function ThreadShell({
           quotedContext={quotedContext}
           focusRequest={composerFocusSignal}
           onQuotedContextChange={setQuotedContext}
+          allowAttachments={!temporary}
         />
       ) : (
         <ThreadComposer
@@ -1416,7 +1460,7 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
-          slashCommands={slashCommands}
+          slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           skills={skills}
@@ -1442,10 +1486,15 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <HeroGreeting text={t(heroGreetingKey)} />
+      <HeroGreeting text={emptyStateGreeting ?? t(heroGreetingKey)} />
+      {emptyStateDescription ? (
+        <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+          {emptyStateDescription}
+        </p>
+      ) : null}
     </div>
   );
-  const sessionInfoAction = historyKey ? (
+  const sessionInfoAction = historyKey && showSessionInfo ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
@@ -1470,6 +1519,7 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            headerAction={headerAction}
           />
         ) : null}
         <FilePreviewAvailabilityProvider
@@ -1486,17 +1536,17 @@ export function ThreadShell({
             conversationKey={historyKey}
             conversationReady={messagesReady}
             showScrollToBottomButton={!!session}
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
-            slashCommands={slashCommands}
+            cliApps={temporary ? [] : cliApps}
+            mcpPresets={temporary ? [] : mcpPresets}
+            slashCommands={availableSlashCommands}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}
             loadingOlder={loadingOlder}
             userMessageOffset={userMessageOffset}
             onLoadOlder={loadOlder}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
-            onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
-            onQuoteSelection={session ? handleQuoteSelection : undefined}
+            onForkFromMessage={!temporary && onForkChat ? handleForkFromMessage : undefined}
+            onQuoteSelection={session && !temporary ? handleQuoteSelection : undefined}
           />
         </FilePreviewAvailabilityProvider>
       </div>

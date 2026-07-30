@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { Ghost, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -37,6 +37,13 @@ import {
 import { displayTitle } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import {
+  createTemporaryChatSession,
+  isQuickChatKey,
+  QUICK_CHAT_ID,
+  QUICK_CHAT_KEY,
+  quickChatSession,
+} from "@/lib/quick-chat";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   BootstrapResponse,
@@ -225,6 +232,9 @@ function readShellRoute(): ShellRoute {
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
   }
+  if (path === "/quick-chat") {
+    return { view: "chat", activeKey: QUICK_CHAT_KEY, settingsSection: "overview" };
+  }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
     try {
@@ -241,6 +251,7 @@ function readShellRoute(): ShellRoute {
 
 function shellRouteHash(route: ShellRoute): string {
   if (route.view === "chat") {
+    if (isQuickChatKey(route.activeKey)) return "#/quick-chat";
     return route.activeKey
       ? `#/chat/${encodeURIComponent(route.activeKey)}`
       : "#/new";
@@ -947,14 +958,24 @@ function Shell({
     deleteChat,
     getSessionAutomations,
   } = useSessions();
+  const regularSessions = useMemo(
+    () => sessions.filter((session) => !isQuickChatKey(session.key)),
+    [sessions],
+  );
+  const quickSession = useMemo(
+    () => quickChatSession(sessions.find((session) => isQuickChatKey(session.key))),
+    [sessions],
+  );
   const { state: sidebarState, update: updateSidebarState } =
-    useSidebarState(sessions, !loading);
+    useSidebarState(regularSessions, !loading);
   const initialRouteRef = useRef<ShellRoute | null>(null);
   if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
   const [activeKey, setActiveKey] = useState<string | null>(
     initialRouteRef.current.activeKey,
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [temporarySession, setTemporarySession] = useState<ChatSummary | null>(null);
+  const temporarySessionRef = useRef<ChatSummary | null>(null);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
@@ -1004,19 +1025,33 @@ function Shell({
   const showHostChrome = effectiveRuntimeSurface === "native";
   const showMainSidebar = view !== "settings";
 
+  const discardTemporaryChat = useCallback(() => {
+    const current = temporarySessionRef.current;
+    if (!current) return;
+    temporarySessionRef.current = null;
+    client.discardTemporaryChat(current.chatId);
+    setTemporarySession(null);
+  }, [client]);
+
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
+      if (route.view !== "chat" || route.activeKey !== QUICK_CHAT_KEY) {
+        discardTemporaryChat();
+      }
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
       writeShellRoute(route, options?.replace);
     },
-    [],
+    [discardTemporaryChat],
   );
 
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
+      if (route.view !== "chat" || route.activeKey !== QUICK_CHAT_KEY) {
+        discardTemporaryChat();
+      }
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
@@ -1027,7 +1062,15 @@ function Shell({
     };
     window.addEventListener("hashchange", applyRoute);
     return () => window.removeEventListener("hashchange", applyRoute);
-  }, []);
+  }, [discardTemporaryChat]);
+
+  useEffect(() => {
+    return client.onStatus((status) => {
+      if (status !== "open") discardTemporaryChat();
+    });
+  }, [client, discardTemporaryChat]);
+
+  useEffect(() => () => discardTemporaryChat(), [discardTemporaryChat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1114,8 +1157,11 @@ function Shell({
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
+    if (isQuickChatKey(activeKey)) return temporarySession ?? quickSession;
     return sessions.find((s) => s.key === activeKey) ?? null;
-  }, [sessions, activeKey]);
+  }, [sessions, activeKey, quickSession, temporarySession]);
+  const quickChatActive = isQuickChatKey(activeKey);
+  const temporaryChatActive = quickChatActive && temporarySession !== null;
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
@@ -1130,6 +1176,12 @@ function Shell({
     });
   }, [activeChatId]);
   const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
+    if (temporaryChatActive) {
+      return null;
+    }
+    if (quickChatActive) {
+      return workspaces?.default_scope ?? null;
+    }
     if (activeChatId && workspaceOverrides[activeChatId]) {
       return workspaceOverrides[activeChatId];
     }
@@ -1141,6 +1193,8 @@ function Shell({
     activeChatId,
     activeSession?.workspaceScope,
     draftWorkspaceScope,
+    quickChatActive,
+    temporaryChatActive,
     workspaceOverrides,
     workspaces?.default_scope,
   ]);
@@ -1161,7 +1215,10 @@ function Shell({
 
   useEffect(() => {
     if (loading) return;
-    const knownChatIds = new Set(sessions.map((session) => session.chatId));
+    const knownChatIds = new Set([
+      QUICK_CHAT_ID,
+      ...sessions.map((session) => session.chatId),
+    ]);
     setUpdatedChatIds((current) => {
       const next = new Set(
         Array.from(current).filter((chatId) => knownChatIds.has(chatId)),
@@ -1176,6 +1233,7 @@ function Shell({
 
   useEffect(() => {
     if (loading || !activeKey) return;
+    if (isQuickChatKey(activeKey)) return;
     if (sessions.some((session) => session.key === activeKey)) return;
     const currentRoute = readShellRoute();
     navigate(
@@ -1416,6 +1474,28 @@ function Shell({
     setSessionSearchOpen(false);
     setMobileSidebarOpen(false);
   }, [navigate]);
+
+  const onOpenQuickChat = useCallback(() => {
+    setDraftWorkspaceScope(null);
+    setWorkspaceError(null);
+    setSessionSearchOpen(false);
+    navigate({
+      view: "chat",
+      activeKey: QUICK_CHAT_KEY,
+      settingsSection: "overview",
+    });
+    setMobileSidebarOpen(false);
+  }, [navigate]);
+
+  const onToggleTemporaryChat = useCallback(() => {
+    if (temporarySessionRef.current) {
+      discardTemporaryChat();
+      return;
+    }
+    const session = createTemporaryChatSession();
+    temporarySessionRef.current = session;
+    setTemporarySession(session);
+  }, [discardTemporaryChat]);
 
   const onNewChatInProject = useCallback(
     (projectPath: string, projectName: string) => {
@@ -1682,6 +1762,7 @@ function Shell({
     setMobileSidebarOpen(false);
     const nextKey = (() => {
       if (!activeKey) return null;
+      if (isQuickChatKey(activeKey)) return activeKey;
       if (sessions.some((session) => session.key === activeKey)) return activeKey;
       return sessions[0]?.key ?? null;
     })();
@@ -1773,7 +1854,10 @@ function Shell({
     });
   }, [client, t]);
 
-  const onTurnEnd = useDeferredTitleRefresh(activeSession, refresh);
+  const onTurnEnd = useDeferredTitleRefresh(
+    quickChatActive ? null : activeSession,
+    refresh,
+  );
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
@@ -1863,11 +1947,39 @@ function Shell({
     });
   }, []);
 
-  const headerTitle = activeSession
+  const headerTitle = temporaryChatActive
+    ? t("quickChat.temporary.title")
+    : quickChatActive
+      ? t("sidebar.quickChat")
+    : activeSession
     ? sidebarState.title_overrides[activeSession.key] ||
       activeSession.title ||
       deriveTitle(activeSession.preview, t("chat.newChat"))
-    : t("app.brand");
+      : t("app.brand");
+
+  const temporaryChatAction = quickChatActive ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      aria-pressed={temporaryChatActive}
+      aria-label={
+        temporaryChatActive
+          ? t("quickChat.temporary.exit")
+          : t("quickChat.temporary.enter")
+      }
+      onClick={onToggleTemporaryChat}
+      className={cn(
+        "host-no-drag h-8 rounded-full px-2.5 text-xs text-muted-foreground",
+        temporaryChatActive && "bg-foreground text-background hover:bg-foreground/90 hover:text-background",
+      )}
+    >
+      <Ghost className="mr-1.5 h-3.5 w-3.5" />
+      {temporaryChatActive
+        ? t("quickChat.temporary.active")
+        : t("quickChat.temporary.enter")}
+    </Button>
+  ) : undefined;
 
   useEffect(() => {
     if (view === "settings") {
@@ -1900,10 +2012,12 @@ function Shell({
   }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
   const sidebarProps = {
-    sessions,
+    sessions: regularSessions,
     activeKey: view === "chat" ? activeKey : null,
     loading,
+    quickChatActive: view === "chat" && quickChatActive,
     newChatActive: view === "chat" && activeKey === null,
+    onOpenQuickChat,
     onNewChat,
     onSelect: onSelectChat,
     onRequestDelete,
@@ -2066,7 +2180,7 @@ function Shell({
               <SessionSearchDialog
                 open
                 onOpenChange={setSessionSearchOpen}
-                sessions={sessions}
+                sessions={regularSessions}
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
@@ -2091,7 +2205,7 @@ function Shell({
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}
                 onCreateChat={onCreateChat}
-                onForkChat={onForkChat}
+                onForkChat={quickChatActive ? undefined : onForkChat}
                 onTurnEnd={onTurnEnd}
                 theme={theme}
                 onToggleTheme={toggle}
@@ -2099,14 +2213,34 @@ function Shell({
                 hostChromeTitleInset={hostSidebarCollapsed}
                 hideHeader={false}
                 workspaceScope={activeWorkspaceScope}
-                workspaceDefaultScope={workspaces?.default_scope ?? null}
-                workspaceControls={workspaces?.controls ?? null}
+                workspaceDefaultScope={
+                  temporaryChatActive ? null : workspaces?.default_scope ?? null
+                }
+                workspaceControls={
+                  quickChatActive ? null : (workspaces?.controls ?? null)
+                }
                 workspaceScopeDisabled={activeChatRunning}
                 workspaceError={workspaceError}
                 onWorkspaceScopeChange={applyWorkspaceScope}
                 settingsSnapshot={settingsSnapshot}
                 onOpenModelSettings={onOpenModelSettings}
                 skills={skills}
+                allowConversationReset={!quickChatActive}
+                showSessionInfo={!quickChatActive}
+                emptyStateGreeting={
+                  temporaryChatActive
+                    ? t("quickChat.temporary.greeting")
+                    : quickChatActive
+                      ? t("quickChat.greeting")
+                      : undefined
+                }
+                emptyStateDescription={
+                  temporaryChatActive
+                    ? t("quickChat.temporary.description")
+                    : undefined
+                }
+                temporary={temporaryChatActive}
+                headerAction={temporaryChatAction}
               />
             </div>
             {view !== "chat" && (

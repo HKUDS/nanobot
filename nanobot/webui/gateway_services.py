@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger as default_logger
 
@@ -38,6 +39,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    cancel_active_turn: Callable[[str], Awaitable[int]] | None
 
 
 def build_gateway_services(
@@ -56,6 +58,7 @@ def build_gateway_services(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+    cancel_active_turn: Callable[[str], Awaitable[int]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
@@ -117,4 +120,5 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        cancel_active_turn=cancel_active_turn,
     )

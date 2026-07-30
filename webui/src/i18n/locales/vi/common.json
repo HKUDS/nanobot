@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
+    "quickChat": "Trò chuyện nhanh",
     "newChat": "Chủ đề mới",
     "searchAria": "Tìm kiếm",
     "searchPlaceholder": "Tìm kiếm",
@@ -58,6 +59,17 @@
     "automations": "Tự động hóa",
     "skills": {
       "title": "Kỹ năng"
+    }
+  },
+  "quickChat": {
+    "greeting": "Bạn đang nghĩ gì?",
+    "temporary": {
+      "title": "Trò chuyện tạm thời",
+      "enter": "Tạm thời",
+      "active": "Tạm thời",
+      "exit": "Thoát trò chuyện tạm thời",
+      "greeting": "Bắt đầu trò chuyện tạm thời",
+      "description": "Không lịch sử, bộ nhớ, công cụ hay quyền truy cập dự án. Nội dung vẫn được gửi đến nhà cung cấp mô hình bạn chọn."
     }
   },
   "settings": {

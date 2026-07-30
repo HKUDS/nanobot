@@ -15,6 +15,20 @@ def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
 
 
+def test_conversation_only_messages_omit_the_system_prompt(tmp_path) -> None:
+    (tmp_path / "AGENTS.md").write_text("SECRET PROJECT INSTRUCTIONS", encoding="utf-8")
+    builder = _builder(tmp_path)
+
+    messages = builder.build_messages(
+        [],
+        "hello",
+        conversation_only=True,
+    )
+
+    assert messages == [{"role": "user", "content": "hello"}]
+    assert "SECRET PROJECT INSTRUCTIONS" not in str(messages)
+
+
 # ---------------------------------------------------------------------------
 # _merge_message_content (static)
 # ---------------------------------------------------------------------------

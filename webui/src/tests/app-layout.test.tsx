@@ -12,6 +12,7 @@ const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomatio
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
+const discardTemporaryChatSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
@@ -219,6 +220,7 @@ vi.mock("@/lib/nanobot-client", () => {
     sendMessage = vi.fn();
     newChat = vi.fn();
     attach = attachSpy;
+    discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
     updateMaxFrameBytes = vi.fn();
@@ -246,6 +248,7 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
+    discardTemporaryChatSpy.mockReset();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
@@ -363,6 +366,129 @@ describe("App layout", () => {
       "data-active-id",
       "new-chat",
     );
+  });
+
+  it("opens a single fixed Quick Chat without provisioning a new session", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const quickChatButton = within(sidebar).getByRole("button", {
+      name: "Quick Chat",
+    });
+    const newTopicButton = within(sidebar).getByRole("button", {
+      name: "New topic",
+    });
+    const actionHighlight = within(sidebar).getByTestId(
+      "actions-selection-highlight",
+    );
+
+    fireEvent.click(quickChatButton);
+
+    expect(window.location.hash).toBe("#/quick-chat");
+    expect(quickChatButton).toHaveAttribute("aria-current", "page");
+    expect(newTopicButton).not.toHaveAttribute("aria-current");
+    expect(quickChatButton).not.toHaveClass("bg-sidebar-accent");
+    expect(quickChatButton).toHaveClass("transition-[width,padding,color]");
+    expect(actionHighlight).toHaveAttribute("data-active-id", "quick-chat");
+    expect(
+      within(sidebar).queryByTestId("actions-selection-highlight-surface"),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/sessions/websocket%3Aquick-chat/webui-thread",
+        ),
+        expect.anything(),
+      ),
+    );
+    expect(createChatSpy).not.toHaveBeenCalled();
+    expect(document.title).toBe("Quick Chat · nanobot");
+    expect(screen.getByText("What's on your mind?")).toBeInTheDocument();
+
+    fireEvent.click(newTopicButton);
+
+    expect(window.location.hash).toBe("#/new");
+    expect(newTopicButton).toHaveAttribute("aria-current", "page");
+    expect(quickChatButton).not.toHaveAttribute("aria-current");
+    expect(actionHighlight).toHaveAttribute("data-active-id", "new-chat");
+    expect(within(sidebar).queryAllByRole("button", { current: "page" })).toHaveLength(1);
+  });
+
+  it("enters and destroys Temporary Chat inside Quick Chat", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Quick Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Temporary" }));
+
+    expect(screen.getByText("Start a temporary chat")).toBeInTheDocument();
+    expect(screen.getByText(/No history, memory, tools, or project access/))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Attach image" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit temporary chat" }));
+
+    expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(1);
+    expect(discardTemporaryChatSpy.mock.calls[0][0]).toMatch(/^temporary-/);
+    await waitFor(() => {
+      expect(screen.getByText("What's on your mind?")).toBeInTheDocument();
+    });
+  });
+
+  it("restores Quick Chat before it has a persisted session", async () => {
+    window.history.replaceState(null, "", "/#/quick-chat");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(window.location.hash).toBe("#/quick-chat");
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/sessions/websocket%3Aquick-chat/webui-thread",
+        ),
+        expect.anything(),
+      ),
+    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+        .getByRole("button", { name: "Quick Chat" }),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps persisted Quick Chat out of the topic list and topic search", async () => {
+    mockSessions = [
+      {
+        key: "websocket:quick-chat",
+        channel: "websocket",
+        chatId: "quick-chat",
+        createdAt: "2026-07-30T08:00:00Z",
+        updatedAt: "2026-07-30T08:05:00Z",
+        preview: "A private casual message",
+      },
+      {
+        key: "websocket:project-chat",
+        channel: "websocket",
+        chatId: "project-chat",
+        createdAt: "2026-07-30T08:00:00Z",
+        updatedAt: "2026-07-30T08:05:00Z",
+        preview: "Project roadmap",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Project roadmap")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("A private casual message")).not.toBeInTheDocument();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Search" }));
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
+    expect(within(dialog).getByText("Project roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("A private casual message")).not.toBeInTheDocument();
   });
 
   it("restores the Settings route after a restart fallback hash", async () => {
