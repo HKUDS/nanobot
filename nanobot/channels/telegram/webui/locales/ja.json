@@ -86,6 +86,11 @@
       },
       "webhookMaxConnections": {
         "label": "Webhook 接続の上限"
+      },
+      "apiBase": {
+        "label": "Bot API ベース URL",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "任意。api.telegram.org の代わりにセルフホストの Bot API サーバーまたはゲートウェイを指定します。"
       }
     }
   }
