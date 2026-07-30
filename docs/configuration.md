@@ -2200,11 +2200,11 @@ How it works:
 4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
 
 > [!NOTE]
-> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the session file with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
+> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the persisted session with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
 >
-> Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
+> Concretely, auto compact replaces the session row in `sessions.db`: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the active session database.
 >
-> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
+> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves persisted messages untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
 
 ## Timezone
 

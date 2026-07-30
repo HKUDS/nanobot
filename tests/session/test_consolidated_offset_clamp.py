@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import JsonlSessionFiles, Session, SessionManager
 
 
 def _session(count: int, last_consolidated: object) -> Session:
@@ -30,8 +30,8 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
     }
 
     for name, offset in offsets.items():
-        manager = SessionManager(tmp_path / name)
-        path = manager._get_session_path("chan:chat")
+        workspace = tmp_path / name
+        path = JsonlSessionFiles(workspace).get_session_path("chan:chat")
         path.parent.mkdir(parents=True, exist_ok=True)
         message = {"role": "user", "content": f"survived {name}"}
         path.write_text(
@@ -47,6 +47,7 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
             encoding="utf-8",
         )
 
+        manager = SessionManager(workspace)
         session = manager.get_or_create("chan:chat")
 
         assert session.messages == [message]
@@ -62,8 +63,7 @@ def test_valid_offset_is_preserved():
 
 def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
     """Session jsonl metadata:null must load as {} so agent .pop/.get work."""
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("chan:chat")
+    path = JsonlSessionFiles(tmp_path).get_session_path("chan:chat")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({
@@ -76,6 +76,7 @@ def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
         }) + "\n",
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
     session = manager.get_or_create("chan:chat")
     assert session.metadata == {}
     session.metadata["title"] = "ok"

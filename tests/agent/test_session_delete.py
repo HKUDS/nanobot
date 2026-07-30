@@ -1,8 +1,9 @@
 """Tests for SessionManager.delete_session and read_session_file."""
 
+import json
 from pathlib import Path
 
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import JsonlSessionFiles, Session, SessionManager
 
 
 def _seed(workspace: Path, key: str = "telegram:abc") -> SessionManager:
@@ -14,16 +15,15 @@ def _seed(workspace: Path, key: str = "telegram:abc") -> SessionManager:
     return sm
 
 
-def test_delete_session_removes_file_and_invalidates_cache(tmp_path: Path) -> None:
+def test_delete_session_removes_row_and_invalidates_cache(tmp_path: Path) -> None:
     sm = _seed(tmp_path, "telegram:abc")
-    file_path = sm._get_session_path("telegram:abc")
-    assert file_path.exists()
+    assert (tmp_path / "sessions.db").is_file()
     # Populate cache as a real consumer would.
     cached = sm.get_or_create("telegram:abc")
     assert cached.messages
 
     assert sm.delete_session("telegram:abc") is True
-    assert not file_path.exists()
+    assert sm.read_session_file("telegram:abc") is None
     # Subsequent get_or_create returns a fresh, empty Session (no stale cache).
     fresh = sm.get_or_create("telegram:abc")
     assert fresh.messages == []
@@ -58,13 +58,6 @@ def test_read_session_file_missing(tmp_path: Path) -> None:
     assert sm.read_session_file("nope:none") is None
 
 
-def test_storage_key_matches_internal_path(tmp_path: Path) -> None:
-    sm = SessionManager(tmp_path)
-    key = "telegram:abc/def"
-    expected = sm._get_session_path(key).name
-    assert SessionManager._storage_key(key) + ".jsonl" == expected
-
-
 def _write_legacy_session(legacy_dir: Path, key: str, roles: list[str]) -> Path:
     legacy_dir.mkdir(parents=True, exist_ok=True)
     safe = SessionManager.safe_key(key)
@@ -82,6 +75,26 @@ def _write_legacy_session(legacy_dir: Path, key: str, roles: list[str]) -> Path:
     return path
 
 
+def _write_jsonl_session(source: JsonlSessionFiles, session: Session) -> Path:
+    records = [
+        {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_consolidated": session.last_consolidated,
+        },
+        *session.messages,
+    ]
+    path = source.get_session_path(session.key)
+    path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_delete_session_cleans_legacy_file(tmp_path: Path, monkeypatch) -> None:
     """A session that only exists at the legacy location must also be deleted."""
     legacy = tmp_path / "legacy_sessions"
@@ -94,8 +107,6 @@ def test_delete_session_cleans_legacy_file(tmp_path: Path, monkeypatch) -> None:
     assert legacy_path.exists()
 
     sm = SessionManager(tmp_path / "workspace")
-    new_path = sm._get_session_path(key)
-    assert not new_path.exists()
 
     assert sm.delete_session(key) is True
     assert not legacy_path.exists(), "legacy session file should have been removed"
@@ -111,18 +122,24 @@ def test_delete_session_cleans_both_locations(tmp_path: Path, monkeypatch) -> No
     workspace = tmp_path / "workspace"
     key = "telegram:both-paths"
     _write_legacy_session(legacy, key, ["user", "assistant"])
+    source = JsonlSessionFiles(workspace)
+    migrated = Session(key=key)
+    migrated.add_message("user", "from jsonl")
+    _write_jsonl_session(source, migrated)
 
     sm = SessionManager(workspace)
     session = Session(key=key)
     session.add_message("user", "recent")
     sm.save(session)
 
-    assert sm._get_session_path(key).exists()
+    assert source.get_session_path(key).exists()
+    assert sm.read_session_file(key) is not None
     assert (legacy / f"{SessionManager.safe_key(key)}.jsonl").exists()
 
     assert sm.delete_session(key) is True
 
-    assert not sm._get_session_path(key).exists()
+    assert not source.get_session_path(key).exists()
+    assert sm.read_session_file(key) is None
     assert not (legacy / f"{SessionManager.safe_key(key)}.jsonl").exists()
 
 

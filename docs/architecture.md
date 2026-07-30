@@ -142,7 +142,7 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<workspace>/sessions/*.jsonl` |
+| Sessions | `<workspace>/sessions.db` |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
@@ -173,12 +173,16 @@ Session history is the near-term conversation replay. Memory is the longer-term 
 
 | Store | File area |
 |---|---|
-| Session JSONL files | `<workspace>/sessions/` |
+| Session database | `<workspace>/sessions.db` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |
 
 Dream is implemented in `nanobot/agent/memory.py` and scheduled by the runtime when enabled.
+
+On first startup after upgrading, canonical files under `<workspace>/sessions/`
+are imported into SQLite in one transaction. The JSONL files remain as a
+rollback backup; runtime session reads and writes use only `sessions.db`.
 
 ## Security Boundaries
 

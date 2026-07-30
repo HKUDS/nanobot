@@ -4,16 +4,14 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import JsonlSessionFiles, SessionManager
 
 
 def test_list_sessions_ignores_legacy_stem(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path / "workspace")
 
-    # A legacy lossy-path filename must not be treated as current session storage,
-    # even when the file contains otherwise recoverable records.
     legacy_stem = "telegram_12345"
-    corrupt_path = manager.sessions_dir / f"{legacy_stem}.jsonl"
+    corrupt_path = manager.workspace / "sessions" / f"{legacy_stem}.jsonl"
     corrupt_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = json.dumps({
         "_type": "metadata",
@@ -42,9 +40,10 @@ def test_read_session_methods_ignore_legacy_lossy_stem(
         lambda: tmp_path / "legacy_sessions",
     )
     manager = SessionManager(tmp_path / "workspace")
+    source = JsonlSessionFiles(manager.workspace)
     session_id = "123e4567-e89b-12d3-a456-426614174000"
     key = f"websocket:{session_id}"
-    legacy_path = manager._get_legacy_lossy_path(key)
+    legacy_path = source.get_legacy_lossy_path(key)
     assert legacy_path.name == f"websocket_{session_id}.jsonl"
 
     metadata = {

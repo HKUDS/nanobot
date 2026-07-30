@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -6,7 +7,7 @@ from threading import Event
 import pytest
 
 from nanobot.session import Session, SessionManager
-from nanobot.session.manager import SQLiteSessionStore
+from nanobot.session.manager import JsonlSessionFiles, SQLiteSessionStore
 
 
 def _session(
@@ -26,6 +27,24 @@ def _session(
     )
 
 
+def _write_jsonl(source: JsonlSessionFiles, session: Session) -> None:
+    records = [
+        {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_consolidated": session.last_consolidated,
+        },
+        *session.messages,
+    ]
+    source.get_session_path(session.key).write_text(
+        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+
 def test_sqlite_store_round_trips_through_manager(tmp_path) -> None:
     key = "websocket:quote'和中文"
     stored = _session(
@@ -40,12 +59,14 @@ def test_sqlite_store_round_trips_through_manager(tmp_path) -> None:
         ],
         title="SQLite session",
     )
-    manager = SessionManager(tmp_path, store=SQLiteSessionStore(tmp_path))
+    manager = SessionManager(tmp_path)
 
     manager.save(stored, fsync=True)
 
-    reloaded = SessionManager(tmp_path, store=SQLiteSessionStore(tmp_path))
+    reloaded = SessionManager(tmp_path)
     assert reloaded.get_or_create(key) == stored
+    assert (tmp_path / "sessions.db").is_file()
+    assert not list((tmp_path / "sessions").glob("*.jsonl"))
     assert reloaded.read_session_file(key) == {
         "key": key,
         "created_at": stored.created_at.isoformat(),
@@ -61,7 +82,87 @@ def test_sqlite_store_round_trips_through_manager(tmp_path) -> None:
     }
 
 
-def test_sqlite_store_lists_sessions_with_jsonl_projection(tmp_path) -> None:
+def test_manager_migrates_jsonl_once_and_keeps_source_as_backup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    source = JsonlSessionFiles(tmp_path)
+    stored = _session(
+        "cli:migrate",
+        updated_at=datetime(2026, 7, 30, 10, 0),
+        messages=[{"role": "user", "content": "from jsonl"}],
+        title="Migrated",
+    )
+    _write_jsonl(source, stored)
+    source_path = source.get_session_path(stored.key)
+
+    manager = SessionManager(tmp_path)
+
+    assert manager.get_or_create(stored.key) == stored
+    assert source_path.is_file()
+
+    stored.add_message("assistant", "only in sqlite")
+    manager.save(stored)
+
+    def fail_scan(_self) -> None:
+        raise AssertionError("JSONL backups should not be scanned after migration")
+
+    monkeypatch.setattr(JsonlSessionFiles, "session_files", fail_scan)
+    reloaded = SessionManager(tmp_path)
+    assert [message["content"] for message in reloaded.get_or_create(stored.key).messages] == [
+        "from jsonl",
+        "only in sqlite",
+    ]
+
+
+def test_jsonl_migration_rolls_back_on_invalid_session(tmp_path) -> None:
+    source = JsonlSessionFiles(tmp_path)
+    valid = _session(
+        "cli:valid",
+        updated_at=datetime(2026, 7, 30, 10, 0),
+        messages=[{"role": "user", "content": "keep me"}],
+        title="Valid",
+    )
+    _write_jsonl(source, valid)
+    invalid_path = source.get_session_path("cli:invalid")
+    invalid_path.write_text("not json\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Failed to migrate JSONL session"):
+        SessionManager(tmp_path)
+
+    with sqlite3.connect(tmp_path / "sessions.db") as connection:
+        session_count = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()
+        migration_count = connection.execute(
+            "SELECT COUNT(*) FROM store_metadata WHERE key = 'jsonl_import_v1'"
+        ).fetchone()
+    assert session_count == (0,)
+    assert migration_count == (0,)
+    assert source.get_session_path(valid.key).is_file()
+    assert invalid_path.is_file()
+
+
+def test_jsonl_migration_is_safe_under_concurrent_startup(tmp_path) -> None:
+    source = JsonlSessionFiles(tmp_path)
+    stored = _session(
+        "cli:concurrent-migration",
+        updated_at=datetime(2026, 7, 30, 10, 0),
+        messages=[{"role": "user", "content": "migrate once"}],
+        title="Concurrent",
+    )
+    _write_jsonl(source, stored)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        managers = list(executor.map(lambda _: SessionManager(tmp_path), range(8)))
+
+    assert all(manager.get_or_create(stored.key) == stored for manager in managers)
+    with sqlite3.connect(tmp_path / "sessions.db") as connection:
+        session_count = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()
+        message_count = connection.execute("SELECT COUNT(*) FROM messages").fetchone()
+    assert session_count == (1,)
+    assert message_count == (1,)
+
+
+def test_sqlite_store_lists_sessions_with_session_projection(tmp_path) -> None:
     store = SQLiteSessionStore(tmp_path)
     older = _session(
         "cli:older",
@@ -86,6 +187,7 @@ def test_sqlite_store_lists_sessions_with_jsonl_projection(tmp_path) -> None:
     assert [row["key"] for row in rows] == ["cli:newer", "cli:older"]
     assert [row["preview"] for row in rows] == ["first user", "assistant fallback"]
     assert [row["title"] for row in rows] == ["Newer", "Older"]
+    assert [row["model_preset"] for row in rows] == [None, None]
     assert {row["path"] for row in rows} == {str(store.db_path)}
 
 

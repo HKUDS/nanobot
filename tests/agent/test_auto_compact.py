@@ -856,15 +856,14 @@ class TestProactiveAutoCompact:
         healthy.add_message("user", "keep me")
         loop.sessions.save(healthy)
 
-        removed_path = loop.sessions._get_session_path(removed.key)
-        original_open = open
+        original_list = loop.sessions.list_sessions
 
-        def remove_before_open(path, *args, **kwargs):
-            if Path(path) == removed_path:
-                removed_path.unlink()
-            return original_open(path, *args, **kwargs)
+        def remove_after_listing():
+            rows = original_list()
+            loop.sessions.delete_session(removed.key)
+            return rows
 
-        monkeypatch.setattr("builtins.open", remove_before_open)
+        monkeypatch.setattr(loop.sessions, "list_sessions", remove_after_listing)
 
         async def idle_once():
             loop._running = False
@@ -874,7 +873,7 @@ class TestProactiveAutoCompact:
 
         await loop.run()
 
-        assert [row["key"] for row in loop.sessions.list_sessions()] == ["cli:healthy"]
+        assert [row["key"] for row in original_list()] == ["cli:healthy"]
 
     @pytest.mark.asyncio
     async def test_no_check_when_ttl_disabled(self, tmp_path):

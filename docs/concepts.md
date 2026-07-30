@@ -125,7 +125,7 @@ nanobot uses two related stores:
 
 | Store | Location | Purpose |
 |---|---|---|
-| Sessions | `<workspace>/sessions/*.jsonl` | Recent conversation turns replayed into context |
+| Sessions | `<workspace>/sessions.db` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
 
 Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.

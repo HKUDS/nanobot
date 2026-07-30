@@ -7,6 +7,7 @@ from nanobot.session.manager import FILE_MAX_MESSAGES, SessionStore
 
 def test_store_types_are_not_public_session_api() -> None:
     assert not hasattr(session_api, "SessionStore")
+    assert not hasattr(session_api, "JsonlSessionFiles")
     assert not hasattr(session_api, "JsonlSessionStore")
     assert not hasattr(session_api, "SQLiteSessionStore")
 
@@ -34,6 +35,7 @@ def test_manager_delegates_persistence_to_store(tmp_path) -> None:
             "updated_at": stored.updated_at.isoformat(),
             "title": "",
             "preview": "hello",
+            "model_preset": None,
             "path": "session.db",
         }
     ]

@@ -16,6 +16,7 @@ from nanobot.command.builtin import (
     cmd_dream_restore,
 )
 from nanobot.command.router import CommandContext
+from nanobot.session.manager import SessionManager
 from nanobot.utils.gitstore import CommitInfo
 
 
@@ -118,12 +119,10 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
     store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=None)
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=SessionManager(tmp_path),
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, bus
@@ -169,13 +168,11 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
             metadata={"_stop_reason": "completed"},
         )
 
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     dream_runtime = object()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=SessionManager(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: dream_runtime,
     )
@@ -224,12 +221,10 @@ def _build_runnable_dream(
         )
 
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=SessionManager(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
     )
@@ -311,12 +306,10 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=SessionManager(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
     )

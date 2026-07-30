@@ -2,7 +2,7 @@
 
 import asyncio
 import signal
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
@@ -154,14 +154,15 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
 def _pick_heartbeat_target_from_sessions(
     *,
     enabled_channels: Iterable[str],
-    sessions: Iterable[dict[str, Any]],
+    sessions: Iterable[Mapping[str, object]],
     archived_keys: Iterable[str],
     unified_session_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     enabled = set(enabled_channels)
     archived = set(archived_keys)
     for item in sessions:
-        key = item.get("key") or ""
+        value = item.get("key")
+        key = value if isinstance(value, str) else ""
         if key in archived:
             continue
         if key == UNIFIED_SESSION_KEY:
@@ -475,7 +476,7 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+                prune_dream_sessions(agent.sessions)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.

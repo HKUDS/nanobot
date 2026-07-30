@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import JsonlSessionFiles, SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
@@ -28,16 +29,33 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert list_webui_sessions(manager)[0]["preview"] == "indexed preview"
     assert list_webui_sessions(manager)[0]["model_preset"] == "fast"
 
-    def fail_scan(session_manager: SessionManager, path: Path) -> None:
-        raise AssertionError(f"unexpected session file scan: {path}")
+    def fail_read(key: str) -> None:
+        raise AssertionError(f"unexpected session read: {key}")
 
-    monkeypatch.setattr(session_list_index, "_scan_session_row", fail_scan)
+    monkeypatch.setattr(manager, "read_session_file", fail_read)
 
     rows = list_webui_sessions(manager)
 
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_rebuilds_invalid_cached_row(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:invalid-index")
+    session.add_message("user", "hello")
+    manager.save(session)
+    expected_updated_at = list_webui_sessions(manager)[0]["updated_at"]
+
+    index_path = tmp_path / "sessions" / ".webui_session_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["sessions"][0]["updated_at"] = None
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    row = list_webui_sessions(manager)[0]
+
+    assert row["updated_at"] == expected_updated_at
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
@@ -71,18 +89,18 @@ def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatc
     second.add_message("user", "second after")
     manager.save(second)
 
-    original_scan = session_list_index._scan_session_row
+    original_read = manager.read_session_file
     scanned: list[str] = []
 
-    def record_scan(session_manager: SessionManager, path: Path) -> dict | None:
-        scanned.append(path.name)
-        return original_scan(session_manager, path)
+    def record_read(key: str) -> dict | None:
+        scanned.append(key)
+        return original_read(key)
 
-    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
+    monkeypatch.setattr(manager, "read_session_file", record_read)
 
     rows = list_webui_sessions(manager)
 
-    assert scanned == [manager._get_session_path("websocket:second").name]
+    assert scanned == ["websocket:second"]
     assert {row["preview"] for row in rows} == {"first", "second after"}
 
 
@@ -121,7 +139,7 @@ def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
 
 def test_webui_session_list_ignores_legacy_stem(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
-    legacy_path = manager.sessions_dir / "websocket_legacy.jsonl"
+    legacy_path = manager.workspace / "sessions" / "websocket_legacy.jsonl"
     legacy_path.write_text(
         '{"_type":"metadata","key":"websocket:legacy",'
         '"created_at":"2025-01-01T00:00:00",'
@@ -244,18 +262,18 @@ def test_webui_session_list_rescans_when_transcript_changes(
     activity_ns = int(datetime(2026, 6, 15, 12, 30, 0).timestamp() * 1_000_000_000)
     os.utime(transcript, ns=(activity_ns, activity_ns))
 
-    original_scan = session_list_index._scan_session_row
+    original_read = manager.read_session_file
     scanned: list[str] = []
 
-    def record_scan(session_manager: SessionManager, path: Path) -> dict | None:
-        scanned.append(path.name)
-        return original_scan(session_manager, path)
+    def record_read(key: str) -> dict | None:
+        scanned.append(key)
+        return original_read(key)
 
-    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
+    monkeypatch.setattr(manager, "read_session_file", record_read)
 
     rows = list_webui_sessions(manager)
 
-    assert scanned == [manager._get_session_path("websocket:transcript-change").name]
+    assert scanned == ["websocket:transcript-change"]
     assert rows[0]["updated_at"].startswith("2026-06-15T12:30:00")
 
 
@@ -290,13 +308,14 @@ def list_webui_sessions(manager: SessionManager) -> list[dict]:
 
 
 def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("websocket:missing-time")
+    source = JsonlSessionFiles(tmp_path)
+    path = source.get_session_path("websocket:missing-time")
     path.write_text(
         '{"_type": "metadata", "key": "websocket:missing-time"}\n'
         '{"_type": "message", "role": "user", "content": "hello"}\n',
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
 
     rows = list_webui_sessions(manager)
     assert len(rows) == 1
@@ -308,13 +327,14 @@ def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
 
 
 def test_session_manager_list_sessions_fallback_time_when_missing(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("websocket:missing-time2")
+    source = JsonlSessionFiles(tmp_path)
+    path = source.get_session_path("websocket:missing-time2")
     path.write_text(
         '{"_type": "metadata", "key": "websocket:missing-time2"}\n'
         '{"_type": "message", "role": "user", "content": "hello"}\n',
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
 
     sessions = manager.list_sessions()
     assert len(sessions) == 1

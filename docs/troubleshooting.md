@@ -313,7 +313,7 @@ See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
 |---|---|
 | Conversation context seems wrong | Confirm the active workspace and session. WebUI chats and chat app threads may use different sessions. |
 | Memory does not update immediately | Dream consolidation is periodic; recent turns still live in session history. |
-| Old sessions appear after moving config | Session files are stored under `<workspace>/sessions/`; verify the workspace path. |
+| Old sessions appear after moving config | Sessions are stored in `<workspace>/sessions.db`; verify the workspace path. |
 | You want one shared session across devices | Set `agents.defaults.unifiedSession` intentionally; otherwise keep separate sessions. |
 
 ## Collect Useful Evidence

@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import errno
-import os
-import sys
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 
-from nanobot.session.manager import SessionManager
-
-_IS_WINDOWS = sys.platform == "win32"
+from nanobot.session.manager import SessionManager, SQLiteSessionStore
 
 
 @pytest.fixture
@@ -28,74 +24,35 @@ def manager(sessions_dir: Path) -> SessionManager:
 
 
 class TestSaveFsync:
-    """Verify that save(fsync=True) calls os.fsync."""
+    """Verify that durable saves use SQLite FULL synchronous mode."""
 
-    def test_save_without_fsync_does_not_call_fsync(self, manager: SessionManager):
+    def test_save_without_fsync_uses_normal_durability(self, manager: SessionManager):
         session = manager.get_or_create("test:no-fsync")
         session.add_message("user", "hello")
+        store = cast(SQLiteSessionStore, manager._store)  # pyright: ignore[reportPrivateUsage]
 
-        with patch("os.fsync") as mock_fsync:
+        with patch.object(store, "_connection", wraps=store._connection) as connection:
             manager.save(session, fsync=False)
-            mock_fsync.assert_not_called()
+        connection.assert_called_once_with(durable=False)
 
-    def test_save_with_fsync_calls_fsync(self, manager: SessionManager):
+    def test_save_with_fsync_uses_full_durability(self, manager: SessionManager):
         session = manager.get_or_create("test:with-fsync")
         session.add_message("user", "hello")
+        store = cast(SQLiteSessionStore, manager._store)  # pyright: ignore[reportPrivateUsage]
 
-        with patch("os.fsync") as mock_fsync:
+        with patch.object(store, "_connection", wraps=store._connection) as connection:
             manager.save(session, fsync=True)
-            # File fsync always runs; directory fsync only on non-Windows.
-            expected = 1 if _IS_WINDOWS else 2
-            assert mock_fsync.call_count == expected
+        connection.assert_called_once_with(durable=True)
 
     def test_save_default_no_fsync(self, manager: SessionManager):
         """Default save() should not fsync (backward compat)."""
         session = manager.get_or_create("test:default")
         session.add_message("user", "hello")
+        store = cast(SQLiteSessionStore, manager._store)  # pyright: ignore[reportPrivateUsage]
 
-        with patch("os.fsync") as mock_fsync:
+        with patch.object(store, "_connection", wraps=store._connection) as connection:
             manager.save(session)
-            mock_fsync.assert_not_called()
-
-    def test_save_ignores_unsupported_directory_fsync(
-        self, manager: SessionManager
-    ) -> None:
-        """Shared filesystems may open directories but reject directory fsync."""
-        session = manager.get_or_create("test:unsupported-directory-fsync")
-        session.add_message("user", "hello")
-        directory_fd = 987654
-        with (
-            patch("nanobot.session.manager.os.open", return_value=directory_fd) as open_dir,
-            patch(
-                "nanobot.session.manager.os.fsync",
-                side_effect=[None, OSError(errno.EINVAL, "Invalid argument")],
-            ),
-            patch("nanobot.session.manager.os.close") as close_dir,
-        ):
-            manager.save(session, fsync=True)
-
-        assert manager._get_session_path(session.key).exists()
-        open_dir.assert_called_once_with(str(manager.sessions_dir), os.O_RDONLY)
-        close_dir.assert_called_once_with(directory_fd)
-
-    def test_save_propagates_other_directory_fsync_errors(
-        self, manager: SessionManager
-    ) -> None:
-        """Only EINVAL is an expected unsupported-directory-fsync result."""
-        session = manager.get_or_create("test:directory-fsync-io-error")
-        directory_fd = 987654
-        with (
-            patch("nanobot.session.manager.os.open", return_value=directory_fd),
-            patch(
-                "nanobot.session.manager.os.fsync",
-                side_effect=[None, OSError(errno.EIO, "I/O error")],
-            ),
-            patch("nanobot.session.manager.os.close") as close_dir,
-            pytest.raises(OSError, match="I/O error"),
-        ):
-            manager.save(session, fsync=True)
-
-        close_dir.assert_called_once_with(directory_fd)
+        connection.assert_called_once_with(durable=False)
 
 
 class TestFlushAll:
@@ -120,12 +77,11 @@ class TestFlushAll:
         session = manager.get_or_create("test:fsync-check")
         session.add_message("user", "important")
         manager.save(session)
+        store = cast(SQLiteSessionStore, manager._store)  # pyright: ignore[reportPrivateUsage]
 
-        with patch("os.fsync") as mock_fsync:
+        with patch.object(store, "_connection", wraps=store._connection) as connection:
             manager.flush_all()
-            # file fsync always; directory fsync only on non-Windows
-            expected = 1 if _IS_WINDOWS else 2
-            assert mock_fsync.call_count == expected
+        connection.assert_called_once_with(durable=True)
 
     def test_flush_all_continues_on_error(self, manager: SessionManager):
         """One broken session should not prevent others from flushing."""
@@ -188,7 +144,8 @@ class TestLoadErrors:
         writer.save(session)
 
         reader = SessionManager(workspace=sessions_dir)
-        with patch("builtins.open", side_effect=PermissionError("access denied")):
+        store = cast(SQLiteSessionStore, reader._store)  # pyright: ignore[reportPrivateUsage]
+        with patch.object(store, "_connection", side_effect=PermissionError("access denied")):
             with pytest.raises(PermissionError, match="access denied"):
                 if operation == "list_sessions":
                     reader.list_sessions()

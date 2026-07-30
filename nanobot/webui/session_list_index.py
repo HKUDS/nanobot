@@ -1,9 +1,4 @@
-"""Cache-only WebUI session list index.
-
-The core ``SessionManager`` owns durable conversation history. This module owns
-the WebUI sidebar optimization so core session writes stay independent from UI
-presentation caches.
-"""
+"""Cache-only WebUI session list index."""
 
 from __future__ import annotations
 
@@ -21,61 +16,81 @@ from nanobot.session.manager import (
     _PROVIDER_STATE_RECORD_TYPE,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_CHARS,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_RECORDS,  # pyright: ignore[reportPrivateUsage]
-    Session,
+    SessionInfo,
     SessionManager,
     _is_provider_state_record_line,  # pyright: ignore[reportPrivateUsage]
     _message_preview_text,  # pyright: ignore[reportPrivateUsage]
-    _metadata_title,  # pyright: ignore[reportPrivateUsage]
 )
-from nanobot.session.model_selection import model_preset_from_metadata
 
-_INDEX_VERSION = 4
+_INDEX_VERSION = 5
 _INDEX_FILENAME = ".webui_session_index.json"
 _MODEL_PRESET_FIELD = "model_preset"
+_STORED_UPDATED_AT = "stored_updated_at"
+_STORED_PREVIEW = "stored_preview"
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
-    """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
+    index_dir = session_manager.workspace / "sessions"
     rows, changed = _reconcile_index(session_manager)
     if changed:
         try:
-            _write_index_rows(session_manager.sessions_dir, rows)
+            _write_index_rows(index_dir, rows)
         except Exception as e:
             logger.debug("Failed to write WebUI session list index: {}", e)
-    sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
-    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+    return sorted((_public_row(row) for row in rows), key=lambda row: row["updated_at"], reverse=True)
 
 
 def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
-    existing_rows = _read_index_rows(session_manager.sessions_dir)
-    existing_by_file = {
-        row.get("file"): row
+    existing_rows = _read_index_rows(session_manager.workspace / "sessions")
+    existing_by_key = {
+        row.get("key"): row
         for row in existing_rows or []
-        if isinstance(row.get("file"), str)
+        if isinstance(row.get("key"), str)
     }
-    paths = sorted(
-        path
-        for path in session_manager.sessions_dir.glob("*.jsonl")
-        if SessionManager._session_key_from_path(path) is not None  # pyright: ignore[reportPrivateUsage]
-    )
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
 
-    for path in paths:
-        row = existing_by_file.get(path.name)
-        if row is not None and _indexed_row_matches_file(row, path):
+    for stored in session_manager.list_sessions():
+        key = stored["key"]
+        model_preset = stored["model_preset"]
+        activity_signature = _webui_activity_signature(key)
+        row = existing_by_key.get(key)
+        if row is not None and _indexed_row_matches(
+            row,
+            stored,
+            model_preset,
+            activity_signature,
+        ):
             rows.append(row)
             continue
 
         changed = True
-        scanned = _scan_session_row(session_manager, path)
-        if scanned is not None:
-            rows.append(scanned)
+        payload = session_manager.read_session_file(key)
+        if payload is None:
+            continue
+        raw_messages: object = payload.get("messages", [])
+        messages = (
+            [
+                cast(dict[str, Any], message)
+                for message in cast(list[object], raw_messages)
+                if isinstance(message, dict)
+            ]
+            if isinstance(raw_messages, list)
+            else []
+        )
+        rows.append(
+            _indexed_row(
+                stored,
+                messages,
+                model_preset,
+                activity_signature,
+            )
+        )
 
-    if set(existing_by_file) != {path.name for path in paths}:
+    if set(existing_by_key) != {row["key"] for row in rows}:
         changed = True
     if existing_rows is not None and rows != existing_rows:
         changed = True
@@ -91,21 +106,21 @@ def _read_index_rows(sessions_dir: Path) -> list[dict[str, Any]] | None:
     if not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw_data: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(data, dict):
+    if not isinstance(raw_data, dict):
         return None
-    index_data = cast(dict[str, Any], data)
-    if index_data.get("version") != _INDEX_VERSION:
+    data = cast(dict[str, Any], raw_data)
+    if data.get("version") != _INDEX_VERSION:
         return None
-    rows = index_data.get("sessions")
-    if not isinstance(rows, list):
+    raw_rows: object = data.get("sessions")
+    if not isinstance(raw_rows, list):
         return None
-    index_rows = cast(list[Any], rows)
-    if not all(isinstance(row, dict) for row in index_rows):
+    rows = cast(list[object], raw_rows)
+    if not all(isinstance(row, dict) for row in rows):
         return None
-    return [cast(dict[str, Any], row) for row in index_rows]
+    return [cast(dict[str, Any], row) for row in rows]
 
 
 def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
@@ -120,32 +135,39 @@ def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
         raise
 
 
-def _file_signature(path: Path) -> dict[str, int]:
-    stat = path.stat()
-    return {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
-
-
-def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
-    if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
+def _indexed_row_matches(
+    row: dict[str, Any],
+    stored: SessionInfo,
+    model_preset: str | None,
+    activity_signature: dict[str, int],
+) -> bool:
+    text_fields = (
+        "key",
+        "created_at",
+        "updated_at",
+        "title",
+        "preview",
+        "path",
+        _STORED_UPDATED_AT,
+        _STORED_PREVIEW,
+    )
+    if not all(isinstance(row.get(field), str) for field in text_fields):
         return False
-    if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
-        return False
-    if row.get("file") != path.name:
-        return False
-    try:
-        signature = _file_signature(path)
-    except OSError:
-        return False
-    activity_signature = _webui_activity_signature(str(row.get("key")))
     return (
-        row.get("mtime_ns") == signature["mtime_ns"]
-        and row.get("size") == signature["size"]
-        and row.get(_WEBUI_ACTIVITY_MTIME_NS) == activity_signature[_WEBUI_ACTIVITY_MTIME_NS]
+        row.get("key") == stored["key"]
+        and row.get("created_at") == stored["created_at"]
+        and row.get(_STORED_UPDATED_AT) == stored["updated_at"]
+        and row.get("title") == stored["title"]
+        and row.get(_STORED_PREVIEW) == stored["preview"]
+        and row.get("path") == stored["path"]
+        and row.get(_MODEL_PRESET_FIELD) == model_preset
+        and row.get(_WEBUI_ACTIVITY_MTIME_NS)
+        == activity_signature[_WEBUI_ACTIVITY_MTIME_NS]
         and row.get(_WEBUI_ACTIVITY_SIZE) == activity_signature[_WEBUI_ACTIVITY_SIZE]
     )
 
 
-def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
+def _public_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "key": row.get("key"),
         "created_at": row.get("created_at"),
@@ -153,7 +175,7 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
-        "path": str(sessions_dir / str(row.get("file", ""))),
+        "path": row.get("path", ""),
     }
 
 
@@ -184,10 +206,7 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
 def _webui_activity_paths(session_key: str) -> list[Path]:
     stem = SessionManager.safe_key(session_key)
     webui_dir = get_webui_dir()
-    return [
-        webui_dir / f"{stem}.jsonl",
-        webui_dir / f"{stem}.json",
-    ]
+    return [webui_dir / f"{stem}.jsonl", webui_dir / f"{stem}.json"]
 
 
 def _webui_activity_signature(session_key: str) -> dict[str, int]:
@@ -231,9 +250,7 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
 
 
 def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
-    if is_hidden_history_message(item):
-        return None
-    if item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
+    if is_hidden_history_message(item) or item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
         return None
     timestamp = item.get("timestamp")
     return timestamp if isinstance(timestamp, str) else None
@@ -242,9 +259,7 @@ def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
 def _last_visible_message_at(messages: list[dict[str, Any]]) -> str | None:
     latest: str | None = None
     for item in messages:
-        timestamp = _visible_message_timestamp(item)
-        if timestamp is not None:
-            latest = _latest_updated_at(latest, timestamp)
+        latest = _latest_updated_at(latest, _visible_message_timestamp(item))
     return latest
 
 
@@ -256,108 +271,25 @@ def _visible_activity_updated_at(
     return _latest_updated_at(visible_message_at, webui_activity) or stored
 
 
-def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
-    signature = _file_signature(path)
-    activity_signature = _webui_activity_signature(session.key)
-    activity_updated_at = _webui_activity_updated_at(activity_signature)
-    visible_message_at = _last_visible_message_at(session.messages)
+def _indexed_row(
+    stored: SessionInfo,
+    messages: list[dict[str, Any]],
+    model_preset: str | None,
+    activity_signature: dict[str, int],
+) -> dict[str, Any]:
     return {
-        "key": session.key,
-        "created_at": session.created_at.isoformat(),
+        "key": stored["key"],
+        "created_at": stored["created_at"],
         "updated_at": _visible_activity_updated_at(
-            session.updated_at.isoformat(),
-            visible_message_at,
-            activity_updated_at,
+            stored["updated_at"],
+            _last_visible_message_at(messages),
+            _webui_activity_updated_at(activity_signature),
         ),
-        "title": _metadata_title(session.metadata),
-        "preview": _preview_from_messages(session.messages),
-        _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
-        "file": path.name,
-        "mtime_ns": signature["mtime_ns"],
-        "size": signature["size"],
+        "title": stored["title"],
+        "preview": _preview_from_messages(messages),
+        _MODEL_PRESET_FIELD: model_preset,
+        "path": stored["path"],
+        _STORED_UPDATED_AT: stored["updated_at"],
+        _STORED_PREVIEW: stored["preview"],
         **activity_signature,
     }
-
-
-def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
-    storage_key = SessionManager._session_key_from_path(path)  # pyright: ignore[reportPrivateUsage]
-    if storage_key is None:
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            first_line = f.readline().strip()
-            if not first_line:
-                return None
-            data = json.loads(first_line)
-            if data.get("_type") != "metadata":
-                return None
-            preview = ""
-            fallback_preview = ""
-            visible_message_at = None
-            preview_done = False
-            scanned_records = 0
-            scanned_chars = 0
-            for line in f:
-                if not line.strip():
-                    continue
-                if _is_provider_state_record_line(line):
-                    continue
-                item = json.loads(line)
-                if item.get("_type") == _PROVIDER_STATE_RECORD_TYPE:
-                    continue
-                timestamp = _visible_message_timestamp(item)
-                if timestamp is not None:
-                    visible_message_at = _latest_updated_at(visible_message_at, timestamp)
-                if not preview_done:
-                    scanned_records += 1
-                    scanned_chars += len(line)
-                    if (
-                        scanned_records > _SESSION_LIST_PREVIEW_MAX_RECORDS
-                        or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
-                    ):
-                        preview_done = True
-                        continue
-                    if item.get("_type") == "metadata":
-                        continue
-                    if is_hidden_history_message(item):
-                        continue
-                    text = _message_preview_text(item)
-                    if not text:
-                        continue
-                    if item.get("role") == "user":
-                        preview = text
-                        preview_done = True
-                        continue
-                    if not fallback_preview and item.get("role") == "assistant":
-                        fallback_preview = text
-            signature = _file_signature(path)
-            created_at_s = data.get("created_at")
-            updated_at_s = data.get("updated_at")
-            if not created_at_s or not updated_at_s:
-                fallback_time = datetime.fromtimestamp(signature["mtime_ns"] / 1e9).isoformat()
-                created_at_s = created_at_s or fallback_time
-                updated_at_s = updated_at_s or fallback_time
-            key = data.get("key") or storage_key
-            activity_signature = _webui_activity_signature(key)
-            activity_updated_at = _webui_activity_updated_at(activity_signature)
-            return {
-                "key": key,
-                "created_at": created_at_s,
-                "updated_at": _visible_activity_updated_at(
-                    updated_at_s,
-                    visible_message_at,
-                    activity_updated_at,
-                ),
-                "title": _metadata_title(data.get("metadata", {})),
-                "preview": preview or fallback_preview,
-                _MODEL_PRESET_FIELD: model_preset_from_metadata(data.get("metadata", {})),
-                "file": path.name,
-                "mtime_ns": signature["mtime_ns"],
-                "size": signature["size"],
-                **activity_signature,
-            }
-    except Exception:
-        repaired = session_manager._repair(storage_key)  # pyright: ignore[reportPrivateUsage]
-        if repaired is None:
-            return None
-        return _indexed_row_for_session(repaired, path)
