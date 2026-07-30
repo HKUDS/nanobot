@@ -53,7 +53,7 @@ _PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
 )
 _SQLITE_DB_NAME = "sessions.db"
 _SQLITE_SCHEMA_VERSION = 1
-# TODO(0.3.2): Remove JSONL migration after v0.3.1 users have upgraded.
+# TODO(0.3.2): Remove JSONL migration; v0.3.1 is the upgrade window.
 _SQLITE_JSONL_MIGRATION_KEY = "jsonl_import_v1"
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
