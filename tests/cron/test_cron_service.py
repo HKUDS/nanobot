@@ -858,6 +858,34 @@ async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
     assert loaded.state.next_run_at_ms > loaded.state.last_run_at_ms
 
 
+async def test_run_job_completion_is_not_rolled_back_by_list_jobs_reload(tmp_path):
+    """Regression: manual run_job() must not lose its completion state when
+    list_jobs() (WebUI polling) reloads the store mid-execution (#5163)."""
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def on_job(_job):
+        service.list_jobs(include_disabled=True)
+        await asyncio.sleep(0)
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual-poll-race",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+
+    result = await service.run_job(job.id)
+    assert result is True
+
+    raw = json.loads(store_path.read_text(encoding="utf-8"))
+    state = raw["jobs"][0]["state"]
+    assert state["lastStatus"] == "ok"
+    assert state["lastError"] is None
+    assert len(state["runHistory"]) == 1
+    assert state["runHistory"][0]["status"] == "ok"
+
+
 # ── update_job tests ──
 
 
