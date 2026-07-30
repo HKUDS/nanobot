@@ -651,6 +651,14 @@ describe("webui API helpers", () => {
       }),
     );
 
+    await loginProviderOAuth("tok", "openai_codex", "", true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
     await completeProviderOAuth("tok", "xai_grok", "flow-123");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",

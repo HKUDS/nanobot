@@ -993,9 +993,11 @@ export async function loginProviderOAuth(
   token: string,
   provider: string,
   base: string = "",
+  remoteBrowserAccess: boolean = false,
 ): Promise<ProviderOAuthLoginResult> {
   const query = new URLSearchParams();
   query.set("provider", provider);
+  if (remoteBrowserAccess) query.set("remote_browser", "true");
   return request<ProviderOAuthLoginResult>(
     `${base}/api/settings/provider/oauth-login?${query}`,
     token,

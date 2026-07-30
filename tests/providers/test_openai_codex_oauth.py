@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from http.client import HTTPConnection
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
@@ -64,7 +65,10 @@ def _fake_interactive_login(
 
 
 def test_authorization_url_comes_from_oauth_cli_kit() -> None:
-    flow = start_openai_codex_oauth_login(timeout_s=2)
+    flow = start_openai_codex_oauth_login(
+        timeout_s=2,
+        listen_for_callback=False,
+    )
     try:
         params = parse_qs(urlsplit(flow.authorization_url).query)
         assert params["response_type"] == ["code"]
@@ -77,7 +81,44 @@ def test_authorization_url_comes_from_oauth_cli_kit() -> None:
         flow.cancel()
 
 
-def test_remote_flow_delegates_callback_to_public_oauth_cli_kit(
+def test_local_flow_relays_loopback_callback_to_public_oauth_cli_kit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(codex_oauth, "_CALLBACK_PORT", 0)
+    monkeypatch.setattr(
+        codex_oauth,
+        "login_oauth_interactive",
+        _fake_interactive_login(captured),
+    )
+    flow = start_openai_codex_oauth_login(timeout_s=5)
+    callback_url = (
+        "http://localhost:1455/auth/callback?"
+        + urlencode({"code": "authorization-code", "state": "expected-state"})
+    )
+    server = flow._callback_server
+    assert server is not None
+
+    try:
+        callback = urlsplit(callback_url)
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        try:
+            connection.request("GET", callback.path + "?" + callback.query)
+            response = connection.getresponse()
+            assert response.status == 200
+            response.read()
+        finally:
+            connection.close()
+        token = _wait_for_completion(flow)
+    finally:
+        flow.cancel()
+
+    assert token.account_id == "acct-test"
+    assert captured["callback_url"] == callback_url
+    assert captured["open_browser"] is False
+
+
+def test_remote_flow_delegates_pasted_callback_to_public_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -89,6 +130,7 @@ def test_remote_flow_delegates_callback_to_public_oauth_cli_kit(
     flow = start_openai_codex_oauth_login(
         proxy="http://127.0.0.1:7890",
         timeout_s=5,
+        listen_for_callback=False,
     )
     callback_url = (
         "http://localhost:1455/auth/callback?"
@@ -114,42 +156,29 @@ def test_remote_flow_delegates_callback_to_public_oauth_cli_kit(
     }
 
 
-def test_remote_flow_delegates_state_validation_to_public_oauth_cli_kit(
+def test_remote_flow_rejects_callback_from_another_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-
-    def login(
-        *,
-        print_fn,
-        prompt_fn,
-        provider,
-        proxy,
-        open_browser,
-    ) -> OAuthToken:
-        print_fn(_authorization_url())
-        callback_url = prompt_fn("Paste callback URL")
-        captured["callback_url"] = callback_url
-        state = parse_qs(urlsplit(callback_url).query).get("state")
-        if state != ["expected-state"]:
-            raise RuntimeError("State validation failed.")
-        raise AssertionError("expected a mismatched state")
-
-    monkeypatch.setattr(codex_oauth, "login_oauth_interactive", login)
-    flow = start_openai_codex_oauth_login(timeout_s=5)
+    monkeypatch.setattr(
+        codex_oauth,
+        "login_oauth_interactive",
+        _fake_interactive_login(captured),
+    )
+    flow = start_openai_codex_oauth_login(
+        timeout_s=5,
+        listen_for_callback=False,
+    )
     callback_url = (
         "http://localhost:1455/auth/callback?"
         + urlencode({"code": "authorization-code", "state": "wrong-state"})
     )
     try:
-        with pytest.raises(OpenAICodexOAuthError, match="state did not match"):
-            token = complete_openai_codex_oauth_login(flow, callback_url)
-            if token is None:
-                _wait_for_completion(flow)
+        with pytest.raises(OpenAICodexOAuthInputError, match="does not belong"):
+            complete_openai_codex_oauth_login(flow, callback_url)
+        assert "callback_url" not in captured
     finally:
         flow.cancel()
-
-    assert captured["callback_url"] == callback_url
 
 
 def test_remote_flow_reports_authorization_denial_without_exchanging_code(
@@ -161,7 +190,10 @@ def test_remote_flow_reports_authorization_denial_without_exchanging_code(
         "login_oauth_interactive",
         _fake_interactive_login(captured),
     )
-    flow = start_openai_codex_oauth_login(timeout_s=5)
+    flow = start_openai_codex_oauth_login(
+        timeout_s=5,
+        listen_for_callback=False,
+    )
     callback_url = (
         "http://localhost:1455/auth/callback?"
         + urlencode({"error": "access_denied", "state": "expected-state"})
@@ -187,7 +219,10 @@ def test_dependency_error_is_bounded_and_does_not_expose_callback(
             error=RuntimeError("Token exchange failed: 400 secret-code upstream-body"),
         ),
     )
-    flow = start_openai_codex_oauth_login(timeout_s=5)
+    flow = start_openai_codex_oauth_login(
+        timeout_s=5,
+        listen_for_callback=False,
+    )
     callback_url = (
         "http://localhost:1455/auth/callback?"
         + urlencode({"code": "secret-code", "state": "expected-state"})
@@ -212,7 +247,10 @@ def test_remote_flow_expires_while_waiting_for_callback(
         "login_oauth_interactive",
         _fake_interactive_login({}),
     )
-    flow = start_openai_codex_oauth_login(timeout_s=0.05)
+    flow = start_openai_codex_oauth_login(
+        timeout_s=0.05,
+        listen_for_callback=False,
+    )
     try:
         time.sleep(0.08)
         with pytest.raises(OpenAICodexOAuthError, match="expired"):

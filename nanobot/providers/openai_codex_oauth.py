@@ -1,17 +1,22 @@
-"""Thin WebUI adapter around oauth-cli-kit's interactive Codex login."""
+"""WebUI adapter around oauth-cli-kit's interactive Codex login."""
 
 # oauth-cli-kit does not publish type stubs.
 # pyright: reportMissingTypeStubs=false
 
 from __future__ import annotations
 
+import hmac
 import queue
 import re
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from contextlib import suppress
-from urllib.parse import parse_qs, urlsplit
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, cast
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from oauth_cli_kit import login_oauth_interactive
 from oauth_cli_kit.models import OAuthToken
@@ -20,7 +25,13 @@ from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
 _AUTHORIZATION_URL_TIMEOUT_S = 5.0
 _CALLBACK = urlsplit(OPENAI_CODEX_PROVIDER.redirect_uri)
 _CALLBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_CALLBACK_PORT = _CALLBACK.port or 1455
 _TOKEN_EXCHANGE_STATUS = re.compile(r"Token exchange failed:\s*(\d{3})\b")
+_CALLBACK_RECEIVED_HTML = b"""<!doctype html>
+<meta charset="utf-8">
+<title>OpenAI Codex sign-in</title>
+<p>Callback received. You can return to nanobot.</p>
+"""
 
 
 class OpenAICodexOAuthError(RuntimeError):
@@ -31,22 +42,98 @@ class OpenAICodexOAuthInputError(OpenAICodexOAuthError):
     """A recoverable error in a callback URL pasted by the user."""
 
 
+# The WebUI opens the browser itself. oauth-cli-kit closes its listener in that
+# headless mode, so this relay preserves automatic local callbacks without
+# taking ownership of PKCE, token exchange, or credential storage.
+class _CallbackRelayHandler(BaseHTTPRequestHandler):
+    """Relay the fixed loopback callback into oauth-cli-kit's prompt."""
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlsplit(self.path)
+        if parsed.path != _CALLBACK.path:
+            self._send(HTTPStatus.NOT_FOUND, b"Not found")
+            return
+        callback_url = urlunsplit(
+            (_CALLBACK.scheme, _CALLBACK.netloc, _CALLBACK.path, parsed.query, "")
+        )
+        try:
+            cast(_CallbackRelayServer, self.server).submit_callback(callback_url)
+        except OpenAICodexOAuthError:
+            self._send(HTTPStatus.BAD_REQUEST, b"Invalid OAuth callback")
+            return
+        self._send(HTTPStatus.OK, _CALLBACK_RECEIVED_HTML, "text/html; charset=utf-8")
+
+    def _send(
+        self,
+        status: HTTPStatus,
+        body: bytes,
+        content_type: str = "text/plain; charset=utf-8",
+    ) -> None:
+        self.close_connection = True
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        with suppress(OSError):
+            self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+        return
+
+
+class _CallbackRelayServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, submit_callback: Callable[[str], object]) -> None:
+        self.submit_callback = submit_callback
+        super().__init__(("127.0.0.1", _CALLBACK_PORT), _CallbackRelayHandler)
+
+
+def _start_callback_relay(
+    submit_callback: Callable[[str], object],
+) -> _CallbackRelayServer | None:
+    try:
+        server = _CallbackRelayServer(submit_callback)
+    except OSError:
+        return None
+    thread = threading.Thread(
+        target=server.serve_forever,
+        name="nanobot-openai-codex-oauth-callback",
+        daemon=True,
+    )
+    thread.start()
+    return server
+
+
 class OpenAICodexOAuthLoginFlow:
     """Expose oauth-cli-kit's blocking prompt as a two-stage WebUI flow."""
 
-    def __init__(self, *, proxy: str | None, timeout_s: float) -> None:
+    def __init__(
+        self,
+        *,
+        proxy: str | None,
+        timeout_s: float,
+        listen_for_callback: bool,
+    ) -> None:
         self.authorization_url = ""
+        self._expected_state = ""
         self._proxy = proxy
         self._expires_at = time.monotonic() + timeout_s
         self._callback_input: queue.Queue[str] = queue.Queue(maxsize=1)
         self._result: Future[OAuthToken] = Future()
         self._ready = threading.Event()
         self._submission_lock = threading.Lock()
+        self._callback_server_lock = threading.Lock()
         self._submitted = False
         self._thread = threading.Thread(
             target=self._run,
             name="nanobot-openai-codex-oauth",
             daemon=True,
+        )
+        self._callback_server = (
+            _start_callback_relay(self.complete) if listen_for_callback else None
         )
 
     @property
@@ -92,7 +179,11 @@ class OpenAICodexOAuthLoginFlow:
         if callback_url is None:
             return None
 
-        authorization_failed = _validate_callback_url(callback_url)
+        callback_state, authorization_failed = _validate_callback_url(callback_url)
+        if not hmac.compare_digest(callback_state, self._expected_state):
+            raise OpenAICodexOAuthInputError(
+                "The callback URL does not belong to this sign-in flow. Copy the latest URL."
+            )
         if authorization_failed:
             error = OpenAICodexOAuthError(
                 "OpenAI Codex sign-in was not completed by the authorization server."
@@ -132,6 +223,7 @@ class OpenAICodexOAuthLoginFlow:
             with suppress(Exception):
                 self._result.set_result(token)
         finally:
+            self._stop_callback_relay()
             self._ready.set()
 
     def _capture_output(self, message: str) -> None:
@@ -140,7 +232,11 @@ class OpenAICodexOAuthLoginFlow:
         if start < 0:
             return
         candidate = raw[start:].split(maxsplit=1)[0]
+        state = _first(parse_qs(urlsplit(candidate).query), "state")
+        if not state:
+            return
         self.authorization_url = candidate
+        self._expected_state = state
         self._ready.set()
 
     def _prompt_for_callback(self, _prompt: str) -> str:
@@ -162,19 +258,35 @@ class OpenAICodexOAuthLoginFlow:
         try:
             self._result.set_exception(error)
         except Exception:
-            return
-        with suppress(queue.Full):
-            self._callback_input.put_nowait("")
+            pass
+        else:
+            with suppress(queue.Full):
+                self._callback_input.put_nowait("")
         self._ready.set()
+        self._stop_callback_relay()
+
+    def _stop_callback_relay(self) -> None:
+        with self._callback_server_lock:
+            server = self._callback_server
+            self._callback_server = None
+        if server is None:
+            return
+        server.shutdown()
+        server.server_close()
 
 
 def start_openai_codex_oauth_login(
     *,
     proxy: str | None = None,
     timeout_s: float = 600,
+    listen_for_callback: bool = True,
 ) -> OpenAICodexOAuthLoginFlow:
     """Start a non-blocking wrapper around oauth-cli-kit's Codex login."""
-    return OpenAICodexOAuthLoginFlow(proxy=proxy, timeout_s=timeout_s).start()
+    return OpenAICodexOAuthLoginFlow(
+        proxy=proxy,
+        timeout_s=timeout_s,
+        listen_for_callback=listen_for_callback,
+    ).start()
 
 
 def complete_openai_codex_oauth_login(
@@ -185,7 +297,7 @@ def complete_openai_codex_oauth_login(
     return flow.complete(callback_url)
 
 
-def _validate_callback_url(raw: str) -> bool:
+def _validate_callback_url(raw: str) -> tuple[str, bool]:
     value = raw.strip()
     if not value:
         raise OpenAICodexOAuthInputError("Paste the full callback URL from your browser.")
@@ -219,7 +331,7 @@ def _validate_callback_url(raw: str) -> bool:
         raise OpenAICodexOAuthInputError(
             "The callback URL has no authorization result. Finish signing in, then copy it again."
         )
-    return error is not None
+    return state, error is not None
 
 
 def _safe_login_error(exc: Exception) -> OpenAICodexOAuthError:

@@ -769,6 +769,7 @@
       "saveProxy": "Enregistrer le proxy",
       "localCodeHelp": "Terminez la connexion dans votre navigateur. nanobot termine généralement automatiquement ; sinon, collez le code d’autorisation ci-dessous.",
       "remoteCodeHelp": "Sélectionnez Se connecter pour ouvrir xAI sur votre ordinateur. Après la connexion, collez ci-dessous le code d’autorisation affiché par xAI.",
+      "localCallbackHelp": "Terminez la connexion dans votre navigateur. nanobot termine généralement automatiquement ; sinon, copiez l’URL complète de rappel localhost depuis la barre d’adresse et collez-la ci-dessous.",
       "remoteCallbackHelp": "Ouvrez ChatGPT dans ce navigateur et terminez la connexion. Lorsque la page localhost ne se charge pas, copiez l’URL complète de la barre d’adresse et collez-la ci-dessous.",
       "authorizationCode": "Code d’autorisation",
       "callbackUrl": "URL complète de rappel",

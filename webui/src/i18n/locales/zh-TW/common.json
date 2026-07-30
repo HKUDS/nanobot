@@ -769,6 +769,7 @@
       "saveProxy": "儲存代理",
       "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
       "remoteCodeHelp": "點擊「登入」在你的電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
+      "localCallbackHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請複製網址列中的完整 localhost 回呼 URL 並貼到下方。",
       "remoteCallbackHelp": "請在此瀏覽器中開啟 ChatGPT 並完成登入。當 localhost 頁面無法開啟時，請複製網址列中的完整 URL 並貼到下方。",
       "authorizationCode": "授權碼",
       "callbackUrl": "完整回呼 URL",

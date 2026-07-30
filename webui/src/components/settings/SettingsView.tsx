@@ -1636,7 +1636,12 @@ export function SettingsView({
     try {
       const payload =
         action === "login"
-          ? await loginProviderOAuth(token, providerName)
+          ? await loginProviderOAuth(
+              token,
+              providerName,
+              "",
+              providerName === "openai_codex" && remoteBrowserAccess,
+            )
           : await logoutProviderOAuth(token, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
         try {
@@ -3056,20 +3061,22 @@ function ProviderOAuthLoginDialog({
             <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
               {expectsCallbackUrl
-                ? t("settings.oauth.remoteCallbackHelp")
+                ? remoteBrowserAccess
+                  ? t("settings.oauth.remoteCallbackHelp")
+                  : t("settings.oauth.localCallbackHelp")
                 : remoteBrowserAccess
                   ? t("settings.oauth.remoteCodeHelp")
                   : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 rounded-[14px] border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
-            {expectsCallbackUrl ? (
+            {expectsCallbackUrl && remoteBrowserAccess ? (
               <Clipboard className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : (
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
             )}
             <span>
-              {expectsCallbackUrl
+              {expectsCallbackUrl && remoteBrowserAccess
                 ? t("settings.oauth.pasteCallbackToContinue")
                 : t("settings.oauth.waitingForCallback")}
             </span>

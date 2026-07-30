@@ -1820,10 +1820,17 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
+        remote_browser_value = _query_first(query, "remote_browser")
+        remote_browser = (
+            _parse_bool(remote_browser_value, "remote_browser")
+            if remote_browser_value is not None
+            else False
+        )
         try:
             flow = start_openai_codex_oauth_login(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+                listen_for_callback=not remote_browser,
             )
         except Exception as e:
             raise WebUISettingsError(f"OpenAI Codex OAuth login failed: {e}", status=502) from e

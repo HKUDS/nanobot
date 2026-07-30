@@ -2753,6 +2753,90 @@ describe("SettingsView Apps catalog", () => {
     }
   });
 
+  it("polls local OpenAI Codex sign-in until the loopback callback completes", async () => {
+    const base = settingsPayload();
+    const codexProvider = {
+      name: "openai_codex",
+      label: "OpenAI Codex",
+      configured: false,
+      auth_type: "oauth" as const,
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://chatgpt.com/backend-api",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    };
+    const payload: SettingsPayload = { ...base, providers: [codexProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+    };
+    const authorization = {
+      status: "authorization_required",
+      provider: "openai_codex",
+      flow_id: "flow-codex-local",
+      authorization_url: "https://auth.openai.com/oauth/authorize?state=local",
+      expires_in: 600,
+      completion_input: "callback_url",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/provider/oauth-login?provider=openai_codex") {
+        return jsonResponse(authorization);
+      }
+      if (
+        url ===
+        "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex-local"
+      ) {
+        expect(init?.headers).not.toHaveProperty("X-Nanobot-OAuth-Callback");
+        return jsonResponse(signedIn);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await chooseProviderToConfigure("OpenAI Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+    expect(popup.location.href).toBe(authorization.authorization_url);
+    expect(
+      within(dialog).getByText(
+        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Paste the callback URL to continue."),
+    ).not.toBeInTheDocument();
+
+    expect(
+      await screen.findByText("Signed in as acct-codex", {}, { timeout: 2500 }),
+    ).toBeInTheDocument();
+  });
+
   it("completes remote OpenAI Codex sign-in with the full callback URL", async () => {
     const happyWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void };
@@ -2794,7 +2878,10 @@ describe("SettingsView Apps catalog", () => {
       const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === "/api/settings") return jsonResponse(payload);
-        if (url === "/api/settings/provider/oauth-login?provider=openai_codex") {
+        if (
+          url ===
+          "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true"
+        ) {
           return jsonResponse(authorization);
         }
         if (
