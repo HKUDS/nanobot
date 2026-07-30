@@ -23,9 +23,12 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
-    def __init__(self):
+    def __init__(self, max_consecutive_tool_failures: int = 3):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        # Break infinite retry loops when the model keeps sending bad args (#4864)
+        self.max_consecutive_tool_failures = max(1, int(max_consecutive_tool_failures))
+        self._consecutive_failures: dict[str, int] = {}
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -131,6 +134,18 @@ class ToolRegistry:
             tool.set_context(ctx)
 
         params = self._coerce_params(tool, params)
+        # Truncated/malformed JSON object strings (e.g. '{"recap": "') must not
+        # be executed — they cause complete_goal/update_goal retry loops (#4864).
+        if isinstance(params, str):
+            stripped = params.strip()
+            if stripped.startswith(("{", "[")):
+                return tool, params, (
+                    ToolResult.error(
+                        f"Error: Tool '{name}' received truncated or invalid JSON arguments: "
+                        f"{stripped[:120]!r}. Retry with a complete JSON object matching the "
+                        f"tool schema (for goals: {{\"action\": \"complete\", \"recap\": \"...\"}})."
+                    )
+                )
         if not isinstance(params, dict):
             return tool, params, (
                 ToolResult.error(
@@ -186,20 +201,54 @@ class ToolRegistry:
             return arguments_payload
         return cls._coerce_argument_value(arguments_payload.get("arguments"))
 
+    def _record_tool_failure(self, name: str) -> int:
+        count = self._consecutive_failures.get(name, 0) + 1
+        self._consecutive_failures[name] = count
+        return count
+
+    def _clear_tool_failure(self, name: str) -> None:
+        self._consecutive_failures.pop(name, None)
+
+    def consecutive_failure_count(self, name: str) -> int:
+        """How many consecutive failures the named tool has produced."""
+        return self._consecutive_failures.get(name, 0)
+
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
         hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
+            fails = self._record_tool_failure(str(name))
+            if fails >= self.max_consecutive_tool_failures:
+                return ToolResult.error(
+                    str(error)
+                    + f"\n\n[Circuit-break: tool '{name}' failed {fails} times in a row "
+                    f"(malformed args or execution). Stop retrying this tool; "
+                    f"finish the user turn or use a different approach. Fixes #4864 loops.]"
+                )
             return ToolResult.error(str(error) + hint)
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(result):
+                fails = self._record_tool_failure(str(name))
+                if fails >= self.max_consecutive_tool_failures:
+                    return ToolResult.error(
+                        str(result)
+                        + f"\n\n[Circuit-break: tool '{name}' failed {fails} times in a row. "
+                        f"Stop retrying; do not call it again with the same bad args.]"
+                    )
                 return ToolResult.error(str(result) + hint)
+            self._clear_tool_failure(str(name))
             return result
         except Exception as e:
+            fails = self._record_tool_failure(str(name))
+            if fails >= self.max_consecutive_tool_failures:
+                return ToolResult.error(
+                    f"Error executing {name}: {str(e)}"
+                    + f"\n\n[Circuit-break: tool '{name}' failed {fails} times in a row.]"
+                )
             return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
 
     @property
