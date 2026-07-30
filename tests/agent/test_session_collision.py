@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from nanobot.session.manager import JsonlSessionFiles, Session, SessionManager
 
 
@@ -69,3 +71,47 @@ def test_migration_ignores_legacy_lossy_file(tmp_path: Path) -> None:
 
     assert manager.read_session_file(key) is None
     assert lossy_path.exists()
+
+
+def test_migration_rejects_lossy_stem_that_is_canonical_for_another_key(
+    tmp_path: Path,
+) -> None:
+    source = JsonlSessionFiles(tmp_path)
+    lossy_key = "YQ"
+    assert source.session_key_from_path(source.get_legacy_lossy_path(lossy_key)) == "a"
+    _write_session_file(
+        source.get_legacy_lossy_path(lossy_key),
+        lossy_key,
+        "must not migrate under a",
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to migrate JSONL session"):
+        SessionManager(tmp_path)
+
+
+def test_delete_does_not_remove_another_keys_canonical_backup(tmp_path: Path) -> None:
+    source = JsonlSessionFiles(tmp_path)
+    canonical_key = "a"
+    colliding_lossy_key = "YQ"
+    canonical_path = source.get_session_path(canonical_key)
+    assert canonical_path == source.get_legacy_lossy_path(colliding_lossy_key)
+    _write_session_file(canonical_path, canonical_key, "canonical history")
+    manager = SessionManager(tmp_path)
+
+    assert manager.delete_session(colliding_lossy_key) is False
+    assert canonical_path.is_file()
+    assert manager.read_session_file(canonical_key) is not None
+
+
+def test_delete_rejects_ambiguous_lossy_and_canonical_path(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    source = JsonlSessionFiles(tmp_path)
+    lossy_key = "YQ"
+    lossy_path = source.get_legacy_lossy_path(lossy_key)
+    assert source.session_key_from_path(lossy_path) == "a"
+    _write_session_file(lossy_path, lossy_key, "ambiguous history")
+
+    with pytest.raises(RuntimeError, match="ambiguous legacy session file"):
+        manager.delete_session(lossy_key)
+
+    assert lossy_path.is_file()

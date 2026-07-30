@@ -182,7 +182,13 @@ Dream is implemented in `nanobot/agent/memory.py` and scheduled by the runtime w
 
 On first startup after upgrading, canonical files under `<workspace>/sessions/`
 are imported into SQLite in one transaction. The JSONL files remain as a
-rollback backup; runtime session reads and writes use only `sessions.db`.
+rollback backup; runtime session reads and writes use only `sessions.db`. During
+the migration window, startup checks the backup content hashes and fails closed
+if a rollback wrote new JSONL data, so divergent histories are never silently
+overwritten.
+Session metadata is stored as an extensible JSON object, while provider-owned
+continuation state is isolated in a private JSON envelope that is not returned
+by session or WebUI APIs.
 
 ## Security Boundaries
 

@@ -186,7 +186,7 @@ class ProviderConversationState:
         )
 
     def to_private_record(self) -> dict[str, Any]:
-        """Serialize for the private session sidecar, never for public history."""
+        """Serialize for private session storage, never for public history."""
         return {
             "kind": self.kind,
             "provider": self.provider,
@@ -201,7 +201,7 @@ class ProviderConversationState:
         cls,
         value: object,
     ) -> ProviderConversationState | None:
-        """Validate and deserialize a private session-sidecar value."""
+        """Validate and deserialize a private session storage value."""
         if not isinstance(value, dict):
             return None
         data = cast(dict[str, Any], value)

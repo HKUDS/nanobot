@@ -13,12 +13,10 @@ from loguru import logger
 from nanobot.config.paths import get_webui_dir
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
-    _PROVIDER_STATE_RECORD_TYPE,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_CHARS,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_RECORDS,  # pyright: ignore[reportPrivateUsage]
     SessionInfo,
     SessionManager,
-    _is_provider_state_record_line,  # pyright: ignore[reportPrivateUsage]
     _message_preview_text,  # pyright: ignore[reportPrivateUsage]
 )
 
@@ -55,13 +53,11 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
 
     for stored in session_manager.list_sessions():
         key = stored["key"]
-        model_preset = stored["model_preset"]
         activity_signature = _webui_activity_signature(key)
         row = existing_by_key.get(key)
         if row is not None and _indexed_row_matches(
             row,
             stored,
-            model_preset,
             activity_signature,
         ):
             rows.append(row)
@@ -85,13 +81,10 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
             _indexed_row(
                 stored,
                 messages,
-                model_preset,
                 activity_signature,
             )
         )
 
-    if set(existing_by_key) != {row["key"] for row in rows}:
-        changed = True
     if existing_rows is not None and rows != existing_rows:
         changed = True
     return rows, changed
@@ -138,7 +131,6 @@ def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
 def _indexed_row_matches(
     row: dict[str, Any],
     stored: SessionInfo,
-    model_preset: str | None,
     activity_signature: dict[str, int],
 ) -> bool:
     text_fields = (
@@ -160,7 +152,7 @@ def _indexed_row_matches(
         and row.get("title") == stored["title"]
         and row.get(_STORED_PREVIEW) == stored["preview"]
         and row.get("path") == stored["path"]
-        and row.get(_MODEL_PRESET_FIELD) == model_preset
+        and row.get(_MODEL_PRESET_FIELD) == stored["model_preset"]
         and row.get(_WEBUI_ACTIVITY_MTIME_NS)
         == activity_signature[_WEBUI_ACTIVITY_MTIME_NS]
         and row.get(_WEBUI_ACTIVITY_SIZE) == activity_signature[_WEBUI_ACTIVITY_SIZE]
@@ -274,7 +266,6 @@ def _visible_activity_updated_at(
 def _indexed_row(
     stored: SessionInfo,
     messages: list[dict[str, Any]],
-    model_preset: str | None,
     activity_signature: dict[str, int],
 ) -> dict[str, Any]:
     return {
@@ -287,7 +278,7 @@ def _indexed_row(
         ),
         "title": stored["title"],
         "preview": _preview_from_messages(messages),
-        _MODEL_PRESET_FIELD: model_preset,
+        _MODEL_PRESET_FIELD: stored["model_preset"],
         "path": stored["path"],
         _STORED_UPDATED_AT: stored["updated_at"],
         _STORED_PREVIEW: stored["preview"],

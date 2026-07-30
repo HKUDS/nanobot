@@ -10,6 +10,7 @@ from contextlib import contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any, Callable, Protocol, TypedDict, cast
@@ -48,13 +49,13 @@ _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
 _PROVIDER_STATE_RECORD_TYPE = "provider_state"
-_PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
-    r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
-)
 _SQLITE_DB_NAME = "sessions.db"
-_SQLITE_SCHEMA_VERSION = 1
+_SQLITE_SCHEMA_VERSION = 2
+_SQLITE_BUSY_TIMEOUT_SECONDS = 5.0
+_SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS = 60.0
 # TODO(0.3.2): Remove JSONL migration; v0.3.1 is the upgrade window.
 _SQLITE_JSONL_MIGRATION_KEY = "jsonl_import_v1"
+_SQLITE_JSONL_MANIFEST_VERSION = 1
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -70,11 +71,6 @@ def _json_object(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("session records must be JSON objects")
     return cast(dict[str, Any], value)
-
-
-def _is_provider_state_record_line(line: str) -> bool:
-    """Recognize the canonical private record without decoding its opaque payload."""
-    return _PROVIDER_STATE_RECORD_PREFIX_RE.match(line) is not None
 
 
 def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
@@ -475,6 +471,22 @@ class SessionInfo(TypedDict):
     path: str
 
 
+@dataclass(frozen=True)
+class _JsonlFileSignature:
+    sha256: str
+
+
+@dataclass(frozen=True)
+class _PreparedSession:
+    key: str
+    created_at: str
+    updated_at: str
+    metadata_json: str
+    private_metadata_json: str
+    last_consolidated: int
+    message_rows: tuple[tuple[str, int, str], ...]
+
+
 class SessionStore(Protocol):
     def load(self, key: str) -> Session | None: ...
 
@@ -525,7 +537,7 @@ class JsonlSessionFiles:
         return self.sessions_dir / f"{self.storage_key(key)}.jsonl"
 
     def get_legacy_lossy_path(self, key: str) -> Path:
-        return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
+        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def get_legacy_session_path(self, key: str) -> Path:
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
@@ -537,6 +549,26 @@ class JsonlSessionFiles:
             if key is not None:
                 files.append((key, path))
         return files
+
+    @staticmethod
+    def _metadata_record_key(path: Path) -> str | None:
+        try:
+            with open(path, encoding="utf-8") as file:
+                for line in file:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    raw_data: object = json.loads(line)
+                    if not isinstance(raw_data, dict):
+                        continue
+                    data = cast(dict[object, object], raw_data)
+                    if data.get("_type") != "metadata":
+                        continue
+                    key = data.get("key")
+                    return key if isinstance(key, str) else None
+        except (OSError, *_SESSION_DATA_ERRORS):
+            return None
+        return None
 
     def load_for_migration(self, key: str) -> Session | None:
         path = self.get_session_path(key)
@@ -562,6 +594,10 @@ class JsonlSessionFiles:
 
                     record_type = data.get("_type")
                     if record_type == "metadata":
+                        if data.get("key") != key:
+                            raise ValueError(
+                                "session metadata key does not match its canonical filename"
+                            )
                         metadata_value = cast(object, data.get("metadata", {}))
                         metadata = (
                             cast(dict[str, Any], metadata_value)
@@ -613,9 +649,8 @@ class JsonlSessionFiles:
                 )
             return repaired
 
-    def _repair(self, key: str, *, path: Path | None = None) -> Session | None:
-        if path is None:
-            path = self.get_session_path(key)
+    def _repair(self, key: str) -> Session | None:
+        path = self.get_session_path(key)
         if not path.exists():
             return None
 
@@ -645,6 +680,12 @@ class JsonlSessionFiles:
 
                     record_type = data.get("_type")
                     if record_type == "metadata":
+                        if data.get("key") != key:
+                            logger.warning(
+                                "Session metadata key does not match canonical key {}",
+                                key,
+                            )
+                            return None
                         metadata_value = cast(object, data.get("metadata", {}))
                         metadata = (
                             cast(dict[str, Any], metadata_value)
@@ -696,11 +737,20 @@ class JsonlSessionFiles:
             return None
 
     def delete_backups(self, key: str) -> bool:
-        paths = [
-            self.get_session_path(key),
-            self.get_legacy_lossy_path(key),
-            self.get_legacy_session_path(key),
-        ]
+        canonical_path = self.get_session_path(key)
+        lossy_path = self.get_legacy_lossy_path(key)
+        paths = [canonical_path]
+        if lossy_path != canonical_path and lossy_path.exists():
+            canonical_owner = self.session_key_from_path(lossy_path)
+            if canonical_owner is None or canonical_owner == key:
+                paths.append(lossy_path)
+            else:
+                metadata_owner = self._metadata_record_key(lossy_path)
+                if metadata_owner != canonical_owner:
+                    raise RuntimeError(
+                        f"Refusing to delete ambiguous legacy session file {lossy_path}"
+                    )
+        paths.append(self.get_legacy_session_path(key))
         deleted = False
         for path in paths:
             if not path.exists():
@@ -710,7 +760,9 @@ class JsonlSessionFiles:
                 deleted = True
             except OSError as e:
                 logger.warning("Failed to delete session file {}: {}", path, e)
+                raise
         return deleted
+
 
 class SQLiteSessionStore:
     """SQLite implementation of session persistence."""
@@ -720,11 +772,16 @@ class SQLiteSessionStore:
         self._initialize()
 
     @contextmanager
-    def _connection(self, *, durable: bool = False) -> Generator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.db_path, timeout=5.0)
+    def _connection(
+        self,
+        *,
+        durable: bool = False,
+        timeout: float = _SQLITE_BUSY_TIMEOUT_SECONDS,
+    ) -> Generator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.db_path, timeout=timeout)
         try:
             connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
             connection.execute(
                 "PRAGMA synchronous = FULL" if durable else "PRAGMA synchronous = NORMAL"
             )
@@ -733,8 +790,11 @@ class SQLiteSessionStore:
             connection.close()
 
     def _initialize(self) -> None:
-        with self._connection(durable=True) as connection:
-            deadline = monotonic() + 5.0
+        with self._connection(
+            durable=True,
+            timeout=_SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS,
+        ) as connection:
+            deadline = monotonic() + _SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS
             while True:
                 try:
                     journal_mode: object = connection.execute(
@@ -760,93 +820,348 @@ class SQLiteSessionStore:
                 if len(version_row) != 1 or not isinstance(version_row[0], int):
                     raise RuntimeError("Failed to read SQLite session schema version")
                 version = version_row[0]
-                if version not in (0, _SQLITE_SCHEMA_VERSION):
+                if version not in (0, 1, _SQLITE_SCHEMA_VERSION):
                     raise RuntimeError(
                         f"Unsupported SQLite session schema version {version}; "
                         f"expected {_SQLITE_SCHEMA_VERSION}"
                     )
-                if version == _SQLITE_SCHEMA_VERSION:
+                if version == 0:
                     connection.execute(
                         """
-                        CREATE TABLE IF NOT EXISTS store_metadata (
+                        CREATE TABLE sessions (
                             key TEXT PRIMARY KEY,
-                            value TEXT NOT NULL
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            metadata TEXT NOT NULL,
+                            private_metadata TEXT NOT NULL DEFAULT '{}',
+                            last_consolidated INTEGER NOT NULL DEFAULT 0
+                                CHECK (last_consolidated >= 0)
                         )
                         """
                     )
-                    return
+                    connection.execute(
+                        """
+                        CREATE TABLE messages (
+                            session_key TEXT NOT NULL,
+                            position INTEGER NOT NULL CHECK (position >= 0),
+                            payload TEXT NOT NULL,
+                            PRIMARY KEY (session_key, position),
+                            FOREIGN KEY (session_key) REFERENCES sessions(key) ON DELETE CASCADE
+                        )
+                        """
+                    )
+                    connection.execute(
+                        "CREATE INDEX sessions_updated_at ON sessions(updated_at DESC)"
+                    )
+                elif version == 1:
+                    columns: set[str] = set()
+                    for raw_column in connection.execute("PRAGMA table_info(sessions)"):
+                        column: object = raw_column
+                        if not isinstance(column, tuple):
+                            continue
+                        values = cast(tuple[object, ...], column)
+                        if len(values) > 1 and isinstance(values[1], str):
+                            columns.add(values[1])
+                    if "private_metadata" not in columns:
+                        connection.execute(
+                            """
+                            ALTER TABLE sessions
+                            ADD COLUMN private_metadata TEXT NOT NULL DEFAULT '{}'
+                            """
+                        )
 
                 connection.execute(
                     """
-                    CREATE TABLE sessions (
-                        key TEXT PRIMARY KEY,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        metadata TEXT NOT NULL,
-                        last_consolidated INTEGER NOT NULL DEFAULT 0
-                            CHECK (last_consolidated >= 0)
-                    )
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE messages (
-                        session_key TEXT NOT NULL,
-                        position INTEGER NOT NULL CHECK (position >= 0),
-                        payload TEXT NOT NULL,
-                        PRIMARY KEY (session_key, position),
-                        FOREIGN KEY (session_key) REFERENCES sessions(key) ON DELETE CASCADE
-                    )
-                    """
-                )
-                connection.execute(
-                    "CREATE INDEX sessions_updated_at ON sessions(updated_at DESC)"
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE store_metadata (
+                    CREATE TABLE IF NOT EXISTS store_metadata (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     )
                     """
                 )
-                connection.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
+                if version != _SQLITE_SCHEMA_VERSION:
+                    connection.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
+
+    @staticmethod
+    def _file_signature(path: Path) -> _JsonlFileSignature:
+        try:
+            digest = sha256()
+            with open(path, "rb") as file:
+                while chunk := file.read(1024 * 1024):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise RuntimeError(f"Failed to inspect JSONL session backup {path}") from exc
+        return _JsonlFileSignature(sha256=digest.hexdigest())
+
+    @classmethod
+    def _current_jsonl_signatures(
+        cls,
+        source: JsonlSessionFiles,
+    ) -> dict[str, _JsonlFileSignature]:
+        return {
+            key: cls._file_signature(path)
+            for key, path in source.session_files()
+        }
+
+    @staticmethod
+    def _read_migration_marker(connection: sqlite3.Connection) -> str | None:
+        row: object = connection.execute(
+            "SELECT value FROM store_metadata WHERE key = ?",
+            (_SQLITE_JSONL_MIGRATION_KEY,),
+        ).fetchone()
+        if row is None:
+            return None
+        if not isinstance(row, tuple):
+            raise RuntimeError("Invalid JSONL migration marker")
+        values = cast(tuple[object, ...], row)
+        if len(values) != 1 or not isinstance(values[0], str):
+            raise RuntimeError("Invalid JSONL migration marker")
+        return values[0]
+
+    @classmethod
+    def _encode_migration_manifest(
+        cls,
+        signatures: dict[str, _JsonlFileSignature],
+    ) -> str:
+        return cls._encode_json(
+            {
+                "version": _SQLITE_JSONL_MANIFEST_VERSION,
+                "files": {
+                    key: {"sha256": signature.sha256}
+                    for key, signature in sorted(signatures.items())
+                },
+            }
+        )
+
+    @staticmethod
+    def _decode_migration_manifest(
+        value: str,
+    ) -> dict[str, _JsonlFileSignature] | None:
+        # The original PR marker only stored the imported file count.
+        if value.isdecimal():
+            return None
+        try:
+            data = _json_object(json.loads(value))
+            version = cast(object, data.get("version"))
+            files = cast(object, data.get("files"))
+            if (
+                not isinstance(version, int)
+                or isinstance(version, bool)
+                or version != _SQLITE_JSONL_MANIFEST_VERSION
+                or not isinstance(files, dict)
+            ):
+                raise ValueError("unsupported JSONL migration manifest")
+
+            signatures: dict[str, _JsonlFileSignature] = {}
+            for raw_key, raw_signature in cast(dict[object, object], files).items():
+                if not isinstance(raw_key, str) or not isinstance(raw_signature, dict):
+                    raise ValueError("invalid JSONL migration manifest entry")
+                signature_data = cast(dict[object, object], raw_signature)
+                digest = signature_data.get("sha256")
+                if (
+                    not isinstance(digest, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                ):
+                    raise ValueError("invalid JSONL migration file signature")
+                signatures[raw_key] = _JsonlFileSignature(sha256=digest)
+            return signatures
+        except _SESSION_DATA_ERRORS as exc:
+            raise RuntimeError("Invalid JSONL migration marker") from exc
+
+    @staticmethod
+    def _assert_backups_unchanged(
+        connection: sqlite3.Connection,
+        current: dict[str, _JsonlFileSignature],
+        expected: dict[str, _JsonlFileSignature],
+    ) -> None:
+        changed = {
+            key
+            for key, signature in current.items()
+            if expected.get(key) != signature
+        }
+        live_keys = {
+            row[0]
+            for row in connection.execute("SELECT key FROM sessions")
+            if isinstance(row[0], str)
+        }
+        changed.update((expected.keys() - current.keys()).intersection(live_keys))
+        if changed:
+            raise RuntimeError(
+                "JSONL session backups changed after SQLite migration for "
+                f"{len(changed)} session(s). Refusing to start to avoid losing "
+                "rollback writes; preserve sessions.db and the JSONL files before recovery."
+            )
+
+    @classmethod
+    def _assert_prepared_sources_unchanged(
+        cls,
+        source: JsonlSessionFiles,
+        expected: dict[str, _JsonlFileSignature],
+    ) -> None:
+        if cls._current_jsonl_signatures(source) != expected:
+            raise RuntimeError(
+                "JSONL session files changed while migration was being prepared; "
+                "retry startup after session writers have stopped."
+            )
+
+    def _prepare_jsonl_sessions(
+        self,
+        source: JsonlSessionFiles,
+    ) -> tuple[list[_PreparedSession], dict[str, _JsonlFileSignature]]:
+        prepared: list[_PreparedSession] = []
+        signatures: dict[str, _JsonlFileSignature] = {}
+        for key, path in source.session_files():
+            before = self._file_signature(path)
+            session = source.load_for_migration(key)
+            if session is None:
+                raise RuntimeError(f"Failed to migrate JSONL session {path}")
+            prepared_session = self._prepare_session(session)
+            after = self._file_signature(path)
+            if before != after:
+                raise RuntimeError(
+                    f"JSONL session file changed while it was being read: {path}"
+                )
+            prepared.append(prepared_session)
+            signatures[key] = after
+        return prepared, signatures
+
+    @classmethod
+    def _validate_legacy_migration_marker(
+        cls,
+        connection: sqlite3.Connection,
+        prepared: list[_PreparedSession],
+        expected_count: int,
+    ) -> None:
+        changed: list[str] = []
+        prepared_keys = {session.key for session in prepared}
+        stored_keys = {
+            row[0]
+            for row in connection.execute("SELECT key FROM sessions")
+            if isinstance(row[0], str)
+        }
+        if expected_count != len(prepared) or stored_keys != prepared_keys:
+            raise RuntimeError(
+                "JSONL session backups may have changed after SQLite migration. "
+                "Refusing to start to avoid losing rollback writes; preserve "
+                "sessions.db and the JSONL files before recovery."
+            )
+        for session in prepared:
+            row: object = connection.execute(
+                """
+                SELECT
+                    key,
+                    created_at,
+                    updated_at,
+                    metadata,
+                    private_metadata,
+                    last_consolidated
+                FROM sessions
+                WHERE key = ?
+                """,
+                (session.key,),
+            ).fetchone()
+            try:
+                (
+                    _,
+                    stored_created_at,
+                    stored_updated_at,
+                    stored_metadata,
+                    stored_last_consolidated,
+                    stored_provider_state,
+                ) = cls._decode_loaded_session_row(row)
+                source_metadata = cls._decode_json_object(session.metadata_json)
+                source_private = cls._decode_json_object(session.private_metadata_json)
+                source_provider_state = ProviderConversationState.from_private_record(
+                    source_private.get(_PROVIDER_STATE_RECORD_TYPE)
+                )
+                source_messages = [
+                    cls._decode_json_object(payload)
+                    for _, _, payload in session.message_rows
+                ]
+                stored_messages = cls._read_messages(connection, session.key)
+                if (
+                    session.created_at != stored_created_at
+                    or session.updated_at != stored_updated_at
+                    or source_metadata != stored_metadata
+                    or session.last_consolidated != stored_last_consolidated
+                    or source_provider_state != stored_provider_state
+                    or stored_messages != source_messages
+                ):
+                    changed.append(session.key)
+            except _SESSION_DATA_ERRORS:
+                changed.append(session.key)
+        if changed:
+            raise RuntimeError(
+                "JSONL session backups may have changed after SQLite migration for "
+                f"{len(changed)} session(s). Refusing to start to avoid losing "
+                "rollback writes; preserve sessions.db and the JSONL files before recovery."
+            )
 
     def migrate_from_jsonl(self, source: JsonlSessionFiles) -> int:
+        with self._connection(
+            timeout=_SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS,
+        ) as connection:
+            marker = self._read_migration_marker(connection)
+            if marker is not None:
+                manifest = self._decode_migration_manifest(marker)
+                if manifest is not None:
+                    current = self._current_jsonl_signatures(source)
+                    self._assert_backups_unchanged(connection, current, manifest)
+                    return 0
+
+        prepared, signatures = self._prepare_jsonl_sessions(source)
+        self._assert_prepared_sources_unchanged(source, signatures)
         migrated_count = 0
-        with self._connection(durable=True) as connection, connection:
+        with self._connection(
+            durable=True,
+            timeout=_SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS,
+        ) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            migrated = connection.execute(
-                "SELECT value FROM store_metadata WHERE key = ?",
-                (_SQLITE_JSONL_MIGRATION_KEY,),
-            ).fetchone()
-            if migrated is not None:
+            marker = self._read_migration_marker(connection)
+            if marker is not None:
+                manifest = self._decode_migration_manifest(marker)
+                if manifest is not None:
+                    self._assert_backups_unchanged(connection, signatures, manifest)
+                    return 0
+
+                self._validate_legacy_migration_marker(
+                    connection,
+                    prepared,
+                    int(marker),
+                )
+                connection.execute(
+                    "UPDATE store_metadata SET value = ? WHERE key = ?",
+                    (
+                        self._encode_migration_manifest(signatures),
+                        _SQLITE_JSONL_MIGRATION_KEY,
+                    ),
+                )
                 return 0
 
-            files = source.session_files()
             existing_keys = {
                 row[0]
                 for row in connection.execute("SELECT key FROM sessions")
                 if isinstance(row[0], str)
             }
-            conflicts = sorted(existing_keys.intersection(key for key, _ in files))
+            conflicts = sorted(
+                existing_keys.intersection(session.key for session in prepared)
+            )
             if conflicts:
                 raise RuntimeError(
                     "Cannot migrate JSONL sessions because SQLite already contains "
                     f"{len(conflicts)} matching session key(s)"
                 )
 
-            for key, path in files:
-                session = source.load_for_migration(key)
-                if session is None:
-                    raise RuntimeError(f"Failed to migrate JSONL session {path}")
-                self._save(connection, session)
+            for session in prepared:
+                self._save_prepared(connection, session)
 
             connection.execute(
                 "INSERT INTO store_metadata (key, value) VALUES (?, ?)",
-                (_SQLITE_JSONL_MIGRATION_KEY, str(len(files))),
+                (
+                    _SQLITE_JSONL_MIGRATION_KEY,
+                    self._encode_migration_manifest(signatures),
+                ),
             )
-            migrated_count = len(files)
+            migrated_count = len(prepared)
 
         if migrated_count:
             logger.info("Migrated {} JSONL session(s) to SQLite", migrated_count)
@@ -890,6 +1205,42 @@ class SQLiteSessionStore:
         )
 
     @classmethod
+    def _decode_loaded_session_row(
+        cls,
+        row: object,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        dict[str, Any],
+        int,
+        ProviderConversationState | None,
+    ]:
+        if not isinstance(row, tuple):
+            raise ValueError("Invalid SQLite session row")
+        values = cast(tuple[object, ...], row)
+        if len(values) != 6:
+            raise ValueError("Invalid SQLite session row")
+        key, created_at, updated_at, metadata_json, private_metadata_json, offset = values
+        stored_key, created_at_text, updated_at_text, metadata, last_consolidated = (
+            cls._decode_session_row(
+                (key, created_at, updated_at, metadata_json, offset)
+            )
+        )
+        private_metadata = cls._decode_json_object(private_metadata_json)
+        provider_state = ProviderConversationState.from_private_record(
+            private_metadata.get(_PROVIDER_STATE_RECORD_TYPE)
+        )
+        return (
+            stored_key,
+            created_at_text,
+            updated_at_text,
+            metadata,
+            last_consolidated,
+            provider_state,
+        )
+
+    @classmethod
     def _read_messages(
         cls,
         connection: sqlite3.Connection,
@@ -926,9 +1277,9 @@ class SQLiteSessionStore:
             ORDER BY position
             LIMIT ?
             """,
-            (key, _SESSION_LIST_PREVIEW_MAX_RECORDS + 1),
+            (key, _SESSION_LIST_PREVIEW_MAX_RECORDS),
         )
-        for index, raw_row in enumerate(rows, start=1):
+        for raw_row in rows:
             row: object = raw_row
             if not isinstance(row, tuple):
                 raise ValueError("Invalid SQLite message row")
@@ -937,10 +1288,7 @@ class SQLiteSessionStore:
                 raise ValueError("Invalid SQLite message row")
             payload = values[0]
             scanned_chars += len(payload) + 1
-            if (
-                index > _SESSION_LIST_PREVIEW_MAX_RECORDS
-                or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
-            ):
+            if scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS:
                 break
             message = cls._decode_json_object(payload)
             if is_hidden_history_message(message):
@@ -959,7 +1307,13 @@ class SQLiteSessionStore:
             connection.execute("BEGIN")
             row: object = connection.execute(
                 """
-                SELECT key, created_at, updated_at, metadata, last_consolidated
+                SELECT
+                    key,
+                    created_at,
+                    updated_at,
+                    metadata,
+                    private_metadata,
+                    last_consolidated
                 FROM sessions
                 WHERE key = ?
                 """,
@@ -968,9 +1322,14 @@ class SQLiteSessionStore:
             if row is None:
                 return None
             try:
-                stored_key, created_at, updated_at, metadata, last_consolidated = (
-                    self._decode_session_row(row)
-                )
+                (
+                    stored_key,
+                    created_at,
+                    updated_at,
+                    metadata,
+                    last_consolidated,
+                    provider_state,
+                ) = self._decode_loaded_session_row(row)
                 messages = self._read_messages(connection, stored_key)
                 return Session(
                     key=stored_key,
@@ -979,38 +1338,74 @@ class SQLiteSessionStore:
                     updated_at=datetime.fromisoformat(updated_at),
                     metadata=metadata,
                     last_consolidated=last_consolidated,
+                    provider_state=provider_state,
                 )
             except _SESSION_DATA_ERRORS as exc:
                 logger.warning("Failed to load SQLite session {}: {}", key, exc)
-                return None
+                raise RuntimeError(f"Failed to load SQLite session {key}") from exc
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
+        prepared = self._prepare_session(session)
         with self._connection(durable=fsync) as connection, connection:
-            self._save(connection, session)
+            self._save_prepared(connection, prepared)
 
-    def _save(self, connection: sqlite3.Connection, session: Session) -> None:
-        metadata_json = self._encode_json(session.metadata)
-        message_rows = [
-            (session.key, position, self._encode_json(message))
+    @classmethod
+    def _prepare_session(cls, session: Session) -> _PreparedSession:
+        metadata_json = cls._encode_json(session.metadata)
+        private_metadata_json = cls._encode_json(
+            {
+                _PROVIDER_STATE_RECORD_TYPE: session.provider_state.to_private_record()
+            }
+            if session.provider_state is not None
+            else {}
+        )
+        message_rows = tuple(
+            (
+                session.key,
+                position,
+                cls._encode_json(_json_object(cast(object, message))),
+            )
             for position, message in enumerate(session.messages)
-        ]
+        )
+        return _PreparedSession(
+            key=session.key,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+            metadata_json=metadata_json,
+            private_metadata_json=private_metadata_json,
+            last_consolidated=session.last_consolidated,
+            message_rows=message_rows,
+        )
+
+    @staticmethod
+    def _save_prepared(
+        connection: sqlite3.Connection,
+        session: _PreparedSession,
+    ) -> None:
         connection.execute(
             """
             INSERT INTO sessions (
-                key, created_at, updated_at, metadata, last_consolidated
+                key,
+                created_at,
+                updated_at,
+                metadata,
+                private_metadata,
+                last_consolidated
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at,
                 metadata = excluded.metadata,
+                private_metadata = excluded.private_metadata,
                 last_consolidated = excluded.last_consolidated
             """,
             (
                 session.key,
-                session.created_at.isoformat(),
-                session.updated_at.isoformat(),
-                metadata_json,
+                session.created_at,
+                session.updated_at,
+                session.metadata_json,
+                session.private_metadata_json,
                 session.last_consolidated,
             ),
         )
@@ -1020,11 +1415,25 @@ class SQLiteSessionStore:
             INSERT INTO messages (session_key, position, payload)
             VALUES (?, ?, ?)
             """,
-            message_rows,
+            session.message_rows,
         )
 
     def delete(self, key: str) -> bool:
         with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            marker = self._read_migration_marker(connection)
+            if marker is not None:
+                manifest = self._decode_migration_manifest(marker)
+                if manifest is not None and key in manifest:
+                    updated_manifest = dict(manifest)
+                    updated_manifest.pop(key)
+                    connection.execute(
+                        "UPDATE store_metadata SET value = ? WHERE key = ?",
+                        (
+                            self._encode_migration_manifest(updated_manifest),
+                            _SQLITE_JSONL_MIGRATION_KEY,
+                        ),
+                    )
             cursor = connection.execute("DELETE FROM sessions WHERE key = ?", (key,))
             return cursor.rowcount > 0
 
@@ -1056,7 +1465,9 @@ class SQLiteSessionStore:
                 stored_key, created_at, updated_at, metadata, _ = self._decode_session_row(row)
             except _SESSION_DATA_ERRORS as exc:
                 logger.warning("Failed to read SQLite session metadata {}: {}", key, exc)
-                return None
+                raise RuntimeError(
+                    f"Failed to read SQLite session metadata {key}"
+                ) from exc
             return {
                 "key": stored_key,
                 "created_at": created_at,
@@ -1082,7 +1493,7 @@ class SQLiteSessionStore:
                     preview = self._preview(connection, key)
                 except _SESSION_DATA_ERRORS as exc:
                     logger.warning("Failed to list SQLite session: {}", exc)
-                    continue
+                    raise RuntimeError("Failed to list SQLite sessions") from exc
                 sessions.append(
                     {
                         "key": key,
@@ -1212,8 +1623,9 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
         self.invalidate(key)
+        backup_deleted = self._jsonl_files.delete_backups(key)
         deleted = self._store.delete(key)
-        return self._jsonl_files.delete_backups(key) or deleted
+        return backup_deleted or deleted
 
     def fork_session_before_user_index(
         self,

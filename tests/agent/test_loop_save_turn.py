@@ -771,8 +771,9 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
     public_payload = loop.sessions.read_session_file(session.key)
     assert public_payload is not None
     assert "private-checkpoint-blob" not in json.dumps(public_payload)
-    raw = loop.sessions._get_session_path(session.key).read_text(encoding="utf-8")
-    assert "private-checkpoint-blob" in raw
+    loop.sessions.invalidate(session.key)
+    persisted = loop.sessions.get_or_create(session.key)
+    assert persisted.provider_state == state
 
 
 @pytest.mark.asyncio
