@@ -357,11 +357,24 @@ describe("App layout", () => {
     const quickChatButton = within(sidebar).getByRole("button", {
       name: "Quick Chat",
     });
+    const newTopicButton = within(sidebar).getByRole("button", {
+      name: "New topic",
+    });
+    const actionHighlight = within(sidebar).getByTestId(
+      "actions-selection-highlight",
+    );
 
     fireEvent.click(quickChatButton);
 
     expect(window.location.hash).toBe("#/quick-chat");
     expect(quickChatButton).toHaveAttribute("aria-current", "page");
+    expect(newTopicButton).not.toHaveAttribute("aria-current");
+    expect(quickChatButton).not.toHaveClass("bg-sidebar-accent");
+    expect(quickChatButton).toHaveClass("transition-[width,padding,color]");
+    expect(actionHighlight).toHaveAttribute("data-active-id", "quick-chat");
+    expect(
+      within(sidebar).queryByTestId("actions-selection-highlight-surface"),
+    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -373,6 +386,14 @@ describe("App layout", () => {
     expect(createChatSpy).not.toHaveBeenCalled();
     expect(document.title).toBe("Quick Chat · nanobot");
     expect(screen.getByText("What's on your mind?")).toBeInTheDocument();
+
+    fireEvent.click(newTopicButton);
+
+    expect(window.location.hash).toBe("#/new");
+    expect(newTopicButton).toHaveAttribute("aria-current", "page");
+    expect(quickChatButton).not.toHaveAttribute("aria-current");
+    expect(actionHighlight).toHaveAttribute("data-active-id", "new-chat");
+    expect(within(sidebar).queryAllByRole("button", { current: "page" })).toHaveLength(1);
   });
 
   it("restores Quick Chat before it has a persisted session", async () => {
@@ -2208,16 +2229,41 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings");
 
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
+    const overviewButton = within(settingsNav).getByRole("button", {
+      name: "Overview",
+      exact: true,
+    });
+    const modelsButton = within(settingsNav).getByRole("button", {
+      name: "Models",
+      exact: true,
+    });
+    const settingsHighlight = within(settingsNav).getByTestId(
+      "settings-selection-highlight",
+    );
+
+    expect(overviewButton).toHaveAttribute("aria-current", "page");
+    expect(overviewButton).not.toHaveClass("bg-sidebar-accent");
+    expect(overviewButton).toHaveClass("transition-[color]");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "overview");
+
+    fireEvent.click(modelsButton);
 
     expect(await screen.findByText("Model presets")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Models" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
+    expect(modelsButton).toHaveAttribute("aria-current", "page");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "models");
 
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Voice" }));
+    const voiceButton = within(settingsNav).getByRole("button", {
+      name: "Voice",
+      exact: true,
+    });
+    fireEvent.click(voiceButton);
 
     expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(voiceButton).toHaveAttribute("aria-current", "page");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "voice");
   });
 
   it("transitions between Apps and Skills without replacing the sidebar", async () => {
@@ -2243,6 +2289,11 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
+    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
+      "data-active-id",
+      "utility:apps",
+    );
+    expect(within(sidebar).queryAllByRole("button", { current: "page" })).toHaveLength(1);
     expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
       "data-settings-section",
       "apps",
@@ -2269,6 +2320,10 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
       "aria-current",
       "page",
+    );
+    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
+      "data-active-id",
+      "utility:skills",
     );
     expect(document.title).toBe("Skills · nanobot");
   });

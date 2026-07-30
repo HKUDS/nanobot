@@ -1,7 +1,6 @@
 import {
   memo,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +24,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  SIDEBAR_SELECTION_ITEM_CLASS,
+  SidebarSelectionHighlight,
+} from "@/components/SidebarSelectionHighlight";
 import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
@@ -106,9 +109,6 @@ export const ChatList = memo(function ChatList({
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
   const listContentRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
-  const activeHighlightRef = useRef<HTMLDivElement>(null);
-  const activeHighlightSurfaceRef = useRef<HTMLDivElement>(null);
-  const highlightVisibleRef = useRef(false);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -162,74 +162,6 @@ export const ChatList = memo(function ChatList({
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
   }, [showArchived, sort]);
-
-  useLayoutEffect(() => {
-    let resetTransitionFrame: number | null = null;
-
-    const updateHighlight = () => {
-      const content = listContentRef.current;
-      const row = activeRowRef.current;
-      const highlight = activeHighlightRef.current;
-      const surface = activeHighlightSurfaceRef.current;
-
-      if (!highlight || !surface) return;
-      if (!content || !row) {
-        surface.style.opacity = "0";
-        surface.style.transform = "scale(0.97)";
-        highlightVisibleRef.current = false;
-        return;
-      }
-
-      const shouldFloatIn = !highlightVisibleRef.current;
-      if (shouldFloatIn) {
-        highlight.style.transitionProperty = "none";
-      }
-
-      const contentRect = content.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      highlight.style.width = `${rowRect.width}px`;
-      highlight.style.height = `${rowRect.height}px`;
-      highlight.style.transform = `translate3d(${rowRect.left - contentRect.left}px, ${
-        rowRect.top - contentRect.top
-      }px, 0)`;
-
-      if (shouldFloatIn) {
-        void highlight.offsetWidth;
-      }
-
-      surface.style.opacity = "1";
-      surface.style.transform = "scale(1)";
-      highlightVisibleRef.current = true;
-
-      if (shouldFloatIn) {
-        resetTransitionFrame = window.requestAnimationFrame(() => {
-          highlight.style.removeProperty("transition-property");
-          resetTransitionFrame = null;
-        });
-      }
-    };
-
-    updateHighlight();
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(updateHighlight);
-    if (resizeObserver) {
-      if (listContentRef.current) resizeObserver.observe(listContentRef.current);
-      if (activeRowRef.current) resizeObserver.observe(activeRowRef.current);
-    }
-    window.addEventListener("resize", updateHighlight);
-
-    return () => {
-      if (resetTransitionFrame !== null) {
-        window.cancelAnimationFrame(resetTransitionFrame);
-      }
-      activeHighlightRef.current?.style.removeProperty("transition-property");
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateHighlight);
-    };
-  }, [activeKey, density, limitedGroups, showPreviews, showTimestamps]);
 
   if (loading && sessions.length === 0) {
     return (
@@ -333,7 +265,8 @@ export const ChatList = memo(function ChatList({
                           ref={active ? activeRowRef : undefined}
                           data-chat-row={s.key}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] transition-colors",
+                            "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
+                            SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             active
                               ? "text-sidebar-accent-foreground"
@@ -475,18 +408,12 @@ export const ChatList = memo(function ChatList({
             </button>
           </div>
         ) : null}
-        <div
-          ref={activeHighlightRef}
-          data-testid="active-chat-highlight"
-          aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 z-0 !mt-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none"
-        >
-          <div
-            ref={activeHighlightSurfaceRef}
-            data-testid="active-chat-highlight-surface"
-            className="h-full w-full scale-[0.97] rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none dark:bg-white/[0.07]"
-          />
-        </div>
+        <SidebarSelectionHighlight
+          containerRef={listContentRef}
+          targetRef={activeRowRef}
+          activeId={activeKey}
+          scope="sessions"
+        />
       </div>
     </div>
   );

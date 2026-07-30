@@ -1947,9 +1947,10 @@ function Shell({
 
   const sidebarProps = {
     sessions: regularSessions,
-    activeKey,
+    activeKey: view === "chat" ? activeKey : null,
     loading,
-    quickChatActive,
+    quickChatActive: view === "chat" && quickChatActive,
+    newChatActive: view === "chat" && activeKey === null,
     onOpenQuickChat,
     onNewChat,
     onSelect: onSelectChat,
