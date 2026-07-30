@@ -17,6 +17,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cli import commands as cli_commands
+from nanobot.cli import provider as provider_commands
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
@@ -493,7 +494,7 @@ def test_openai_codex_oauth_default_matches_curated_flagship():
 
     assert spec is not None
     assert spec.builtin_models
-    assert cli_commands._OAUTH_PROVIDER_DEFAULT_MODELS["openai_codex"] == (
+    assert provider_commands._OAUTH_PROVIDER_DEFAULT_MODELS["openai_codex"] == (
         spec.builtin_models[0].id
     )
 
@@ -674,13 +675,13 @@ def test_provider_login_rejects_unknown_provider():
 def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
     called = False
-    original = cli_commands._LOGIN_HANDLERS["openai_codex"]
+    original = provider_commands._LOGIN_HANDLERS["openai_codex"]
 
     def fake_login() -> None:
         nonlocal called
         called = True
 
-    cli_commands._LOGIN_HANDLERS["openai_codex"] = fake_login
+    provider_commands._LOGIN_HANDLERS["openai_codex"] = fake_login
     try:
         result = runner.invoke(
             app,
@@ -694,7 +695,7 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
             ],
         )
     finally:
-        cli_commands._LOGIN_HANDLERS["openai_codex"] = original
+        provider_commands._LOGIN_HANDLERS["openai_codex"] = original
 
     assert result.exit_code == 0
     assert called is True
@@ -709,8 +710,8 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
 
 def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
-    original = cli_commands._LOGIN_HANDLERS["github_copilot"]
-    cli_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
+    original = provider_commands._LOGIN_HANDLERS["github_copilot"]
+    provider_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
     try:
         result = runner.invoke(
             app,
@@ -724,7 +725,7 @@ def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
             ],
         )
     finally:
-        cli_commands._LOGIN_HANDLERS["github_copilot"] = original
+        provider_commands._LOGIN_HANDLERS["github_copilot"] = original
 
     assert result.exit_code == 0
     assert "Set github-copilot as the main provider" in result.stdout
@@ -738,8 +739,8 @@ def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
 
 def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
-    original = cli_commands._LOGIN_HANDLERS["xai_grok"]
-    cli_commands._LOGIN_HANDLERS["xai_grok"] = lambda: None
+    original = provider_commands._LOGIN_HANDLERS["xai_grok"]
+    provider_commands._LOGIN_HANDLERS["xai_grok"] = lambda: None
     try:
         result = runner.invoke(
             app,
@@ -753,7 +754,7 @@ def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
             ],
         )
     finally:
-        cli_commands._LOGIN_HANDLERS["xai_grok"] = original
+        provider_commands._LOGIN_HANDLERS["xai_grok"] = original
 
     assert result.exit_code == 0
     assert "Set xai-grok as the main provider" in result.stdout
@@ -768,8 +769,8 @@ def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
 
 def test_provider_login_model_implies_set_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
-    original = cli_commands._LOGIN_HANDLERS["github_copilot"]
-    cli_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
+    original = provider_commands._LOGIN_HANDLERS["github_copilot"]
+    provider_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
     try:
         result = runner.invoke(
             app,
@@ -784,7 +785,7 @@ def test_provider_login_model_implies_set_main_provider(tmp_path):
             ],
         )
     finally:
-        cli_commands._LOGIN_HANDLERS["github_copilot"] = original
+        provider_commands._LOGIN_HANDLERS["github_copilot"] = original
 
     assert result.exit_code == 0
     assert "Set github-copilot as the main provider" in result.stdout
