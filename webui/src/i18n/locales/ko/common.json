@@ -769,12 +769,12 @@
       "saveProxy": "프록시 저장",
       "localCodeHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 인증 코드를 아래에 붙여 넣으세요.",
       "remoteCodeHelp": "로그인을 선택하여 사용자 컴퓨터에서 xAI를 여세요. 로그인 후 xAI에 표시된 인증 코드를 아래에 붙여 넣으세요.",
-      "localCallbackHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 주소 표시줄에서 전체 localhost 콜백 URL을 복사해 아래에 붙여 넣으세요.",
       "remoteCallbackHelp": "이 브라우저에서 ChatGPT를 열고 로그인을 완료하세요. localhost 페이지가 열리지 않으면 주소 표시줄의 전체 URL을 복사해 아래에 붙여 넣으세요.",
       "authorizationCode": "인증 코드",
       "callbackUrl": "전체 콜백 URL",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "ChatGPT 열기",
+      "pasteCallbackToContinue": "계속하려면 콜백 URL을 붙여 넣으세요.",
       "waitingForCallback": "브라우저 콜백 대기 중…",
       "finishSignIn": "로그인 완료"
     },

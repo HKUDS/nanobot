@@ -769,12 +769,12 @@
       "saveProxy": "Simpan proksi",
       "localCodeHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, tempel kode otorisasi di bawah.",
       "remoteCodeHelp": "Pilih Masuk untuk membuka xAI di komputer Anda. Setelah masuk, tempel kode otorisasi yang ditampilkan xAI di bawah.",
-      "localCallbackHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, salin URL callback localhost lengkap dari bilah alamat dan tempel di bawah.",
       "remoteCallbackHelp": "Buka ChatGPT di browser ini dan selesaikan proses masuk. Saat halaman localhost gagal dimuat, salin URL lengkap dari bilah alamat dan tempel di bawah.",
       "authorizationCode": "Kode otorisasi",
       "callbackUrl": "URL callback lengkap",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "Buka ChatGPT",
+      "pasteCallbackToContinue": "Tempel URL callback untuk melanjutkan.",
       "waitingForCallback": "Menunggu callback browser…",
       "finishSignIn": "Selesaikan masuk"
     },

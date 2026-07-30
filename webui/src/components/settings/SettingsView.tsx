@@ -3056,17 +3056,23 @@ function ProviderOAuthLoginDialog({
             <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
               {expectsCallbackUrl
-                ? remoteBrowserAccess
-                  ? t("settings.oauth.remoteCallbackHelp")
-                  : t("settings.oauth.localCallbackHelp")
+                ? t("settings.oauth.remoteCallbackHelp")
                 : remoteBrowserAccess
                   ? t("settings.oauth.remoteCodeHelp")
                   : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 rounded-[14px] border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
-            <span>{t("settings.oauth.waitingForCallback")}</span>
+            {expectsCallbackUrl ? (
+              <Clipboard className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            ) : (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            )}
+            <span>
+              {expectsCallbackUrl
+                ? t("settings.oauth.pasteCallbackToContinue")
+                : t("settings.oauth.waitingForCallback")}
+            </span>
           </div>
           <div className="space-y-2">
             <label

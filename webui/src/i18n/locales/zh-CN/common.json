@@ -783,12 +783,12 @@
       "saveProxy": "保存代理",
       "localCodeHelp": "请在浏览器中完成登录。nanobot 通常会自动完成；若未自动完成，请将授权码粘贴到下方。",
       "remoteCodeHelp": "点击“登录”在你的电脑上打开 xAI。完成登录后，请将 xAI 显示的授权码粘贴到下方。",
-      "localCallbackHelp": "请在浏览器中完成登录。nanobot 通常会自动完成；若未自动完成，请复制地址栏中的完整 localhost 回调 URL 并粘贴到下方。",
       "remoteCallbackHelp": "在此浏览器中打开 ChatGPT 并完成登录。当 localhost 页面无法打开时，请复制地址栏中的完整 URL 并粘贴到下方。",
       "authorizationCode": "授权码",
       "callbackUrl": "完整回调 URL",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "打开 ChatGPT",
+      "pasteCallbackToContinue": "粘贴回调 URL 以继续。",
       "waitingForCallback": "正在等待浏览器回调…",
       "finishSignIn": "完成登录"
     },

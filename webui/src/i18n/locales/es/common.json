@@ -770,12 +770,12 @@
       "saveProxy": "Guardar proxy",
       "localCodeHelp": "Completa el inicio de sesión en el navegador. nanobot suele finalizar automáticamente; si no lo hace, pega el código de autorización abajo.",
       "remoteCodeHelp": "Selecciona Iniciar sesión para abrir xAI en tu computadora. Después de iniciar sesión, pega abajo el código de autorización que muestra xAI.",
-      "localCallbackHelp": "Completa el inicio de sesión en el navegador. nanobot suele finalizar automáticamente; si no lo hace, copia de la barra de direcciones la URL completa de devolución de localhost y pégala abajo.",
       "remoteCallbackHelp": "Abre ChatGPT en este navegador y completa el inicio de sesión. Cuando la página de localhost no cargue, copia la URL completa de la barra de direcciones y pégala abajo.",
       "authorizationCode": "Código de autorización",
       "callbackUrl": "URL completa de devolución",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "Abrir ChatGPT",
+      "pasteCallbackToContinue": "Pega la URL de devolución para continuar.",
       "waitingForCallback": "Esperando la devolución del navegador…",
       "finishSignIn": "Completar inicio de sesión"
     },

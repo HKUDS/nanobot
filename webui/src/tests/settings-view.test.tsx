@@ -2847,6 +2847,7 @@ describe("SettingsView Apps catalog", () => {
           "Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.",
         ),
       ).toBeInTheDocument();
+      expect(within(dialog).getByText("Paste the callback URL to continue.")).toBeInTheDocument();
       const callbackInput = within(dialog).getByRole("textbox", {
         name: "Full callback URL",
       });

@@ -769,12 +769,12 @@
       "saveProxy": "Lưu proxy",
       "localCodeHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy dán mã ủy quyền bên dưới.",
       "remoteCodeHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn. Sau khi đăng nhập, hãy dán mã ủy quyền do xAI hiển thị bên dưới.",
-      "localCallbackHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy sao chép URL callback localhost đầy đủ từ thanh địa chỉ và dán vào bên dưới.",
       "remoteCallbackHelp": "Mở ChatGPT trong trình duyệt này và hoàn tất đăng nhập. Khi trang localhost không tải được, hãy sao chép URL đầy đủ từ thanh địa chỉ và dán vào bên dưới.",
       "authorizationCode": "Mã ủy quyền",
       "callbackUrl": "URL callback đầy đủ",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "Mở ChatGPT",
+      "pasteCallbackToContinue": "Dán URL callback để tiếp tục.",
       "waitingForCallback": "Đang chờ callback từ trình duyệt…",
       "finishSignIn": "Hoàn tất đăng nhập"
     },
