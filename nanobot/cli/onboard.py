@@ -1,7 +1,5 @@
 """Interactive onboarding questionnaire for nanobot."""
 
-# pyright: reportMissingTypeStubs=false, reportUnusedFunction=false
-
 import asyncio
 import json
 import types
@@ -206,35 +204,36 @@ def _select_with_back(
     # Key bindings
     bindings = KeyBindings()
 
+    # KeyBindings consumes these handlers through decorator registration.
     @bindings.add(Keys.Up)
-    def _up(event: KeyPressEvent) -> None:
+    def _up(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         nonlocal selected_index
         selected_index = (selected_index - 1) % len(choices)
         event.app.invalidate()
 
     @bindings.add(Keys.Down)
-    def _down(event: KeyPressEvent) -> None:
+    def _down(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         nonlocal selected_index
         selected_index = (selected_index + 1) % len(choices)
         event.app.invalidate()
 
     @bindings.add(Keys.Enter)
-    def _enter(event: KeyPressEvent) -> None:
+    def _enter(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = choices[selected_index]
         event.app.exit()
 
     @bindings.add("escape")
-    def _escape(event: KeyPressEvent) -> None:
+    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = _BACK_PRESSED
         event.app.exit()
 
     @bindings.add(Keys.Left)
-    def _left(event: KeyPressEvent) -> None:
+    def _left(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = _BACK_PRESSED
         event.app.exit()
 
     @bindings.add(Keys.ControlC)
-    def _ctrl_c(event: KeyPressEvent) -> None:
+    def _ctrl_c(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = None
         event.app.exit()
 
@@ -532,8 +531,9 @@ def _input_back_key_bindings() -> KeyBindings:
     """Return key bindings that make Escape behave like a local back action."""
     bindings = KeyBindings()
 
+    # KeyBindings consumes this handler through decorator registration.
     @bindings.add("escape")
-    def _escape(event: KeyPressEvent) -> None:
+    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         event.app.exit(result=_BACK_PRESSED)
 
     return bindings
@@ -1668,7 +1668,11 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
         return False
 
     try:
-        from oauth_cli_kit import get_token, login_oauth_interactive
+        # oauth-cli-kit does not publish type information.
+        from oauth_cli_kit import (  # pyright: ignore[reportMissingTypeStubs]
+            get_token,
+            login_oauth_interactive,
+        )
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         return False
@@ -1709,7 +1713,8 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
     if provider_name != "openai_codex":
         return False
     try:
-        from oauth_cli_kit import get_token
+        # oauth-cli-kit does not publish type information.
+        from oauth_cli_kit import get_token  # pyright: ignore[reportMissingTypeStubs]
 
         proxy = _quick_start_codex_proxy(config)
         token = get_token(proxy=proxy)
