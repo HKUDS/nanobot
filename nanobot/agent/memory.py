@@ -1196,23 +1196,21 @@ class Consolidator:
             )
             result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             visible_suffix = probe.messages
-            messages_to_remove = result.dropped[result.already_consolidated_count:]
+            messages_to_remove = result.dropped
 
-            if not messages_to_remove and not visible_suffix:
+            if not messages_to_remove:
                 self.sessions.save(session)
                 return ""
 
             last_active = session.updated_at
-            summary: str | None = ""
-            if messages_to_remove:
-                # Summarize the visible suffix too, but only raw-dump messages
-                # excluded from model replay if the provider call fails.
-                summary = await self.archive(
-                    messages_to_remove,
-                    runtime=runtime,
-                    session_key=session_key,
-                    summary_messages=messages_to_summarize,
-                )
+            # Summarize the visible suffix too, but only raw-dump messages
+            # excluded from model replay if the provider call fails.
+            summary = await self.archive(
+                messages_to_remove,
+                runtime=runtime,
+                session_key=session_key,
+                summary_messages=messages_to_summarize,
+            )
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {

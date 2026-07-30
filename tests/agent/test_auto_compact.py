@@ -107,9 +107,9 @@ def _make_fake_compact(
             extend_to_user=True,
         )
         visible_suffix = probe.messages
-        archive_msgs = result.dropped[result.already_consolidated_count:]
+        archive_msgs = result.dropped
 
-        if not archive_msgs and not visible_suffix:
+        if not archive_msgs:
             loop.sessions.save(session)
             return ""
 
