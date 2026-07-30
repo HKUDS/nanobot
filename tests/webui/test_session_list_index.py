@@ -4,9 +4,14 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
 def test_webui_session_list_reuses_valid_index_without_scanning_files(
@@ -15,10 +20,12 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
 ) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:indexed")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     session.add_message("user", "indexed preview")
     manager.save(session)
 
     assert list_webui_sessions(manager)[0]["preview"] == "indexed preview"
+    assert list_webui_sessions(manager)[0]["model_preset"] == "fast"
 
     def fail_scan(session_manager: SessionManager, path: Path) -> None:
         raise AssertionError(f"unexpected session file scan: {path}")
@@ -29,6 +36,23 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
 
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
+    assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:custom-metadata")
+    session.metadata["model_preset"] = 7
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = {"invalid": True}
+    session.add_message("user", "custom metadata")
+    manager.save(session)
+
+    with pytest.raises(ValueError, match="session model preset must be a non-empty string"):
+        list_webui_sessions(manager)
+
+    assert manager.get_or_create(session.key).metadata["model_preset"] == 7
 
 
 def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatch) -> None:
@@ -74,6 +98,20 @@ def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
     assert list_webui_sessions(manager) == []
 
 
+def test_webui_session_list_ignores_legacy_stem(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    legacy_path = manager.sessions_dir / "websocket_legacy.jsonl"
+    legacy_path.write_text(
+        '{"_type":"metadata","key":"websocket:legacy",'
+        '"created_at":"2025-01-01T00:00:00",'
+        '"updated_at":"2025-01-01T00:00:00","metadata":{}}\n',
+        encoding="utf-8",
+    )
+
+    assert list_webui_sessions(manager) == []
+    assert legacy_path.exists()
+
+
 def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:cron-preview")
@@ -86,6 +124,34 @@ def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> 
     manager.save(session)
 
     assert list_webui_sessions(manager)[0]["preview"] == "提醒已经到期。"
+
+
+def test_webui_session_list_skips_trigger_internal_user_preview(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:trigger-preview")
+    session.add_message(
+        "user",
+        "Local trigger received: PR review",
+        **{AUTOMATION_HISTORY_META: {"kind": "local_trigger", "trigger_id": "trg_123"}},
+    )
+    session.add_message("assistant", "PR #4502 已经开始 review。")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "PR #4502 已经开始 review。"
+
+
+def test_webui_session_list_skips_hidden_history_user_preview(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:hidden-preview")
+    session.add_message(
+        "user",
+        "internal subagent result",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result", "subagent_task_id": "sub-1"}},
+    )
+    session.add_message("assistant", "subagent summary")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "subagent summary"
 
 
 def test_webui_session_list_uses_webui_transcript_activity_for_sort(
@@ -101,6 +167,7 @@ def test_webui_session_list_uses_webui_transcript_activity_for_sort(
     old_session.created_at = datetime(2026, 6, 15, 10, 0, 0)
     old_session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
     old_session.add_message("user", "old metadata")
+    old_session.messages[-1]["timestamp"] = "2026-06-15T10:00:00"
     old_session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
     manager.save(old_session)
 
@@ -108,6 +175,7 @@ def test_webui_session_list_uses_webui_transcript_activity_for_sort(
     newer_metadata.created_at = datetime(2026, 6, 15, 11, 0, 0)
     newer_metadata.updated_at = datetime(2026, 6, 15, 11, 0, 0)
     newer_metadata.add_message("user", "newer metadata")
+    newer_metadata.messages[-1]["timestamp"] = "2026-06-15T11:00:00"
     newer_metadata.updated_at = datetime(2026, 6, 15, 11, 0, 0)
     manager.save(newer_metadata)
 
@@ -141,6 +209,7 @@ def test_webui_session_list_rescans_when_transcript_changes(
     session.created_at = datetime(2026, 6, 15, 10, 0, 0)
     session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
     session.add_message("user", "preview")
+    session.messages[-1]["timestamp"] = "2026-06-15T10:00:00"
     session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
     manager.save(session)
 
@@ -167,6 +236,32 @@ def test_webui_session_list_rescans_when_transcript_changes(
 
     assert scanned == [manager._get_session_path("websocket:transcript-change").name]
     assert rows[0]["updated_at"].startswith("2026-06-15T12:30:00")
+
+
+def test_webui_session_list_sorts_by_message_activity_not_maintenance_timestamp(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(tmp_path)
+    old = manager.get_or_create("websocket:old")
+    old.created_at = datetime(2026, 6, 1, 10, 0, 0)
+    old.add_message("user", "old first visible activity")
+    old.messages[-1]["timestamp"] = "2026-06-01T10:00:00"
+    old.add_message("assistant", "automation result")
+    old.messages[-1]["timestamp"] = "2026-06-05T10:00:00"
+    old.updated_at = datetime(2026, 6, 30, 17, 40, 0)
+    manager.save(old)
+
+    newer = manager.get_or_create("websocket:newer")
+    newer.created_at = datetime(2026, 6, 4, 10, 0, 0)
+    newer.add_message("user", "newer real activity")
+    newer.messages[-1]["timestamp"] = "2026-06-04T10:00:00"
+    newer.updated_at = datetime(2026, 6, 4, 10, 0, 0)
+    manager.save(newer)
+
+    rows = list_webui_sessions(manager)
+
+    assert [row["key"] for row in rows] == ["websocket:old", "websocket:newer"]
+    assert rows[0]["updated_at"] == "2026-06-05T10:00:00"
 
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:

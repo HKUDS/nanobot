@@ -125,6 +125,32 @@ async def test_generate_image_tool_selects_aihubmix_provider(
     assert fake.calls[0]["aspect_ratio"] == "3:4"
 
 
+def test_image_generation_tool_passes_provider_proxy_to_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeImageClient.instances = []
+    monkeypatch.setattr(
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "openai_codex" else None,
+    )
+    proxy = "http://127.0.0.1:23458"
+    tool = ImageGenerationTool(
+        workspace=tmp_path,
+        config=ImageGenerationToolConfig(
+            enabled=True,
+            provider="openai_codex",
+            model="openai-codex/gpt-5.4",
+        ),
+        provider_configs={"openai_codex": ProviderConfig(proxy=proxy)},
+    )
+
+    client = tool._provider_client()
+
+    assert client is not None
+    assert FakeImageClient.instances[0].kwargs["proxy"] == proxy
+
+
 @pytest.mark.asyncio
 async def test_generate_image_tool_reports_missing_aihubmix_key(tmp_path: Path) -> None:
     tool = ImageGenerationTool(

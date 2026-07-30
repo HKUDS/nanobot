@@ -1,0 +1,31 @@
+{
+  "description": "Use nanobot from DingTalk groups.",
+  "requirements": "DingTalk app credentials and gateway",
+  "setup": {
+    "docsLabel": "Open DingTalk setup",
+    "officialLabel": "Open DingTalk console",
+    "tryIt": "Send a test message from the DingTalk group where the app is installed.",
+    "summary": "DingTalk needs app credentials from Stream mode.",
+    "steps": [
+      "Create or choose a DingTalk app with Stream mode enabled.",
+      "Add Client ID and Client Secret.",
+      "Save and enable DingTalk, then send a test message."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "DingTalk client ID",
+        "help": "Copy it from DingTalk app credentials."
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••",
+        "help": "Copy it from the same DingTalk app credentials page."
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      }
+    }
+  }
+}

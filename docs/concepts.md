@@ -12,7 +12,7 @@ nanobot has one small core loop and several ways to enter it:
 |---|---|
 | Agent loop | Builds context, selects the session, calls the provider, runs tools, and publishes replies |
 | Providers | LLM backends such as OpenRouter, Anthropic, OpenAI, Bedrock, Ollama, vLLM, and other OpenAI-compatible APIs |
-| Channels | User-facing transports such as CLI, WebUI/WebSocket, Telegram, Discord, Slack, Feishu, WeChat, Email, and others |
+| Channels | User-facing transports such as CLI, WebUI/WebSocket, Telegram, Discord, Slack, Feishu, WeChat, Email, Mattermost, and others |
 | Tools | Capabilities the model may call, including files, shell, web search/fetch, MCP, cron, image generation, and subagents |
 | Memory | Workspace files and session history that keep useful context across turns |
 | Gateway | Long-running process that connects enabled channels and serves the health endpoint |
@@ -38,6 +38,23 @@ nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
 
 The config file controls what nanobot may use. The workspace is where nanobot keeps state for that instance.
 
+### Agent Workspace and Project Workspace
+
+The configured workspace is the **agent workspace**. A WebUI chat can also select
+a different **project workspace** for repository-specific work without moving the
+agent's identity or durable state.
+
+| Resource | Owner when a project is selected |
+|---|---|
+| Project instructions | `AGENTS.md` from the selected project; there is no fallback to the agent workspace's `AGENTS.md` |
+| Agent profile | `SOUL.md` and `USER.md` from the agent workspace; project-local files with those names are ignored |
+| Memory and custom skills | `memory/` and `skills/` from the agent workspace |
+| Relative file paths and shell working directory | The selected project workspace |
+
+When no separate project is selected, one directory normally serves both roles.
+Selecting a project changes the working context for that chat; it does not create
+a second agent or relocate the configured agent workspace.
+
 ## Config Format
 
 `config.json` accepts both camelCase and snake_case keys. The docs use camelCase because nanobot writes config back to disk with camelCase aliases, for example `apiKey`, `modelPresets`, `intervalS`, and `maxToolResultChars`.
@@ -49,7 +66,7 @@ Most examples are partial snippets. Merge them into the existing file created by
 A normal turn follows this flow:
 
 1. A channel receives a user message and publishes it to the message bus.
-2. The agent loop chooses a session key and builds context from the workspace, skills, memory, recent messages, channel metadata, and runtime settings.
+2. The agent loop chooses a session key and builds context from the effective project workspace, agent-owned profile/skills/memory, recent messages, channel metadata, and runtime settings.
 3. The provider receives the model request.
 4. If the model asks for tools, the runner executes them and feeds results back to the model.
 5. The final reply is saved to the session and sent back through the channel.
@@ -64,9 +81,9 @@ That flow is the same whether the message starts in the CLI, WebUI, Telegram, Di
 | CLI interactive | `nanobot agent` | Terminal chat with persistent session history |
 | Gateway | `nanobot gateway` | Chat apps, WebUI, heartbeat, Dream, and long-running service mode |
 | OpenAI-compatible API | `nanobot serve` | Programmatic access through `/v1/chat/completions` |
-| WebUI | `nanobot gateway` plus WebSocket channel | Browser workbench served by the WebSocket channel on port `8765` |
+| WebUI | `nanobot webui` | Prepare the local WebUI, start the gateway, and open the browser workbench |
 
-The gateway health endpoint is on `gateway.port` (`18790` by default). The browser WebUI is served by the WebSocket channel (`8765` by default), not by the health endpoint.
+The WebUI launcher is the normal browser entry point. Underneath, the gateway keeps the WebSocket channel and other long-running services alive. The gateway health endpoint is on `gateway.port` (`18790` by default); the browser WebUI is served on `8765` by default, not by the health endpoint.
 
 ## Provider and Model Selection
 
@@ -123,7 +140,7 @@ Tools are discovered automatically from built-in modules and plugin entry points
 - shell execution with configurable sandboxing;
 - web search and web fetch with SSRF checks;
 - MCP servers;
-- cron reminders and heartbeat tasks;
+- cron reminders, local triggers, and heartbeat tasks;
 - image generation;
 - subagents and runtime self-inspection.
 
@@ -131,14 +148,29 @@ Security-sensitive controls live in [`configuration.md#security`](./configuratio
 
 ## Background Jobs
 
-When `nanobot gateway` starts, it creates workspace-scoped cron storage at `<workspace>/cron/jobs.json` and registers system jobs:
+When `nanobot gateway` starts, it runs workspace-scoped automations and
+registers system jobs:
 
 - `dream`, when `agents.defaults.dream.enabled` is true;
 - `heartbeat`, when `gateway.heartbeat.enabled` is true.
 
 Heartbeat reads `<workspace>/HEARTBEAT.md`. If the file has tasks under `## Active Tasks`, nanobot executes them and sends only useful/actionable results to the most recently active chat target. Routine "nothing changed" results are suppressed.
 
-User-created reminders use the same cron service but are not the same as the protected heartbeat system job. They run as scheduled turns in their origin chat/session and normally deliver the result back to that channel.
+User-created reminders use the same cron service but are not the same as the
+protected heartbeat system job. They run as scheduled turns in their origin
+chat/session and normally deliver the result back to that channel.
+
+Local triggers are also session-bound, but they do not have their own
+schedule. Create one from the target chat with `/trigger <name>`, then call
+`nanobot trigger <id> "<message>"` when a local script or external service wants
+nanobot to respond in that session. Webhook servers, third-party auth, and
+event-to-message formatting stay outside nanobot. Trigger deliveries are stored
+in the workspace until the linked agent turn finishes successfully. If the
+target session is busy, the trigger waits until that session is idle instead of
+being injected into the active turn. The message is recorded as an automation
+turn in that session. Delivery is at-least-once, so external systems should
+tolerate repeated trigger messages; a delivery that reaches the agent but fails
+is marked failed rather than retried forever.
 
 ## Where to Go Next
 

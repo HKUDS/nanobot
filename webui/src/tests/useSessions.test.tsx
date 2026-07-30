@@ -42,12 +42,16 @@ function fakeClient() {
   };
 }
 
-function wrap(client: ReturnType<typeof fakeClient>) {
+function wrap(
+  client: ReturnType<typeof fakeClient>,
+  tokenSource: string | { current: string } = "tok",
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
+    const token = typeof tokenSource === "string" ? tokenSource : tokenSource.current;
     return (
       <ClientProvider
         client={client as unknown as import("@/lib/nanobot-client").NanobotClient}
-        token="tok"
+        token={token}
       >
         {children}
       </ClientProvider>
@@ -71,7 +75,7 @@ describe("useSessions", () => {
       updatedAt: "2026-04-16T10:00:00Z",
       title: "",
       preview: "hi",
-    })).toBe("New chat");
+    })).toBe("New topic");
 
     expect(sessionTitle({
       key: "websocket:chat-work",
@@ -188,6 +192,76 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
     expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces a same-task burst of session updates into one refresh", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.listSessions).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "metadata");
+      client.emitSessionUpdate("chat-a", "thread");
+      client.emitSessionUpdate("chat-b", "metadata");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one trailing refresh when an update arrives during a session request", async () => {
+    let resolveInFlight!: (rows: []) => void;
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveInFlight = resolve;
+      }))
+      .mockResolvedValueOnce([
+        {
+          key: "websocket:chat-a",
+          channel: "websocket",
+          chatId: "chat-a",
+          createdAt: "2026-04-16T10:00:00Z",
+          updatedAt: "2026-04-16T10:01:00Z",
+          title: "Latest title",
+          preview: "Latest preview",
+        },
+      ]);
+    const client = fakeClient();
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "metadata");
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      client.emitSessionUpdate("chat-a", "thread");
+      await Promise.resolve();
+    });
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveInFlight([]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions[0]?.title).toBe("Latest title");
   });
 
   it("keeps a newly created chat visible until the server session list catches up", async () => {
@@ -450,6 +524,32 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
+  it("exposes turn ids backed by persisted completion events", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      has_pending_tool_calls: false,
+      completed_turn_ids: ["turn-empty", "", "turn-empty"],
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          content: "stop",
+          turnId: "turn-empty",
+          createdAt: 1,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-empty"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.completedTurnIds).toEqual(["turn-empty"]);
+    expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
   it("does not flag transcript as pending when last row is not a trace", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,
@@ -478,6 +578,73 @@ describe("useSessions", () => {
 
     expect(result.current.messages).toEqual([]);
     expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
+  it("does not reload history when only the auth token rotates", async () => {
+    const tokenSource = { current: "tok-old" };
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      messages: [
+        { id: "a1", role: "assistant", content: "stable", createdAt: 1 },
+      ],
+    });
+
+    const { result, rerender } = renderHook(
+      () => useSessionHistory("websocket:token-rotation"),
+      { wrapper: wrap(fakeClient(), tokenSource) },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(1);
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok-old",
+      "websocket:token-rotation",
+      expect.any(Object),
+    );
+
+    tokenSource.current = "tok-new";
+    rerender();
+    await act(async () => Promise.resolve());
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok-new",
+      "websocket:token-rotation",
+      expect.any(Object),
+    );
+  });
+
+  it("aborts a superseded latest-history request without surfacing an error", async () => {
+    let firstSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread)
+      .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((_resolve, reject) => {
+        if (typeof optionsOrBase !== "string") firstSignal = optionsOrBase?.signal;
+        firstSignal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }))
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "a2", role: "assistant", content: "latest", createdAt: 2 },
+        ],
+      });
+
+    const { result } = renderHook(
+      () => useSessionHistory("websocket:superseded"),
+      { wrapper: wrap(fakeClient()) },
+    );
+
+    await waitFor(() => expect(firstSignal).toBeDefined());
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+    expect(firstSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages.map((message) => message.id)).toEqual(["a2"]);
   });
 
   it("loads older transcript pages before the current history", async () => {
@@ -514,21 +681,34 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
-      limit: 160,
-      direction: "latest",
-    });
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith(
+      "tok",
+      "websocket:paged",
+      expect.objectContaining({
+        limit: 160,
+        direction: "latest",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.current.hasMoreBefore).toBe(true);
     expect(result.current.userMessageOffset).toBe(1);
+    const latestVersion = result.current.version;
+    const latestLineage = result.current.lineage;
+    expect(result.current.continuity).toBe("initial");
 
     await act(async () => {
       await result.current.loadOlder();
     });
 
-    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:paged", {
-      limit: 120,
-      before: "cursor-2",
-    });
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok",
+      "websocket:paged",
+      expect.objectContaining({
+        limit: 120,
+        before: "cursor-2",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.current.messages.map((message) => message.content)).toEqual([
       "old question",
       "old answer",
@@ -537,6 +717,412 @@ describe("useSessions", () => {
     ]);
     expect(result.current.hasMoreBefore).toBe(false);
     expect(result.current.userMessageOffset).toBe(0);
+    expect(result.current.version).toBe(latestVersion);
+    expect(result.current.lineage).toBe(latestLineage);
+    expect(result.current.continuity).toBe("initial");
+  });
+
+  it("aborts an older-history request when the consumer unmounts", async () => {
+    let olderSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "latest question", createdAt: 2 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 1,
+          user_message_offset: 1,
+        },
+      })
+      .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((_resolve, reject) => {
+        if (typeof optionsOrBase !== "string") olderSignal = optionsOrBase?.signal;
+        olderSignal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }));
+
+    const { result, unmount } = renderHook(
+      () => useSessionHistory("websocket:unmount-older"),
+      { wrapper: wrap(fakeClient()) },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let olderRequest!: Promise<void>;
+    act(() => {
+      olderRequest = result.current.loadOlder();
+    });
+    await waitFor(() => expect(olderSignal).toBeDefined());
+
+    unmount();
+
+    expect(olderSignal?.aborted).toBe(true);
+    await expect(olderRequest).resolves.toBeUndefined();
+  });
+
+  it("preserves a loaded prefix when a canonical latest window overlaps its tail", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        has_pending_tool_calls: true,
+        messages: [
+          { id: "u2", role: "user", content: "middle question", createdAt: 2 },
+          { id: "a2", role: "assistant", content: "middle answer", createdAt: 3 },
+        ],
+        page: {
+          before_cursor: "cursor-middle",
+          has_more_before: true,
+          loaded_message_count: 2,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        has_pending_tool_calls: false,
+        completed_turn_ids: ["turn-3"],
+        messages: [
+          { id: "a2-replayed", role: "assistant", content: "middle answer", createdAt: 3 },
+          {
+            id: "u3",
+            role: "user",
+            content: "latest question",
+            turnId: "turn-3",
+            createdAt: 4,
+          },
+          {
+            id: "a3",
+            role: "assistant",
+            content: "latest answer",
+            turnId: "turn-3",
+            createdAt: 5,
+          },
+        ],
+        page: {
+          before_cursor: "cursor-shifted",
+          has_more_before: true,
+          loaded_message_count: 3,
+          user_message_offset: 1,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged-refresh"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    const loadedVersion = result.current.version;
+    const loadedLineage = result.current.lineage;
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.version).toBeGreaterThan(loadedVersion));
+
+    expect(result.current.messages.map((message) => message.id)).toEqual([
+      "u1",
+      "a1",
+      "u2",
+      "a2-replayed",
+      "u3",
+      "a3",
+    ]);
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.userMessageOffset).toBe(0);
+    expect(result.current.hasPendingToolCalls).toBe(false);
+    expect(result.current.completedTurnIds).toEqual(["turn-3"]);
+    expect(result.current.continuity).toBe("overlap");
+    expect(result.current.lineage).toBe(loadedLineage);
+  });
+
+  it("starts a new lineage when more than 160 new rows remove all latest-page overlap", async () => {
+    const oldWindow = Array.from({ length: 160 }, (_, index) => ({
+      id: `old-${index}`,
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `old window row ${index}`,
+      turnId: `old-turn-${Math.floor(index / 2)}`,
+      createdAt: index,
+    }));
+    const newWindow = Array.from({ length: 160 }, (_, index) => ({
+      id: `new-${index}`,
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `new window row ${index}`,
+      turnId: `new-turn-${Math.floor(index / 2)}`,
+      createdAt: 1_000 + index,
+    }));
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: oldWindow,
+        page: {
+          before_cursor: "old-window-cursor",
+          has_more_before: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: newWindow,
+        page: {
+          before_cursor: "new-window-cursor",
+          has_more_before: true,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:window-reset"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const initialLineage = result.current.lineage;
+    expect(result.current.messages[0]?.id).toBe("old-0");
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.messages[0]?.id).toBe("new-0"));
+
+    expect(result.current.messages).toHaveLength(160);
+    expect(result.current.messages.at(-1)?.id).toBe("new-159");
+    expect(result.current.continuity).toBe("reset");
+    expect(result.current.lineage).toBeGreaterThan(initialLineage);
+    expect(result.current.hasMoreBefore).toBe(true);
+  });
+
+  it("uses the longest consecutive semantic overlap for legacy unstable replay metadata", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "repeat-1-old", role: "user", content: "repeat", createdAt: 10 },
+          { id: "answer-1-old", role: "assistant", content: "first answer", createdAt: 11 },
+          { id: "repeat-2-old", role: "user", content: "repeat", createdAt: 12 },
+          { id: "answer-2-old", role: "assistant", content: "second answer", createdAt: 13 },
+        ],
+        page: {
+          before_cursor: "legacy-cursor",
+          has_more_before: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "old-prefix", role: "user", content: "old prefix", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "repeat-2-new", role: "user", content: "repeat", createdAt: 9_012 },
+          { id: "answer-2-new", role: "assistant", content: "second answer", createdAt: 9_013 },
+          { id: "new-tail", role: "assistant", content: "new tail", createdAt: 9_014 },
+        ],
+        page: {
+          before_cursor: "shifted-legacy-cursor",
+          has_more_before: true,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:legacy-overlap"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    const lineage = result.current.lineage;
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.messages.at(-1)?.id).toBe("new-tail"));
+
+    expect(result.current.messages.map((message) => message.id)).toEqual([
+      "old-prefix",
+      "repeat-1-old",
+      "answer-1-old",
+      "repeat-2-new",
+      "answer-2-new",
+      "new-tail",
+    ]);
+    expect(result.current.continuity).toBe("overlap");
+    expect(result.current.lineage).toBe(lineage);
+  });
+
+  it("ignores an older-page response after a latest refresh resets its lineage", async () => {
+    let resolveOlder:
+      | ((value: Awaited<ReturnType<typeof api.fetchWebuiThread>>) => void)
+      | null = null;
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "old-latest", role: "assistant", content: "old latest", createdAt: 10 },
+        ],
+        page: {
+          before_cursor: "cursor-old-lineage",
+          has_more_before: true,
+        },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveOlder = resolve;
+      }))
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "new-latest", role: "assistant", content: "new latest", createdAt: 20 },
+        ],
+        page: {
+          before_cursor: "cursor-new-lineage",
+          has_more_before: true,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged-race"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const oldLineage = result.current.lineage;
+    let olderRequest: Promise<void> | undefined;
+    act(() => {
+      olderRequest = result.current.loadOlder();
+    });
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.messages[0]?.id).toBe("new-latest"));
+    expect(result.current.continuity).toBe("reset");
+    expect(result.current.lineage).toBeGreaterThan(oldLineage);
+
+    await act(async () => {
+      resolveOlder?.({
+        schemaVersion: 3,
+        messages: [
+          { id: "stale-prefix", role: "user", content: "stale prefix", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+        },
+      });
+      await olderRequest;
+    });
+
+    expect(result.current.messages.map((message) => message.id)).toEqual(["new-latest"]);
+    expect(result.current.hasMoreBefore).toBe(true);
+  });
+
+  it("preserves authoritative active state while prepending older history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        has_pending_tool_calls: true,
+        messages: [
+          { id: "u2", role: "user", content: "current question", createdAt: 2 },
+          { id: "a2", role: "assistant", content: "partial answer", createdAt: 3 },
+        ],
+        page: {
+          before_cursor: "cursor-active",
+          has_more_before: true,
+          loaded_message_count: 2,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        has_pending_tool_calls: false,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged-active"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasPendingToolCalls).toBe(true);
+    const latestVersion = result.current.version;
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.hasPendingToolCalls).toBe(true);
+    expect(result.current.version).toBe(latestVersion);
+  });
+
+  it("preserves authoritative completed state while prepending trace history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        has_pending_tool_calls: false,
+        messages: [
+          {
+            id: "t2",
+            role: "tool",
+            kind: "trace",
+            content: "completed trace",
+            traces: ["completed trace"],
+            createdAt: 2,
+          },
+        ],
+        page: {
+          before_cursor: "cursor-complete",
+          has_more_before: true,
+          loaded_message_count: 1,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged-complete"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasPendingToolCalls).toBe(false);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
   it("keeps the session in the list when delete fails", async () => {

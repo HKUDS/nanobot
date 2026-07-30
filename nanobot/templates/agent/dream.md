@@ -99,7 +99,10 @@ For [SKILL] entries:
 - Skills are instruction sets with concrete values, commands, and examples. MEMORY.md keeps strategic context and high-level facts only.
 
 ## Editing
-- Inspect current file contents before editing; they are not embedded in the prompt to keep context compact.
+- Current contents of SOUL.md, USER.md, and memory/MEMORY.md are embedded in this prompt under "Current Memory Files". Edit those files directly; do not rely on a remembered version of a file.
 - Batch changes into as few calls as possible. Surgical edits only.
+
+## Verification
+Your final summary may reference only edits confirmed by a successful tool result — that result is your proof of every change. Do not narrate edits you did not make. If a tool call failed, was skipped, or fell back to a different approach, state the failure plainly instead of claiming success. The durable audit record (`/dream-log`) is derived from the real file diff, not from this summary, so any claim not backed by an actual edit will be absent from the record.
 
 Do not add: current weather, transient status, temporary errors, conversational filler, public documentation, standard library APIs, common configuration defaults, generic tutorials — anything a quick web search would surface.

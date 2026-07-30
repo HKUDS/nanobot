@@ -1,6 +1,8 @@
 import json
 
-from nanobot.security.workspace_access import default_workspace_scope
+import pytest
+
+from nanobot.security.workspace_access import WorkspaceScopeError, default_workspace_scope
 from nanobot.session.manager import SessionManager
 from nanobot.webui.workspaces import (
     WebUIWorkspaceController,
@@ -181,3 +183,84 @@ def test_scope_for_session_key_reads_metadata_without_full_history(
 
     assert scope.project_path == project.resolve()
     assert scope.access_mode == "full"
+
+
+def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    controller = WebUIWorkspaceController(
+        session_manager=sessions,
+        default_workspace=default,
+        default_restrict_to_workspace=True,
+    )
+    controller.persist_scope(
+        "remote-chat",
+        default_workspace_scope(project, restrict_to_workspace=False),
+    )
+
+    scope = controller.scope_for_set_request(
+        {
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "restricted",
+            }
+        },
+        chat_id="remote-chat",
+        chat_running=False,
+        controls_available=False,
+    )
+
+    assert scope.project_path == project.resolve()
+    assert scope.access_mode == "restricted"
+
+
+@pytest.mark.parametrize(
+    ("default_restricted", "project_name", "access_mode", "allowed"),
+    [
+        (False, "default", "restricted", True),
+        (True, "default", "full", False),
+        (False, "other", "restricted", False),
+    ],
+)
+def test_remote_new_chat_only_allows_non_escalating_scope_change(
+    tmp_path,
+    monkeypatch,
+    default_restricted: bool,
+    project_name: str,
+    access_mode: str,
+    allowed: bool,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    other = tmp_path / "other"
+    default.mkdir()
+    other.mkdir()
+    controller = WebUIWorkspaceController(
+        session_manager=None,
+        default_workspace=default,
+        default_restrict_to_workspace=default_restricted,
+    )
+    requested_path = tmp_path / project_name
+
+    def resolve():
+        return controller.scope_for_new_chat(
+            {
+                "workspace_scope": {
+                    "project_path": str(requested_path),
+                    "access_mode": access_mode,
+                }
+            },
+            controls_available=False,
+        )
+
+    if allowed:
+        scope = resolve()
+        assert scope.project_path == requested_path.resolve()
+        assert scope.access_mode == access_mode
+    else:
+        with pytest.raises(WorkspaceScopeError, match="workspace controls are localhost-only"):
+            resolve()

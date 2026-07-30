@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+@supports (content-visibility: auto) {
+  .apps-catalog-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.25rem;
+  }
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
@@ -22,45 +29,51 @@
     --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --border: 40 8% 90.5%;
+    --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
+    --inline-token-highlight: 221 70% 50%;
     --radius: 0.4375rem;
-    --sidebar: 0 0% 98.5%;
+    --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 89.8%;
+    --sidebar-border: 40 8% 90.5%;
+    --settings-canvas: var(--background);
+    --settings-surface: 60 6% 96.7%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
   .dark {
     color-scheme: dark;
-    --background: 0 0% 10%;
+    --background: 0 0% 19%;
     --foreground: 240 4% 96%;
-    --card: 0 0% 12%;
+    --card: 0 0% 22%;
     --card-foreground: 240 4% 96%;
-    --popover: 0 0% 12%;
+    --popover: var(--card);
     --popover-foreground: 240 4% 96%;
     --primary: 240 5% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 12%;
+    --secondary: var(--card);
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 15%;
+    --muted: var(--card);
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
+    --border: 0 0% 28%;
+    --input: var(--border);
     --ring: 0 0% 83.1%;
-    --sidebar: 0 0% 11.5%;
+    --inline-token-highlight: 217 92% 72%;
+    --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 15.5%;
+    --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 0 0% 18%;
+    --sidebar-border: var(--border);
+    --settings-canvas: var(--background);
+    --settings-surface: var(--card);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -79,6 +92,7 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    overflow: hidden;
   }
 
   * {
@@ -114,6 +128,38 @@
 }
 
 @layer utilities {
+  .composer-model-badge {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .composer-model-badge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: rgb(236 141 49);
+    opacity: 0;
+    transition: opacity 600ms ease-in-out;
+  }
+
+  .composer-model-badge[data-fallback="true"]::before {
+    opacity: 1;
+  }
+
+  .composer-model-badge > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-model-badge::before {
+      transition-duration: 150ms;
+    }
+  }
+
   .host-drag-region {
     -webkit-app-region: drag;
   }
@@ -157,10 +203,7 @@
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
     backdrop-filter: saturate(145%) blur(18px);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.32),
-      inset 1px 0 0 hsl(var(--background) / 0.52),
-      14px 0 32px -30px rgb(0 0 0 / 0.22);
+    box-shadow: 14px 0 32px -30px rgb(0 0 0 / 0.12);
   }
 
   .dark .host-window-shell,
@@ -172,10 +215,7 @@
 
   .dark .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.96);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.42),
-      inset 1px 0 0 hsl(var(--foreground) / 0.05),
-      14px 0 34px -30px rgb(0 0 0 / 0.62);
+    box-shadow: 14px 0 34px -30px rgb(0 0 0 / 0.34);
   }
 
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -199,7 +239,7 @@
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
 
-  /* Markdown body styles, ported from agent-chat-ui's markdown-styles.css. */
+  /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
   }
@@ -214,6 +254,7 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
+    line-height: var(--cjk-line-height);
   }
 
   .markdown-content .contains-task-list {
@@ -297,6 +338,30 @@
       animation: none;
       content: "";
     }
+    .markdown-content-streaming > :last-child::after,
+    .streaming-text-fallback::after {
+      animation: none;
+    }
+  }
+
+  /**
+   * The composer is one persistent grid item in both landing and thread
+   * layouts. On desktop, the landing's trailing flexible row holds it at the
+   * visual center; collapsing only that row lets the same element dock at the
+   * bottom without a remount or a transform clone.
+   */
+  .thread-layout {
+    grid-template-rows: minmax(min-content, 1fr) auto 0fr;
+    transition:
+      grid-template-rows 900ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .thread-layout[data-layout="thread"] {
+    grid-template-rows: minmax(0, 1fr) auto 0fr;
+  }
+  @media (min-width: 640px) {
+    .thread-layout[data-layout="hero"] {
+      grid-template-rows: minmax(min-content, 1fr) auto 1fr;
+    }
   }
 
   @keyframes composer-status-strip-enter {
@@ -337,6 +402,39 @@
   }
   .composer-status-strip[data-state="exit"] {
     animation: composer-status-strip-exit 180ms ease-in both;
+  }
+  .composer-status-drawer {
+    --composer-status-drawer-duration: 600ms;
+    --composer-status-drawer-easing: ease-out;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    pointer-events: none;
+    transition:
+      grid-template-rows var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] {
+    grid-template-rows: 1fr;
+    pointer-events: auto;
+  }
+  .composer-status-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .composer-status-drawer-content {
+    opacity: 0;
+    transform: translateY(8px);
+    transform-origin: bottom center;
+    transition:
+      opacity var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing),
+      transform var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
+    opacity: 1;
+    transform: translateY(0);
   }
   @keyframes run-pulse-dot {
     0%,
@@ -401,6 +499,16 @@
     }
     .composer-status-strip[data-state] {
       animation: none;
+    }
+    .composer-status-drawer {
+      transition-duration: 220ms;
+    }
+    .composer-status-drawer-content {
+      transform: translateY(2px);
+      transition-duration: 140ms, 220ms;
+    }
+    .thread-layout {
+      transition-duration: 360ms;
     }
     .run-pulse-icon,
     .run-pulse-icon * {
@@ -522,5 +630,240 @@
   }
   .scrollbar-track-transparent::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /*
+   * Mobile responsive safety net — keep the chat viewport + composer inside a
+   * narrow viewport (see #4693). These are containment rules: long markdown
+   * (URLs, branch names, file paths, code, tables) wraps or scrolls inside its
+   * own box instead of forcing the whole column — and thus the page — wider
+   * than 100vw. Desktop layout is unchanged; the rules only engage when content
+   * would otherwise overflow. Fenced code blocks keep their own internal
+   * horizontal scroll (CodeBlock and the markdown <pre> wrappers already set
+   * overflow-x: auto), so clipping the thread column horizontally is safe.
+   */
+
+  /* Prose container: allow it to shrink within its column and break long words
+     so long URLs / paths never stretch the conversation wider than 100vw. */
+  .markdown-content {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Long links and inline code break rather than stretch the column. */
+  .markdown-content a,
+  .markdown-content code {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Fenced / pre blocks scroll inside their own box, never the page. */
+  .markdown-content pre,
+  .not-prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Wide markdown tables scroll horizontally within the conversation column.
+     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
+     custom `table` component (see MarkdownTextRenderer); min-w-max on the
+     <table> keeps natural column widths so it scrolls instead of shrinking. */
+
+  /* Clip any residual horizontal bleed at the thread column edge. Vertical
+     scrolling and internal code-block scroll are unaffected. */
+  .thread-viewport-scrollbar {
+    overflow-x: hidden;
+  }
+
+  .thread-viewport {
+    container-name: thread-viewport;
+    container-type: inline-size;
+  }
+
+  @supports (content-visibility: auto) {
+    .thread-render-unit {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 12rem;
+    }
+  }
+
+  .thread-prompt-rail {
+    display: none;
+    left: 1.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .thread-prompt-rail {
+      display: block;
+    }
+  }
+
+  @container thread-viewport (max-width: 59rem) {
+    .thread-prompt-rail {
+      display: none;
+    }
+  }
+}
+
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/*
+ * Composer controls compress against their actual container, not the viewport.
+ * Permission state has priority over the model label; both retain their full
+ * accessible names and title text when their visible labels are shortened.
+ */
+.thread-composer-surface {
+  container-name: thread-composer;
+  container-type: inline-size;
+}
+
+.thread-composer-footer-actions {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+
+.thread-composer-model-badge {
+  flex-shrink: 1;
+}
+
+.thread-composer-model-label-fade {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active
+  > .composer-model-pill {
+  transform: scale(0.98);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms
+    cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-model-badge:active > .composer-model-pill {
+    transform: none !important;
+  }
+
+  .composer-model-pill-track[data-settling="true"],
+  .composer-model-pill-dock {
+    transition: none;
+    will-change: auto;
+  }
+
+  .composer-model-pill-viewport {
+    animation: none;
+  }
+}
+
+@container thread-composer (max-width: 21rem) {
+  .thread-composer-footer {
+    column-gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+
+  .thread-composer-footer-primary,
+  .thread-composer-footer-actions {
+    gap: 0.25rem;
+  }
+
+  .thread-composer-access {
+    max-width: 6.5rem;
+    padding-inline: 0.5rem;
+    font-size: 0.71875rem;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0.25rem;
+  }
+
+  .thread-composer-access-chevron {
+    margin-left: 0.25rem;
+  }
+
+  .thread-composer-access-label-full {
+    display: none;
+  }
+
+  .thread-composer-access-label-short {
+    display: inline;
+  }
+}
+
+@container thread-composer (max-width: 19rem) {
+  .thread-composer-model-badge {
+    width: 2rem;
+    flex: none;
+  }
+
+  .thread-composer-model-badge .composer-model-pill {
+    width: 100%;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .thread-composer-model-label {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 16rem) {
+  .thread-composer-access {
+    width: 2rem;
+    flex: none;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0;
+  }
+
+  .thread-composer-access-label-short,
+  .thread-composer-access-chevron {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 15rem) {
+  .thread-composer-action.touch-target,
+  .thread-composer-access.touch-target {
+    width: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    min-height: 2rem;
   }
 }

@@ -1,0 +1,39 @@
+{
+  "description": "Gunakan nanobot dari server dan DM Discord.",
+  "requirements": "Token bot Discord, izin, dan gateway",
+  "setup": {
+    "docsLabel": "Buka panduan Discord",
+    "officialLabel": "Buka portal Discord",
+    "tryIt": "Sebut bot di server atau kirim pesan langsung.",
+    "summary": "Mengaktifkan akan menyalakan dukungan Discord. Token bot dan izin server tetap diperlukan.",
+    "steps": [
+      "Buat bot di Discord Developer Portal dan salin tokennya.",
+      "Undang bot ke server dengan izin baca/kirim pesan dan perintah slash.",
+      "Simpan dan aktifkan Discord, lalu sebut bot atau kirim DM."
+    ],
+    "fields": {
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Discord",
+        "help": "Buat dari halaman Bot di Discord Developer Portal."
+      },
+      "allowChannels": {
+        "label": "Channel yang diizinkan",
+        "placeholder": "ID channel, dipisahkan koma",
+        "help": "Kosongkan untuk mengizinkan semua channel yang dapat dibaca bot."
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya sebutan",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      }
+    }
+  }
+}

@@ -7,12 +7,13 @@ import binascii
 import hashlib
 import hmac
 import mimetypes
+import os
 import re
 import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -126,17 +127,33 @@ def sign_or_stage_media_path(
     signed = sign_media_path(path, secret=secret, media_dir=media_dir)
     if signed is not None:
         return {"url": signed, "name": path.name}
+    staged_tmp: Path | None = None
     try:
-        if not path.is_file():
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
             return None
+        source_stat = resolved.stat()
         target_dir = media_dir("websocket")
         safe_name = safe_filename(path.name) or "attachment"
-        staged = target_dir / f"{uuid.uuid4().hex[:12]}-{safe_name}"
-        shutil.copyfile(path, staged)
+        source_version = "\0".join((
+            os.path.normcase(str(resolved)),
+            str(source_stat.st_size),
+            str(source_stat.st_mtime_ns),
+            str(source_stat.st_ctime_ns),
+        ))
+        source_digest = hashlib.sha256(source_version.encode("utf-8")).hexdigest()[:20]
+        staged = target_dir / f"{source_digest}-{safe_name}"
+        if not staged.is_file() or staged.stat().st_size != source_stat.st_size:
+            staged_tmp = target_dir / f".{source_digest}-{uuid.uuid4().hex}.tmp"
+            shutil.copyfile(resolved, staged_tmp)
+            staged_tmp.replace(staged)
     except OSError as exc:
         if logger is not None:
             logger.warning("failed to stage outbound media {}: {}", path, exc)
         return None
+    finally:
+        if staged_tmp is not None:
+            staged_tmp.unlink(missing_ok=True)
     signed = sign_media_path(staged, secret=secret, media_dir=media_dir)
     if signed is None:
         return None
@@ -182,14 +199,17 @@ def attach_signed_media_urls(
     messages = payload.get("messages")
     if not isinstance(messages, list):
         return
-    for msg in messages:
+    raw_messages = cast(list[Any], messages)
+    for msg in raw_messages:
         if not isinstance(msg, dict):
             continue
-        media = msg.get("media")
+        message = cast(dict[str, Any], msg)
+        media = message.get("media")
         if not isinstance(media, list) or not media:
             continue
+        media_entries = cast(list[Any], media)
         urls: list[dict[str, str]] = []
-        for entry in media:
+        for entry in media_entries:
             if not isinstance(entry, str) or not entry:
                 continue
             signed = sign_path(Path(entry))
@@ -197,8 +217,8 @@ def attach_signed_media_urls(
                 continue
             urls.append({"url": signed, "name": Path(entry).name})
         if urls:
-            msg["media_urls"] = urls
-        msg.pop("media", None)
+            message["media_urls"] = urls
+        message.pop("media", None)
 
 
 def serve_signed_media(

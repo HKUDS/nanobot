@@ -12,7 +12,6 @@ import {
 } from "@/workers/imageEncode.worker";
 
 export type { EncodeResponse, EncodeSuccess, EncodeFailure } from "@/workers/imageEncode.worker";
-export { TARGET_MAX_BYTES } from "@/workers/imageEncode.worker";
 
 type Pending = {
   resolve: (r: EncodeResponse) => void;
@@ -81,17 +80,4 @@ export async function encodeImage(file: File): Promise<EncodeResponse> {
       reject(err instanceof Error ? err : new Error(String(err)));
     }
   });
-}
-
-/** Release the singleton Worker (tests / teardown). */
-export function disposeImageEncoder(): void {
-  if (worker) {
-    worker.terminate();
-    worker = null;
-  }
-  bootAttempted = false;
-  for (const [, entry] of pending) {
-    entry.reject(new Error("image encoder disposed"));
-  }
-  pending.clear();
 }

@@ -1,9 +1,10 @@
-import { Fragment, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -12,27 +13,14 @@ interface ThreadMessagesProps {
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onQuoteSelection?: (text: string) => void;
 }
 
 export type DisplayUnit = TurnUnit;
-
-/** True when this unit index is the last assistant text slice before the next user message (or end of thread). */
-export function isFinalAssistantSliceBeforeNextUser(
-  units: DisplayUnit[],
-  index: number,
-): boolean {
-  const u = units[index];
-  if (u.type !== "message" || u.message.role !== "assistant") return true;
-  for (let j = index + 1; j < units.length; j++) {
-    const v = units[j];
-    if (v.type === "message" && v.message.role === "user") break;
-    return false;
-  }
-  return true;
-}
 
 export function buildDisplayUnits(
   messages: UIMessage[],
@@ -43,7 +31,7 @@ export function buildDisplayUnits(
   });
 }
 
-export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
+export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
   const flags = new Array<boolean>(units.length).fill(true);
   let hasLaterUnitBeforeUser = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
@@ -66,17 +54,20 @@ export function ThreadMessages({
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  slashCommands = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
+  onQuoteSelection,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const messageListRef = useRef<HTMLDivElement>(null);
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
-  const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
+  const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
@@ -85,7 +76,11 @@ export function ThreadMessages({
   let nextUserIndex = hiddenUserMessageCount;
 
   return (
-    <div className="flex w-full flex-col">
+    <div ref={messageListRef} className="flex w-full flex-col">
+      <AssistantSelectionAction
+        containerRef={messageListRef}
+        onQuoteSelection={onQuoteSelection}
+      />
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =
@@ -97,57 +92,170 @@ export function ThreadMessages({
           unit.type === "activity"
           && next?.type === "message"
           && next.message.role === "assistant";
-
+        const deferOffscreenRender =
+          index < units.length - 1
+          && (
+            unit.type === "activity"
+              ? !liveActivityClusterIndices.has(index)
+              : unit.message.role === "assistant" && !unit.message.isStreaming
+          );
         const userPromptId =
           unit.type === "message" && unit.message.role === "user"
             ? unit.message.id
             : undefined;
         const forkIndex =
-          unit.type === "message" && unit.message.role === "assistant" && copyFlags[index]
+          unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
-        if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
+        if (
+          unit.type === "message"
+          && unit.message.role === "user"
+          && unit.message.deliveryStatus !== "failed"
+        ) nextUserIndex += 1;
 
         return (
-          <Fragment key={unitKeys[index]}>
-            <div className={marginTop} data-user-prompt-id={userPromptId}>
-              {unit.type === "activity" ? (
-                <AgentActivityCluster
-                  messages={unit.messages}
-                  isTurnStreaming={liveActivityClusterIndices.has(index)}
-                  hasBodyBelow={hasBodyBelow}
-                  turnLatencyMs={unit.turnLatencyMs}
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  onOpenFilePreview={onOpenFilePreview}
-                />
-              ) : (
-                <MessageBubble
-                  message={unit.message}
-                  showAssistantCopyAction={
-                    unit.message.role === "assistant"
-                      ? copyFlags[index]
-                      : true
-                  }
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  onOpenFilePreview={onOpenFilePreview}
-                  onForkFromHere={
-                    onForkFromMessage && forkIndex !== undefined
-                      ? () => onForkFromMessage(forkIndex)
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-            {index === forkBoundaryAfterUnitIndex ? (
-              <ForkBoundaryDivider label={t("thread.forkedFromHistory")} />
-            ) : null}
-          </Fragment>
+          <ThreadDisplayUnit
+            key={unitKeys[index]}
+            unit={unit}
+            marginTop={marginTop}
+            userPromptId={userPromptId}
+            hasBodyBelow={hasBodyBelow}
+            deferOffscreenRender={deferOffscreenRender}
+            isTurnStreaming={liveActivityClusterIndices.has(index)}
+            forkIndex={forkIndex}
+            showForkBoundary={index === forkBoundaryAfterUnitIndex}
+            forkBoundaryLabel={t("thread.forkedFromHistory")}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
+            onOpenFilePreview={onOpenFilePreview}
+            onForkFromMessage={onForkFromMessage}
+          />
         );
       })}
     </div>
   );
+}
+
+interface ThreadDisplayUnitProps {
+  unit: DisplayUnit;
+  marginTop: string;
+  userPromptId?: string;
+  hasBodyBelow: boolean;
+  deferOffscreenRender: boolean;
+  isTurnStreaming: boolean;
+  forkIndex?: number;
+  showForkBoundary: boolean;
+  forkBoundaryLabel: string;
+  cliApps: CliAppInfo[];
+  mcpPresets: McpPresetInfo[];
+  slashCommands: SlashCommand[];
+  onOpenFilePreview?: (path: string) => void;
+  onForkFromMessage?: (beforeUserIndex: number) => void;
+}
+
+const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
+  unit,
+  marginTop,
+  userPromptId,
+  hasBodyBelow,
+  deferOffscreenRender,
+  isTurnStreaming,
+  forkIndex,
+  showForkBoundary,
+  forkBoundaryLabel,
+  cliApps,
+  mcpPresets,
+  slashCommands,
+  onOpenFilePreview,
+  onForkFromMessage,
+}: ThreadDisplayUnitProps) {
+  // Introducing content-visibility after a unit has painted can move the
+  // browser's scroll anchor. Only units deferred on their first render may
+  // remain deferred.
+  const hasRenderedEagerlyRef = useRef(!deferOffscreenRender);
+  if (!deferOffscreenRender) hasRenderedEagerlyRef.current = true;
+  const stableDeferOffscreenRender =
+    deferOffscreenRender && !hasRenderedEagerlyRef.current;
+  const onForkFromHere = useCallback(() => {
+    if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
+  }, [forkIndex, onForkFromMessage]);
+  return (
+    <>
+      <div
+        className={`${marginTop}${stableDeferOffscreenRender ? " thread-render-unit" : ""}`}
+        data-user-prompt-id={userPromptId}
+      >
+        {unit.type === "activity" ? (
+          <AgentActivityCluster
+            messages={unit.messages}
+            isTurnStreaming={isTurnStreaming}
+            hasBodyBelow={hasBodyBelow}
+            turnLatencyMs={unit.turnLatencyMs}
+            startedAtMs={unit.startedAtMs}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        ) : (
+          <MessageBubble
+            message={unit.message}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
+            onOpenFilePreview={onOpenFilePreview}
+            onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+          />
+        )}
+      </div>
+      {showForkBoundary ? <ForkBoundaryDivider label={forkBoundaryLabel} /> : null}
+    </>
+  );
+}, threadDisplayUnitPropsEqual);
+
+function threadDisplayUnitPropsEqual(
+  previous: ThreadDisplayUnitProps,
+  next: ThreadDisplayUnitProps,
+): boolean {
+  return (
+    displayUnitsEqual(previous.unit, next.unit)
+    && previous.marginTop === next.marginTop
+    && previous.userPromptId === next.userPromptId
+    && previous.hasBodyBelow === next.hasBodyBelow
+    && previous.deferOffscreenRender === next.deferOffscreenRender
+    && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.forkIndex === next.forkIndex
+    && previous.showForkBoundary === next.showForkBoundary
+    && previous.forkBoundaryLabel === next.forkBoundaryLabel
+    && previous.cliApps === next.cliApps
+    && previous.mcpPresets === next.mcpPresets
+    && previous.slashCommands === next.slashCommands
+    && previous.onOpenFilePreview === next.onOpenFilePreview
+    && previous.onForkFromMessage === next.onForkFromMessage
+  );
+}
+
+function displayUnitsEqual(previous: DisplayUnit, next: DisplayUnit): boolean {
+  if (previous.type !== next.type) return false;
+  if (previous.type === "message" && next.type === "message") {
+    return shallowMessageEqual(previous.message, next.message);
+  }
+  if (previous.type !== "activity" || next.type !== "activity") return false;
+  return (
+    previous.turnLatencyMs === next.turnLatencyMs
+    && previous.startedAtMs === next.startedAtMs
+    && previous.messages.length === next.messages.length
+    && previous.messages.every((message, index) =>
+      shallowMessageEqual(message, next.messages[index]))
+  );
+}
+
+function shallowMessageEqual(previous: UIMessage, next: UIMessage): boolean {
+  if (previous === next) return true;
+  const previousKeys = Object.keys(previous) as Array<keyof UIMessage>;
+  const nextKeys = Object.keys(next) as Array<keyof UIMessage>;
+  return previousKeys.length === nextKeys.length
+    && previousKeys.every((key) => previous[key] === next[key]);
 }
 
 function unitIndexAfterMessageCount(

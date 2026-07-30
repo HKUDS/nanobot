@@ -1,0 +1,38 @@
+{
+  "description": "在 Slack 工作区中使用 nanobot。",
+  "requirements": "Slack 应用令牌、机器人令牌和工作区安装",
+  "setup": {
+    "docsLabel": "打开 Slack 配置指南",
+    "officialLabel": "打开 Slack 应用后台",
+    "tryIt": "提及 Slack 应用，或向它发送私信。",
+    "summary": "Slack 默认使用 Socket Mode，因此同时需要应用级令牌和机器人令牌。",
+    "steps": [
+      "使用提供的 manifest 创建 Slack 应用并启用 Socket Mode。",
+      "将应用安装到工作区，并复制应用令牌和机器人令牌。",
+      "保存并启用 Slack，然后提及应用或发送私信。"
+    ],
+    "actions": {
+      "slack-manifest": "复制 manifest"
+    },
+    "fields": {
+      "appToken": {
+        "label": "应用令牌",
+        "placeholder": "xapp-...",
+        "help": "从 Slack Socket Mode 创建。"
+      },
+      "botToken": {
+        "label": "机器人令牌",
+        "placeholder": "xoxb-...",
+        "help": "安装 Slack 应用后使用机器人令牌。"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      }
+    }
+  }
+}

@@ -1,19 +1,25 @@
 """MyTool: runtime state inspection and configuration for the agent loop."""
 
+# RuntimeState intentionally exposes a narrow set of AgentLoop internals to
+# this manually registered tool. Tool.execute accepts heterogeneous schemas.
+# pyright: reportPrivateUsage=false, reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import current_request_context, current_request_session_key
 from nanobot.agent.tools.runtime_state import RuntimeState
 from nanobot.config_base import Base
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentStatus
+    from nanobot.agent.tools.context import ToolContext
 
 
 class MyToolConfig(Base):
@@ -35,13 +41,13 @@ def _has_real_attr(obj: Any, key: str) -> bool:
     return False
 
 
-def _is_subagent_status(value: Any) -> bool:
+def _is_subagent_status(value: object) -> TypeGuard[SubagentStatus]:
     from nanobot.agent.subagent import SubagentStatus
 
     return isinstance(value, SubagentStatus)
 
 
-class MyTool(Tool, ContextAware):
+class MyTool(Tool):
     """Check and set the agent loop's runtime configuration."""
 
     _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
@@ -52,12 +58,12 @@ class MyTool(Tool, ContextAware):
         return MyToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.my.enable
 
     BLOCKED = frozenset({
         # Core infrastructure
-        "bus", "provider", "_running", "tools",
+        "bus", "provider", "runtime_resolver", "_running", "tools",
         # Config management
         "_runtime_vars",
         # Subsystems
@@ -68,7 +74,7 @@ class MyTool(Tool, ContextAware):
         "_session_locks", "_active_tasks", "_background_tasks",
         # Security boundaries (inspect + modify both blocked)
         "restrict_to_workspace", "channels_config",
-        "_concurrency_gate", "_unified_session", "_extra_hooks",
+        "_concurrency_gate", "_unified_session", "_extra_hooks", "_hook_factories",
     })
 
     READ_ONLY = frozenset({
@@ -76,8 +82,12 @@ class MyTool(Tool, ContextAware):
         "_current_iteration",  # updated by runner only
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
+        "model_presets",  # config-derived catalog; changes require config reload
         "workspace_sandbox",  # read-only view of workspace enforcement level
+        "request",  # current message routing metadata
     })
+
+    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
 
     _DENIED_ATTRS = frozenset({
         "__class__", "__dict__", "__bases__", "__subclasses__", "__mro__",
@@ -107,12 +117,15 @@ class MyTool(Tool, ContextAware):
     }
 
     _MAX_RUNTIME_KEYS = 64
+    _MODEL_RUNTIME_FIELDS = frozenset({
+        "model",
+        "model_preset",
+        "context_window_tokens",
+    })
 
     def __init__(self, runtime_state: RuntimeState, modify_allowed: bool = True) -> None:
         self._runtime_state = runtime_state
         self._modify_allowed = modify_allowed
-        self._channel = ""
-        self._chat_id = ""
 
     def __deepcopy__(self, memo: dict[int, Any]) -> MyTool:
         cls = self.__class__
@@ -120,13 +133,7 @@ class MyTool(Tool, ContextAware):
         memo[id(self)] = result
         result._runtime_state = self._runtime_state
         result._modify_allowed = self._modify_allowed
-        result._channel = self._channel
-        result._chat_id = self._chat_id
         return result
-
-    def set_context(self, ctx: RequestContext) -> None:
-        self._channel = ctx.channel
-        self._chat_id = ctx.chat_id
 
     @property
     def name(self) -> str:
@@ -144,6 +151,10 @@ class MyTool(Tool, ContextAware):
             "Scratchpad keys persist across turns but not restarts.\n"
             "Key values: _current_iteration (current progress), "
             "max_iterations - _current_iteration = remaining iterations.\n"
+            "Current routing metadata is available read-only via request.channel, "
+            "request.chat_id, and request.sender_id.\n"
+            "Use model_preset for session-scoped model or context changes; direct "
+            "model/context_window_tokens writes are disabled during active sessions.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
             "\n"
             "When to use:\n"
@@ -176,6 +187,7 @@ class MyTool(Tool, ContextAware):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
+                    "Use 'request.channel', 'request.chat_id', or 'request.sender_id' for current routing metadata. "
                     "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
                 "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
@@ -184,7 +196,12 @@ class MyTool(Tool, ContextAware):
         }
 
     def _audit(self, action: str, detail: str) -> None:
-        session = f"{self._channel}:{self._chat_id}" if self._channel else "unknown"
+        ctx = current_request_context()
+        session = (
+            ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
+            if ctx is not None and ctx.channel
+            else "unknown"
+        )
         logger.info("self.{} | {} | session:{}", action, detail, session)
 
     # ------------------------------------------------------------------
@@ -193,7 +210,7 @@ class MyTool(Tool, ContextAware):
 
     def _resolve_path(self, path: str) -> tuple[Any, str | None]:
         parts = path.split(".")
-        obj = self._runtime_state
+        obj: Any = self._runtime_state
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
@@ -202,11 +219,12 @@ class MyTool(Tool, ContextAware):
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
             try:
-                if isinstance(obj, dict):
-                    if part in obj:
-                        obj = obj[part]
+                if isinstance(obj, Mapping):
+                    mapping = cast(Mapping[str, Any], obj)
+                    if part in mapping:
+                        obj = mapping[part]
                     else:
-                        return None, f"'{part}' not found in dict"
+                        return None, f"'{part}' not found in mapping"
                 else:
                     obj = getattr(obj, part)
             except (KeyError, AttributeError) as e:
@@ -216,7 +234,7 @@ class MyTool(Tool, ContextAware):
     @staticmethod
     def _validate_key(key: str | None, label: str = "key") -> str | None:
         if not key or not key.strip():
-            return f"Error: '{label}' cannot be empty or whitespace"
+            return ToolResult.error(f"Error: '{label}' cannot be empty or whitespace")
         return None
 
     # ------------------------------------------------------------------
@@ -247,28 +265,40 @@ class MyTool(Tool, ContextAware):
             detail = MyTool._format_status(val, "  ")
             return f"{header}\n  task: {val.task_description}\n{detail}"
         # SubagentManager: delegate to its _task_statuses dict
-        if hasattr(val, "_task_statuses") and isinstance(val._task_statuses, dict):
-            return MyTool._format_value(val._task_statuses, key)
-        if isinstance(val, dict) and val and _is_subagent_status(next(iter(val.values()))):
+        task_statuses = getattr(val, "_task_statuses", None)
+        if isinstance(task_statuses, dict):
+            return MyTool._format_value(task_statuses, key)
+        if isinstance(val, Mapping):
+            mapping = cast(Mapping[object, object], val)
+        else:
+            mapping = None
+        if (
+            mapping
+            and _is_subagent_status(next(iter(mapping.values())))
+        ):
+            status_mapping: Mapping[object, SubagentStatus] = cast(Any, mapping)
             prefix = f"{key}: " if key else ""
-            lines = [f"{prefix}{len(val)} subagent(s):"]
-            for tid, st in val.items():
+            lines = [f"{prefix}{len(status_mapping)} subagent(s):"]
+            for tid, st in status_mapping.items():
                 detail = MyTool._format_status(st, "    ")
                 lines.append(f"  [{tid}] '{st.label}'\n{detail}")
             return "\n".join(lines)
-        if hasattr(val, "tool_names"):
-            return f"tools: {len(val.tool_names)} registered — {val.tool_names}"
+        dynamic_value = cast(Any, val)
+        if hasattr(dynamic_value, "tool_names"):
+            tool_names: Any = getattr(dynamic_value, "tool_names")
+            return f"tools: {len(tool_names)} registered — {tool_names}"
         # Scalar types — repr is fine
         if isinstance(val, (str, int, float, bool, type(None))):
             r = repr(val)
             return f"{key}: {r}" if key else r
-        # Dict — small: show content; large: show keys for dot-path navigation
-        if isinstance(val, dict):
-            ks = list(val.keys())
+        # Mapping — small: show content; large: show keys for dot-path navigation
+        if isinstance(val, Mapping):
+            value_mapping = cast(Mapping[object, object], val)
+            ks = list(value_mapping.keys())
             if not ks:
                 return f"{key}: {{}}" if key else "{}"
             if len(ks) <= 5:
-                r = repr(val)
+                r = repr(value_mapping)
                 if len(r) <= 200:
                     return f"{key}: {r}" if key else r
             preview = ", ".join(str(k) for k in ks[:15])
@@ -276,18 +306,20 @@ class MyTool(Tool, ContextAware):
             return f"{key}: {{{preview}{suffix}}}" if key else f"{{{preview}{suffix}}}"
         # List/tuple — count for large, repr for small
         if isinstance(val, (list, tuple)):
-            if len(val) > 20:
-                return f"{key}: [{len(val)} items]" if key else f"[{len(val)} items]"
-            r = repr(val)
+            sequence = cast(list[object] | tuple[object, ...], val)
+            if len(sequence) > 20:
+                return f"{key}: [{len(sequence)} items]" if key else f"[{len(sequence)} items]"
+            r = repr(sequence)
             return f"{key}: {r}" if key else r
         # Complex object — small Pydantic models: show values; others: show field names for navigation
-        cls_name = type(val).__name__
-        model_fields = getattr(type(val), "model_fields", None)
-        if model_fields:
-            fields = list(model_fields.keys())
+        value_type = type(cast(object, val))
+        cls_name = value_type.__name__
+        model_fields = cast(object, getattr(value_type, "model_fields", None))
+        if isinstance(model_fields, Mapping) and model_fields:
+            fields = list(cast(Mapping[str, object], model_fields).keys())
             if len(fields) <= 8:
                 # Small config objects: show field=value pairs
-                pairs = []
+                pairs: list[str] = []
                 for f in fields:
                     fv = getattr(val, f, "?")
                     if MyTool._is_sensitive_field_name(f):
@@ -299,7 +331,8 @@ class MyTool(Tool, ContextAware):
                 preview = ", ".join(pairs)
                 return f"{key}: {preview}" if key else preview
         else:
-            fields = [a for a in getattr(val, "__dict__", {}) if not a.startswith("__")]
+            attributes = cast(dict[str, Any], getattr(val, "__dict__", {}))
+            fields = [name for name in attributes if not name.startswith("__")]
         if fields:
             preview = ", ".join(str(f) for f in fields[:20])
             suffix = ", ..." if len(fields) > 20 else ""
@@ -321,19 +354,43 @@ class MyTool(Tool, ContextAware):
         if action in ("inspect", "check"):
             return self._inspect(key)
         if not self._modify_allowed:
-            return "Error: set is disabled (tools.my.allow_set is false)"
+            return ToolResult.error("Error: set is disabled (tools.my.allow_set is false)")
         if action in ("modify", "set"):
             return self._modify(key, value)
         return f"Unknown action: {action}"
 
     # -- inspect --
 
+    def _current_runtime_value(self, key: str) -> tuple[bool, Any]:
+        request_ctx = current_request_context()
+        runtime = request_ctx.runtime if request_ctx is not None else None
+        if runtime is None or key not in self._MODEL_RUNTIME_FIELDS:
+            return False, None
+        return True, getattr(runtime, key)
+
     def _inspect(self, key: str | None) -> str:
         if not key:
             return self._inspect_all()
+        if key == "request" or key.startswith("request."):
+            request_ctx = current_request_context()
+            if request_ctx is None:
+                return ToolResult.error("Error: current request context is unavailable")
+            if key == "request":
+                return self._format_value(
+                    {field: getattr(request_ctx, field) for field in self._REQUEST_FIELDS},
+                    key,
+                )
+            field = key.removeprefix("request.")
+            if field not in self._REQUEST_FIELDS:
+                return ToolResult.error(f"Error: '{key}' not found")
+            return self._format_value(getattr(request_ctx, field), key)
+        if "." not in key:
+            found, value = self._current_runtime_value(key)
+            if found:
+                return self._format_value(value, key)
         top = key.split(".")[0]
         if top in self._DENIED_ATTRS or top.startswith("__"):
-            return f"Error: '{top}' is not accessible"
+            return ToolResult.error(f"Error: '{top}' is not accessible")
         obj, err = self._resolve_path(key)
         if err:
             # "scratchpad" alias for _runtime_vars
@@ -343,12 +400,12 @@ class MyTool(Tool, ContextAware):
             # Fallback: check _runtime_vars for simple keys stored by modify
             if "." not in key and key in self._runtime_state._runtime_vars:
                 return self._format_value(self._runtime_state._runtime_vars[key], key)
-            return f"Error: {err}"
+            return ToolResult.error(f"Error: {err}")
         # Guard against mock auto-generated attributes
         if "." not in key and not _has_real_attr(self._runtime_state, key):
             if key in self._runtime_state._runtime_vars:
                 return self._format_value(self._runtime_state._runtime_vars[key], key)
-            return f"Error: '{key}' not found"
+            return ToolResult.error(f"Error: '{key}' not found")
         return self._format_value(obj, key)
 
     def _inspect_all(self) -> str:
@@ -356,8 +413,13 @@ class MyTool(Tool, ContextAware):
         parts: list[str] = []
         # RESTRICTED keys
         for k in self.RESTRICTED:
-            parts.append(self._format_value(getattr(state, k, None), k))
-        parts.append(self._format_value(state.model_preset, "model_preset"))
+            found, value = self._current_runtime_value(k)
+            parts.append(self._format_value(value if found else getattr(state, k, None), k))
+        found, value = self._current_runtime_value("model_preset")
+        parts.append(self._format_value(
+            value if found else state.model_preset,
+            "model_preset",
+        ))
         # Other useful top-level keys shown in description
         for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "workspace_sandbox", "subagents"):
             if _has_real_attr(state, k):
@@ -376,24 +438,25 @@ class MyTool(Tool, ContextAware):
     def _modify(self, key: str | None, value: Any) -> str:
         if err := self._validate_key(key):
             return err
+        key = cast(str, key)
         top = key.split(".")[0]
         if top in self.BLOCKED or top in self._DENIED_ATTRS or top.startswith("__") or top.lower() in self._SENSITIVE_NAMES:
             self._audit("modify", f"BLOCKED {key}")
-            return f"Error: '{key}' is protected and cannot be modified"
+            return ToolResult.error(f"Error: '{key}' is protected and cannot be modified")
         if top in self.READ_ONLY:
             self._audit("modify", f"READ_ONLY {key}")
-            return f"Error: '{key}' is read-only and cannot be modified"
+            return ToolResult.error(f"Error: '{key}' is read-only and cannot be modified")
         if "." in key:
             parent_path, leaf = key.rsplit(".", 1)
             if leaf in self._DENIED_ATTRS or leaf.startswith("__"):
                 self._audit("modify", f"BLOCKED leaf '{leaf}'")
-                return f"Error: '{leaf}' is not accessible"
+                return ToolResult.error(f"Error: '{leaf}' is not accessible")
             if leaf.lower() in self._SENSITIVE_NAMES:
                 self._audit("modify", f"BLOCKED sensitive leaf '{leaf}'")
-                return f"Error: '{leaf}' is not accessible"
+                return ToolResult.error(f"Error: '{leaf}' is not accessible")
             parent, err = self._resolve_path(parent_path)
             if err:
-                return f"Error: {err}"
+                return ToolResult.error(f"Error: {err}")
             if isinstance(parent, dict):
                 parent[leaf] = value
             else:
@@ -408,11 +471,28 @@ class MyTool(Tool, ContextAware):
 
     def _modify_model_preset(self, value: Any) -> str:
         if not isinstance(value, str) or not value.strip():
-            return "Error: 'model_preset' must be a non-empty string"
+            return ToolResult.error("Error: 'model_preset' must be a non-empty string")
         name = value.strip()
+        session_key = current_request_session_key()
+        if session_key:
+            try:
+                runtime = self._runtime_state.set_session_model_preset(
+                    session_key,
+                    name,
+                )
+            except (KeyError, ValueError) as exc:
+                message = str(exc.args[0]) if exc.args else str(exc)
+                punctuation = "" if message.endswith((".", "!", "?")) else "."
+                return ToolResult.error(f"Error: {message}{punctuation}")
+            self._audit("modify", f"model_preset = {name!r}")
+            return (
+                f"Set model_preset = {name!r} for the next turn; "
+                f"model will be {runtime.model!r}; "
+                f"context_window_tokens will be {runtime.context_window_tokens!r}"
+            )
         result = self._modify_free("model_preset", name)
-        if result.startswith("Error:"):
-            return result if result.endswith((".", "!", "?")) else f"{result}."
+        if isinstance(result, ToolResult) and result.is_error:
+            return result if result.endswith((".", "!", "?")) else ToolResult.error(f"{result}.")
         return (
             f"{result}; model is now {self._runtime_state.model!r}; "
             f"context_window_tokens is now {self._runtime_state.context_window_tokens!r}"
@@ -420,25 +500,36 @@ class MyTool(Tool, ContextAware):
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
-        expected = spec["type"]
+        expected = cast(type[Any], spec["type"])
         if expected is int and isinstance(value, bool):
-            return f"Error: '{key}' must be {expected.__name__}, got bool"
+            return ToolResult.error(f"Error: '{key}' must be {expected.__name__}, got bool")
         if not isinstance(value, expected):
             try:
                 value = expected(value)
             except (ValueError, TypeError):
-                return f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}"
+                return ToolResult.error(f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}")
         old = getattr(self._runtime_state, key)
         if "min" in spec and value < spec["min"]:
-            return f"Error: '{key}' must be >= {spec['min']}"
+            return ToolResult.error(f"Error: '{key}' must be >= {spec['min']}")
         if "max" in spec and value > spec["max"]:
-            return f"Error: '{key}' must be <= {spec['max']}"
+            return ToolResult.error(f"Error: '{key}' must be <= {spec['max']}")
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
-            return f"Error: '{key}' must be at least {spec['min_len']} characters"
-        setattr(self._runtime_state, key, value)
+            return ToolResult.error(f"Error: '{key}' must be at least {spec['min_len']} characters")
+        if key in {"model", "context_window_tokens"} and current_request_session_key():
+            return ToolResult.error(
+                f"Error: direct '{key}' changes are instance-wide and disabled "
+                "during an active session; use a configured model_preset"
+            )
         if key == "model":
-            self._runtime_state._active_preset = None
-        if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
+            self._runtime_state.set_runtime_model(cast(str, value))
+        elif key == "context_window_tokens":
+            self._runtime_state.set_runtime_context_window(cast(int, value))
+        else:
+            setattr(self._runtime_state, key, value)
+        if key == "max_iterations" and hasattr(
+            self._runtime_state,
+            "_sync_subagent_runtime_limits",
+        ):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
         return f"Set {key} = {value!r} (was {old!r})"
@@ -447,7 +538,8 @@ class MyTool(Tool, ContextAware):
         if _has_real_attr(self._runtime_state, key):
             old = getattr(self._runtime_state, key)
             if isinstance(old, (str, int, float, bool)):
-                old_t, new_t = type(old), type(value)
+                old_t: type[Any] = type(old)
+                new_t = cast(type[Any], type(value))
                 if old_t is float and new_t is int:
                     pass  # int → float coercion allowed
                 elif old_t is not new_t:
@@ -455,25 +547,25 @@ class MyTool(Tool, ContextAware):
                         "modify",
                         f"REJECTED type mismatch {key}: expects {old_t.__name__}, got {new_t.__name__}",
                     )
-                    return f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}"
+                    return ToolResult.error(f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}")
             try:
                 setattr(self._runtime_state, key, value)
             except (ValueError, KeyError) as e:
                 message = str(e.args[0] if isinstance(e, KeyError) and e.args else e).strip('"')
                 self._audit("modify", f"REJECTED {key}: {message}")
-                return f"Error: {message}"
+                return ToolResult.error(f"Error: {message}")
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):
             self._audit("modify", f"REJECTED callable {key}")
-            return "Error: cannot store callable values"
+            return ToolResult.error("Error: cannot store callable values")
         err = self._validate_json_safe(value)
         if err:
             self._audit("modify", f"REJECTED {key}: {err}")
-            return f"Error: {err}"
+            return ToolResult.error(f"Error: {err}")
         if key not in self._runtime_state._runtime_vars and len(self._runtime_state._runtime_vars) >= self._MAX_RUNTIME_KEYS:
             self._audit("modify", f"REJECTED {key}: max keys ({self._MAX_RUNTIME_KEYS}) reached")
-            return f"Error: scratchpad is full (max {self._MAX_RUNTIME_KEYS} keys). Remove unused keys first."
+            return ToolResult.error(f"Error: scratchpad is full (max {self._MAX_RUNTIME_KEYS} keys). Remove unused keys first.")
         old = self._runtime_state._runtime_vars.get(key)
         self._runtime_state._runtime_vars[key] = value
         self._audit("modify", f"scratchpad.{key}: {old!r} -> {value!r}")
@@ -486,12 +578,12 @@ class MyTool(Tool, ContextAware):
         if isinstance(value, (str, int, float, bool, type(None))):
             return None
         if isinstance(value, list):
-            for i, item in enumerate(value):
+            for i, item in enumerate(cast(list[Any], value)):
                 if err := cls._validate_json_safe(item, depth + 1):
                     return f"list[{i}] contains {err}"
             return None
         if isinstance(value, dict):
-            for k, v in value.items():
+            for k, v in cast(dict[Any, Any], value).items():
                 if not isinstance(k, str):
                     return f"dict key must be str, got {type(k).__name__}"
                 if err := cls._validate_json_safe(v, depth + 1):

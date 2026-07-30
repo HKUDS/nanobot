@@ -1,7 +1,10 @@
+import json
 import warnings
 
 import pytest
 
+from nanobot.agent.model_presets import load_model_preset_catalog
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.schema import Config
 
 
@@ -14,6 +17,29 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.context_window_tokens == config.agents.defaults.context_window_tokens
     assert resolved.temperature == config.agents.defaults.temperature
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
+
+
+def test_model_preset_catalog_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    name = "NANOBOT_TEST_CATALOG_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_model_preset_catalog(config_path)
+
+    assert exc_info.value.path == config_path
+
+
+def test_agent_timezone_rejects_unknown_iana_name() -> None:
+    with pytest.raises(ValueError, match="unknown timezone"):
+        Config.model_validate({"agents": {"defaults": {"timezone": "Not/AZone"}}})
 
 
 def test_provider_api_type_accepts_exact_values_only() -> None:
@@ -219,6 +245,23 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
     assert config.model_presets["fast"].provider == "openai"
 
 
+def test_model_presets_serializes_with_camel_case_root_key() -> None:
+    config = Config.model_validate({
+        "model_presets": {
+            "fast": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+            }
+        },
+    })
+
+    dumped = config.model_dump(mode="json", by_alias=True)
+
+    assert "modelPresets" in dumped
+    assert "model_presets" not in dumped
+    assert dumped["modelPresets"]["fast"]["model"] == "openai/gpt-4.1"
+
+
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:
     config = Config.model_validate({
         "model_presets": {
@@ -242,6 +285,24 @@ def test_validator_rejects_unknown_preset() -> None:
                     "modelPreset": "unknown",
                 }
             }
+        })
+
+
+def test_validator_accepts_dream_model_preset() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "dream": {"model": "anthropic/claude-haiku-4-5", "provider": "anthropic"},
+        },
+        "agents": {"defaults": {"dream": {"modelOverride": "dream"}}},
+    })
+
+    assert config.agents.defaults.dream.model_override == "dream"
+
+
+def test_validator_rejects_unknown_dream_model_preset() -> None:
+    with pytest.raises(ValueError, match="Dream model preset 'unknown' not found"):
+        Config.model_validate({
+            "agents": {"defaults": {"dream": {"modelOverride": "unknown"}}},
         })
 
 
@@ -363,6 +424,24 @@ def test_spawn_presets_validator_rejects_unknown_entry() -> None:
                 }
             },
         })
+
+
+def test_configured_spawn_presets_excludes_synthetic_default() -> None:
+    from nanobot.agent.model_presets import configured_spawn_presets
+
+    config = Config.model_validate({
+        "modelPresets": {
+            "fast": {"model": "openai/gpt-4.1"},
+        },
+        "agents": {
+            "defaults": {
+                "spawnPresets": ["fast"],
+            }
+        },
+    })
+    result = configured_spawn_presets(config)
+    assert "fast" in result
+    assert "default" not in result
 
 
 def test_spawn_presets_validator_accepts_valid_entries() -> None:

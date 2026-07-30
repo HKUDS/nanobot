@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
+from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
-    SDKRuntimeController,
     build_process_direct_kwargs,
     ensure_single_model_selector,
 )
@@ -37,6 +37,7 @@ from nanobot.sdk.types import (
     StreamEventType,
     result_from_response,
 )
+from nanobot.utils.llm_runtime import LLMRuntime
 
 __all__ = [
     "Nanobot",
@@ -73,7 +74,6 @@ class Nanobot:
     def __init__(self, loop: AgentLoop, *, config: Config | None = None) -> None:
         self._loop = loop
         self._config = config
-        self._runtime_overrides = SDKRuntimeController(loop, config=config)
         self.sessions = SessionClient(loop)
         self.memory = MemoryClient(loop)
         self.runtime = RuntimeClient(loop)
@@ -105,7 +105,10 @@ class Nanobot:
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
 
-        config: Config = resolve_config_env_vars(load_config(resolved))
+        config: Config = resolve_config_env_vars(
+            load_config(resolved),
+            config_path=resolved,
+        )
         if workspace is not None:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()
@@ -120,6 +123,7 @@ class Nanobot:
         loop = AgentLoop.from_config(
             config,
             image_generation_provider_configs=image_gen_provider_configs(config),
+            hook_factories=[create_file_edit_activity_hook],
         )
         return cls(loop, config=config)
 
@@ -133,6 +137,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -148,26 +153,36 @@ class Nanobot:
             sender_id: Logical sender identifier for runtime context.
             media: Optional local media paths attached to the message.
             ephemeral: If true, do not persist the turn or compact session history.
+            attributes: Optional caller-owned request data exposed to context
+                providers and turn-hook factories. Attributes are kept separate
+                from nanobot's trusted internal message metadata.
             hooks: Optional lifecycle hooks for this run.
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
         """
         capture = SDKCaptureHook()
         per_run_hooks = [capture, *(hooks or [])]
-        async with self._runtime_overrides.override(model=model, model_preset=model_preset):
-            kwargs = build_process_direct_kwargs(
-                session_key=session_key,
-                channel=channel,
-                chat_id=chat_id,
-                sender_id=sender_id,
-                media=media,
-                ephemeral=ephemeral,
-            )
-            response = await self._loop.process_direct(
-                message,
-                **kwargs,
-                hooks=per_run_hooks,
-            )
+        runtime = self._loop.runtime_resolver.resolve_override(
+            model=model,
+            model_preset=model_preset,
+            config=self._config,
+        )
+        kwargs = build_process_direct_kwargs(
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+            sender_id=sender_id,
+            media=media,
+            ephemeral=ephemeral,
+            attributes=attributes,
+        )
+        if runtime is not None:
+            kwargs["runtime"] = runtime
+        response = await self._loop.process_direct(
+            message,
+            **kwargs,
+            hooks=per_run_hooks,
+        )
 
         return result_from_response(response, capture)
 
@@ -181,17 +196,46 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
-        ensure_single_model_selector(model=model, model_preset=model_preset)
+        override_runtime = self._loop.runtime_resolver.resolve_override(
+            model=model,
+            model_preset=model_preset,
+            config=self._config,
+        )
         queue: asyncio.Queue[StreamEvent | object] = asyncio.Queue(maxsize=256)
         emitter = SDKStreamEmitter(queue)
         stream_hook = SDKStreamingHook(emitter)
         capture = SDKCaptureHook()
         per_run_hooks = [capture, stream_hook, *(hooks or [])]
+        run_started = False
+
+        async def _emit_run_started(runtime: LLMRuntime | None = None) -> None:
+            nonlocal run_started
+            if run_started:
+                return
+            if runtime is None:
+                runtime = override_runtime
+            metadata: dict[str, Any] = {
+                "session_key": session_key,
+                "channel": channel,
+                "chat_id": chat_id,
+                "sender_id": sender_id,
+            }
+            if runtime is not None:
+                metadata.update({
+                    "model": runtime.model,
+                    "model_preset": runtime.model_preset,
+                })
+            await emitter.emit(StreamEvent(
+                type=STREAM_EVENT_RUN_STARTED,
+                metadata=metadata,
+            ))
+            run_started = True
 
         async def _on_stream(delta: str) -> None:
             await emitter.text_delta(delta)
@@ -200,55 +244,47 @@ class Nanobot:
             await emitter.text_completed(resuming=resuming)
 
         async def _run() -> RunResult:
-            async with self._runtime_overrides.override(model=model, model_preset=model_preset):
-                kwargs = build_process_direct_kwargs(
-                    session_key=session_key,
-                    channel=channel,
-                    chat_id=chat_id,
-                    sender_id=sender_id,
-                    media=media,
-                    ephemeral=ephemeral,
-                    on_stream=_on_stream,
-                    on_stream_end=_on_stream_end,
+            kwargs = build_process_direct_kwargs(
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                sender_id=sender_id,
+                media=media,
+                ephemeral=ephemeral,
+                attributes=attributes,
+                on_stream=_on_stream,
+                on_stream_end=_on_stream_end,
+            )
+            kwargs["on_runtime_admitted"] = _emit_run_started
+            if override_runtime is not None:
+                kwargs["runtime"] = override_runtime
+            try:
+                response = await self._loop.process_direct(
+                    message,
+                    **kwargs,
+                    hooks=per_run_hooks,
                 )
+                await _emit_run_started()
+                await emitter.text_completed(resuming=False, force=False)
+                result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
-                    type=STREAM_EVENT_RUN_STARTED,
-                    metadata={
-                        "session_key": session_key,
-                        "channel": channel,
-                        "chat_id": chat_id,
-                        "sender_id": sender_id,
-                        "model": self._loop.model,
-                        "model_preset": (
-                            model_preset if model_preset is not None else self._loop.model_preset
-                        ),
-                    },
+                    type=STREAM_EVENT_RUN_COMPLETED,
+                    content=result.content,
+                    result=result,
+                    usage=dict(result.usage),
+                    metadata=dict(result.metadata),
                 ))
-                try:
-                    response = await self._loop.process_direct(
-                        message,
-                        **kwargs,
-                        hooks=per_run_hooks,
-                    )
-                    await emitter.text_completed(resuming=False, force=False)
-                    result = result_from_response(response, capture)
-                    await emitter.emit(StreamEvent(
-                        type=STREAM_EVENT_RUN_COMPLETED,
-                        content=result.content,
-                        result=result,
-                        usage=dict(result.usage),
-                        metadata=dict(result.metadata),
-                    ))
-                    return result
-                except Exception as exc:
-                    await emitter.emit(StreamEvent(
-                        type=STREAM_EVENT_RUN_FAILED,
-                        error=str(exc),
-                        metadata={"exception_type": type(exc).__name__},
-                    ))
-                    raise
-                finally:
-                    emitter.close()
+                return result
+            except Exception as exc:
+                await _emit_run_started()
+                await emitter.emit(StreamEvent(
+                    type=STREAM_EVENT_RUN_FAILED,
+                    error=str(exc),
+                    metadata={"exception_type": type(exc).__name__},
+                ))
+                raise
+            finally:
+                emitter.close()
 
         task = asyncio.create_task(_run())
         return RunStream(task, queue)
@@ -263,6 +299,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -276,6 +313,7 @@ class Nanobot:
             sender_id=sender_id,
             media=media,
             ephemeral=ephemeral,
+            attributes=attributes,
             hooks=hooks,
             model=model,
             model_preset=model_preset,

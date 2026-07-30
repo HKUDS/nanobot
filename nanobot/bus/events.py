@@ -2,7 +2,10 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nanobot.bus.outbound_events import OutboundEvent
 
 # Optional ``OutboundMessage.metadata`` key for structured, channel-agnostic UI
 # payloads. Value is JSON-serializable with at least ``kind``; rich clients may
@@ -14,6 +17,7 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 RUNTIME_CONTROL_ACK = "_ack"
 RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
+RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD = "image_generation_reload"
 
 
 @dataclass
@@ -39,9 +43,9 @@ class InboundMessage:
 class OutboundMessage:
     """Message to send to a chat channel.
 
-    ``metadata`` can carry routing (``message_id``, …), trace flags (``_progress``),
-    and optional ``OUTBOUND_META_AGENT_UI`` blobs for rich clients; non-WebUI
-    channels may ignore unknown keys.
+    ``event`` carries internal runtime/UI semantics. ``metadata`` is reserved
+    for channel routing context (``message_id``, thread ids, etc.) and optional
+    ``OUTBOUND_META_AGENT_UI`` blobs for rich clients.
     """
 
     channel: str
@@ -51,3 +55,4 @@ class OutboundMessage:
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     buttons: list[list[str]] = field(default_factory=list)
+    event: "OutboundEvent | None" = None

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -16,6 +17,7 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
+_SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
 
 
 class SkillsLoader:
@@ -108,6 +110,21 @@ class SkillsLoader:
         ]
         return "\n\n---\n\n".join(parts)
 
+    def get_explicitly_invoked_skills(self, text: str) -> list[str]:
+        """Resolve ``$skill-name`` references to enabled, available skills."""
+        if not text:
+            return []
+        available = {
+            entry["name"]
+            for entry in self.list_skills(filter_unavailable=True)
+        }
+        invoked: list[str] = []
+        for match in _SKILL_REFERENCE.finditer(text):
+            name = match.group(1)
+            if name in available and name not in invoked:
+                invoked.append(name)
+        return invoked
+
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
@@ -125,27 +142,50 @@ class SkillsLoader:
         if not all_skills:
             return ""
 
-        lines: list[str] = []
-        for entry in all_skills:
-            skill_name = entry["name"]
-            if exclude and skill_name in exclude:
+        sections: list[str] = []
+        groups = (
+            ("Workspace skills", "workspace", self.workspace_skills),
+            ("Built-in skills", "builtin", self.builtin_skills),
+        )
+        for label, source, root in groups:
+            entries = [
+                entry
+                for entry in all_skills
+                if entry["source"] == source and (not exclude or entry["name"] not in exclude)
+            ]
+            if not entries:
                 continue
-            meta = self._get_skill_meta(skill_name)
-            available = self._check_requirements(meta)
-            desc = self._get_skill_description(skill_name)
-            if available:
-                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
-            else:
-                missing = self._get_missing_requirements(meta)
-                suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
-        return "\n".join(lines)
 
-    def _get_missing_requirements(self, skill_meta: dict) -> str:
+            lines = [f"### {label} (`{root.expanduser().resolve()}`)"]
+            for entry in entries:
+                skill_name = entry["name"]
+                meta = self._get_skill_meta(skill_name)
+                available = self._check_requirements(meta)
+                desc = self.get_skill_description(skill_name)
+                suffix = ""
+                if not available:
+                    missing = self._get_missing_requirements(meta)
+                    suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
+                relative_path = Path(entry["path"]).relative_to(root).as_posix()
+                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{relative_path}`")
+            sections.append("\n".join(lines))
+        return "\n\n".join(sections)
+
+    @staticmethod
+    def _requirement_lists(skill_meta: dict[str, Any]) -> tuple[list[str], list[str]]:
+        """Return (bins, env) lists from skill metadata, tolerating null/wrong shapes."""
+        requires = cast(dict[str, Any], skill_meta.get("requires") or {})
+        if not isinstance(skill_meta.get("requires") or {}, dict):
+            return [], []
+        bins_raw: object = requires.get("bins") or []
+        env_raw: object = requires.get("env") or []
+        bins = [value for value in cast(list[object], bins_raw) if isinstance(value, str) and value.strip()] if isinstance(bins_raw, list) else []
+        env = [value for value in cast(list[object], env_raw) if isinstance(value, str) and value.strip()] if isinstance(env_raw, list) else []
+        return bins, env
+
+    def _get_missing_requirements(self, skill_meta: dict[str, Any]) -> str:
         """Get a description of missing requirements."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
+        required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return ", ".join(
             [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
             + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
@@ -159,9 +199,7 @@ class SkillsLoader:
 
     def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
         """Return explicit command/env requirements and currently missing entries."""
-        requires = self._get_skill_meta(name).get("requires", {})
-        bins = [str(value) for value in requires.get("bins", [])]
-        env = [str(value) for value in requires.get("env", [])]
+        bins, env = self._requirement_lists(self._get_skill_meta(name))
         return {
             "bins": bins,
             "env": env,
@@ -169,11 +207,12 @@ class SkillsLoader:
             "missing_env": [value for value in env if not os.environ.get(value)],
         }
 
-    def _get_skill_description(self, name: str) -> str:
+    def get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""
         meta = self.get_skill_metadata(name)
-        if meta and meta.get("description"):
-            return meta["description"]
+        description = meta.get("description") if meta else None
+        if isinstance(description, str) and description:
+            return description
         return name  # Fallback to skill name
 
     def _strip_frontmatter(self, content: str) -> str:
@@ -185,13 +224,13 @@ class SkillsLoader:
             return content[match.end():].strip()
         return content
 
-    def _parse_nanobot_metadata(self, raw: object) -> dict:
+    def _parse_nanobot_metadata(self, raw: object) -> dict[str, Any]:
         """Extract nanobot/openclaw metadata from a frontmatter field.
 
         ``raw`` may be a dict (already parsed by yaml.safe_load) or a JSON str.
         """
         if isinstance(raw, dict):
-            data = raw
+            data = cast(dict[str, Any], raw)
         elif isinstance(raw, str):
             try:
                 data = json.loads(raw)
@@ -201,19 +240,18 @@ class SkillsLoader:
             return {}
         if not isinstance(data, dict):
             return {}
-        payload = data.get("nanobot", data.get("openclaw", {}))
-        return payload if isinstance(payload, dict) else {}
+        data_object = cast(dict[str, Any], data)
+        payload = data_object.get("nanobot", data_object.get("openclaw", {}))
+        return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
-    def _check_requirements(self, skill_meta: dict) -> bool:
+    def _check_requirements(self, skill_meta: dict[str, Any]) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
+        required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return all(shutil.which(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
         )
 
-    def _get_skill_meta(self, name: str) -> dict:
+    def _get_skill_meta(self, name: str) -> dict[str, Any]:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
         raw_meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(raw_meta.get("metadata"))
@@ -230,7 +268,7 @@ class SkillsLoader:
             )
         ]
 
-    def get_skill_metadata(self, name: str) -> dict | None:
+    def get_skill_metadata(self, name: str) -> dict[str, object] | None:
         """
         Get metadata from a skill's frontmatter.
 
@@ -255,6 +293,6 @@ class SkillsLoader:
         # yaml.safe_load returns native types (int, bool, list, etc.);
         # keep values as-is so downstream consumers get correct types.
         metadata: dict[str, object] = {}
-        for key, value in parsed.items():
+        for key, value in cast(dict[object, object], parsed).items():
             metadata[str(key)] = value
         return metadata

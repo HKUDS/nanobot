@@ -1,5 +1,7 @@
 """OpenAI-compatible provider for all non-Anthropic LLM APIs."""
 
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -7,14 +9,15 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import string
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -58,6 +61,7 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
+_KIMI_K3_MODEL = "kimi-k3"
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
@@ -70,6 +74,11 @@ _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code",
     "kimi-k2.7-code-highspeed",
 })
+_KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.5",
+    "kimi-k2.6",
+})
+_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
 # because it does not support thinking.
@@ -84,17 +93,34 @@ _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
 # merge into extra_body, keeping the style→wire-format mapping in one place.
-_THINKING_STYLE_MAP: dict[str, Any] = {
+_THINKING_STYLE_MAP: dict[
+    str,
+    Callable[[bool], dict[str, Any]],
+] = {
     "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
     "enable_thinking": lambda on: {"enable_thinking": on},
     "reasoning_split": lambda on: {"reasoning_split": on},
 }
-_GATEWAY_REASONING_STYLE_MAP: dict[str, Any] = {
+_GATEWAY_REASONING_STYLE_MAP: dict[
+    str,
+    Callable[[str], dict[str, Any]],
+] = {
     "reasoning_effort": lambda effort: {"reasoning": {"effort": effort}},
 }
+_QWEN_THINKING_MODELS: frozenset[str] = frozenset({
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+    "qwen3.5-plus",
+    "qwen3.5-flash",
+})
+
 _MODEL_THINKING_STYLES: dict[str, str] = {
     **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
     **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
+    **dict.fromkeys(_QWEN_THINKING_MODELS, "enable_thinking"),
 }
 
 
@@ -107,9 +133,9 @@ def _provider_prefix_key(name: str) -> str:
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
+    """Return True for models that require ``max_completion_tokens``."""
     slug = _model_slug(model_name)
-    return "gpt-5" in slug or any(
+    return slug == _KIMI_K3_MODEL or "gpt-5" in slug or any(
         slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
     )
 
@@ -165,24 +191,87 @@ def _short_tool_id() -> str:
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
-def _get(obj: Any, key: str) -> Any:
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```") or not stripped.endswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+    """Normalize common text-format tool call blocks into structured calls."""
+    if not content or "<tool_call>" not in content:
+        return content, []
+
+    tool_calls: list[ToolCallRequest] = []
+    spans: list[tuple[int, int]] = []
+    for match in _TEXT_TOOL_CALL_RE.finditer(content):
+        try:
+            raw_payload: object = json.loads(
+                _strip_json_fence(match.group(1))
+            )
+        except Exception:
+            continue
+        if not isinstance(raw_payload, dict):
+            continue
+        payload = cast(dict[str, Any], raw_payload)
+
+        nested = cast(object, payload.get("tool_call"))
+        if isinstance(nested, dict):
+            payload = cast(dict[str, Any], nested)
+        function = cast(object, payload.get("function"))
+        if not isinstance(function, dict):
+            function = payload
+        function_data = cast(dict[str, Any], function)
+        name = cast(object, function_data.get("name"))
+        if not isinstance(name, str) or not name:
+            continue
+
+        arguments = function_data.get(
+            "arguments",
+            payload.get("arguments", {}),
+        )
+        tool_calls.append(ToolCallRequest(
+            id=str(payload.get("id") or _short_tool_id()),
+            name=name,
+            arguments=parse_tool_arguments(arguments),
+        ))
+        spans.append(match.span())
+
+    if not tool_calls:
+        return content, []
+
+    visible_parts: list[str] = []
+    last = 0
+    for start, end in spans:
+        visible_parts.append(content[last:start])
+        last = end
+    visible_parts.append(content[last:])
+    visible_content = "".join(visible_parts).strip() or None
+    return visible_content, tool_calls
+
+
+def _get(obj: object, key: str) -> Any:
     """Get a value from dict or object attribute, returning None if absent."""
     if isinstance(obj, dict):
-        return obj.get(key)
+        return cast(dict[str, Any], obj).get(key)
     return getattr(obj, key, None)
 
 
-def _coerce_dict(value: Any) -> dict[str, Any] | None:
+def _coerce_dict(value: object) -> dict[str, Any] | None:
     """Try to coerce *value* to a dict; return None if not possible or empty."""
     if value is None:
         return None
     if isinstance(value, dict):
-        return value if value else None
+        return cast(dict[str, Any], value) if value else None
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        dumped = model_dump()
+        dumped: object = model_dump()
         if isinstance(dumped, dict) and dumped:
-            return dumped
+            return cast(dict[str, Any], dumped)
     return None
 
 
@@ -294,19 +383,25 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
             and isinstance(merged[key], dict)
             and isinstance(value, dict)
         ):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = _deep_merge(
+                cast(dict[str, Any], merged[key]),
+                cast(dict[str, Any], value),
+            )
         else:
             merged[key] = value
     return merged
 
 
-def _merge_unique_list(base: Any, override: Any) -> Any:
+def _merge_unique_list(base: object, override: object) -> object:
     """Append list values while preserving order and removing duplicates."""
     if not isinstance(base, list) or not isinstance(override, list):
         return override
-    result: list[Any] = []
+    result: list[object] = []
     seen: set[str] = set()
-    for value in [*base, *override]:
+    for value in [
+        *cast(list[object], base),
+        *cast(list[object], override),
+    ]:
         try:
             key = json.dumps(value, sort_keys=True, ensure_ascii=False)
         except Exception:
@@ -358,6 +453,7 @@ class OpenAICompatProvider(LLMProvider):
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
+        proxy: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -366,6 +462,7 @@ class OpenAICompatProvider(LLMProvider):
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
+        self._proxy = proxy or None
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -396,7 +493,14 @@ class OpenAICompatProvider(LLMProvider):
 
         timeout_s = _openai_compat_timeout_s()
         http_client: httpx.AsyncClient | None = None
-        if self._is_local:
+        if self._proxy:
+            http_client = httpx.AsyncClient(
+                timeout=timeout_s,
+                proxy=self._proxy,
+                trust_env=False,
+                follow_redirects=True,
+            )
+        elif self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
             # two LLM calls happen seconds apart (e.g. heartbeat _decide then
@@ -430,7 +534,7 @@ class OpenAICompatProvider(LLMProvider):
             http_client=http_client,
         )
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> AsyncOpenAIType:
         """Return the shared OpenAI client, creating it on first call."""
         if self._client is not None:
             return self._client
@@ -451,6 +555,8 @@ class OpenAICompatProvider(LLMProvider):
                 AsyncOpenAI = _AsyncOpenAI
 
             self._build_client()
+            if self._client is None:
+                raise RuntimeError("OpenAI client initialization did not produce a client")
             return self._client
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -484,7 +590,7 @@ class OpenAICompatProvider(LLMProvider):
                     {"type": "text", "text": content, "cache_control": cache_marker},
                 ]}
             if isinstance(content, list) and content:
-                nc = list(content)
+                nc = list(cast(list[dict[str, Any]], content))
                 nc[-1] = {**nc[-1], "cache_control": cache_marker}
                 return {**msg, "content": nc}
             return msg
@@ -579,23 +685,24 @@ class OpenAICompatProvider(LLMProvider):
             return map_id(value)
 
         for clean in sanitized:
-            if isinstance(clean.get("tool_calls"), list):
-                normalized = []
+            tool_calls_value = cast(object, clean.get("tool_calls"))
+            if isinstance(tool_calls_value, list):
+                normalized: list[Any] = []
                 used_ids: set[str] = set()
-                for idx, tc in enumerate(clean["tool_calls"]):
+                for idx, tc in enumerate(cast(list[object], tool_calls_value)):
                     if not isinstance(tc, dict):
                         normalized.append(tc)
                         continue
-                    tc_clean = dict(tc)
+                    tc_clean = dict(cast(dict[str, Any], tc))
                     raw_id = tc_clean.get("id")
                     mapped_id = unique_tool_id(raw_id, used_ids, idx)
                     tc_clean["id"] = mapped_id
                     used_ids.add(mapped_id)
                     if isinstance(raw_id, str) and raw_id:
                         pending_tool_ids.setdefault(raw_id, deque()).append(mapped_id)
-                    function = tc_clean.get("function")
+                    function = cast(object, tc_clean.get("function"))
                     if isinstance(function, dict):
-                        function_clean = dict(function)
+                        function_clean = dict(cast(dict[str, Any], function))
                         if "arguments" in function_clean:
                             function_clean["arguments"] = tool_arguments_json_for_replay(
                                 function_clean.get("arguments")
@@ -632,9 +739,13 @@ class OpenAICompatProvider(LLMProvider):
         route_prefixes = getattr(spec, "strip_model_prefixes", ())
         if not isinstance(route_prefixes, tuple) or not route_prefixes:
             return model_name
+        typed_route_prefixes = cast(tuple[str, ...], route_prefixes)
         model_prefix, routed_model = model_name.split("/", 1)
         model_prefix_key = _provider_prefix_key(model_prefix)
-        if any(_provider_prefix_key(prefix) == model_prefix_key for prefix in route_prefixes):
+        if any(
+            _provider_prefix_key(prefix) == model_prefix_key
+            for prefix in typed_route_prefixes
+        ):
             return routed_model
         return model_name
 
@@ -645,9 +756,12 @@ class OpenAICompatProvider(LLMProvider):
     ) -> bool:
         """Return True when the model accepts a temperature parameter.
 
-        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
-        when reasoning_effort is set to anything other than ``"none"``.
+        Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
+        and reasoning models (o1/o3/o4) reject temperature when
+        reasoning_effort is set to anything other than ``"none"``.
         """
+        if _model_slug(model_name) == _KIMI_K3_MODEL:
+            return False
         if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = model_name.lower()
@@ -697,6 +811,16 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
+        # Moonshot selects the only valid temperature from the K2.5/K2.6 thinking mode:
+        # 1.0 when enabled and 0.6 when disabled. Omitting the parameter lets the API
+        # apply the matching value for both its default and explicit thinking controls.
+        if (
+            spec
+            and spec.name == "moonshot"
+            and _model_slug(model_name) in _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS
+        ):
+            kwargs.pop("temperature", None)
+
         # Normalize reasoning_effort into a semantic form (OpenAI vocab)
         # used for internal decisions, and a wire form actually sent out.
         # "minimum" is accepted as a DashScope-native alias for "minimal".
@@ -707,6 +831,17 @@ class OpenAICompatProvider(LLMProvider):
                 semantic_effort = "minimal"
 
         wire_effort = reasoning_effort
+        slug = _model_slug(model_name)
+        if slug == _KIMI_K3_MODEL and semantic_effort is not None:
+            # K3 always reasons and currently accepts only the top-level
+            # reasoning_effort="max". Preserve disabled/default semantics by
+            # omitting the field; normalize older enabled presets to "max" so
+            # switching from a K2.x model does not send an unsupported value.
+            if semantic_effort in ("none", "minimal"):
+                wire_effort = None
+            else:
+                semantic_effort = "max"
+                wire_effort = "max"
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
@@ -744,7 +879,6 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
-            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
                 if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
@@ -944,25 +1078,25 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _maybe_mapping(value: Any) -> dict[str, Any] | None:
+    def _maybe_mapping(value: object) -> dict[str, Any] | None:
         if isinstance(value, dict):
-            return value
+            return cast(dict[str, Any], value)
         model_dump = getattr(value, "model_dump", None)
         if callable(model_dump):
-            dumped = model_dump()
+            dumped: object = model_dump()
             if isinstance(dumped, dict):
-                return dumped
+                return cast(dict[str, Any], dumped)
         return None
 
     @classmethod
-    def _extract_text_content(cls, value: Any) -> str | None:
+    def _extract_text_content(cls, value: object) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
             return value
         if isinstance(value, list):
             parts: list[str] = []
-            for item in value:
+            for item in cast(list[object], value):
                 item_map = cls._maybe_mapping(item)
                 if item_map:
                     # Skip Mistral-style {"type":"thinking","thinking":[...]}
@@ -983,7 +1117,7 @@ class OpenAICompatProvider(LLMProvider):
         return str(value)
 
     @classmethod
-    def _extract_thinking_content(cls, value: Any) -> str | None:
+    def _extract_thinking_content(cls, value: object) -> str | None:
         """Extract reasoning text from Mistral-style thinking blocks.
 
         Mistral returns content as a list mixing
@@ -995,7 +1129,7 @@ class OpenAICompatProvider(LLMProvider):
         if not isinstance(value, list):
             return None
         parts: list[str] = []
-        for item in value:
+        for item in cast(list[object], value):
             item_map = cls._maybe_mapping(item)
             if not item_map:
                 continue
@@ -1057,21 +1191,21 @@ class OpenAICompatProvider(LLMProvider):
         return result
 
     @staticmethod
-    def _get_nested_int(obj: Any, path: tuple[str, ...]) -> int:
+    def _get_nested_int(obj: object, path: tuple[str, ...]) -> int:
         """Drill into *obj* by *path* segments and return an ``int`` value.
 
         Supports both dict-key access and attribute access so it works
         uniformly with raw JSON dicts **and** SDK Pydantic models.
         """
-        current = obj
+        current: object = obj
         for segment in path:
             if current is None:
                 return 0
             if isinstance(current, dict):
-                current = current.get(segment)
+                current = cast(dict[str, Any], current).get(segment)
             else:
                 current = getattr(current, segment, None)
-        return int(current or 0) if current is not None else 0
+        return int(cast(Any, current) or 0) if current is not None else 0
 
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
@@ -1079,7 +1213,10 @@ class OpenAICompatProvider(LLMProvider):
 
         response_map = self._maybe_mapping(response)
         if response_map is not None:
-            choices = response_map.get("choices") or []
+            choices = cast(
+                list[object],
+                response_map.get("choices") or [],
+            )
             if not choices:
                 content = self._extract_text_content(
                     response_map.get("content") or response_map.get("output_text")
@@ -1105,7 +1242,7 @@ class OpenAICompatProvider(LLMProvider):
             content = self._extract_text_content(msg0.get("content"))
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
-            raw_tool_calls: list[Any] = []
+            raw_tool_calls: list[object] = []
             # StepFun: fallback to reasoning field when content is empty
             if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
@@ -1121,9 +1258,11 @@ class OpenAICompatProvider(LLMProvider):
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
-                tool_calls = m.get("tool_calls")
-                if isinstance(tool_calls, list) and tool_calls:
-                    raw_tool_calls.extend(tool_calls)
+                message_tool_calls = cast(object, m.get("tool_calls"))
+                if isinstance(message_tool_calls, list) and message_tool_calls:
+                    raw_tool_calls.extend(
+                        cast(list[object], message_tool_calls)
+                    )
                     if ch_map.get("finish_reason") in ("tool_calls", "stop"):
                         finish_reason = str(ch_map["finish_reason"])
                 if not content:
@@ -1134,7 +1273,7 @@ class OpenAICompatProvider(LLMProvider):
             # Deduplicate tool call IDs (same pattern as streaming path)
             # Some providers reuse the same ID for parallel tool calls.
             _seen_tc_ids: set[str] = set()
-            parsed_tool_calls = []
+            parsed_tool_calls: list[ToolCallRequest] = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
@@ -1152,6 +1291,8 @@ class OpenAICompatProvider(LLMProvider):
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
+            if not parsed_tool_calls:
+                content, parsed_tool_calls = _extract_text_tool_calls(content)
 
             return LLMResponse(
                 content=content,
@@ -1173,11 +1314,11 @@ class OpenAICompatProvider(LLMProvider):
         content = msg.content
         finish_reason = choice.finish_reason
 
-        raw_tool_calls: list[Any] = []
+        raw_sdk_tool_calls: list[Any] = []
         for ch in response.choices:
             m = ch.message
             if hasattr(m, "tool_calls") and m.tool_calls:
-                raw_tool_calls.extend(m.tool_calls)
+                raw_sdk_tool_calls.extend(m.tool_calls)
                 if ch.finish_reason in ("tool_calls", "stop"):
                     finish_reason = ch.finish_reason
             if not content and m.content:
@@ -1185,8 +1326,8 @@ class OpenAICompatProvider(LLMProvider):
             if not content and getattr(m, "reasoning", None) and self._spec and self._spec.reasoning_as_content:
                 content = m.reasoning
 
-        tool_calls = []
-        for tc in raw_tool_calls:
+        tool_calls: list[ToolCallRequest] = []
+        for tc in raw_sdk_tool_calls:
             args = parse_tool_arguments(tc.function.arguments)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
@@ -1197,6 +1338,8 @@ class OpenAICompatProvider(LLMProvider):
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
 
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
@@ -1266,7 +1409,10 @@ class OpenAICompatProvider(LLMProvider):
 
             chunk_map = cls._maybe_mapping(chunk)
             if chunk_map is not None:
-                choices = chunk_map.get("choices") or []
+                choices = cast(
+                    list[object],
+                    chunk_map.get("choices") or [],
+                )
                 if not choices:
                     usage = cls._extract_usage(chunk_map) or usage
                     text = cls._extract_text_content(
@@ -1292,7 +1438,12 @@ class OpenAICompatProvider(LLMProvider):
                     text = cls._extract_thinking_content(raw_delta_content)
                 if text:
                     reasoning_parts.append(text)
-                for idx, tc in enumerate(delta.get("tool_calls") or []):
+                for idx, tc in enumerate(
+                    cast(
+                        Iterable[object],
+                        delta.get("tool_calls") or [],
+                    )
+                ):
                     _accum_tc(tc, idx)
                 _accum_legacy_function_call(delta.get("function_call"))
                 usage = cls._extract_usage(chunk_map) or usage
@@ -1320,7 +1471,12 @@ class OpenAICompatProvider(LLMProvider):
                     text = cls._extract_text_content(reasoning)
                     if text:
                         reasoning_parts.append(text)
-            for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
+            delta_tool_calls = (
+                cast(Iterable[object], getattr(delta, "tool_calls", None) or [])
+                if delta
+                else ()
+            )
+            for tc in delta_tool_calls:
                 _accum_tc(tc, getattr(tc, "index", 0))
             if delta:
                 _accum_legacy_function_call(getattr(delta, "function_call", None))
@@ -1334,19 +1490,24 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
+        content = "".join(content_parts) or None
+        tool_calls = [
+            ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=b["name"],
+                arguments=parse_tool_arguments(b["arguments"]),
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            )
+            for b in tc_bufs.values()
+        ]
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
+
         return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=parse_tool_arguments(b["arguments"]),
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            content=content,
+            tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
@@ -1448,7 +1609,7 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
-        await self._ensure_client()
+        client = await self._ensure_client()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1456,7 +1617,11 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                     )
-                    result = parse_response_output(await self._client.responses.create(**body))
+                    responses_raw = cast(
+                        Any,
+                        await client.responses.create(**body),
+                    )
+                    result = parse_response_output(responses_raw)
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
@@ -1475,7 +1640,11 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            chat_raw = cast(
+                Any,
+                await client.chat.completions.create(**kwargs),
+            )
+            return self._parse(chat_raw)
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
@@ -1492,7 +1661,7 @@ class OpenAICompatProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        await self._ensure_client()
+        client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
@@ -1502,10 +1671,13 @@ class OpenAICompatProvider(LLMProvider):
                         reasoning_effort, tool_choice,
                     )
                     body["stream"] = True
-                    stream = await self._client.responses.create(**body)
+                    responses_stream = cast(
+                        Any,
+                        await client.responses.create(**body),
+                    )
 
-                    async def _timed_stream():
-                        stream_iter = stream.__aiter__()
+                    async def _timed_stream() -> AsyncIterator[Any]:
+                        stream_iter: AsyncIterator[Any] = responses_stream.__aiter__()
                         while True:
                             try:
                                 yield await asyncio.wait_for(
@@ -1558,12 +1730,15 @@ class OpenAICompatProvider(LLMProvider):
                 kwargs.setdefault("extra_body", {})["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
-            stream = await self._client.chat.completions.create(**kwargs)
+            chat_stream = cast(
+                Any,
+                await client.chat.completions.create(**kwargs),
+            )
             chunks: list[Any] = []
-            stream_iter = stream.__aiter__()
+            stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
                 try:
-                    chunk = await asyncio.wait_for(
+                    chunk: Any = await asyncio.wait_for(
                         stream_iter.__anext__(),
                         timeout=idle_timeout_s,
                     )

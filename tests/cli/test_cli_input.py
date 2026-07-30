@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import nullcontext
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -6,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 from prompt_toolkit.formatted_text import HTML
 
-from nanobot.cli import commands
 from nanobot.cli import stream as stream_mod
+from nanobot.cli import terminal
 
 
 @pytest.fixture
@@ -15,8 +14,8 @@ def mock_prompt_session():
     """Mock the global prompt session."""
     mock_session = MagicMock()
     mock_session.prompt_async = AsyncMock()
-    with patch("nanobot.cli.commands._PROMPT_SESSION", mock_session), \
-         patch("nanobot.cli.commands.patch_stdout"):
+    with patch("nanobot.cli.terminal._prompt_session", mock_session), \
+         patch("nanobot.cli.terminal.patch_stdout"):
         yield mock_session
 
 
@@ -25,8 +24,8 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     """Test that _read_interactive_input_async returns the user input from prompt_session."""
     mock_prompt_session.prompt_async.return_value = "hello world"
 
-    result = await commands._read_interactive_input_async()
-    
+    result = await terminal._read_interactive_input_async()
+
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
     args, _ = mock_prompt_session.prompt_async.call_args
@@ -39,27 +38,111 @@ async def test_read_interactive_input_async_handles_eof(mock_prompt_session):
     mock_prompt_session.prompt_async.side_effect = EOFError()
 
     with pytest.raises(KeyboardInterrupt):
-        await commands._read_interactive_input_async()
+        await terminal._read_interactive_input_async()
 
 
 def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
-    commands._PROMPT_SESSION = None
-    
-    with patch("nanobot.cli.commands.PromptSession") as MockSession, \
-         patch("nanobot.cli.commands.FileHistory") as MockHistory, \
+    terminal._prompt_session = None
+
+    with patch("nanobot.cli.terminal.PromptSession") as mock_session_cls, \
+         patch("nanobot.cli.terminal.FileHistory"), \
          patch("pathlib.Path.home") as mock_home:
-        
+
         mock_home.return_value = MagicMock()
-        
-        commands._init_prompt_session()
-        
-        assert commands._PROMPT_SESSION is not None
-        MockSession.assert_called_once()
-        _, kwargs = MockSession.call_args
-        assert kwargs["multiline"] is False
+
+        terminal._init_prompt_session()
+
+        assert terminal._prompt_session is not None
+        mock_session_cls.assert_called_once()
+        _, kwargs = mock_session_cls.call_args
+        # Buffer is multiline-capable so Alt+Enter can insert newlines;
+        # Enter-to-submit is restored via custom key bindings.
+        assert kwargs["multiline"] is True
         assert kwargs["enable_open_in_editor"] is False
+        assert kwargs.get("key_bindings") is not None
+
+
+def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
+    """Enter submits the buffer; Alt+Enter inserts a newline."""
+    from prompt_toolkit.keys import Keys
+
+    kb = terminal._build_cli_key_bindings()
+
+    def _keys(binding):
+        return tuple(getattr(k, "value", k) for k in binding.keys)
+
+    bound = {_keys(b): b for b in kb.bindings}
+
+    # Enter -> submit
+    enter = bound[(Keys.Enter.value,)]
+    buf = MagicMock()
+    enter.call(MagicMock(current_buffer=buf))
+    buf.validate_and_handle.assert_called_once()
+    buf.insert_text.assert_not_called()
+
+    # Alt+Enter (escape, enter) -> newline
+    alt_enter = bound[(Keys.Escape.value, Keys.Enter.value)]
+    buf = MagicMock()
+    alt_enter.call(MagicMock(current_buffer=buf))
+    buf.insert_text.assert_called_once_with("\n")
+
+
+@pytest.mark.asyncio
+async def test_raw_lf_enter_still_submits_like_wsl_terminals():
+    """A raw LF byte (\\x0a) is what some terminals -- e.g. WSL -- send for a
+    plain Enter keypress. It must submit the buffer, not insert a newline;
+    a mock buffer can't catch a key binding shadowing prompt_toolkit's own
+    default \\n-as-\\r handling, so this drives a real PromptSession/parser.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            terminal._init_prompt_session()
+            session = terminal._prompt_session
+            pipe_input.send_text("hello\x0aworld\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "hello"
+
+
+@pytest.mark.asyncio
+async def test_alt_enter_inserts_newline_on_lf_terminals():
+    """LF-as-Enter terminals send Alt+Enter as ESC + LF, which needs its own binding."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            terminal._init_prompt_session()
+            session = terminal._prompt_session
+            pipe_input.send_text("foo\x1b\x0abar\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "foo\nbar"
+
+
+@pytest.mark.asyncio
+async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
+    """CSI-u Shift+Enter inserts a newline instead of raw escape bytes."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            terminal._init_prompt_session()
+            session = terminal._prompt_session
+            pipe_input.send_text("foo\x1b[13;2ubar\r")
+            result = await session.prompt_async("> ")
+
+    # A newline is inserted and no raw escape bytes leak into the result.
+    assert result == "foo\nbar"
 
 
 def test_thinking_spinner_pause_stops_and_restarts():
@@ -90,10 +173,10 @@ def test_print_cli_progress_line_pauses_spinner_before_printing():
     mock_console = MagicMock()
     mock_console.status.return_value = spinner
 
-    with patch.object(commands.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")):
+    with patch.object(terminal.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")):
         thinking = stream_mod.ThinkingSpinner(console=mock_console)
         with thinking:
-            commands._print_cli_progress_line("tool running", thinking)
+            terminal._print_cli_progress_line("tool running", thinking)
 
     assert order == ["start", "stop", "print", "start", "stop"]
 
@@ -141,7 +224,7 @@ def test_print_cli_progress_line_opens_renderer_header_before_trace():
     renderer.ensure_header.side_effect = lambda: order.append("header")
     renderer.pause_spinner.return_value = nullcontext()
 
-    commands._print_cli_progress_line("tool running", None, renderer)
+    terminal._print_cli_progress_line("tool running", None, renderer)
 
     assert order == ["header", "print"]
 
@@ -152,7 +235,7 @@ def test_print_cli_progress_line_stops_live_before_trace():
     renderer = stream_mod.StreamRenderer(show_spinner=False)
     renderer._live = mock_live
 
-    commands._print_cli_progress_line("tool running", None, renderer)
+    terminal._print_cli_progress_line("tool running", None, renderer)
 
     mock_live.stop.assert_called_once()
     assert renderer._live is None
@@ -171,10 +254,10 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
     async def fake_print(_text: str) -> None:
         order.append("print")
 
-    with patch("nanobot.cli.commands._print_interactive_line", side_effect=fake_print):
+    with patch("nanobot.cli.terminal._print_interactive_line", side_effect=fake_print):
         thinking = stream_mod.ThinkingSpinner(console=mock_console)
         with thinking:
-            await commands._print_interactive_progress_line("tool running", thinking)
+            await terminal._print_interactive_progress_line("tool running", thinking)
 
     assert order == ["start", "stop", "print", "start", "stop"]
 
@@ -186,7 +269,7 @@ def test_response_renderable_uses_text_for_explicit_plain_rendering():
         "📊 Tokens: 20639 in / 29 out"
     )
 
-    renderable = commands._response_renderable(
+    renderable = terminal._response_renderable(
         status,
         render_markdown=True,
         metadata={"render_as": "text"},
@@ -196,7 +279,7 @@ def test_response_renderable_uses_text_for_explicit_plain_rendering():
 
 
 def test_response_renderable_preserves_normal_markdown_rendering():
-    renderable = commands._response_renderable("**bold**", render_markdown=True)
+    renderable = terminal._response_renderable("**bold**", render_markdown=True)
 
     assert renderable.__class__.__name__ == "Markdown"
 
@@ -204,7 +287,7 @@ def test_response_renderable_preserves_normal_markdown_rendering():
 def test_response_renderable_without_metadata_keeps_markdown_path():
     help_text = "🐈 nanobot commands:\n/status — Show bot status\n/help — Show available commands"
 
-    renderable = commands._response_renderable(help_text, render_markdown=True)
+    renderable = terminal._response_renderable(help_text, render_markdown=True)
 
     assert renderable.__class__.__name__ == "Markdown"
 
@@ -306,9 +389,9 @@ def test_render_interactive_ansi_force_terminal_follows_isatty():
         captured["console"] = c
 
     with patch.object(sys.stdout, "isatty", return_value=True):
-        commands._render_interactive_ansi(render_fn)
+        terminal._render_interactive_ansi(render_fn)
         assert captured["console"]._force_terminal is True
 
     with patch.object(sys.stdout, "isatty", return_value=False):
-        commands._render_interactive_ansi(render_fn)
+        terminal._render_interactive_ansi(render_fn)
         assert captured["console"]._force_terminal is False

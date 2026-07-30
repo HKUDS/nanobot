@@ -57,6 +57,37 @@ class TestBwrapBackend:
         tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
         assert str(ws.parent) in tmpfs_targets
 
+    def test_tmp_dir_mounted_as_tmpfs(self, tmp_path):
+        """Regression coverage for #1948: commands need writable scratch space."""
+        ws = tmp_path / "project"
+        result = wrap_command("bwrap", "touch /tmp/probe", str(ws), str(ws))
+        tokens = _parse(result)
+
+        tmpfs_indices = [i for i, t in enumerate(tokens) if t == "--tmpfs"]
+        tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
+        assert "/tmp" in tmpfs_targets
+
+    def test_parent_mask_precedes_workspace_recreation(self, tmp_path):
+        ws = tmp_path / "project"
+        result = wrap_command("bwrap", "ls", str(ws), str(ws))
+        tokens = _parse(result)
+
+        parent_mask = next(
+            i for i, t in enumerate(tokens)
+            if t == "--tmpfs" and tokens[i + 1] == str(ws.parent)
+        )
+        workspace_dir = next(
+            i for i, t in enumerate(tokens)
+            if t == "--dir" and tokens[i + 1] == str(ws)
+        )
+        workspace_bind = next(
+            i for i, t in enumerate(tokens)
+            if t == "--bind" and tokens[i + 1] == str(ws) and tokens[i + 2] == str(ws)
+        )
+        chdir = tokens.index("--chdir")
+
+        assert parent_mask < workspace_dir < workspace_bind < chdir
+
     def test_cwd_inside_workspace(self, tmp_path):
         ws = tmp_path / "project"
         sub = ws / "src" / "lib"
@@ -118,6 +149,78 @@ class TestBwrapBackend:
         try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
         try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
         assert (str(fake_media), str(fake_media)) in try_pairs
+
+    def test_custom_read_only_binds_use_ro_bind_try(self, tmp_path):
+        ws = tmp_path / "project"
+        tool_bin = tmp_path / "home" / ".local" / "bin"
+
+        result = wrap_command(
+            "bwrap",
+            "uv --version",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=[str(tool_bin)],
+        )
+        tokens = _parse(result)
+
+        try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
+        try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
+        assert (str(tool_bin.resolve(strict=False)), str(tool_bin.resolve(strict=False))) in try_pairs
+
+    def test_custom_read_write_binds_use_bind_try(self, tmp_path):
+        ws = tmp_path / "project"
+        cache_dir = tmp_path / "cache"
+
+        result = wrap_command(
+            "bwrap",
+            "touch cache/file",
+            str(ws),
+            str(ws),
+            sandbox_rw_binds=[str(cache_dir)],
+        )
+        tokens = _parse(result)
+
+        bind_try_indices = [i for i, t in enumerate(tokens) if t == "--bind-try"]
+        bind_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in bind_try_indices}
+        resolved = str(cache_dir.resolve(strict=False))
+        assert (resolved, resolved) in bind_try_pairs
+
+    def test_custom_relative_bind_paths_are_ignored(self, tmp_path):
+        ws = tmp_path / "project"
+
+        result = wrap_command(
+            "bwrap",
+            "ls",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=["relative/bin"],
+            sandbox_rw_binds=["relative/cache"],
+        )
+        tokens = _parse(result)
+
+        assert "relative/bin" not in tokens
+        assert "relative/cache" not in tokens
+
+    def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
+        ws = tmp_path / "private" / "project"
+        parent = ws.parent.resolve(strict=False)
+
+        result = wrap_command(
+            "bwrap",
+            "cat ../config.json",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=[str(parent)],
+            sandbox_rw_binds=[str(parent)],
+        )
+        tokens = _parse(result)
+
+        ro_try_indices = [i for i, token in enumerate(tokens) if token == "--ro-bind-try"]
+        ro_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in ro_try_indices}
+        bind_try_indices = [i for i, token in enumerate(tokens) if token == "--bind-try"]
+        bind_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in bind_try_indices}
+        assert (str(parent), str(parent)) not in ro_try_pairs
+        assert (str(parent), str(parent)) not in bind_try_pairs
 
 
 class TestUnknownBackend:

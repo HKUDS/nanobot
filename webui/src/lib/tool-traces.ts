@@ -1,26 +1,5 @@
 import type { ToolProgressEvent } from "@/lib/types";
 
-/** Drop duplicate tool_call objects (same id or identical formatted trace). */
-export function dedupeToolCallsForUi(calls: unknown): unknown[] {
-  if (!Array.isArray(calls) || calls.length === 0) return [];
-  const seen = new Set<string>();
-  const out: unknown[] = [];
-  for (const c of calls) {
-    let key: string | null = null;
-    if (c && typeof c === "object" && "id" in c) {
-      const id = (c as { id?: unknown }).id;
-      if (typeof id === "string" && id.length > 0) key = `id:${id}`;
-    }
-    if (key == null) {
-      key = formatToolCallTrace(c) ?? "";
-    }
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(c);
-  }
-  return out;
-}
-
 export function formatToolCallTrace(call: unknown): string | null {
   if (!call || typeof call !== "object") return null;
   const item = call as {
@@ -39,6 +18,19 @@ export function formatToolCallTrace(call: unknown): string | null {
   if (typeof args === "string" && args.trim()) return `${name}(${args})`;
   if (args && typeof args === "object") return `${name}(${JSON.stringify(args)})`;
   return `${name}()`;
+}
+
+export function canonicalToolTrace(line: string): string {
+  const trimmed = line.trim();
+  const match = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
+  if (!match) return trimmed;
+  const args = match[2].trim();
+  if (!args) return `${match[1]}()`;
+  try {
+    return `${match[1]}(${JSON.stringify(JSON.parse(args))})`;
+  } catch {
+    return trimmed;
+  }
 }
 
 const VALID_PHASES = new Set(["start", "end", "error"]);
@@ -112,12 +104,13 @@ export function mergeUniqueToolTraceLines(
   previousTraces: string[],
   lines: string[],
 ): { traces: string[]; added: boolean } {
-  const seen = new Set(previousTraces);
+  const seen = new Set(previousTraces.map(canonicalToolTrace));
   const traces = [...previousTraces];
   let added = false;
   for (const line of lines) {
-    if (seen.has(line)) continue;
-    seen.add(line);
+    const key = canonicalToolTrace(line);
+    if (seen.has(key)) continue;
+    seen.add(key);
     traces.push(line);
     added = true;
   }

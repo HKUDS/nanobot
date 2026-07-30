@@ -8,7 +8,6 @@ import {
 
 const VOICE_RECORDING_MAX_MS = 120_000;
 const VOICE_RECORDING_MIN_MS = 650;
-const VOICE_NO_INPUT_HINT_MS = 1_100;
 const VOICE_HOLD_START_MS = 140;
 const VOICE_WAVEFORM_BAR_COUNT = 64;
 const VOICE_WAVEFORM_SILENT_HEIGHT = 3;
@@ -29,7 +28,7 @@ const VOICE_MIME_CANDIDATES = [
 export type VoiceRecorderState = "idle" | "recording" | "transcribing";
 export type VoiceRecorderErrorKey =
   | "failed"
-  | "noInput"
+  | "noDevice"
   | "notConfigured"
   | "permission"
   | "tooLong"
@@ -60,7 +59,6 @@ export function useVoiceRecorder({
   const audioRef = useRef<VoiceAudioState | null>(null);
   const startedAtRef = useRef(0);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdActiveRef = useRef(false);
   const startPendingRef = useRef(false);
@@ -68,15 +66,10 @@ export function useVoiceRecorder({
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shortcutActiveRef = useRef(false);
-  const levelObservedRef = useRef(false);
-  const peakLevelRef = useRef(0);
-  const levelReliableRef = useRef(false);
-  const noInputHintVisibleRef = useRef(false);
   const [state, setState] = useState<VoiceRecorderState>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
   const [levels, setLevels] = useState<number[]>(VOICE_WAVEFORM_IDLE_LEVELS);
 
-  const clearInputHintTimer = useCallback(() => clearTimer(inputHintTimerRef), []);
   const clearSuppressClickTimer = useCallback(() => clearTimer(suppressClickTimerRef), []);
 
   const suppressNextClick = useCallback(() => {
@@ -127,16 +120,6 @@ export function useVoiceRecorder({
         }
         current.analyser.getByteTimeDomainData(current.data);
         const level = voiceLevelFromSamples(current.data);
-        levelReliableRef.current = true;
-        levelObservedRef.current = true;
-        peakLevelRef.current = Math.max(peakLevelRef.current, level);
-        if (level >= VOICE_MIN_LEVEL) {
-          clearInputHintTimer();
-          if (noInputHintVisibleRef.current) {
-            noInputHintVisibleRef.current = false;
-            onClearError();
-          }
-        }
         setLevels((currentLevels) => [
           ...currentLevels.slice(1),
           waveformHeightFromLevel(level),
@@ -149,11 +132,10 @@ export function useVoiceRecorder({
     } catch {
       stopWaveform();
     }
-  }, [clearInputHintTimer, onClearError, stopWaveform]);
+  }, [stopWaveform]);
 
   const cleanupRecording = useCallback(() => {
     clearTimer(holdTimerRef);
-    clearInputHintTimer();
     clearTimer(maxTimerRef);
     stopWaveform();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -161,8 +143,7 @@ export function useVoiceRecorder({
     mediaRecorderRef.current = null;
     startPendingRef.current = false;
     shortcutActiveRef.current = false;
-    noInputHintVisibleRef.current = false;
-  }, [clearInputHintTimer, stopWaveform]);
+  }, [stopWaveform]);
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -181,22 +162,21 @@ export function useVoiceRecorder({
 
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    onClearError();
+    const mediaDevices = navigator.mediaDevices;
+    const MediaRecorderCtor = mediaRecorderConstructor();
+    if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
       onError("unsupported");
       return;
     }
     startPendingRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, mediaRecorderOptions());
+      const stream = await mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorderCtor(stream, mediaRecorderOptions(MediaRecorderCtor));
       chunksRef.current = [];
       streamRef.current = stream;
       mediaRecorderRef.current = recorder;
       startedAtRef.current = Date.now();
-      levelObservedRef.current = false;
-      peakLevelRef.current = 0;
-      levelReliableRef.current = false;
-      noInputHintVisibleRef.current = false;
       setElapsedMs(0);
       startWaveform(stream);
       recorder.ondataavailable = (event) => {
@@ -206,10 +186,6 @@ export function useVoiceRecorder({
         const chunks = chunksRef.current.splice(0);
         const durationMs = Math.max(0, Date.now() - startedAtRef.current);
         const mimeType = recorder.mimeType || "audio/webm";
-        const hasMeasuredSilence =
-          levelReliableRef.current
-          && levelObservedRef.current
-          && peakLevelRef.current < VOICE_MIN_LEVEL;
         cleanupRecording();
         if (chunks.length === 0) {
           setState("idle");
@@ -218,11 +194,6 @@ export function useVoiceRecorder({
         if (durationMs < VOICE_RECORDING_MIN_MS) {
           setState("idle");
           onError("tooShort");
-          return;
-        }
-        if (hasMeasuredSilence) {
-          setState("idle");
-          onError("noInput");
           return;
         }
         setState("transcribing");
@@ -238,23 +209,10 @@ export function useVoiceRecorder({
       setState("recording");
       onClearError();
       maxTimerRef.current = setTimeout(stopRecording, VOICE_RECORDING_MAX_MS);
-      inputHintTimerRef.current = setTimeout(() => {
-        const recording = mediaRecorderRef.current?.state === "recording";
-        if (
-          !recording
-          || !levelReliableRef.current
-          || !levelObservedRef.current
-          || peakLevelRef.current >= VOICE_MIN_LEVEL
-        ) {
-          return;
-        }
-        noInputHintVisibleRef.current = true;
-        onError("noInput");
-      }, VOICE_NO_INPUT_HINT_MS);
-    } catch {
+    } catch (error) {
       cleanupRecording();
       setState("idle");
-      onError("permission");
+      onError(recordingErrorKey(error));
     }
   }, [
     cleanupRecording,
@@ -370,10 +328,19 @@ function clearTimer(ref: { current: ReturnType<typeof setTimeout> | null }) {
   }
 }
 
-function mediaRecorderOptions(): MediaRecorderOptions | undefined {
-  if (typeof MediaRecorder === "undefined") return undefined;
-  const mimeType = VOICE_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type));
+function mediaRecorderOptions(MediaRecorderCtor: MediaRecorderConstructor): MediaRecorderOptions | undefined {
+  const mimeType = VOICE_MIME_CANDIDATES.find((type) => MediaRecorderCtor.isTypeSupported?.(type));
   return mimeType ? { mimeType } : undefined;
+}
+
+type MediaRecorderConstructor = typeof MediaRecorder;
+
+function mediaRecorderConstructor(): MediaRecorderConstructor | undefined {
+  if (typeof window === "undefined") return undefined;
+  const browserWindow = window as Window & {
+    MediaRecorder?: MediaRecorderConstructor;
+  };
+  return browserWindow.MediaRecorder;
 }
 
 function formatVoiceElapsed(ms: number): string {
@@ -509,4 +476,10 @@ function transcriptionErrorKey(error: unknown): VoiceRecorderErrorKey {
   if (detail === "not_configured") return "notConfigured";
   if (detail === "duration") return "tooLong";
   return "failed";
+}
+
+function recordingErrorKey(error: unknown): VoiceRecorderErrorKey {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotFoundError") return "noDevice";
+  return "permission";
 }

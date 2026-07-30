@@ -1,0 +1,38 @@
+{
+  "description": "通过 NapCat 网关连接 nanobot。",
+  "requirements": "NapCat WebSocket 地址和可选访问令牌",
+  "setup": {
+    "docsLabel": "打开 NapCat 配置指南",
+    "officialLabel": "打开 NapCat 文档",
+    "tryIt": "通过 NapCat 发送一条 QQ 测试消息。",
+    "summary": "NapCat 通过本地或远程 OneBot WebSocket 地址将 nanobot 连接到 QQ。",
+    "steps": [
+      "启动 NapCat 并启用正向 WebSocket 服务。",
+      "将 WebSocket 地址和可选访问令牌复制到 nanobot。",
+      "保存并启用 NapCat，然后发送一条 QQ 测试消息。"
+    ],
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket 地址",
+        "placeholder": "ws://127.0.0.1:3001",
+        "help": "使用 NapCat 的正向 WebSocket 地址。"
+      },
+      "accessToken": {
+        "label": "访问令牌",
+        "placeholder": "可选令牌"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "QQ ID，用逗号分隔"
+      }
+    }
+  }
+}

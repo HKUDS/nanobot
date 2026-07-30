@@ -9,6 +9,10 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.session.manager import Session, SessionManager
 
 
+def _runtime(_session: Session | None = None):
+    return MagicMock(name="runtime")
+
+
 def _make_session(
     key: str = "cli:test",
     messages: list | None = None,
@@ -150,6 +154,26 @@ class TestIsExpired:
         now_over = datetime(2026, 1, 1, 10, 10, 0)
         assert ac._is_expired(ts, now=now_over) is True
 
+    def test_unparseable_string_timestamp_returns_false(self):
+        """A persisted timestamp that no longer parses must not raise.
+
+        list_sessions() forwards the raw persisted updated_at string, and
+        SessionManager._load already tolerates a malformed value through its
+        recovery path. The idle scan must mirror that tolerance instead of crashing.
+        """
+        ac = _make_autocompact(ttl=15)
+        assert ac._is_expired("not-a-timestamp") is False
+
+    def test_tz_aware_string_timestamp_is_compared_by_instant(self):
+        """A valid timestamp with an offset remains eligible for expiry."""
+        ac = _make_autocompact(ttl=15)
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        recent = (now - timedelta(minutes=10)).astimezone().isoformat()
+        expired = (now - timedelta(minutes=20)).astimezone().isoformat()
+
+        assert ac._is_expired(recent, now=now) is False
+        assert ac._is_expired(expired, now=now) is True
+
 
 # ---------------------------------------------------------------------------
 # _format_summary
@@ -193,15 +217,18 @@ class TestCheckExpired:
         mock_sm.list_sessions.return_value = []
         ac.sessions = mock_sm
         scheduler = MagicMock()
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
         scheduler.assert_not_called()
 
     def test_expired_session_schedules_background(self):
         """Expired session should trigger schedule_background."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
-        old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_ts}]
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_dt.isoformat()}]
+        mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
 
         scheduled = []
@@ -210,9 +237,114 @@ class TestCheckExpired:
             scheduled.append(coro)
             coro.close()
 
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
         assert len(scheduled) == 1
         assert "cli:old" in ac._archiving
+
+    def test_unparseable_updated_at_does_not_stop_scan(self):
+        """A malformed timestamp is skipped without hiding later sessions.
+
+        The idle scan runs from the agent loop's inbound-timeout branch, so a
+        raised exception here would tear down the loop. list_sessions() forwards
+        the raw string, so check_expired must tolerate it like SessionManager
+        does when loading.
+        """
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:corrupt", "updated_at": "not-a-timestamp"},
+            {"key": "cli:old", "updated_at": old_dt.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, _runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:old"}
+
+    @pytest.mark.asyncio
+    async def test_runtime_is_captured_before_background_starts(self):
+        ac = _make_autocompact(ttl=15)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        ac.sessions.list_sessions.return_value = [
+            {"key": "cli:old", "updated_at": old_dt.isoformat()}
+        ]
+        ac.sessions.get_or_create.return_value = session
+        admitted = _runtime()
+        replacement = _runtime()
+        resolve_runtime = MagicMock(return_value=admitted)
+        scheduled = []
+
+        ac.check_expired(scheduled.append, resolve_runtime)
+        resolve_runtime.return_value = replacement
+        await scheduled[0]
+
+        resolve_runtime.assert_called_once_with(session)
+        ac.consolidator.compact_idle_session.assert_awaited_once_with(
+            "cli:old",
+            runtime=admitted,
+            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+        )
+
+    @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
+    def test_invalid_preset_is_isolated_to_one_session(self, resolution_error):
+        ac = _make_autocompact(ttl=15)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        sessions = {
+            key: _make_session(key, updated_at=old_dt)
+            for key in ("cli:removed", "cli:healthy")
+        }
+        for session in sessions.values():
+            _add_turns(session, 5)
+        ac.sessions.list_sessions.return_value = [
+            {"key": key, "updated_at": old_dt.isoformat()}
+            for key in sessions
+        ]
+        ac.sessions.get_or_create.side_effect = sessions.__getitem__
+        healthy_runtime = _runtime()
+
+        def resolve_runtime(session: Session):
+            if session.key == "cli:removed":
+                raise resolution_error("model preset cannot be resolved")
+            return healthy_runtime
+
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, resolve_runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:healthy"}
+
+    def test_unexpected_runtime_resolution_failure_propagates(self):
+        ac = _make_autocompact(ttl=15)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        ac.sessions.list_sessions.return_value = [
+            {"key": session.key, "updated_at": old_dt.isoformat()}
+        ]
+        ac.sessions.get_or_create.return_value = session
+
+        def fail(_session: Session):
+            raise RuntimeError("unexpected resolver failure")
+
+        with pytest.raises(RuntimeError, match="unexpected resolver failure"):
+            ac.check_expired(MagicMock(), fail)
 
     def test_active_session_key_skips(self):
         """Session in active_session_keys should be skipped."""
@@ -222,7 +354,7 @@ class TestCheckExpired:
         mock_sm.list_sessions.return_value = [{"key": "cli:busy", "updated_at": old_ts}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
-        ac.check_expired(scheduler, active_session_keys={"cli:busy"})
+        ac.check_expired(scheduler, _runtime, active_session_keys={"cli:busy"})
         scheduler.assert_not_called()
 
     def test_session_already_in_archiving_skips(self):
@@ -234,7 +366,7 @@ class TestCheckExpired:
         ac.sessions = mock_sm
         ac._archiving.add("cli:dup")
         scheduler = MagicMock()
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
         scheduler.assert_not_called()
 
     def test_session_with_no_key_skips(self):
@@ -244,7 +376,7 @@ class TestCheckExpired:
         mock_sm.list_sessions.return_value = [{"key": "", "updated_at": "old"}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
         scheduler.assert_not_called()
 
     def test_session_with_missing_key_field_skips(self):
@@ -254,7 +386,7 @@ class TestCheckExpired:
         mock_sm.list_sessions.return_value = [{"updated_at": "old"}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
         scheduler.assert_not_called()
 
     def test_dream_session_skips(self):
@@ -268,10 +400,28 @@ class TestCheckExpired:
         ac.sessions = mock_sm
         scheduler = MagicMock()
 
-        ac.check_expired(scheduler)
+        ac.check_expired(scheduler, _runtime)
 
         scheduler.assert_not_called()
         assert "dream:20260602-155256" not in ac._archiving
+
+    def test_already_trimmed_session_skips(self):
+        """Expired session with no removable tail should not be re-scheduled."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        last_active = datetime(2026, 1, 1, 10, 0, 0)
+        session = _make_session("cli:done", updated_at=last_active)
+        _add_turns(session, 2)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:done", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+
+        scheduler = MagicMock()
+        ac.check_expired(scheduler, _runtime)
+
+        scheduler.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -289,10 +439,13 @@ class TestArchiveDelegates:
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
 
-        await ac._archive("cli:test")
+        runtime = _runtime()
+        await ac._archive("cli:test", runtime=runtime)
 
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
-            "cli:test", ac._RECENT_SUFFIX_MESSAGES,
+            "cli:test",
+            runtime=runtime,
+            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
         )
 
     @pytest.mark.asyncio
@@ -301,7 +454,7 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
         ac._archiving.add("dream:20260602-155256")
 
-        await ac._archive("dream:20260602-155256")
+        await ac._archive("dream:20260602-155256", runtime=_runtime())
 
         ac.consolidator.compact_idle_session.assert_not_awaited()
         assert "dream:20260602-155256" not in ac._archiving
@@ -317,7 +470,7 @@ class TestArchiveDelegates:
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Hello.")
 
-        await ac._archive("cli:test")
+        await ac._archive("cli:test", runtime=_runtime())
 
         entry = ac._summaries.get("cli:test")
         assert entry is not None
@@ -330,7 +483,7 @@ class TestArchiveDelegates:
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="")
 
-        await ac._archive("cli:test")
+        await ac._archive("cli:test", runtime=_runtime())
 
         assert "cli:test" not in ac._summaries
 
@@ -341,7 +494,7 @@ class TestArchiveDelegates:
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="(nothing)")
 
-        await ac._archive("cli:test")
+        await ac._archive("cli:test", runtime=_runtime())
 
         assert "cli:test" not in ac._summaries
 
@@ -353,7 +506,7 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session = AsyncMock(side_effect=RuntimeError("fail"))
 
         ac._archiving.add("cli:test")
-        await ac._archive("cli:test")
+        await ac._archive("cli:test", runtime=_runtime())
 
         assert "cli:test" not in ac._archiving
 

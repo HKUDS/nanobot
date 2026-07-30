@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -141,4 +141,34 @@ describe("SessionInfoPopover", () => {
     );
     expect(screen.getByText("No automations in this session yet.")).toBeInTheDocument();
   }, 8000);
+
+  it("coalesces focus refreshes while a session automation request is in flight", async () => {
+    let resolveRequest!: (response: Response) => void;
+    const pendingRequest = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const fetchMock = vi.fn(() => pendingRequest);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(
+      <SessionInfoPopover
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRequest(automationsResponse([]));
+      await pendingRequest;
+    });
+  });
 });

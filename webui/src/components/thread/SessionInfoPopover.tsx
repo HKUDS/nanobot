@@ -152,6 +152,9 @@ function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number })
 
 function formatSchedule(job: SessionAutomationJob, t: TFunction) {
   const locale = currentLocale();
+  if (isLocalTriggerAutomation(job)) {
+    return t("thread.sessionInfo.schedule.local");
+  }
   if (job.schedule.kind === "at" && job.schedule.at_ms) {
     return t("thread.sessionInfo.schedule.at", { time: fmtDateTime(job.schedule.at_ms, locale) });
   }
@@ -179,6 +182,9 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
   if (job.state.pending) {
     return { label: t("thread.sessionInfo.next.pending"), title: "" };
   }
+  if (isLocalTriggerAutomation(job)) {
+    return { label: t("thread.sessionInfo.next.local"), title: "" };
+  }
   const next = job.state.next_run_at_ms;
   if (!next) {
     return { label: t("thread.sessionInfo.next.none"), title: "" };
@@ -187,6 +193,12 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
     label: t("thread.sessionInfo.next.label", { time: relativeTimeFrom(next, now, locale) }),
     title: fmtDateTime(next, locale),
   };
+}
+
+function isLocalTriggerAutomation(job: SessionAutomationJob): boolean {
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
 }
 
 function relativeTimeFrom(value: number, now: number, locale: string): string {

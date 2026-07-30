@@ -1,5 +1,7 @@
 """Provider wrapper that transparently fails over to fallback models on error."""
 
+# pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import time
@@ -8,12 +10,11 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
 _PRIMARY_COOLDOWN_S = 60
-_MISSING = object()
 _FALLBACK_ERROR_KINDS = frozenset({
     "timeout",
     "connection",
@@ -21,10 +22,36 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "rate_limit",
     "overloaded",
 })
-_NON_FALLBACK_ERROR_KINDS = frozenset({
+_AUTHENTICATION_ERROR_KINDS = frozenset({
     "authentication",
     "auth",
     "permission",
+})
+_AUTHENTICATION_ERROR_TOKENS = (
+    "authentication_error",
+    "authentication error",
+    "invalid_api_key",
+    "invalid api key",
+    "incorrect_api_key",
+    "incorrect api key",
+    "expired_api_key",
+    "expired api key",
+    "invalid credential",
+    "expired credential",
+    "credential has expired",
+    "credentials have expired",
+    "invalid_token",
+    "invalid token",
+    "expired_token",
+    "expired token",
+    "unauthorized",
+    "permission_denied",
+    "permission denied",
+    "access_denied",
+    "account_deactivated",
+    "organization_deactivated",
+)
+_NON_FALLBACK_ERROR_KINDS = frozenset({
     "content_filter",
     "refusal",
     "context_length",
@@ -56,6 +83,9 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
+FallbackModelObserver = Callable[[str], Awaitable[None]]
+
+
 class FallbackProvider(LLMProvider):
     """Wrap a primary provider and transparently failover to fallback models.
 
@@ -82,24 +112,30 @@ class FallbackProvider(LLMProvider):
         primary: LLMProvider,
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
+        fallback_model_observer: FallbackModelObserver | None = None,
     ):
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
+        self._fallback_model_observer = fallback_model_observer
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
 
     @property
-    def generation(self):
+    def generation(self) -> GenerationSettings:
         return self._primary.generation
 
     @generation.setter
-    def generation(self, value):
+    def generation(self, value: GenerationSettings) -> None:
         self._primary.generation = value
 
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
+
+    def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
+        """Attach a process-level observer without changing request call signatures."""
+        self._fallback_model_observer = observer
 
     @property
     def supports_progress_deltas(self) -> bool:
@@ -242,25 +278,19 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
-            original_values = {
-                name: kwargs.get(name, _MISSING)
-                for name in ("model", "max_tokens", "temperature", "reasoning_effort")
+            await self._notify_fallback_model(fallback_model)
+
+            fallback_kwargs = {
+                **kwargs,
+                "model": fallback_model,
+                "max_tokens": fallback.max_tokens,
+                "temperature": fallback.temperature,
             }
-            kwargs["model"] = fallback_model
-            kwargs["max_tokens"] = fallback.max_tokens
-            kwargs["temperature"] = fallback.temperature
             if fallback.reasoning_effort is None:
-                kwargs.pop("reasoning_effort", None)
+                fallback_kwargs.pop("reasoning_effort", None)
             else:
-                kwargs["reasoning_effort"] = fallback.reasoning_effort
-            try:
-                fallback_response = await call(fallback_provider, kwargs)
-            finally:
-                for name, value in original_values.items():
-                    if value is _MISSING:
-                        kwargs.pop(name, None)
-                    else:
-                        kwargs[name] = value
+                fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
+            fallback_response = await call(fallback_provider, fallback_kwargs)
 
             if fallback_response.finish_reason != "error":
                 logger.info(
@@ -289,21 +319,48 @@ class FallbackProvider(LLMProvider):
             finish_reason="error",
         )
 
+    async def _notify_fallback_model(self, model: str) -> None:
+        if self._fallback_model_observer is None:
+            return
+        try:
+            await self._fallback_model_observer(model)
+        except Exception:
+            logger.exception("fallback model observer failed for '{}'", model)
+
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
-        if response.error_should_retry is False:
-            return False
+        if LLMProvider.is_arrearage_response(response):
+            return True
         status = response.error_status_code
         kind = (response.error_kind or "").lower()
         error_type = (response.error_type or "").lower()
         code = (response.error_code or "").lower()
         text = (response.content or "").lower()
+        structured_values = (kind, error_type, code)
 
-        if status in {400, 401, 403, 404, 422}:
-            return False
+        if kind in _AUTHENTICATION_ERROR_KINDS:
+            return True
+        if any(
+            token in value
+            for value in structured_values
+            for token in _AUTHENTICATION_ERROR_TOKENS
+        ):
+            return True
         if kind in _NON_FALLBACK_ERROR_KINDS:
             return False
-        if any(token in value for value in (kind, error_type, code) for token in _NON_FALLBACK_ERROR_KINDS):
+        if any(
+            token in value
+            for value in structured_values
+            for token in _NON_FALLBACK_ERROR_KINDS
+        ):
+            return False
+        if status in {401, 403}:
+            return True
+        if any(token in text for token in _AUTHENTICATION_ERROR_TOKENS):
+            return True
+        if response.error_should_retry is False:
+            return False
+        if status in {400, 404, 422}:
             return False
         if response.error_should_retry is True:
             return True

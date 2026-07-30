@@ -1,0 +1,92 @@
+{
+  "description": "Let nanobot receive and answer email messages.",
+  "requirements": "IMAP inbox, SMTP sender, app password, explicit consent",
+  "setup": {
+    "docsLabel": "Open Email setup",
+    "officialLabel": "Open app password guide",
+    "tryIt": "Send a test email to the connected mailbox.",
+    "summary": "Email reads messages over IMAP and replies over SMTP. Use a dedicated mailbox and grant consent before enabling it.",
+    "steps": [
+      "Create a dedicated mailbox and, when required, an app password.",
+      "Choose a provider preset or enter the IMAP and SMTP settings manually.",
+      "Grant consent, save and enable Email, then send a test message to the mailbox."
+    ],
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud",
+      "custom": "Custom"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Consent granted",
+        "help": "Required safety switch. Leave false until this bot mailbox is intentionally connected.",
+        "choices": {
+          "true": "Granted",
+          "false": "Not granted"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP host",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP username",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP password",
+        "placeholder": "App password",
+        "help": "Use an app password when your mail provider requires one."
+      },
+      "smtpHost": {
+        "label": "SMTP host",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP username",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP password",
+        "placeholder": "App password",
+        "help": "Usually the same app password used for IMAP."
+      },
+      "imapPort": {
+        "label": "IMAP port",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP port",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "From address",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Poll interval",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Allowed senders",
+        "placeholder": "Email addresses, comma separated",
+        "help": "Leave empty to require pairing before a sender can use email."
+      },
+      "verifyDkim": {
+        "label": "Verify DKIM",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "verifySpf": {
+        "label": "Verify SPF",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  }
+}

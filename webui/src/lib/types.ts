@@ -5,6 +5,11 @@ export type Role = "user" | "assistant" | "tool" | "system";
 export type MessageKind = "message" | "trace";
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
+export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
+export type MessageDeliveryErrorKind =
+  | "message_too_big"
+  | "workspace_scope_rejected"
+  | "turn_rejected";
 
 /** One image attached to a UIMessage.
  *
@@ -32,7 +37,7 @@ export interface UIMediaAttachment {
   name?: string;
 }
 
-export interface UIMessageSource { kind: "cron"; label?: string; }
+export interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
 
 export interface UIMessage {
   id: string;
@@ -68,12 +73,18 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+  /** Client epoch milliseconds when the definitive ``turn_end`` was received. */
+  completedAt?: number;
   /** Lightweight provenance for proactive assistant messages. */
   source?: UIMessageSource;
   /** Stable protocol metadata for grouping all activity emitted by one user turn. */
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** Ephemeral delivery lifecycle for optimistic user messages. */
+  deliveryStatus?: MessageDeliveryStatus;
+  /** Structured rejection reason shown with a failed optimistic message. */
+  deliveryErrorKind?: MessageDeliveryErrorKind;
 }
 
 export interface UICliAppAttachment {
@@ -104,8 +115,9 @@ export interface SessionAutomationJob {
   delete_after_run?: boolean;
   created_at_ms?: number | null;
   updated_at_ms?: number | null;
+  kind?: "local_trigger" | "cron" | string;
   schedule: {
-    kind: "at" | "every" | "cron" | string;
+    kind: "at" | "every" | "cron" | "local" | string;
     at_ms?: number | null;
     every_ms?: number | null;
     expr?: string | null;
@@ -113,7 +125,8 @@ export interface SessionAutomationJob {
   };
   payload: {
     message: string;
-    kind?: "agent_turn" | "system_event" | string;
+    kind?: "agent_turn" | "system_event" | "local_trigger" | string;
+    command?: string;
   };
   state: {
     next_run_at_ms?: number | null;
@@ -135,6 +148,10 @@ export interface SessionAutomationJob {
     title?: string;
     preview?: string;
   } | null;
+  trigger?: {
+    id: string;
+    command: string;
+  };
 }
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
@@ -161,6 +178,8 @@ export interface SkillSummary {
   name: string;
   description: string;
   source: "workspace" | "builtin" | string;
+  enabled?: boolean;
+  deletable?: boolean;
   available: boolean;
   unavailable_reason?: string;
 }
@@ -172,12 +191,74 @@ export interface SkillRequirements {
   missing_env: string[];
 }
 
+export interface SkillInstallOption {
+  id: string;
+  kind: string;
+  label: string;
+  command: string;
+}
+
 export interface SkillDetail extends SkillSummary {
   requirements: SkillRequirements;
+  install_options?: SkillInstallOption[];
   raw_markdown: string;
 }
 
 export interface SkillsPayload { skills: SkillSummary[]; }
+
+export interface SkillActionPayload extends SkillsPayload {
+  last_action: {
+    name: string;
+    enabled: boolean;
+    deleted: boolean;
+  };
+}
+
+export interface MarketplaceSkillSummary {
+  id: string;
+  skill_id: string;
+  name: string;
+  source: string;
+  provider: Exclude<MarketplaceProvider, "all">;
+  installs: number;
+  downloads?: number;
+  url: string;
+  installed: boolean;
+  install_supported: boolean;
+  metric: "installs_24h" | "installs_total";
+  version?: string;
+  verified?: boolean;
+  requires_api_key?: boolean;
+  rank?: number;
+}
+
+export type MarketplaceProvider = "all" | "skills_sh" | "skillhub";
+
+export interface SkillsSearchPayload {
+  query: string;
+  skills: MarketplaceSkillSummary[];
+  provider: MarketplaceProvider;
+  install_supported: boolean;
+}
+
+export interface SkillsTrendingPayload {
+  skills: MarketplaceSkillSummary[];
+  period: "24h" | "trending" | "mixed";
+  provider: MarketplaceProvider;
+  install_supported: boolean;
+}
+
+export interface SkillsTrendsPayload {
+  trends: Record<string, number[]>;
+}
+
+export interface SkillInstallPayload extends SkillsPayload {
+  last_action: {
+    installed: boolean;
+    already_installed: boolean;
+    name: string;
+  };
+}
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
@@ -204,6 +285,13 @@ export interface ToolProgressEvent {
   embeds?: unknown[];
 }
 
+export interface UIFileDiff {
+  format: "unified" | string;
+  context?: number;
+  truncated?: boolean;
+  text?: string;
+}
+
 export interface UIFileEdit {
   version?: number;
   call_id: string;
@@ -219,6 +307,7 @@ export interface UIFileEdit {
   binary?: boolean;
   error?: string;
   pending?: boolean;
+  diff?: UIFileDiff;
 }
 
 export interface ChatSummary {
@@ -231,6 +320,8 @@ export interface ChatSummary {
   updatedAt: string | null;
   title?: string;
   preview: string;
+  /** Model preset persisted for this session; null means it still follows the global default. */
+  modelPreset?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -290,12 +381,35 @@ export interface SidebarStatePayload {
 
 export interface BootstrapResponse {
   token: string;
+  api_token: string;
   ws_path: string;
   ws_url?: string | null;
   expires_in: number;
+  limits?: WebUIIngressLimits;
   model_name?: string | null;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;
+}
+
+export interface WebUITransportLimits {
+  max_frame_bytes: number;
+  envelope_reserve_bytes: number;
+}
+
+export interface WebUIMessageLimits {
+  max_text_bytes: number;
+}
+
+export interface WebUIAttachmentLimits {
+  max_count: number;
+  max_file_bytes: number;
+  max_total_bytes: number;
+}
+
+export interface WebUIIngressLimits {
+  transport: WebUITransportLimits;
+  message: WebUIMessageLimits;
+  attachments: WebUIAttachmentLimits;
 }
 
 export type RuntimeSurface = "browser" | "native";
@@ -317,6 +431,7 @@ export interface RuntimeCapabilities {
 export interface ProviderModelInfo {
   id: string;
   label?: string | null;
+  description?: string | null;
   owned_by?: string | null;
   context_window?: number | null;
 }
@@ -330,12 +445,30 @@ export interface ProviderModelsPayload {
     | "not_configured"
     | "missing_api_base"
     | "error";
-  catalog_kind: "official" | "catalog" | "local" | "custom" | "unsupported";
+  catalog_kind: "builtin" | "official" | "catalog" | "local" | "custom" | "unsupported";
   models: ProviderModelInfo[];
   model_count: number;
   message?: string | null;
   fetched_at?: number;
 }
+
+export interface ProviderOAuthAuthorizationRequired {
+  status: "authorization_required";
+  provider: string;
+  flow_id: string;
+  authorization_url: string;
+  expires_in: number;
+  completion_input?: "authorization_code" | "callback_url";
+}
+
+export interface ProviderOAuthPending {
+  status: "pending";
+  provider: string;
+  flow_id: string;
+}
+
+export type ProviderOAuthLoginResult = SettingsPayload | ProviderOAuthAuthorizationRequired;
+export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPending;
 
 export interface SettingsPayload {
   surface?: RuntimeSurface;
@@ -368,15 +501,21 @@ export interface SettingsPayload {
     is_default: boolean;
     model: string;
     provider: string;
+    resolved_provider?: string | null;
     max_tokens: number;
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
   }>;
+  model_call_order: string[];
+  model_call_order_editable: boolean;
+  created_model_preset?: string;
+  created_provider?: string;
   providers: Array<{
     name: string;
     label: string;
+    is_custom?: boolean;
     configured: boolean;
     auth_type?: "api_key" | "oauth";
     api_key_required?: boolean;
@@ -384,10 +523,28 @@ export interface SettingsPayload {
     api_base?: string | null;
     default_api_base?: string | null;
     model_selectable?: boolean;
+    model_catalog?: ProviderModelsPayload["catalog_kind"];
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
+    proxy?: string | null;
+    advanced_fields?: Array<
+      | "api_type"
+      | "extra_headers"
+      | "extra_body"
+      | "extra_query"
+      | "proxy"
+      | "thinking_style"
+      | "region"
+      | "profile"
+    >;
+    extra_headers?: Record<string, string> | null;
+    extra_body?: Record<string, unknown> | null;
+    extra_query?: Record<string, string> | null;
+    thinking_style?: string | null;
+    region?: string | null;
+    profile?: string | null;
   }>;
   web_search: {
     provider: string;
@@ -413,6 +570,17 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
+  api?: {
+    host: string;
+    port: number;
+    timeout: number;
+    api_key_hint?: string | null;
+  };
+  observability?: {
+    provider: "langfuse" | string;
+    configured: boolean;
+    base_url: string;
+  };
   image_generation: {
     enabled: boolean;
     provider: string;
@@ -430,6 +598,8 @@ export interface SettingsPayload {
       api_key_hint?: string | null;
       api_base?: string | null;
       default_api_base?: string | null;
+      models?: string[];
+      default_model?: string | null;
     }>;
   };
   transcription?: {
@@ -528,6 +698,26 @@ export interface SettingsPayload {
   version?: {
     current: string;
   };
+  docs?: {
+    version: string;
+    base_url: string;
+    chat_apps_url: string;
+    latest_url?: string;
+  };
+}
+
+export interface ApiServicePayload {
+  installed: boolean;
+  running: boolean;
+  managed: boolean;
+  host: string;
+  port: number;
+  timeout: number;
+  api_key_hint?: string | null;
+  endpoint: string;
+  command: string;
+  log_path?: string | null;
+  last_action?: "started" | "stopped" | string;
 }
 
 export interface AppPackageRef {
@@ -618,6 +808,128 @@ export interface CliAppsPayload {
   };
 }
 
+export interface NanobotFeatureInfo {
+  name: string;
+  display_name: string;
+  capabilities?: string[];
+  settings_visible?: boolean;
+  webui?: string;
+  type: "channel" | "feature" | string;
+  enabled: boolean;
+  running?: boolean;
+  runtime_status?: ChannelRuntimeStatus;
+  runtime_error?: string;
+  configured?: boolean;
+  config_values?: Record<string, string>;
+  configured_fields?: string[];
+  setup?: ChannelSetupContract;
+  instances?: NanobotChannelInstanceInfo[];
+  installed: boolean;
+  ready: boolean;
+  status: "enabled" | "missing_dependency" | "not_enabled" | string;
+  install_supported: boolean;
+  requires_restart: boolean;
+}
+
+export interface ChannelSetupContractField {
+  key: string;
+  field: string;
+  kind: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
+  choices: string[];
+  required: boolean;
+  default_value?: string;
+}
+
+export interface ChannelSetupContract {
+  fields: ChannelSetupContractField[];
+  official_url?: string;
+}
+
+export interface NanobotChannelInstanceInfo {
+  id: string;
+  name: string;
+  display_name?: string;
+  avatar_url?: string;
+  enabled: boolean;
+  running?: boolean;
+  runtime_status?: ChannelRuntimeStatus;
+  runtime_error?: string;
+  configured: boolean;
+  config_values: Record<string, string>;
+  configured_fields: string[];
+}
+
+export type ChannelRuntimeStatus = "running" | "starting" | "failed" | "stopped" | string;
+
+export interface NanobotFeaturesPayload {
+  features: NanobotFeatureInfo[];
+  enabled_count: number;
+  requires_restart?: boolean;
+  last_action?: {
+    ok: boolean;
+    message: string;
+    enabled?: boolean;
+  };
+}
+
+export type ChannelSetupStatus =
+  | "connected"
+  | "configured"
+  | "needs_setup"
+  | "invalid"
+  | "unsupported"
+  | string;
+
+export type ChannelValidationCheckStatus = "pass" | "warn" | "fail" | "skipped" | string;
+
+export interface ChannelValidationCheck {
+  id: string;
+  label: string;
+  status: ChannelValidationCheckStatus;
+  message?: string;
+  action_url?: string;
+}
+
+export interface ChannelIdentity {
+  name?: string;
+  workspace?: string;
+  account?: string;
+  avatar_url?: string;
+}
+
+export interface ChannelValidationPayload {
+  name: string;
+  status: ChannelSetupStatus;
+  checks: ChannelValidationCheck[];
+  identity?: ChannelIdentity;
+  missing_fields: string[];
+  can_enable: boolean;
+  requires_restart: boolean;
+  checked_at?: string;
+  message?: string;
+}
+
+export interface PairingRequestInfo {
+  code: string;
+  channel: string;
+  sender_id: string;
+  created_at_ms?: number | null;
+  expires_at_ms?: number | null;
+  expires_in_seconds?: number | null;
+}
+
+export interface PairingPayload {
+  requests: PairingRequestInfo[];
+  last_action?: {
+    ok: boolean;
+    action: "approve" | "deny" | string;
+    message: string;
+    code?: string;
+    channel?: string;
+    sender_id?: string;
+  };
+}
+
 export interface McpPresetField {
   name: string;
   label: string;
@@ -687,6 +999,29 @@ export interface McpPresetsPayload {
   };
 }
 
+export type ChannelConnectStatus = "pending" | "succeeded" | "expired" | "cancelled" | "failed";
+
+export interface ChannelConnectPayload {
+  session_id: string;
+  instance_id?: string;
+  status: ChannelConnectStatus;
+  message?: string;
+  qr_url?: string;
+  domain?: string;
+  interval_ms?: number;
+  expires_at_ms?: number;
+  app_id?: string;
+  account?: string;
+  nanobot_features?: NanobotFeaturesPayload;
+}
+
+export interface ChannelConfigurePayload {
+  name: string;
+  saved: boolean;
+  saved_keys?: string[];
+  nanobot_features?: NanobotFeaturesPayload;
+}
+
 export interface SettingsUpdate {
   model?: string;
   provider?: string;
@@ -703,6 +1038,10 @@ export interface ModelConfigurationCreate {
   label: string;
   provider: string;
   model: string;
+  maxTokens?: number;
+  contextWindowTokens?: number;
+  temperature?: number;
+  reasoningEffort?: string | null;
 }
 
 export interface ModelConfigurationUpdate {
@@ -710,14 +1049,36 @@ export interface ModelConfigurationUpdate {
   label?: string;
   provider?: string;
   model?: string;
+  maxTokens?: number;
   contextWindowTokens?: number;
+  temperature?: number;
+  reasoningEffort?: string | null;
 }
 
 export interface ProviderSettingsUpdate {
   provider: string;
+  displayName?: string;
   apiKey?: string;
   apiBase?: string;
   apiType?: "auto" | "chat_completions" | "responses";
+  proxy?: string;
+  extraHeaders?: string;
+  extraBody?: string;
+  extraQuery?: string;
+  thinkingStyle?: string;
+  region?: string;
+  profile?: string;
+}
+
+export interface ProviderCreationUpdate {
+  name: string;
+  apiKey?: string;
+  apiBase: string;
+  proxy?: string;
+  extraHeaders?: string;
+  extraBody?: string;
+  extraQuery?: string;
+  thinkingStyle?: string;
 }
 
 export interface WebSearchSettingsUpdate {
@@ -752,12 +1113,30 @@ export interface TranscriptionSettingsUpdate {
   maxUploadMb: number;
 }
 
+/**
+ * Backend-owned contract for how a slash command affects WebUI turn state.
+ *
+ * - side_channel: returns control text without starting or ending an agent turn.
+ * - finalize_active_turn: side-channel command that also closes the active UI turn.
+ * - stop_active_turn: cancels the active turn; exact submits may be intercepted locally.
+ * - agent_turn: always enters the normal agent path.
+ * - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
+ */
+export type SlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn"
+  | "agent_turn_with_args";
+
 export interface SlashCommand {
   command: string;
   title: string;
   description: string;
   icon: string;
   argHint?: string;
+  lifecycle: SlashCommandLifecycle;
+  acceptsArgs: boolean;
 }
 
 export type ConnectionStatus =
@@ -777,6 +1156,7 @@ export interface InboundTurnMetadata {
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
+  | { event: "message_accepted"; chat_id: string; turn_id: string }
   | ({
       event: "message";
       chat_id: string;
@@ -805,12 +1185,20 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       stream_id?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
+      /** This answer segment ended, but the active agent turn will continue. */
+      resuming?: boolean;
+      /** The next answer segment continues this same assistant message. */
+      merge_next?: boolean;
     } & InboundTurnMetadata)
   | ({
       event: "reasoning_delta";
@@ -828,6 +1216,11 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
     }
+  | {
+      event: "turn_model_updated";
+      chat_id: string;
+      model_name: string;
+    }
   | ({
       event: "turn_end";
       chat_id: string;
@@ -835,14 +1228,14 @@ export type InboundEvent =
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
     } & InboundTurnMetadata)
-  | {
+  | ({
       event: "goal_status";
       chat_id: string;
       /** Turn executing (user message through agent loop). */
       status: "running" | "idle";
       /** Server ``time.time()`` when ``status`` is ``running``. */
       started_at?: number;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "goal_state";
       chat_id: string;
@@ -861,24 +1254,25 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
-  | { event: "error"; chat_id?: string; detail?: string; reason?: string };
+  | {
+      event: "error";
+      chat_id?: string;
+      detail?: string;
+      reason?: string;
+      /** Present when this error rejects a specific outbound WebUI turn. */
+      turn_id?: string;
+    };
 
-/** Base64-encoded image attached to an outbound ``message`` envelope.
+/** Base64-encoded file attached to an outbound ``message`` envelope.
  *
- * ``data_url`` must be a ``data:image/<png|jpeg|webp|gif>;base64,...`` string
- * — the server whitelists those MIME types and rejects everything else
- * (including SVG, to avoid an XSS surface). ``name`` is advisory: it's
- * preserved for the file on disk and surfaced as the placeholder label when
+ * ``data_url`` must use a server-whitelisted image, video, or document MIME
+ * type. SVG remains rejected on ingress to avoid an embedded-script XSS
+ * surface. ``name`` is advisory and is surfaced as the placeholder label when
  * the session is replayed.
  */
 export interface OutboundMedia {
   data_url: string;
   name?: string;
-}
-
-export interface OutboundImageGeneration {
-  enabled: true;
-  aspect_ratio?: string | null;
 }
 
 export interface OutboundCliAppMention {
@@ -916,7 +1310,11 @@ export interface WebuiThreadPersistedPayload {
   savedAt?: string;
   messages: UIMessage[];
   fork_boundary_message_count?: number;
+  /** Turn ids backed by an explicit persisted ``turn_end`` event. */
+  completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;
+  /** Exact active turn when supplied by a current gateway. */
+  active_turn_id?: string | null;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
 }
@@ -942,9 +1340,9 @@ export type Outbound =
       chat_id: string;
       content: string;
       media?: OutboundMedia[];
-      image_generation?: OutboundImageGeneration;
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
+      quoted_context?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the
