@@ -164,6 +164,7 @@ class CronService:
         self._timer_task: asyncio.Task[None] | None = None
         self._running = False
         self._timer_active = False
+        self._manual_running = 0
         self.max_sleep_ms = max_sleep_ms
 
     def _is_unbound_agent_job(self, job: CronJob) -> bool:
@@ -294,7 +295,7 @@ class CronService:
           load (during ``start``) can return ``None`` to signal an unrecoverable
           state to the caller.
         """
-        if self._timer_active and self._store:
+        if (self._timer_active or self._manual_running > 0) and self._store:
             return self._store
         loaded = self._load_jobs()
         if loaded is None:
@@ -788,6 +789,7 @@ class CronService:
         """Manually run a job without disturbing the service's running state."""
         was_running = self._running
         self._running = True
+        self._manual_running += 1
         try:
             store = self._require_store()
             for job in store.jobs:
@@ -803,6 +805,7 @@ class CronService:
                     return True
             return False
         finally:
+            self._manual_running -= 1
             self._running = was_running
             if was_running:
                 self._arm_timer()
