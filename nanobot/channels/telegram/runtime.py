@@ -60,6 +60,9 @@ POLL_STALE_SECONDS = 120.0
 POLL_WATCH_INTERVAL = 1.0
 RESTART_BACKOFF_INITIAL_SECONDS = 5.0
 RESTART_BACKOFF_MAX_SECONDS = 300.0
+# How long a send waits out a rebuild; short because ChannelManager dispatches
+# every channel from one serial loop.
+APP_RESTART_SEND_WAIT_SECONDS = 2.0
 
 
 class _LivenessTrackedRequest(BaseRequest):
@@ -512,6 +515,7 @@ class TelegramChannel(BaseChannel):
         self._inbound_workers: dict[str, asyncio.Task[None]] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
         self._last_poll_ok: float = 0.0  # monotonic time of last getUpdates round trip
+        self._app_ready = asyncio.Event()  # cleared while the app is being rebuilt
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -564,16 +568,23 @@ class TelegramChannel(BaseChannel):
         while self._running:
             try:
                 await self._start_app()
-            except InvalidToken as e:
-                # A rejected token is a config error, not a transient network
-                # failure — retrying forever would only spam the log.
+            except InvalidToken:
+                # A config error, not a blip: fail the channel. The scrubbed
+                # re-raise keeps PTB's token-bearing message out of the log.
                 await self._teardown_app()
-                self.logger.error("bot token rejected: {}", self._format_telegram_error(e))
-                return
+                self._running = False
+                self.logger.error("bot token rejected by Telegram")
+                raise RuntimeError("Telegram bot token was rejected by the server") from None
             except Exception as e:
                 await self._teardown_app()
                 if not self._running:
                     break
+                if not self._is_transient_startup_error(e):
+                    # Never heals on its own: fail instead of retrying forever
+                    # while ChannelManager keeps reporting the channel running.
+                    self._running = False
+                    self.logger.error("startup failed: {}", self._format_telegram_error(e))
+                    raise
                 self.logger.error(
                     "startup failed: {}; retrying in {:.0f}s",
                     self._format_telegram_error(e),
@@ -706,6 +717,35 @@ class TelegramChannel(BaseChannel):
                 error_callback=self._on_polling_error,
             )
 
+        self._app_ready.set()
+
+    @staticmethod
+    def _is_transient_startup_error(exc: Exception) -> bool:
+        """Report whether a startup failure is worth retrying.
+
+        HTTPXRequest wraps every httpx failure into NetworkError/TimedOut, so
+        anything else is terminal: a bad proxy raises ValueError, an already
+        bound webhook port raises OSError.
+        """
+        return isinstance(exc, NetworkError | TimedOut | asyncio.TimeoutError)
+
+    async def _wait_for_app(self) -> TelegramApplication | None:
+        """Return the live app, briefly waiting out an in-flight rebuild.
+
+        Returning quietly while ``start()`` rebuilds would let the manager count
+        the message as delivered, so raise once the wait runs out. None means the
+        channel is stopped: nothing left to deliver.
+        """
+        if self._app is not None:
+            return self._app
+        if not self._running:
+            return None
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._app_ready.wait(), APP_RESTART_SEND_WAIT_SECONDS)
+        if self._app is None:
+            raise RuntimeError("Telegram application is restarting; message not delivered")
+        return self._app
+
     def _note_poll_ok(self) -> None:
         # HTTP error statuses count too: the watchdog detects transport stalls,
         # not logical failures.
@@ -729,6 +769,7 @@ class TelegramChannel(BaseChannel):
     async def _teardown_app(self) -> None:
         """Shut down the application, tolerating partially started state."""
         app, self._app = self._app, None
+        self._app_ready.clear()
         if not app:
             return
         for step in (cast(Any, app.updater).stop, app.stop, app.shutdown):
@@ -736,6 +777,12 @@ class TelegramChannel(BaseChannel):
                 await step()
             except Exception as e:
                 self.logger.debug("teardown step failed: {}", e)
+        # Application.shutdown() skips the HTTPX pools unless initialize()
+        # finished, so a failed startup leaks one per retry. This is idempotent.
+        try:
+            await app.bot.shutdown()
+        except Exception as e:
+            self.logger.debug("bot shutdown failed: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -848,7 +895,8 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
-        if not self._app:
+        app = await self._wait_for_app()
+        if app is None:
             self.logger.warning("bot not running")
             return
 
@@ -887,11 +935,11 @@ class TelegramChannel(BaseChannel):
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
-                    "photo": self._app.bot.send_photo,
-                    "video": self._app.bot.send_video,
-                    "voice": self._app.bot.send_voice,
-                    "audio": self._app.bot.send_audio,
-                }.get(media_type, self._app.bot.send_document)
+                    "photo": app.bot.send_photo,
+                    "video": app.bot.send_video,
+                    "voice": app.bot.send_voice,
+                    "audio": app.bot.send_audio,
+                }.get(media_type, app.bot.send_document)
                 param = {
                     "photo": "photo",
                     "video": "video",
@@ -931,7 +979,7 @@ class TelegramChannel(BaseChannel):
             except Exception:
                 filename = media_path.rsplit("/", 1)[-1]
                 self.logger.exception("Failed to send media {}", media_path)
-                await self._app.bot.send_message(
+                await app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params,
@@ -1059,7 +1107,8 @@ class TelegramChannel(BaseChannel):
         merge_next: bool = False,
     ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
-        if not self._app:
+        app = await self._wait_for_app()
+        if app is None:
             return
         meta = metadata or {}
         int_chat_id = int(chat_id)
@@ -1098,7 +1147,7 @@ class TelegramChannel(BaseChannel):
                     # Delete the streaming preview message
                     try:
                         await self._call_with_retry(
-                            self._app.bot.delete_message,
+                            app.bot.delete_message,
                             chat_id=int_chat_id, message_id=buf.message_id,
                         )
                     except Exception:
@@ -1112,7 +1161,7 @@ class TelegramChannel(BaseChannel):
             extra_html_chunks = html_chunks[1:]
             try:
                 await self._call_with_retry(
-                    self._app.bot.edit_message_text,
+                    app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=primary_html, parse_mode="HTML",
                 )
@@ -1129,7 +1178,7 @@ class TelegramChannel(BaseChannel):
                 primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
                 try:
                     await self._call_with_retry(
-                        self._app.bot.edit_message_text,
+                        app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=primary_plain,
                     )
@@ -1142,7 +1191,7 @@ class TelegramChannel(BaseChannel):
             for extra_html_chunk in extra_html_chunks:
                 try:
                     await self._call_with_retry(
-                        self._app.bot.send_message,
+                        app.bot.send_message,
                         chat_id=int_chat_id, text=extra_html_chunk,
                         parse_mode="HTML",
                         **thread_kwargs,
@@ -1172,7 +1221,7 @@ class TelegramChannel(BaseChannel):
             preview = _strip_md_block(buf.text)
             try:
                 sent = await self._call_with_retry(
-                    self._app.bot.send_message,
+                    app.bot.send_message,
                     chat_id=int_chat_id, text=preview,
                     **stream_thread_kwargs,
                 )
@@ -1189,7 +1238,7 @@ class TelegramChannel(BaseChannel):
             preview = _strip_md_block(buf.text)
             try:
                 await self._call_with_retry(
-                    self._app.bot.edit_message_text,
+                    app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=preview,
                 )

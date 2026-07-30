@@ -61,6 +61,10 @@ class _FakeBot:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
         self.get_me_calls = 0
+        self.shutdown_calls = 0
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
 
     async def get_me(self):
         self.get_me_calls += 1
@@ -450,11 +454,49 @@ async def test_startup_failure_retries_with_backoff(monkeypatch) -> None:
     assert apps[0].updater.start_polling_kwargs is None
     assert apps[1].updater.start_polling_kwargs is None
     assert apps[2].updater.start_polling_kwargs is not None
+    # Pools must be closed via the bot: app.shutdown() skips them here.
+    assert apps[0].bot.shutdown_calls == 1
+    assert apps[1].bot.shutdown_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_startup_error_is_not_retried(monkeypatch) -> None:
+    """Config errors (bad proxy, bound webhook port) must fail the channel."""
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    apps: list[_FakeApp] = []
+
+    def make_builder():
+        app = _FakeApp(lambda: None)
+
+        async def _fail() -> None:
+            raise ValueError("Unknown scheme for proxy URL")
+
+        app.initialize = _fail
+        apps.append(app)
+        return _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=make_builder),
+    )
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.RESTART_BACKOFF_INITIAL_SECONDS", 0.0)
+
+    with pytest.raises(ValueError, match="proxy URL"):
+        await channel.start()
+
+    assert len(apps) == 1  # no retry loop
+    assert channel._app is None
+    assert channel.is_running is False
 
 
 @pytest.mark.asyncio
 async def test_invalid_token_stops_without_retry(monkeypatch) -> None:
-    """A rejected token is a config error: log it and give up instead of retrying."""
+    """A rejected token is a config error: fail the channel instead of retrying."""
     from telegram.error import InvalidToken
 
     _FakeHTTPXRequest.clear()
@@ -481,10 +523,13 @@ async def test_invalid_token_stops_without_retry(monkeypatch) -> None:
     )
     monkeypatch.setattr("nanobot.channels.telegram.runtime.RESTART_BACKOFF_INITIAL_SECONDS", 0.0)
 
-    await channel.start()
+    with pytest.raises(RuntimeError) as excinfo:
+        await channel.start()
 
     assert len(apps) == 1
     assert channel._app is None
+    assert channel.is_running is False
+    assert "123:abc" not in str(excinfo.value)  # token must not reach the log
 
 
 @pytest.mark.asyncio
@@ -508,6 +553,52 @@ async def test_stop_during_startup_does_not_leak_app(monkeypatch) -> None:
     await channel.start()
 
     assert channel._app is None  # torn down, not leaked
+
+
+@pytest.mark.asyncio
+async def test_send_during_rebuild_fails_instead_of_dropping(monkeypatch) -> None:
+    """A send that cannot reach Telegram must raise so the manager can retry."""
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.APP_RESTART_SEND_WAIT_SECONDS", 0.0)
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+
+    # Mid-rebuild: still running, but no app to send through.
+    channel._running = True
+    channel._app = None
+
+    msg = OutboundMessage(channel="telegram", chat_id="123", content="hello")
+    with pytest.raises(RuntimeError, match="restarting"):
+        await channel.send(msg)
+    with pytest.raises(RuntimeError, match="restarting"):
+        await channel.send_delta("123", "hello", stream_id="s1")
+
+    # Stopped: nothing to deliver, so stay quiet.
+    channel._running = False
+    await channel.send(msg)
+    await channel.send_delta("123", "hello", stream_id="s1")
+
+
+@pytest.mark.asyncio
+async def test_send_waits_for_rebuild_to_finish(monkeypatch) -> None:
+    """A fast rebuild is waited out rather than surfaced as a delivery failure."""
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.APP_RESTART_SEND_WAIT_SECONDS", 5.0)
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+
+    app = _FakeApp(lambda: None)
+    channel._running = True
+    channel._app = None
+
+    async def _finish_rebuild() -> None:
+        await asyncio.sleep(0)
+        channel._app = app
+        channel._app_ready.set()
+
+    rebuild = asyncio.create_task(_finish_rebuild())
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="hello"))
+    await rebuild
+
+    assert [m["text"] for m in app.bot.sent_messages] == ["hello"]
 
 
 @pytest.mark.asyncio
