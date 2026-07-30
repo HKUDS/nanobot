@@ -115,12 +115,11 @@ def _make_fake_compact(
 
         last_active = session.updated_at
         s = summary
-        if archive_msgs:
-            if on_archive:
-                result = on_archive(archive_msgs)
-                s = result if isinstance(result, str) else summary
-            if track_archived is not None:
-                track_archived.extend(archive_msgs)
+        if on_archive:
+            result = on_archive(archive_msgs)
+            s = result if isinstance(result, str) else summary
+        if track_archived is not None:
+            track_archived.extend(archive_msgs)
 
         if s and s != "(nothing)":
             session.metadata["_last_summary"] = {

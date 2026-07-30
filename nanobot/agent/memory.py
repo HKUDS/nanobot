@@ -1224,14 +1224,13 @@ class Consolidator:
             session.last_consolidated = len(session.messages) - len(visible_suffix)
             self.sessions.save(session)
 
-            if messages_to_remove:
-                logger.info(
-                    "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
-                    session_key,
-                    len(messages_to_remove),
-                    len(visible_suffix),
-                    len(session.messages),
-                    bool(summary),
-                )
+            logger.info(
+                "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
+                session_key,
+                len(messages_to_remove),
+                len(visible_suffix),
+                len(session.messages),
+                bool(summary),
+            )
 
             return summary
