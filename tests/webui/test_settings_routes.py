@@ -27,15 +27,31 @@ def _router(*, authorized: bool = True) -> WebUISettingsRouter:
     )
 
 
+@pytest.mark.parametrize(
+    ("provider", "header_name", "authorization_response"),
+    [
+        ("xai_grok", "X-Nanobot-OAuth-Code", "secret"),
+        (
+            "openai_codex",
+            "X-Nanobot-OAuth-Callback",
+            "http://localhost:1455/auth/callback?code=secret&state=test",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_xai_oauth_completion_reads_code_from_private_header(monkeypatch) -> None:
+async def test_oauth_completion_reads_private_response_header(
+    monkeypatch,
+    provider: str,
+    header_name: str,
+    authorization_response: str,
+) -> None:
     captured: dict[str, object] = {}
 
-    def complete(query, authorization_code=None):
-        captured.update(query=query, authorization_code=authorization_code)
+    def complete(query, authorization_response=None):
+        captured.update(query=query, authorization_response=authorization_response)
         return {
             "status": "pending",
-            "provider": "xai_grok",
+            "provider": provider,
             "flow_id": "flow-123",
         }
 
@@ -44,13 +60,13 @@ async def test_xai_oauth_completion_reads_code_from_private_header(monkeypatch) 
     request = SimpleNamespace(
         path=(
             "/api/settings/provider/oauth-login/complete"
-            "?provider=xai_grok&flow_id=flow-123"
+            f"?provider={provider}&flow_id=flow-123"
         ),
         headers=Headers(
             [
                 (
-                    "X-Nanobot-OAuth-Code",
-                    "secret",
+                    header_name,
+                    authorization_response,
                 )
             ]
         ),
@@ -66,14 +82,14 @@ async def test_xai_oauth_completion_reads_code_from_private_header(monkeypatch) 
     assert response.status_code == 200
     assert json.loads(response.body) == {
         "status": "pending",
-        "provider": "xai_grok",
+        "provider": provider,
         "flow_id": "flow-123",
     }
     assert captured == {
-        "query": {"provider": ["xai_grok"], "flow_id": ["flow-123"]},
-        "authorization_code": "secret",
+        "query": {"provider": [provider], "flow_id": ["flow-123"]},
+        "authorization_response": authorization_response,
     }
-    assert "secret" not in request.path
+    assert authorization_response not in request.path
 
 
 @pytest.mark.parametrize(

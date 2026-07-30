@@ -61,6 +61,7 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
 const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
 const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
+const OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback";
 const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
 
 export class ApiError extends Error {
@@ -1006,13 +1007,18 @@ export async function completeProviderOAuth(
   token: string,
   provider: string,
   flowId: string,
-  authorizationCode?: string,
+  authorizationResponse?: string,
   base: string = "",
 ): Promise<ProviderOAuthCompletionResult> {
   const query = new URLSearchParams();
   query.set("provider", provider);
   query.set("flow_id", flowId);
-  const headers = authorizationCode ? { [OAUTH_CODE_HEADER]: authorizationCode } : undefined;
+  const responseHeader = provider === "openai_codex"
+    ? OAUTH_CALLBACK_HEADER
+    : OAUTH_CODE_HEADER;
+  const headers = authorizationResponse
+    ? { [responseHeader]: authorizationResponse }
+    : undefined;
   return request<ProviderOAuthCompletionResult>(
     `${base}/api/settings/provider/oauth-login/complete?${query}`,
     token,

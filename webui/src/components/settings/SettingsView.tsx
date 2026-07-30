@@ -661,11 +661,12 @@ export function SettingsView({
   const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
-  const [xaiOAuthFlow, setXaiOAuthFlow] =
+  const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
-  const xaiOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
-  const [xaiOAuthCode, setXaiOAuthCode] = useState("");
-  const [xaiOAuthCompleting, setXaiOAuthCompleting] = useState(false);
+  const providerOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
+  const [providerOAuthResponse, setProviderOAuthResponse] = useState("");
+  const [providerOAuthCompleting, setProviderOAuthCompleting] = useState(false);
+  const [providerOAuthDialogError, setProviderOAuthDialogError] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
@@ -765,37 +766,44 @@ export function SettingsView({
     [onSettingsChange],
   );
 
-  const closeXaiOAuthFlow = useCallback(() => {
-    xaiOAuthFlowRef.current = null;
-    setXaiOAuthFlow(null);
-    setXaiOAuthCode("");
-    setXaiOAuthCompleting(false);
+  const closeProviderOAuthFlow = useCallback(() => {
+    providerOAuthFlowRef.current = null;
+    setProviderOAuthFlow(null);
+    setProviderOAuthResponse("");
+    setProviderOAuthCompleting(false);
+    setProviderOAuthDialogError(null);
   }, []);
 
   useEffect(() => {
-    if (!xaiOAuthFlow) return;
+    if (!providerOAuthFlow) return;
     let cancelled = false;
     let timer: number | null = null;
     const poll = async () => {
       try {
         const payload = await completeProviderOAuth(
           getToken(),
-          xaiOAuthFlow.provider,
-          xaiOAuthFlow.flow_id,
+          providerOAuthFlow.provider,
+          providerOAuthFlow.flow_id,
         );
-        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        if (
+          cancelled
+          || providerOAuthFlowRef.current?.flow_id !== providerOAuthFlow.flow_id
+        ) return;
         if (isProviderOAuthPending(payload)) {
           timer = window.setTimeout(() => void poll(), 1000);
           return;
         }
         applyPayload(payload);
-        setExpandedProvider(xaiOAuthFlow.provider);
+        setExpandedProvider(providerOAuthFlow.provider);
         setError(null);
-        closeXaiOAuthFlow();
+        closeProviderOAuthFlow();
       } catch (err) {
-        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        if (
+          cancelled
+          || providerOAuthFlowRef.current?.flow_id !== providerOAuthFlow.flow_id
+        ) return;
         setError((err as Error).message);
-        closeXaiOAuthFlow();
+        closeProviderOAuthFlow();
       }
     };
     timer = window.setTimeout(() => void poll(), 1000);
@@ -803,7 +811,7 @@ export function SettingsView({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [applyPayload, closeXaiOAuthFlow, getToken, xaiOAuthFlow]);
+  }, [applyPayload, closeProviderOAuthFlow, getToken, providerOAuthFlow]);
 
   useEffect(() => {
     if (!initialSettings || settings !== null) return;
@@ -1612,7 +1620,11 @@ export function SettingsView({
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
     let popup: Window | null = null;
-    if (action === "login" && providerName === "xai_grok" && !remoteBrowserAccess) {
+    if (
+      action === "login"
+      && (providerName === "xai_grok" || providerName === "openai_codex")
+      && !remoteBrowserAccess
+    ) {
       try {
         popup = window.open("about:blank", "_blank");
         if (popup) popup.opener = null;
@@ -1632,15 +1644,16 @@ export function SettingsView({
         } catch {
           // The dialog keeps the authorization link available when the popup was closed.
         }
-        xaiOAuthFlowRef.current = payload;
-        setXaiOAuthFlow(payload);
-        setXaiOAuthCode("");
+        providerOAuthFlowRef.current = payload;
+        setProviderOAuthFlow(payload);
+        setProviderOAuthResponse("");
+        setProviderOAuthDialogError(null);
         setExpandedProvider(providerName);
         setError(null);
         return;
       }
       popup?.close();
-      closeXaiOAuthFlow();
+      closeProviderOAuthFlow();
       applyPayload(payload);
       setExpandedProvider(providerName);
       setError(null);
@@ -1652,31 +1665,31 @@ export function SettingsView({
     }
   };
 
-  const completeXaiOAuth = async () => {
-    const flow = xaiOAuthFlowRef.current;
-    const authorizationCode = xaiOAuthCode.trim();
-    if (!flow || !authorizationCode || xaiOAuthCompleting) return;
-    setXaiOAuthCompleting(true);
+  const completeProviderOAuthResponse = async () => {
+    const flow = providerOAuthFlowRef.current;
+    const authorizationResponse = providerOAuthResponse.trim();
+    if (!flow || !authorizationResponse || providerOAuthCompleting) return;
+    setProviderOAuthCompleting(true);
+    setProviderOAuthDialogError(null);
     try {
       const payload = await completeProviderOAuth(
         token,
         flow.provider,
         flow.flow_id,
-        authorizationCode,
+        authorizationResponse,
       );
-      if (xaiOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
       applyPayload(payload);
       setExpandedProvider(flow.provider);
       setError(null);
-      closeXaiOAuthFlow();
+      closeProviderOAuthFlow();
     } catch (err) {
-      if (xaiOAuthFlowRef.current?.flow_id === flow.flow_id) {
-        setError((err as Error).message);
-        closeXaiOAuthFlow();
+      if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
+        setProviderOAuthDialogError((err as Error).message);
       }
     } finally {
-      setXaiOAuthCompleting(false);
+      setProviderOAuthCompleting(false);
     }
   };
 
@@ -2317,19 +2330,33 @@ export function SettingsView({
         onConfirm={handleDeleteModelConfiguration}
       />
 
-      <XaiOAuthLoginDialog
-        flow={xaiOAuthFlow}
-        authorizationCode={xaiOAuthCode}
-        completing={xaiOAuthCompleting}
+      <ProviderOAuthLoginDialog
+        flow={providerOAuthFlow}
+        providerLabel={
+          providerOAuthFlow
+            ? settings?.providers.find((provider) => provider.name === providerOAuthFlow.provider)
+              ?.label ?? providerOAuthFlow.provider
+            : ""
+        }
+        authorizationResponse={providerOAuthResponse}
+        completing={providerOAuthCompleting}
+        error={providerOAuthDialogError}
         remoteBrowserAccess={remoteBrowserAccess}
-        onAuthorizationCodeChange={setXaiOAuthCode}
+        onAuthorizationResponseChange={(value) => {
+          setProviderOAuthResponse(value);
+          setProviderOAuthDialogError(null);
+        }}
         onOpenAuthorization={() => {
-          if (!xaiOAuthFlow) return;
-          const opened = window.open(xaiOAuthFlow.authorization_url, "_blank", "noopener,noreferrer");
+          if (!providerOAuthFlow) return;
+          const opened = window.open(
+            providerOAuthFlow.authorization_url,
+            "_blank",
+            "noopener,noreferrer",
+          );
           if (opened) opened.opener = null;
         }}
-        onComplete={() => void completeXaiOAuth()}
-        onClose={closeXaiOAuthFlow}
+        onComplete={() => void completeProviderOAuthResponse()}
+        onClose={closeProviderOAuthFlow}
       />
 
       <NanobotFeatureInstallDialog
@@ -2980,26 +3007,35 @@ function AppearanceSettings({
   );
 }
 
-function XaiOAuthLoginDialog({
+function ProviderOAuthLoginDialog({
   flow,
-  authorizationCode,
+  providerLabel,
+  authorizationResponse,
   completing,
+  error,
   remoteBrowserAccess,
-  onAuthorizationCodeChange,
+  onAuthorizationResponseChange,
   onOpenAuthorization,
   onComplete,
   onClose,
 }: {
   flow: ProviderOAuthAuthorizationRequired | null;
-  authorizationCode: string;
+  providerLabel: string;
+  authorizationResponse: string;
   completing: boolean;
+  error: string | null;
   remoteBrowserAccess: boolean;
-  onAuthorizationCodeChange: (value: string) => void;
+  onAuthorizationResponseChange: (value: string) => void;
   onOpenAuthorization: () => void;
   onComplete: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const expectsCallbackUrl = flow?.completion_input === "callback_url";
+  const inputId = expectsCallbackUrl ? "provider-oauth-callback" : "provider-oauth-code";
+  const inputLabel = expectsCallbackUrl
+    ? t("settings.oauth.callbackUrl")
+    : t("settings.oauth.authorizationCode");
 
   return (
     <Dialog
@@ -3017,36 +3053,67 @@ function XaiOAuthLoginDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>xAI Grok</DialogTitle>
+            <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
-              {remoteBrowserAccess
-                ? t("settings.oauth.remoteCodeHelp")
-                : t("settings.oauth.localCodeHelp")}
+              {expectsCallbackUrl
+                ? remoteBrowserAccess
+                  ? t("settings.oauth.remoteCallbackHelp")
+                  : t("settings.oauth.localCallbackHelp")
+                : remoteBrowserAccess
+                  ? t("settings.oauth.remoteCodeHelp")
+                  : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-2 rounded-[14px] border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            <span>{t("settings.oauth.waitingForCallback")}</span>
+          </div>
           <div className="space-y-2">
             <label
-              htmlFor="xai-oauth-code"
+              htmlFor={inputId}
               className="block text-xs font-medium text-foreground"
             >
-              {t("settings.oauth.authorizationCode")}
+              {inputLabel}
             </label>
-            <Input
-              id="xai-oauth-code"
-              value={authorizationCode}
-              onChange={(event) => onAuthorizationCodeChange(event.target.value)}
-              placeholder={t("settings.oauth.authorizationCode")}
-              aria-label={t("settings.oauth.authorizationCode")}
-              autoComplete="off"
-              spellCheck={false}
-            />
+            {expectsCallbackUrl ? (
+              <Textarea
+                id={inputId}
+                value={authorizationResponse}
+                onChange={(event) => onAuthorizationResponseChange(event.target.value)}
+                placeholder={t("settings.oauth.callbackUrlPlaceholder")}
+                aria-label={inputLabel}
+                autoComplete="off"
+                spellCheck={false}
+                className="min-h-[88px] resize-none break-all font-mono text-[12px] leading-5"
+              />
+            ) : (
+              <Input
+                id={inputId}
+                value={authorizationResponse}
+                onChange={(event) => onAuthorizationResponseChange(event.target.value)}
+                placeholder={inputLabel}
+                aria-label={inputLabel}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            )}
           </div>
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-[14px] border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[12px] text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
           <DialogFooter className="gap-2 sm:space-x-0">
             <Button type="button" variant="outline" onClick={onOpenAuthorization}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-              {t("settings.oauth.signIn")}
+              {expectsCallbackUrl
+                ? t("settings.oauth.openChatGPT")
+                : t("settings.oauth.signIn")}
             </Button>
-            <Button type="submit" disabled={!authorizationCode.trim() || completing}>
+            <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
             </Button>
           </DialogFooter>
@@ -4255,7 +4322,12 @@ function ProvidersSettings({
                             account: provider.oauth_account || provider.label,
                             defaultValue: "Signed in as {{account}}",
                           })
-                        : provider.name === "xai_grok" && remoteBrowserAccess
+                        : provider.name === "openai_codex" && remoteBrowserAccess
+                          ? tx(
+                              "settings.oauth.codexRemoteSignInHelp",
+                              "Sign in through this browser, then paste the full localhost callback URL back into nanobot.",
+                            )
+                          : provider.name === "xai_grok" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.remoteSignInHelp",
                               "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",

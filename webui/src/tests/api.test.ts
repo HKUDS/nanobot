@@ -675,6 +675,23 @@ describe("webui API helpers", () => {
       }),
     );
 
+    await completeProviderOAuth(
+      "tok",
+      "openai_codex",
+      "flow-codex",
+      "http://localhost:1455/auth/callback?code=secret&state=test",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-OAuth-Callback":
+            "http://localhost:1455/auth/callback?code=secret&state=test",
+        },
+      }),
+    );
+
     await logoutProviderOAuth("tok", "openai_codex");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/oauth-logout?provider=openai_codex",
