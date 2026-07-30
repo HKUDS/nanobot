@@ -42,6 +42,11 @@ _SOURCE_RE = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/"
     r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?$"
 )
+_WELL_KNOWN_SOURCE_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
+)
 _SKILL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,63})$")
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -351,7 +356,8 @@ async def _install_skills_sh_skill(
     skill_id: str,
     workspace_path: Path,
 ) -> dict[str, Any]:
-    if not _SOURCE_RE.fullmatch(source):
+    install_source = _skills_sh_install_source(source)
+    if install_source is None:
         raise SkillsMarketplaceError("invalid skill source")
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid skill name")
@@ -386,7 +392,7 @@ async def _install_skills_sh_skill(
         "--yes",
         "skills@latest",
         "add",
-        source,
+        install_source,
         "--skill",
         skill_id,
         "--agent",
@@ -755,7 +761,7 @@ def _marketplace_skill(
 ) -> dict[str, Any] | None:
     source = row.get("source")
     skill_id = row.get("skillId")
-    if not isinstance(source, str) or not _SOURCE_RE.fullmatch(source):
+    if not isinstance(source, str) or _skills_sh_install_source(source) is None:
         return None
     if not isinstance(skill_id, str) or not _valid_skill_id(skill_id):
         return None
@@ -889,7 +895,11 @@ def _valid_skill_refs(skill_ids: list[str]) -> list[tuple[str, str]]:
             continue
         source, skill_id = value.rsplit("/", 1)
         ref = (source, skill_id)
-        if _SOURCE_RE.fullmatch(source) and _valid_skill_id(skill_id) and ref not in refs:
+        if (
+            _skills_sh_install_source(source) is not None
+            and _valid_skill_id(skill_id)
+            and ref not in refs
+        ):
             refs.append(ref)
     return refs
 
@@ -920,6 +930,14 @@ async def _load_skill_page_trends(
 
 def _valid_skill_id(value: str) -> bool:
     return len(value) <= 64 and _SKILL_RE.fullmatch(value) is not None
+
+
+def _skills_sh_install_source(value: str) -> str | None:
+    if _SOURCE_RE.fullmatch(value):
+        return value
+    if _WELL_KNOWN_SOURCE_RE.fullmatch(value):
+        return f"https://{value}"
+    return None
 
 
 def _valid_provider(value: str, *, allow_all: bool = True) -> str:
