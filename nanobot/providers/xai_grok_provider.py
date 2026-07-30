@@ -18,7 +18,6 @@ from nanobot import __version__
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
-    ProviderConversationState,
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
@@ -207,9 +206,6 @@ class XAIGrokProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         return await self._call_xai(
             messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
@@ -227,9 +223,6 @@ class XAIGrokProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         return await self._call_xai(
             messages,

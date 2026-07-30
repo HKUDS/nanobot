@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
+from nanobot.providers.base import LLMProvider, LLMResponse
 
 
 class UnconfiguredProvider(LLMProvider):
@@ -23,9 +23,6 @@ class UnconfiguredProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         return LLMResponse(
             content=(

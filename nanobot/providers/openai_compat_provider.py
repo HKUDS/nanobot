@@ -26,6 +26,7 @@ from pydantic.alias_generators import to_snake
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
     parse_tool_arguments,
@@ -1092,32 +1093,26 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
-        sanitized_state = provider_state if self._responses_state_enabled else None
+        sanitized_state = (
+            provider_context.conversation_state
+            if self._responses_state_enabled and provider_context is not None
+            else None
+        )
         if sanitized_state is not None:
             sanitized_state = sanitized_state.with_pending_messages(
                 self._sanitize_messages(
                     self._sanitize_empty_content(sanitized_state.pending_messages)
                 )
             )
-        sanitized_state_messages = (
-            self._sanitize_messages(
-                self._sanitize_empty_content(provider_state_messages)
-            )
-            if self._responses_state_enabled and provider_state_messages is not None
-            else None
-        )
         instructions, input_items, replayed = prepare_responses_input(
             sanitized_messages,
             state=sanitized_state,
-            state_messages=sanitized_state_messages,
             provider=self._responses_state_provider(),
             model=model_name,
         )
@@ -1131,7 +1126,11 @@ class OpenAICompatProvider(LLMProvider):
             "stream": False,
         }
         compact_threshold = resolve_compact_threshold(
-            context_window_tokens,
+            (
+                provider_context.context_window_tokens
+                if provider_context is not None
+                else None
+            ),
             max_tokens,
             configured_threshold=self._responses_compact_threshold,
         )
@@ -1715,6 +1714,28 @@ class OpenAICompatProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+        )
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+        )
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -1724,9 +1745,7 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         try:
@@ -1735,8 +1754,7 @@ class OpenAICompatProvider(LLMProvider):
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
-                        provider_state, provider_state_messages,
-                        context_window_tokens,
+                        provider_context,
                     )
                     responses_raw = await self._create_response_with_compaction_fallback(
                         client,
@@ -1794,9 +1812,7 @@ class OpenAICompatProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
@@ -1806,8 +1822,7 @@ class OpenAICompatProvider(LLMProvider):
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
-                        provider_state, provider_state_messages,
-                        context_window_tokens,
+                        provider_context,
                     )
                     body["stream"] = True
                     responses_stream = await self._create_response_with_compaction_fallback(

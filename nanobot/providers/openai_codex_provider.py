@@ -17,6 +17,7 @@ from oauth_cli_kit import get_token as get_codex_token
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
@@ -75,27 +76,23 @@ class OpenAICodexProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
-        sanitized_state = provider_state if self._responses_state_enabled else None
+        sanitized_state = (
+            provider_context.conversation_state
+            if self._responses_state_enabled and provider_context is not None
+            else None
+        )
         if sanitized_state is not None:
             sanitized_state = sanitized_state.with_pending_messages(
                 self._sanitize_empty_content(sanitized_state.pending_messages)
             )
-        sanitized_state_messages = (
-            self._sanitize_empty_content(provider_state_messages)
-            if self._responses_state_enabled and provider_state_messages is not None
-            else None
-        )
         system_prompt, input_items, replayed = prepare_responses_input(
             sanitized_messages,
             state=sanitized_state,
-            state_messages=sanitized_state_messages,
             provider=self._responses_state_provider(),
             model=_strip_model_prefix(model),
         )
@@ -165,7 +162,11 @@ class OpenAICodexProvider(LLMProvider):
                     )
 
             compact_threshold = resolve_compact_threshold(
-                context_window_tokens,
+                (
+                    provider_context.context_window_tokens
+                    if provider_context is not None
+                    else None
+                ),
                 max_tokens,
                 configured_threshold=self._responses_compact_threshold,
             )
@@ -238,9 +239,7 @@ class OpenAICodexProvider(LLMProvider):
         model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages,
@@ -249,9 +248,18 @@ class OpenAICodexProvider(LLMProvider):
             max_tokens,
             reasoning_effort,
             tool_choice,
-            provider_state=provider_state,
-            provider_state_messages=provider_state_messages,
-            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
+        )
+
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
         )
 
     async def chat_stream(
@@ -262,9 +270,7 @@ class OpenAICodexProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages=messages,
@@ -276,9 +282,18 @@ class OpenAICodexProvider(LLMProvider):
             on_content_delta=on_content_delta,
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
-            provider_state=provider_state,
-            provider_state_messages=provider_state_messages,
-            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
+        )
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
         )
 
     def get_default_model(self) -> str:

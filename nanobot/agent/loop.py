@@ -127,7 +127,6 @@ class TurnContext:
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
-    provider_state_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -860,7 +859,6 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, list[str], list[dict[str, Any]], str, bool]:
         """Run the agent iteration loop.
 
@@ -1082,7 +1080,6 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
-                provider_state_messages=provider_state_messages,
             ))
         finally:
             turn_scope_stack.close()
@@ -1691,10 +1688,10 @@ class AgentLoop:
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(ctx)
-        state = session.provider_state
-        current_provider_message: dict[str, Any] | None = None
-        if state is not None and runtime.provider.can_resume_conversation_state(
-            state,
+        stored_state = session.provider_state
+        staged_provider_state = False
+        if stored_state is not None and runtime.provider.can_resume_conversation_state(
+            stored_state,
             runtime.model,
         ):
             current_provider_message = self.context.build_current_message(
@@ -1702,15 +1699,14 @@ class AgentLoop:
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
-            ctx.provider_state = state
-            ctx.provider_state_messages = [current_provider_message]
+            ctx.provider_state = stored_state.with_pending_messages([
+                *stored_state.pending_messages,
+                current_provider_message,
+            ])
             if ctx.kind is TurnKind.USER and not ctx.ephemeral:
-                session.provider_state = state.with_pending_messages(
-                    [*state.pending_messages, current_provider_message]
-                )
-                ctx.provider_state = session.provider_state
-                ctx.provider_state_messages = []
-        elif state is not None:
+                session.provider_state = ctx.provider_state
+                staged_provider_state = True
+        elif stored_state is not None:
             session.provider_state = None
         if ctx.kind is TurnKind.USER:
             ctx.input_persisted_early = self._persist_user_message_early(
@@ -1718,19 +1714,8 @@ class AgentLoop:
                 session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
-            if (
-                not ctx.input_persisted_early
-                and not ctx.ephemeral
-                and ctx.provider_state is not None
-                and not ctx.provider_state_messages
-            ):
-                session.provider_state = state
-                ctx.provider_state = state
-                ctx.provider_state_messages = (
-                    [current_provider_message]
-                    if current_provider_message is not None
-                    else []
-                )
+            if staged_provider_state and not ctx.input_persisted_early:
+                session.provider_state = stored_state
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
@@ -1765,7 +1750,6 @@ class AgentLoop:
             tools=ctx.tools,
             request_context=ctx.request_context,
             provider_state=ctx.provider_state,
-            provider_state_messages=ctx.provider_state_messages,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

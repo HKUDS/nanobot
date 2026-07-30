@@ -22,6 +22,7 @@ from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
 )
@@ -114,7 +115,6 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
-    provider_state_messages: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -438,7 +438,6 @@ class AgentRunner:
             model=spec.runtime.model,
             messages=messages,
             state=spec.provider_state,
-            initial_state_messages=spec.provider_state_messages,
         )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
@@ -470,7 +469,7 @@ class AgentRunner:
                 session_key=spec.session_key,
             )
             await hook.before_iteration(context)
-            provider_options = conversation_state.prepare_request(
+            provider_context = conversation_state.prepare_request(
                 messages,
                 context_window_tokens=spec.runtime.context_window_tokens,
             )
@@ -480,7 +479,7 @@ class AgentRunner:
                 hook,
                 context,
                 conversation_state=conversation_state,
-                provider_options=provider_options,
+                provider_context=provider_context,
             )
             conversation_state.observe_response(response, messages)
             context.response = response
@@ -854,7 +853,6 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None,
-        provider_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "messages": messages,
@@ -867,7 +865,6 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens
         kwargs["reasoning_effort"] = generation.reasoning_effort
-        kwargs.update(provider_options or {})
         return kwargs
 
     async def _request_model(
@@ -879,7 +876,7 @@ class AgentRunner:
         *,
         malformed_retry: bool = False,
         conversation_state: ProviderConversationStateController,
-        provider_options: dict[str, Any] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
@@ -898,7 +895,6 @@ class AgentRunner:
             spec,
             messages,
             tools=spec.tools.get_definitions(),
-            provider_options=provider_options,
         )
         wants_streaming = hook.wants_streaming()
         progress_callback = spec.progress_callback
@@ -950,6 +946,7 @@ class AgentRunner:
 
             coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
+                provider_context=provider_context,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
                 on_tool_call_delta=_provider_tool_event,
@@ -984,11 +981,15 @@ class AgentRunner:
 
             coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
+                provider_context=provider_context,
                 on_content_delta=_stream_progress,
                 on_tool_call_delta=_provider_tool_event,
             )
         else:
-            coro = spec.runtime.provider.chat_with_retry(**kwargs)
+            coro = spec.runtime.provider.chat_with_retry(
+                **kwargs,
+                provider_context=provider_context,
+            )
 
         # Streaming requests also have provider-level idle timeouts
         # (NANOBOT_STREAM_IDLE_TIMEOUT_S), but a stream that keeps producing
@@ -1051,7 +1052,7 @@ class AgentRunner:
                 spec, retry_messages, hook, context,
                 malformed_retry=True,
                 conversation_state=conversation_state,
-                provider_options=conversation_state.independent_request_options(
+                provider_context=conversation_state.independent_request_context(
                     context_window_tokens=spec.runtime.context_window_tokens,
                 ),
             )
@@ -1069,7 +1070,7 @@ class AgentRunner:
             return await self._request_no_tools(
                 spec,
                 fallback_messages,
-                provider_options=conversation_state.independent_request_options(
+                provider_context=conversation_state.independent_request_context(
                     context_window_tokens=spec.runtime.context_window_tokens,
                 ),
             )
@@ -1139,7 +1140,7 @@ class AgentRunner:
         conversation_state: ProviderConversationStateController,
     ) -> LLMResponse:
         retry_messages = self._finalization_retry_messages(messages)
-        provider_options = conversation_state.prepare_request(
+        provider_context = conversation_state.prepare_request(
             transcript,
             context_window_tokens=spec.runtime.context_window_tokens,
             supplemental_messages=[retry_messages[-1]],
@@ -1147,7 +1148,7 @@ class AgentRunner:
         response = await self._request_no_tools(
             spec,
             retry_messages,
-            provider_options=provider_options,
+            provider_context=provider_context,
         )
         conversation_state.observe_response(response, transcript)
         return response
@@ -1171,7 +1172,7 @@ class AgentRunner:
             response = await self._request_no_tools(
                 spec,
                 retry_messages,
-                provider_options=conversation_state.independent_request_options(
+                provider_context=conversation_state.independent_request_context(
                     context_window_tokens=spec.runtime.context_window_tokens,
                 ),
             )
@@ -1211,15 +1212,17 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         *,
-        provider_options: dict[str, Any] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
             tools=None,
-            provider_options=provider_options,
         )
-        return await spec.runtime.provider.chat_with_retry(**kwargs)
+        return await spec.runtime.provider.chat_with_retry(
+            **kwargs,
+            provider_context=provider_context,
+        )
 
     @staticmethod
     def _budget_exhausted_finalization_messages(

@@ -66,13 +66,15 @@ def test_controller_replays_only_messages_after_provider_output() -> None:
     }
     messages.append(tool_message)
 
-    options = controller.prepare_request(
+    provider_context = controller.prepare_request(
         messages,
         context_window_tokens=200_000,
     )
 
-    assert options["provider_state"] is state
-    assert options["provider_state_messages"] == [tool_message]
+    assert provider_context is not None
+    assert provider_context.conversation_state is not None
+    assert provider_context.conversation_state.payload == state.payload
+    assert provider_context.conversation_state.pending_messages == [tool_message]
     assert controller.checkpoint(messages).pending_messages == [tool_message]
 
 
@@ -85,16 +87,24 @@ def test_transient_response_preserves_only_durable_request_messages() -> None:
         provider=provider,
         model="gpt-5.6",
         messages=messages,
-        state=_state("saved", pending=[{"role": "tool", "content": "prior"}]),
-        initial_state_messages=[current_message],
+        state=_state("saved", pending=[
+            {"role": "tool", "content": "prior"},
+            current_message,
+        ]),
     )
 
-    options = controller.prepare_request(
+    provider_context = controller.prepare_request(
         messages,
         context_window_tokens=200_000,
         supplemental_messages=[supplemental],
     )
-    assert options["provider_state_messages"] == [current_message, supplemental]
+    assert provider_context is not None
+    assert provider_context.conversation_state is not None
+    assert provider_context.conversation_state.pending_messages == [
+        {"role": "tool", "content": "prior"},
+        current_message,
+        supplemental,
+    ]
 
     controller.observe_response(
         LLMResponse(
@@ -150,6 +160,9 @@ def test_independent_request_only_exposes_native_compaction_context() -> None:
         state=_state("saved"),
     )
 
-    assert controller.independent_request_options(
+    provider_context = controller.independent_request_context(
         context_window_tokens=200_000,
-    ) == {"context_window_tokens": 200_000}
+    )
+    assert provider_context is not None
+    assert provider_context.conversation_state is None
+    assert provider_context.context_window_tokens == 200_000

@@ -11,7 +11,7 @@ from nanobot.providers.azure_openai_provider import (
     AzureOpenAIProvider,
     _AzureTokenProvider,
 )
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ProviderCallContext
 
 # ---------------------------------------------------------------------------
 # Init & validation
@@ -257,7 +257,7 @@ def test_build_body_enables_server_compaction():
         0.1,
         "high",
         None,
-        context_window_tokens=200_000,
+        provider_context=ProviderCallContext(context_window_tokens=200_000),
     )
 
     assert body["context_management"] == [{
@@ -282,7 +282,7 @@ def test_build_body_respects_responses_compaction_kill_switch():
         0.1,
         "high",
         None,
-        context_window_tokens=200_000,
+        provider_context=ProviderCallContext(context_window_tokens=200_000),
     )
 
     assert body["include"] == ["reasoning.encrypted_content"]
@@ -426,7 +426,7 @@ async def test_chat_retries_without_unsupported_server_compaction():
 
     result = await provider.chat(
         [{"role": "user", "content": "Hi"}],
-        context_window_tokens=200_000,
+        provider_context=ProviderCallContext(context_window_tokens=200_000),
     )
 
     create = provider._client.responses.create

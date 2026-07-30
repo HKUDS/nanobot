@@ -14,6 +14,7 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
 )
 
@@ -172,6 +173,22 @@ class FallbackProvider(LLMProvider):
             lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
         )
 
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        call_kwargs: dict[str, Any] = dict(kwargs)
+        call_kwargs["provider_context"] = provider_context
+        if not self._has_fallbacks:
+            return await self._primary.chat_with_context(**call_kwargs)
+        return await self._try_with_fallback(
+            lambda p, kw: p.chat_with_context(**kw),
+            call_kwargs,
+            has_streamed=None,
+        )
+
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
         if not self._has_fallbacks:
@@ -190,6 +207,35 @@ class FallbackProvider(LLMProvider):
         return await self._try_with_fallback(
             lambda p, kw: p.chat_stream(**kw),
             kwargs,
+            has_streamed=has_streamed,
+            on_stream_recover=on_stream_recover,
+        )
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        on_stream_recover = kwargs.pop("on_stream_recover", None)
+        call_kwargs: dict[str, Any] = dict(kwargs)
+        call_kwargs["provider_context"] = provider_context
+        if not self._has_fallbacks:
+            return await self._primary.chat_stream_with_context(**call_kwargs)
+
+        has_streamed: list[bool] = [False]
+        original_delta = call_kwargs.get("on_content_delta")
+
+        async def _tracking_delta(text: str) -> None:
+            if text:
+                has_streamed[0] = True
+            if original_delta:
+                await original_delta(text)
+
+        call_kwargs["on_content_delta"] = _tracking_delta
+        return await self._try_with_fallback(
+            lambda p, kw: p.chat_stream_with_context(**kw),
+            call_kwargs,
             has_streamed=has_streamed,
             on_stream_recover=on_stream_recover,
         )
@@ -301,18 +347,21 @@ class FallbackProvider(LLMProvider):
                 "max_tokens": fallback.max_tokens,
                 "temperature": fallback.temperature,
             }
-            provider_state = fallback_kwargs.get("provider_state")
-            if (
-                isinstance(provider_state, ProviderConversationState)
-                and not fallback_provider.can_resume_conversation_state(
-                    provider_state,
+            provider_context = fallback_kwargs.get("provider_context")
+            if isinstance(provider_context, ProviderCallContext):
+                state = provider_context.conversation_state
+                if state is not None and not fallback_provider.can_resume_conversation_state(
+                    state,
                     fallback_model,
+                ):
+                    state = None
+                context_window_tokens = provider_context.context_window_tokens
+                if not fallback_provider.supports_native_compaction(fallback_model):
+                    context_window_tokens = None
+                fallback_kwargs["provider_context"] = ProviderCallContext(
+                    conversation_state=state,
+                    context_window_tokens=context_window_tokens,
                 )
-            ):
-                fallback_kwargs.pop("provider_state", None)
-                fallback_kwargs.pop("provider_state_messages", None)
-            if not fallback_provider.supports_native_compaction(fallback_model):
-                fallback_kwargs.pop("context_window_tokens", None)
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
             else:

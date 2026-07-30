@@ -628,12 +628,13 @@ async def test_codex_replayed_tool_turn_omits_server_item_ids(monkeypatch) -> No
 
     response = await provider.chat(
         [{"role": "user", "content": "Check the weather"}],
-        provider_state=state,
-        provider_state_messages=[{
-            "role": "tool",
-            "tool_call_id": "call_read|fc_read",
-            "content": "weather skill contents",
-        }],
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([{
+                "role": "tool",
+                "tool_call_id": "call_read|fc_read",
+                "content": "weather skill contents",
+            }]),
+        ),
     )
 
     assert response.content == "done"
@@ -730,9 +731,12 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
             {"role": "user", "content": "new question"},
         ],
         max_tokens=5,
-        provider_state=state,
-        provider_state_messages=[{"role": "user", "content": "new question"}],
-        context_window_tokens=100,
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([
+                {"role": "user", "content": "new question"},
+            ]),
+            context_window_tokens=100,
+        ),
     )
 
     assert response.content == "done"
@@ -805,9 +809,12 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
     response = await provider.chat(
         [{"role": "user", "content": "new"}],
         max_tokens=5,
-        provider_state=state,
-        provider_state_messages=[{"role": "user", "content": "new"}],
-        context_window_tokens=100,
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([
+                {"role": "user", "content": "new"},
+            ]),
+            context_window_tokens=100,
+        ),
     )
 
     assert response.content == "done"

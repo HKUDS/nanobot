@@ -16,7 +16,7 @@ import httpx
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
-from nanobot.providers.base import LLMResponse, ProviderConversationState
+from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 DEFAULT_GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -258,9 +258,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat(
@@ -271,9 +269,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
-            provider_state=provider_state,
-            provider_state_messages=provider_state_messages,
-            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
         )
 
     async def chat_stream(
@@ -288,9 +284,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        provider_state: ProviderConversationState | None = None,
-        provider_state_messages: list[dict[str, Any]] | None = None,
-        context_window_tokens: int | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat_stream(
@@ -304,7 +298,5 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             on_content_delta=on_content_delta,
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
-            provider_state=provider_state,
-            provider_state_messages=provider_state_messages,
-            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
         )

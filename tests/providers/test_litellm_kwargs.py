@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_responses import build_responses_state
 from nanobot.providers.registry import find_by_name
@@ -737,8 +738,10 @@ def test_direct_openai_responses_state_kill_switch_removes_state_and_compaction(
         0.1,
         "high",
         None,
-        provider_state=state,
-        context_window_tokens=200_000,
+        provider_context=ProviderCallContext(
+            conversation_state=state,
+            context_window_tokens=200_000,
+        ),
     )
 
     assert provider.can_resume_conversation_state(state, "gpt-5.6") is False
@@ -766,10 +769,10 @@ async def test_direct_openai_retries_without_unsupported_server_compaction() -> 
             spec=spec,
         )
 
-        result = await provider.chat(
+        result = await provider.chat_with_context(
             messages=[{"role": "user", "content": "hello"}],
             model="gpt-5.6",
-            context_window_tokens=200_000,
+            provider_context=ProviderCallContext(context_window_tokens=200_000),
         )
 
     assert result.content == "compaction fallback"

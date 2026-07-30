@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import (
     _RESPONSES_FAILURE_THRESHOLD,
     _RESPONSES_PROBE_INTERVAL_S,
@@ -39,7 +40,7 @@ def test_direct_openai_enables_server_compaction(provider):
         temperature=0.1,
         reasoning_effort="high",
         tool_choice=None,
-        context_window_tokens=100_000,
+        provider_context=ProviderCallContext(context_window_tokens=100_000),
     )
 
     assert body["context_management"] == [{

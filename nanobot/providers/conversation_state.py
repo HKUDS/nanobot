@@ -8,6 +8,7 @@ from typing import Any, cast
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
 )
 
@@ -41,7 +42,6 @@ class ProviderConversationStateController:
         model: str | None,
         messages: list[dict[str, Any]],
         state: ProviderConversationState | None = None,
-        initial_state_messages: list[dict[str, Any]] | None = None,
     ) -> None:
         self._provider = provider
         self._model = model
@@ -52,22 +52,20 @@ class ProviderConversationStateController:
             else None
         )
         self._boundary = len(messages)
-        self._initial_state_messages = (
-            deepcopy(initial_state_messages or [])
-            if self._state is not None
-            else None
-        )
         self._request_messages: list[dict[str, Any]] = []
 
-    def independent_request_options(
+    def independent_request_context(
         self,
         *,
         context_window_tokens: int | None,
-    ) -> dict[str, Any]:
-        """Return provider options for a request that does not resume state."""
-        if not self._provider.supports_native_compaction(self._model):
-            return {}
-        return {"context_window_tokens": context_window_tokens}
+    ) -> ProviderCallContext | None:
+        """Return typed provider context for a request that does not resume state."""
+        if (
+            context_window_tokens is None
+            or not self._provider.supports_native_compaction(self._model)
+        ):
+            return None
+        return ProviderCallContext(context_window_tokens=context_window_tokens)
 
     def prepare_request(
         self,
@@ -75,37 +73,38 @@ class ProviderConversationStateController:
         *,
         context_window_tokens: int | None,
         supplemental_messages: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        """Build options for the next request and remember its durable delta."""
-        options = self.independent_request_options(
+    ) -> ProviderCallContext | None:
+        """Build typed context for the next request and remember its durable delta."""
+        independent_context = self.independent_request_context(
             context_window_tokens=context_window_tokens,
         )
         if self._state is None:
-            self._initial_state_messages = None
             self._request_messages = []
-            return options
+            return independent_context
         if not self._provider.can_resume_conversation_state(
             self._state,
             self._model,
         ):
             self._state = None
-            self._initial_state_messages = None
             self._request_messages = []
-            return options
+            return independent_context
 
-        request_messages = (
-            deepcopy(self._initial_state_messages)
-            if self._initial_state_messages is not None
-            else self._messages_after_boundary(messages)
-        )
-        self._initial_state_messages = None
+        request_messages = self._messages_after_boundary(messages)
+        supplemental = deepcopy(supplemental_messages or [])
         self._request_messages = deepcopy(request_messages)
-        options["provider_state"] = self._state
-        options["provider_state_messages"] = [
+        request_state = self._state.with_pending_messages([
+            *self._state.pending_messages,
             *request_messages,
-            *deepcopy(supplemental_messages or []),
-        ]
-        return options
+            *supplemental,
+        ])
+        return ProviderCallContext(
+            conversation_state=request_state,
+            context_window_tokens=(
+                independent_context.context_window_tokens
+                if independent_context is not None
+                else None
+            ),
+        )
 
     def observe_response(
         self,

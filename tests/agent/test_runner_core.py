@@ -14,6 +14,7 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
 )
@@ -84,6 +85,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
 
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
+    provider.supports_native_compaction.return_value = False
     captured_second_kwargs: dict = {}
     checkpoints: list[dict] = []
     calls = 0
@@ -110,7 +112,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         nonlocal calls
         calls += 1
         if calls == 1:
-            assert "provider_state" not in kwargs
+            assert kwargs["provider_context"] is None
             return LLMResponse(
                 content=None,
                 tool_calls=[
@@ -143,8 +145,11 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         checkpoint_callback=checkpoint,
     ))
 
-    assert captured_second_kwargs["provider_state"] is first_state
-    assert captured_second_kwargs["provider_state_messages"] == [{
+    provider_context = captured_second_kwargs["provider_context"]
+    assert isinstance(provider_context, ProviderCallContext)
+    assert provider_context.conversation_state is not None
+    assert provider_context.conversation_state.payload == first_state.payload
+    assert provider_context.conversation_state.pending_messages == [{
         "role": "tool",
         "tool_call_id": "call_1|fc_1",
         "name": "list_dir",
@@ -152,7 +157,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
     }]
     assert not any(
         message.get("role") == "assistant"
-        for message in captured_second_kwargs["provider_state_messages"]
+        for message in provider_context.conversation_state.pending_messages
     )
     assert result.provider_state is not None
     assert result.provider_state.payload == second_state.payload
@@ -202,8 +207,7 @@ async def test_runner_preserves_last_completed_provider_state_on_model_error():
         model="gpt-5.6",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        provider_state=state,
-        provider_state_messages=[unsaved_input],
+        provider_state=state.with_pending_messages([unsaved_input]),
     ))
 
     assert result.stop_reason == "error"

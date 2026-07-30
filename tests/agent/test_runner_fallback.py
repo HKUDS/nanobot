@@ -9,7 +9,13 @@ import pytest
 from loguru import logger
 
 from nanobot.config.schema import ModelPresetConfig
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
+)
+from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.providers.fallback_provider import FallbackProvider
 
 
@@ -66,6 +72,9 @@ class _FakeProvider(LLMProvider):
         self._response = response or _make_response()
         self.chat_calls: list[dict[str, Any]] = []
         self.chat_stream_calls: list[dict[str, Any]] = []
+        self.context_calls: list[ProviderCallContext | None] = []
+        self.resumable = False
+        self.compact = False
 
     def get_default_model(self) -> str:
         return f"{self.name}/model"
@@ -80,6 +89,26 @@ class _FakeProvider(LLMProvider):
         if on_delta and self._response.content:
             await on_delta(self._response.content)
         return self._response
+
+    async def chat_with_context(
+        self,
+        provider_context: ProviderCallContext | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        self.context_calls.append(provider_context)
+        return await self.chat(**kwargs)
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        _ = state, model
+        return self.resumable
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        _ = model
+        return self.compact
 
 
 # -- config-level tests --
@@ -284,6 +313,85 @@ class TestFallbackOnPrimaryError:
         factory.assert_called_once_with(_fallback("fallback-a"))
         assert primary.chat_calls[0]["model"] == "primary-model"
         assert fallback.chat_calls[0]["model"] == "fallback-a"
+
+    @pytest.mark.asyncio
+    async def test_responses_chat_fallback_responses_rebuilds_state(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        primary.resumable = True
+        primary.compact = True
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        messages = [{"role": "user", "content": "hi"}]
+        state = ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="gpt-5.6",
+            version=1,
+            payload={"items": [{"type": "reasoning", "encrypted_content": "opaque"}]},
+            pending_messages=list(messages),
+        )
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+        controller = ProviderConversationStateController(
+            provider=fb,
+            model="gpt-5.6",
+            messages=messages,
+            state=state,
+        )
+        provider_context = controller.prepare_request(
+            messages,
+            context_window_tokens=200_000,
+        )
+        assert provider_context is not None
+
+        result = await fb.chat_with_context(
+            messages=messages,
+            model="gpt-5.6",
+            provider_context=provider_context,
+        )
+
+        assert result.content == "fallback ok"
+        assert primary.context_calls == [provider_context]
+        assert fallback.context_calls == [ProviderCallContext()]
+        assert fallback.chat_calls[0]["messages"] == messages
+
+        controller.observe_response(result, messages)
+        messages.append({"role": "assistant", "content": result.content})
+        assert controller.finish(messages) is None
+
+        recovered_state = ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="gpt-5.6",
+            version=1,
+            payload={"items": [{"type": "reasoning", "encrypted_content": "recovered"}]},
+        )
+        primary._response = LLMResponse(
+            content="primary recovered",
+            provider_state=recovered_state,
+        )
+        next_turn = ProviderConversationStateController(
+            provider=fb,
+            model="gpt-5.6",
+            messages=messages,
+        )
+        next_context = next_turn.prepare_request(
+            messages,
+            context_window_tokens=200_000,
+        )
+        assert next_context == ProviderCallContext(context_window_tokens=200_000)
+
+        recovered = await fb.chat_with_context(
+            messages=messages,
+            model="gpt-5.6",
+            provider_context=next_context,
+        )
+
+        assert recovered.provider_state is recovered_state
+        assert primary.context_calls[-1] == next_context
+        assert primary.chat_calls[-1]["messages"] == messages
 
     @pytest.mark.asyncio
     async def test_reports_the_fallback_model_before_its_request(self) -> None:

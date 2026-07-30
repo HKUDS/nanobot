@@ -41,7 +41,6 @@ def prepare_responses_input(
     messages: list[dict[str, Any]],
     *,
     state: ProviderConversationState | None,
-    state_messages: list[dict[str, Any]] | None,
     provider: str,
     model: str,
 ) -> tuple[str, list[dict[str, Any]], bool]:
@@ -63,12 +62,11 @@ def prepare_responses_input(
     if prior_items is None:
         return instructions, fallback_items, False
 
-    pending = [*state.pending_messages, *(state_messages or [])]
-    _, delta_items = convert_messages(pending)
+    _, delta_items = convert_messages(state.pending_messages)
     logger.debug(
         "Replaying Responses state: prior_items={} pending_messages={}",
         len(prior_items),
-        len(pending),
+        len(state.pending_messages),
     )
     return instructions, [*deepcopy(prior_items), *delta_items], True
 

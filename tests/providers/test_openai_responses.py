@@ -670,14 +670,13 @@ class TestResponsesConversationState:
             model=f"secret-model-{secret}",
             input_items=[{"role": "user", "content": secret}],
             output_items=[{"type": "reasoning", "encrypted_content": secret}],
-        )
+        ).with_pending_messages([{"role": "user", "content": secret}])
         sink = StringIO()
         sink_id = logger.add(sink, level="DEBUG", format="{message}")
         try:
             prepare_responses_input(
                 [{"role": "user", "content": secret}],
                 state=state,
-                state_messages=[{"role": "user", "content": secret}],
                 provider=state.provider,
                 model=state.model,
             )
@@ -728,6 +727,7 @@ class TestResponsesConversationState:
                 "tool_call_id": "call_1|fc_1",
                 "content": "file contents",
             },
+            {"role": "user", "content": "continue"},
         ])
 
         instructions, items, replayed = prepare_responses_input(
@@ -736,7 +736,6 @@ class TestResponsesConversationState:
                 {"role": "user", "content": "a lossy public transcript"},
             ],
             state=state,
-            state_messages=[{"role": "user", "content": "continue"}],
             provider="openai:test",
             model="gpt-5.6",
         )
