@@ -246,7 +246,7 @@ class TestCmdNewUnifiedSession:
         assert len(sessions.get_or_create("unified:default").messages) == 2
         expected_snapshot = list(shared.messages)
 
-        # _schedule_background is a *sync* method that schedules a coroutine via
+        # schedule_background is a *sync* method that schedules a coroutine via
         # asyncio.create_task().  Mirror that exactly so the coroutine is consumed
         # and no RuntimeWarning is emitted.
         admitted_runtime = MagicMock(name="admitted_runtime")
@@ -255,8 +255,8 @@ class TestCmdNewUnifiedSession:
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             llm_runtime=MagicMock(return_value=MagicMock()),
+            schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
-        loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
         msg = InboundMessage(
             channel="telegram", sender_id="user1", chat_id="111", content="/new",
@@ -303,8 +303,8 @@ class TestCmdNewUnifiedSession:
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             runtime_for_session=MagicMock(return_value=MagicMock()),
+            schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
-        loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
         msg = InboundMessage(
             channel="telegram", sender_id="user1", chat_id="111", content="/new",
