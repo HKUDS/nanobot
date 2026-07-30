@@ -65,6 +65,55 @@ def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None
     assert jobs[0].state.run_history[0].duration_ms == 12
 
 
+def test_cron_job_from_dict_rejects_malformed_run_history() -> None:
+    with pytest.raises(TypeError):
+        CronJob.from_dict(
+            {
+                "id": "j1",
+                "name": "t",
+                "state": {"run_history": [None]},
+            }
+        )
+
+
+def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": "60000"},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "nextRunAtMs": "100",
+                            "lastRunAtMs": "50",
+                        },
+                        "createdAtMs": 0,
+                        "updatedAtMs": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].state.next_run_at_ms == 100
+    assert jobs[0].state.last_run_at_ms == 50
+
+
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
@@ -809,6 +858,34 @@ async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
     assert loaded.state.next_run_at_ms > loaded.state.last_run_at_ms
 
 
+async def test_run_job_completion_is_not_rolled_back_by_list_jobs_reload(tmp_path):
+    """Regression: manual run_job() must not lose its completion state when
+    list_jobs() (WebUI polling) reloads the store mid-execution (#5163)."""
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def on_job(_job):
+        service.list_jobs(include_disabled=True)
+        await asyncio.sleep(0)
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual-poll-race",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+
+    result = await service.run_job(job.id)
+    assert result is True
+
+    raw = json.loads(store_path.read_text(encoding="utf-8"))
+    state = raw["jobs"][0]["state"]
+    assert state["lastStatus"] == "ok"
+    assert state["lastError"] is None
+    assert len(state["runHistory"]) == 1
+    assert state["runHistory"][0]["status"] == "ok"
+
+
 # ── update_job tests ──
 
 
@@ -1007,3 +1084,83 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
         next_run = j["state"]["nextRunAtMs"]
         assert next_run is not None
         assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"
+
+
+def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                {"runAtMs": None, "status": "ok", "durationMs": None},
+                            ],
+                        },
+                        "createdAtMs": None,
+                        "updatedAtMs": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].state.run_history[0].run_at_ms == 0
+    assert jobs[0].state.run_history[0].duration_ms == 0
+    assert jobs[0].state.run_history[0].status == "ok"
+    assert jobs[0].created_at_ms == 0
+    assert jobs[0].updated_at_ms == 0
+
+
+def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
+    """Null runHistory elements must be skipped like LocalTrigger.from_dict."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                None,
+                                {"runAtMs": 1, "status": "ok", "durationMs": 2},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert len(jobs[0].state.run_history) == 1
+    assert jobs[0].state.run_history[0].run_at_ms == 1
+    assert jobs[0].state.run_history[0].status == "ok"
