@@ -1114,13 +1114,13 @@ class SessionManager:
         self.save(target, fsync=True)
         return target
 
-    def read_session_file(self, key: str) -> SessionPayload | None:
+    def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""
-        return self._store.read(key)
+        return cast(dict[str, Any] | None, self._store.read(key))
 
-    def read_session_metadata(self, key: str) -> SessionMetadataPayload | None:
+    def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without loading the transcript."""
-        return self._store.read_metadata(key)
+        return cast(dict[str, Any] | None, self._store.read_metadata(key))
 
-    def list_sessions(self) -> list[SessionInfo]:
-        return self._store.list_sessions()
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return cast(list[dict[str, Any]], self._store.list_sessions())
