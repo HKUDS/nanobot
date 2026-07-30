@@ -3369,6 +3369,74 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
   });
 
+  it("removes session-management affordances from a fixed conversation", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/commands")) {
+          return httpJson({
+            commands: [
+              {
+                command: "/new",
+                title: "New chat",
+                description: "Reset this chat and start a fresh conversation.",
+                icon: "square-pen",
+                lifecycle: "finalize_active_turn",
+                accepts_args: false,
+              },
+              {
+                command: "/history",
+                title: "Show conversation history",
+                description: "Print the last N persisted messages.",
+                icon: "history",
+                arg_hint: "[n]",
+                lifecycle: "side_channel",
+                accepts_args: true,
+              },
+            ],
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("quick-chat")}
+          title="Quick Chat"
+          onToggleSidebar={() => {}}
+          allowConversationReset={false}
+          showSessionInfo={false}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/commands",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    ));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/" },
+    });
+
+    expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/new/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Session details" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not bring back welcome cards when image mode is enabled", async () => {
     const client = makeClient();
     const settings = modelSettings("deepseek-v4-pro", "deepseek");

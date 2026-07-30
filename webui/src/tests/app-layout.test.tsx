@@ -349,6 +349,86 @@ describe("App layout", () => {
     ).toBeTruthy();
   });
 
+  it("opens a single fixed Quick Chat without provisioning a new session", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const quickChatButton = within(sidebar).getByRole("button", {
+      name: "Quick Chat",
+    });
+
+    fireEvent.click(quickChatButton);
+
+    expect(window.location.hash).toBe("#/quick-chat");
+    expect(quickChatButton).toHaveAttribute("aria-current", "page");
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/sessions/websocket%3Aquick-chat/webui-thread",
+        ),
+        expect.anything(),
+      ),
+    );
+    expect(createChatSpy).not.toHaveBeenCalled();
+    expect(document.title).toBe("Quick Chat · nanobot");
+    expect(screen.getByText("What's on your mind?")).toBeInTheDocument();
+  });
+
+  it("restores Quick Chat before it has a persisted session", async () => {
+    window.history.replaceState(null, "", "/#/quick-chat");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(window.location.hash).toBe("#/quick-chat");
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/sessions/websocket%3Aquick-chat/webui-thread",
+        ),
+        expect.anything(),
+      ),
+    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+        .getByRole("button", { name: "Quick Chat" }),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps persisted Quick Chat out of the topic list and topic search", async () => {
+    mockSessions = [
+      {
+        key: "websocket:quick-chat",
+        channel: "websocket",
+        chatId: "quick-chat",
+        createdAt: "2026-07-30T08:00:00Z",
+        updatedAt: "2026-07-30T08:05:00Z",
+        preview: "A private casual message",
+      },
+      {
+        key: "websocket:project-chat",
+        channel: "websocket",
+        chatId: "project-chat",
+        createdAt: "2026-07-30T08:00:00Z",
+        updatedAt: "2026-07-30T08:05:00Z",
+        preview: "Project roadmap",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Project roadmap")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("A private casual message")).not.toBeInTheDocument();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Search" }));
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
+    expect(within(dialog).getByText("Project roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("A private casual message")).not.toBeInTheDocument();
+  });
+
   it("restores the Settings route after a restart fallback hash", async () => {
     localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
     localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");

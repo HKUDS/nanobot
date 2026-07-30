@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",
+    "quickChat": "随便聊聊",
     "newChat": "新建话题",
     "searchAria": "搜索",
     "searchPlaceholder": "搜索",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "技能"
     }
+  },
+  "quickChat": {
+    "greeting": "想聊点什么？"
   },
   "settings": {
     "backToChat": "返回聊天",

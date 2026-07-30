@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
+    "quickChat": "Discussion rapide",
     "newChat": "Nouveau sujet",
     "searchAria": "Rechercher",
     "searchPlaceholder": "Rechercher",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "Compétences"
     }
+  },
+  "quickChat": {
+    "greeting": "De quoi avez-vous envie de parler ?"
   },
   "settings": {
     "backToChat": "Retour au chat",

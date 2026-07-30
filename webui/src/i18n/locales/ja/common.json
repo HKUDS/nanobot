@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
+    "quickChat": "クイックチャット",
     "newChat": "新しいトピック",
     "searchAria": "検索",
     "searchPlaceholder": "検索",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "スキル"
     }
+  },
+  "quickChat": {
+    "greeting": "何について話しますか？"
   },
   "settings": {
     "backToChat": "チャットに戻る",

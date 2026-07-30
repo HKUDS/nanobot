@@ -315,6 +315,9 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
+  allowConversationReset?: boolean;
+  showSessionInfo?: boolean;
+  emptyStateGreeting?: string;
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -597,6 +600,9 @@ export function ThreadShell({
   settingsSnapshot = null,
   onOpenModelSettings,
   skills = [],
+  allowConversationReset = true,
+  showSessionInfo = true,
+  emptyStateGreeting,
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
@@ -622,6 +628,12 @@ export function ThreadShell({
   const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const availableSlashCommands = useMemo(
+    () => allowConversationReset
+      ? slashCommands
+      : slashCommands.filter((command) => command.command !== "/new"),
+    [allowConversationReset, slashCommands],
+  );
   const cliApps = useInstalledSettingItems({
     getToken,
     eventName: CLI_APPS_CHANGED_EVENT,
@@ -1374,7 +1386,7 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
-          slashCommands={slashCommands}
+          slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           skills={skills}
@@ -1416,7 +1428,7 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
-          slashCommands={slashCommands}
+          slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           skills={skills}
@@ -1442,10 +1454,10 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <HeroGreeting text={t(heroGreetingKey)} />
+      <HeroGreeting text={emptyStateGreeting ?? t(heroGreetingKey)} />
     </div>
   );
-  const sessionInfoAction = historyKey ? (
+  const sessionInfoAction = historyKey && showSessionInfo ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
@@ -1488,7 +1500,7 @@ export function ThreadShell({
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
-            slashCommands={slashCommands}
+            slashCommands={availableSlashCommands}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}
             loadingOlder={loadingOlder}

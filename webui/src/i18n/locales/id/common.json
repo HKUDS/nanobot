@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
+    "quickChat": "Obrolan cepat",
     "newChat": "Topik baru",
     "searchAria": "Cari",
     "searchPlaceholder": "Cari",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "Skill"
     }
+  },
+  "quickChat": {
+    "greeting": "Apa yang sedang kamu pikirkan?"
   },
   "settings": {
     "backToChat": "Kembali ke chat",

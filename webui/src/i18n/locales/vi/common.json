@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
+    "quickChat": "Trò chuyện nhanh",
     "newChat": "Chủ đề mới",
     "searchAria": "Tìm kiếm",
     "searchPlaceholder": "Tìm kiếm",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "Kỹ năng"
     }
+  },
+  "quickChat": {
+    "greeting": "Bạn đang nghĩ gì?"
   },
   "settings": {
     "backToChat": "Quay lại chat",

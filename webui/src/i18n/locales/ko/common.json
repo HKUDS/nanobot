@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
+    "quickChat": "빠른 채팅",
     "newChat": "새 주제",
     "searchAria": "검색",
     "searchPlaceholder": "검색",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "스킬"
     }
+  },
+  "quickChat": {
+    "greeting": "무슨 이야기를 나눠볼까요?"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",

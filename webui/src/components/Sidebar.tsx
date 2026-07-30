@@ -3,6 +3,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  MessageCircle,
   Menu,
   Search,
   Settings,
@@ -24,6 +25,8 @@ interface SidebarProps {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  quickChatActive: boolean;
+  onOpenQuickChat: () => void;
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
@@ -139,6 +142,13 @@ export function Sidebar(props: SidebarProps) {
           collapsed && "flex w-14 flex-col items-center px-0",
         )}
       >
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.quickChat")}
+          onClick={props.onOpenQuickChat}
+          active={props.quickChatActive}
+          icon={<MessageCircle className="h-4 w-4" />}
+        />
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.newChat")}

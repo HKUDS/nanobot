@@ -43,6 +43,7 @@
   "sidebar": {
     "navigation": "Navegación de la barra lateral",
     "collapse": "Contraer barra lateral",
+    "quickChat": "Chat rápido",
     "newChat": "Nuevo tema",
     "searchAria": "Buscar",
     "searchPlaceholder": "Buscar",
@@ -59,6 +60,9 @@
     "skills": {
       "title": "Habilidades"
     }
+  },
+  "quickChat": {
+    "greeting": "¿Qué tienes en mente?"
   },
   "settings": {
     "backToChat": "Volver al chat",
