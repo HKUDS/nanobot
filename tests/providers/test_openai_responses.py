@@ -505,10 +505,22 @@ class TestParseResponseOutput:
         assert result.content is None
         assert result.tool_calls == []
 
-    def test_incomplete_status(self):
-        resp = {"output": [], "status": "incomplete", "usage": {}}
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    def test_incomplete_status(self, reason, expected_finish_reason):
+        resp = {
+            "output": [],
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "usage": {},
+        }
         result = parse_response_output(resp)
-        assert result.finish_reason == "length"
+        assert result.finish_reason == expected_finish_reason
 
     def test_sdk_model_object(self):
         """parse_response_output should handle SDK objects with model_dump()."""
@@ -899,6 +911,52 @@ class TestConsumeSse:
         assert capture.output_items == output
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    async def test_incomplete_event_commits_capture_usage(
+        self,
+        reason,
+        expected_finish_reason,
+    ):
+        output = [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "partial"}],
+            },
+        ]
+        terminal_response = {
+            "id": "resp_1",
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "output": output,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {"type": "response.output_text.delta", "delta": "partial"},
+            {"type": "response.incomplete", "response": terminal_response},
+        ])
+
+        content, _, finish_reason, usage, _ = await consume_sse_with_reasoning(
+            response,
+            capture=capture,
+        )
+
+        assert content == "partial"
+        assert finish_reason == expected_finish_reason
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert capture.completed is True
+        assert capture.response == terminal_response
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
     async def test_capture_does_not_commit_interrupted_stream(self):
         capture = ResponsesStreamCapture()
         response = _SseResponse([
@@ -1236,6 +1294,64 @@ class TestConsumeSdkStream:
 
         _, _, _, usage, _ = await consume_sdk_stream(stream())
         assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    async def test_incomplete_event_commits_capture_usage(
+        self,
+        reason,
+        expected_finish_reason,
+    ):
+        output = [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "partial"}],
+            },
+        ]
+        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
+        output_item = MagicMock(type="message")
+        terminal_response = {
+            "id": "resp_1",
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "output": output,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
+        resp_obj = MagicMock(
+            status="incomplete",
+            usage=usage_obj,
+            output=[output_item],
+        )
+        resp_obj.model_dump.return_value = terminal_response
+        events = [
+            MagicMock(type="response.output_text.delta", delta="partial"),
+            MagicMock(type="response.incomplete", response=resp_obj),
+        ]
+        capture = ResponsesStreamCapture()
+
+        async def stream():
+            for event in events:
+                yield event
+
+        content, _, finish_reason, usage, _ = await consume_sdk_stream(
+            stream(),
+            capture=capture,
+        )
+
+        assert content == "partial"
+        assert finish_reason == expected_finish_reason
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert capture.completed is True
+        assert capture.response == terminal_response
+        assert capture.output_items == output
 
     @pytest.mark.asyncio
     async def test_reasoning_extracted(self):

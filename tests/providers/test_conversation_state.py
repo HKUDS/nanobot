@@ -78,6 +78,70 @@ def test_controller_replays_only_messages_after_provider_output() -> None:
     assert controller.checkpoint(messages).pending_messages == [tool_message]
 
 
+def test_controller_uses_governed_messages_for_provider_state_delta() -> None:
+    provider = _provider()
+    messages = [
+        {"role": "user", "content": "run a tool"},
+    ]
+    controller = ProviderConversationStateController(
+        provider=provider,
+        model="gpt-5.6",
+        messages=messages,
+    )
+    state = _state("first")
+
+    controller.prepare_request(messages, context_window_tokens=200_000)
+    response = LLMResponse(content=None, provider_state=state)
+    controller.observe_response(response, messages)
+    messages.extend([
+        controller.project_response_message(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1", "type": "function"}],
+            },
+            response,
+        ),
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "raw oversized result",
+        },
+    ])
+    governed_messages = [
+        messages[0],
+        messages[1],
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "compacted result",
+        },
+    ]
+
+    provider_context = controller.prepare_request(
+        messages,
+        context_window_tokens=200_000,
+        model_messages=governed_messages,
+    )
+
+    assert provider_context is not None
+    assert provider_context.conversation_state is not None
+    assert provider_context.conversation_state.pending_messages == [{
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "compacted result",
+    }]
+    assert controller.checkpoint(messages).pending_messages[-1]["content"] == (
+        "raw oversized result"
+    )
+    governed_checkpoint = controller.checkpoint(
+        messages,
+        model_messages=governed_messages,
+    )
+    assert governed_checkpoint is not None
+    assert governed_checkpoint.pending_messages[-1]["content"] == "compacted result"
+
+
 def test_transient_response_preserves_only_durable_request_messages() -> None:
     provider = _provider()
     current_message = {"role": "user", "content": "continue"}

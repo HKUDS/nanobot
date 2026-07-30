@@ -23,7 +23,7 @@ FINISH_REASON_MAP = {
 
 @dataclass(slots=True)
 class ResponsesStreamCapture:
-    """Losslessly capture completed output items without changing stream results."""
+    """Losslessly capture terminal output items without changing stream results."""
 
     completed: bool = False
     response: dict[str, Any] | None = field(default=None, repr=False)
@@ -89,6 +89,22 @@ def _response_object_list(value: object) -> list[dict[str, Any]]:
 def map_finish_reason(status: str | None) -> str:
     """Map a Responses API status string to a Chat-Completions-style finish_reason."""
     return FINISH_REASON_MAP.get(status or "completed", "stop")
+
+
+def _response_finish_reason(
+    response: object,
+    *,
+    fallback_status: str | None = None,
+) -> str:
+    """Map terminal response details without treating content filtering as truncation."""
+    response_object = _response_object(response) or {}
+    status = response_object.get("status")
+    terminal_status = status if isinstance(status, str) else fallback_status
+    if terminal_status == "incomplete":
+        details = _response_object(response_object.get("incomplete_details"))
+        if details is not None and details.get("reason") == "content_filter":
+            return "content_filter"
+    return map_finish_reason(terminal_status)
 
 
 def _usage_from_response_obj(response: object) -> dict[str, int]:
@@ -309,12 +325,14 @@ async def consume_sse_with_reasoning(
                     reasoning_content = summary
                     if on_reasoning_delta:
                         await on_reasoning_delta(summary)
-        elif event_type == "response.completed":
+        elif event_type in {"response.completed", "response.incomplete"}:
             response_obj = _response_object(event.get("response")) or {}
             if capture is not None:
                 capture.record_completed(response_obj)
-            status = response_obj.get("status")
-            finish_reason = map_finish_reason(status)
+            finish_reason = _response_finish_reason(
+                response_obj,
+                fallback_status=event_type.removeprefix("response."),
+            )
             usage = _usage_from_response_obj(response_obj) or usage
             if not reasoning_content:
                 summary = _extract_reasoning_summary_from_output(response_obj.get("output"))
@@ -385,7 +403,7 @@ def parse_response_output(
     usage = _usage_from_response_obj(response_object)
 
     status = response_object.get("status")
-    finish_reason = map_finish_reason(status if isinstance(status, str) else None)
+    finish_reason = _response_finish_reason(response_object)
 
     result = LLMResponse(
         content="".join(content_parts) or None,
@@ -508,12 +526,14 @@ async def consume_sdk_stream(
                         arguments=args,
                     )
                 )
-        elif event_type == "response.completed":
+        elif event_type in {"response.completed", "response.incomplete"}:
             resp = getattr(event, "response", None)
             if capture is not None:
                 capture.record_completed(resp)
-            status = getattr(resp, "status", None) if resp else None
-            finish_reason = map_finish_reason(status)
+            finish_reason = _response_finish_reason(
+                resp,
+                fallback_status=event_type.removeprefix("response."),
+            )
             if resp:
                 usage_obj = getattr(resp, "usage", None)
                 if usage_obj:

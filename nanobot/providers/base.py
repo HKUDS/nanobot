@@ -262,6 +262,9 @@ class LLMResponse:
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # Routing wrappers may preserve or discard an incoming provider-owned
+    # continuation independently of the final fallback error's retry policy.
+    preserve_provider_state_on_error: bool | None = field(default=None, repr=False)
     # Structured error metadata used by retry policy when finish_reason == "error".
     error_status_code: int | None = None
     error_kind: str | None = None  # e.g. "timeout", "connection"
@@ -722,6 +725,21 @@ class LLMProvider(ABC):
         return result if found else None
 
     @staticmethod
+    def _contains_image_content(value: object) -> bool:
+        """Return whether a JSON-like provider payload contains an input image."""
+        if isinstance(value, dict):
+            mapping = cast(dict[str, object], value)
+            if mapping.get("type") in {"image_url", "input_image"}:
+                return True
+            return any(LLMProvider._contains_image_content(item) for item in mapping.values())
+        if isinstance(value, list):
+            return any(
+                LLMProvider._contains_image_content(item)
+                for item in cast(list[object], value)
+            )
+        return False
+
+    @staticmethod
     def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
         """Replace image_url blocks with text placeholder *in-place*.
 
@@ -1089,13 +1107,32 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
-                stripped = self._strip_image_content(original_messages)
-                if stripped is not None and stripped != kw["messages"]:
+                stripped = self._strip_image_content(kw["messages"])
+                provider_context = kw.get("provider_context")
+                stripped_context: ProviderCallContext | None = None
+                if isinstance(provider_context, ProviderCallContext):
+                    state = provider_context.conversation_state
+                    if state is not None and (
+                        stripped is not None
+                        or self._strip_image_content(state.pending_messages) is not None
+                        or self._contains_image_content(state.payload)
+                    ):
+                        # Provider-owned payloads may retain earlier input_image items.
+                        # Rebuild from the stripped public transcript for this retry.
+                        stripped_context = ProviderCallContext(
+                            context_window_tokens=(
+                                provider_context.context_window_tokens
+                            ),
+                        )
+                if stripped is not None or stripped_context is not None:
                     logger.warning(
                         "Non-transient LLM error with image content, retrying without images"
                     )
                     retry_kw = dict(kw)
-                    retry_kw["messages"] = stripped
+                    if stripped is not None:
+                        retry_kw["messages"] = stripped
+                    if stripped_context is not None:
+                        retry_kw["provider_context"] = stripped_context
                     result = await call(**retry_kw)
                     # Permanently strip images from the original messages so
                     # subsequent iterations do not repeat the error-retry cycle.

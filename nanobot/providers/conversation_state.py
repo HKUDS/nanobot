@@ -72,6 +72,7 @@ class ProviderConversationStateController:
         messages: list[dict[str, Any]],
         *,
         context_window_tokens: int | None,
+        model_messages: list[dict[str, Any]] | None = None,
         supplemental_messages: list[dict[str, Any]] | None = None,
     ) -> ProviderCallContext | None:
         """Build typed context for the next request and remember its durable delta."""
@@ -89,7 +90,17 @@ class ProviderConversationStateController:
             self._request_messages = []
             return independent_context
 
-        request_messages = self._messages_after_boundary(messages)
+        durable_messages = self._messages_after_boundary(messages)
+        governed_messages = (
+            self._model_messages_after_boundary(model_messages)
+            if model_messages is not None and durable_messages
+            else None
+        )
+        request_messages = (
+            governed_messages
+            if governed_messages is not None
+            else durable_messages
+        )
         supplemental = deepcopy(supplemental_messages or [])
         self._request_messages = deepcopy(request_messages)
         request_state = self._state.with_pending_messages([
@@ -123,9 +134,12 @@ class ProviderConversationStateController:
             self._state = candidate
             self._boundary = len(messages)
             self._seal_boundary(messages)
-        elif (
-            response.finish_reason == "error"
-            and LLMProvider.is_transient_response(response)
+        elif response.finish_reason == "error" and (
+            response.preserve_provider_state_on_error is True
+            or (
+                response.preserve_provider_state_on_error is None
+                and LLMProvider.is_transient_response(response)
+            )
         ):
             if self._state is not None and self._request_messages:
                 self._state = self._state.with_pending_messages([
@@ -154,13 +168,26 @@ class ProviderConversationStateController:
     def checkpoint(
         self,
         messages: list[dict[str, Any]],
+        *,
+        model_messages: list[dict[str, Any]] | None = None,
     ) -> ProviderConversationState | None:
         """Return a durable state snapshot without changing live state."""
         if self._state is None:
             return None
+        durable_messages = self._messages_after_boundary(messages)
+        governed_messages = (
+            self._model_messages_after_boundary(model_messages)
+            if model_messages is not None and durable_messages
+            else None
+        )
+        pending_messages = (
+            governed_messages
+            if governed_messages is not None
+            else durable_messages
+        )
         return self._state.with_pending_messages([
             *self._state.pending_messages,
-            *self._messages_after_boundary(messages),
+            *pending_messages,
         ])
 
     def finish(
@@ -177,6 +204,38 @@ class ProviderConversationStateController:
     ) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
         for message in messages[self._boundary:]:
+            internal_meta = cast(object, message.get("_meta"))
+            if (
+                isinstance(internal_meta, dict)
+                and cast(dict[str, Any], internal_meta).get(
+                    _PROVIDER_STATE_OUTPUT_META
+                ) is True
+            ):
+                continue
+            pending.append(deepcopy(message))
+        return pending
+
+    @staticmethod
+    def _model_messages_after_boundary(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]] | None:
+        """Return the governed delta after the latest provider-owned boundary."""
+        boundary = None
+        for idx in range(len(messages) - 1, -1, -1):
+            internal_meta = cast(object, messages[idx].get("_meta"))
+            if (
+                isinstance(internal_meta, dict)
+                and cast(dict[str, Any], internal_meta).get(
+                    _PROVIDER_STATE_BOUNDARY_META
+                ) is True
+            ):
+                boundary = idx
+                break
+        if boundary is None:
+            return None
+
+        pending: list[dict[str, Any]] = []
+        for message in messages[boundary + 1:]:
             internal_meta = cast(object, message.get("_meta"))
             if (
                 isinstance(internal_meta, dict)

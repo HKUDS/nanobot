@@ -244,6 +244,7 @@ class AgentRunner:
         assistant_message: dict[str, Any] | None,
         injection_cycles: int,
         *,
+        conversation_state: ProviderConversationStateController | None = None,
         phase: str = "after error",
         iteration: int | None = None,
         allow_goal_continue: bool = False,
@@ -271,16 +272,21 @@ class AgentRunner:
         if assistant_message is not None:
             messages.append(assistant_message)
             if iteration is not None:
+                checkpoint: dict[str, Any] = {
+                    "phase": "final_response",
+                    "iteration": iteration,
+                    "model": spec.runtime.model,
+                    "assistant_message": assistant_message,
+                    "completed_tool_results": [],
+                    "pending_tool_calls": [],
+                }
+                if conversation_state is not None:
+                    checkpoint["provider_state"] = conversation_state.checkpoint(
+                        messages
+                    )
                 await self._emit_checkpoint(
                     spec,
-                    {
-                        "phase": "final_response",
-                        "iteration": iteration,
-                        "model": spec.runtime.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": [],
-                        "pending_tool_calls": [],
-                    },
+                    checkpoint,
                 )
         self._append_injected_messages(messages, injections)
         if real_injection:
@@ -472,6 +478,7 @@ class AgentRunner:
             provider_context = conversation_state.prepare_request(
                 messages,
                 context_window_tokens=spec.runtime.context_window_tokens,
+                model_messages=messages_for_model,
             )
             response = await self._request_model(
                 spec,
@@ -580,6 +587,15 @@ class AgentRunner:
                         length_recovery_parts.clear()
                         continue
                     break
+                checkpoint_model_messages = (
+                    self.context_governor.prepare_for_model(
+                        governance_config,
+                        messages,
+                        compacted_tool_call_ids,
+                    )
+                    if response.provider_state is not None
+                    else None
+                )
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -589,7 +605,10 @@ class AgentRunner:
                         "assistant_message": assistant_message,
                         "completed_tool_results": completed_tool_results,
                         "pending_tool_calls": [],
-                        "provider_state": conversation_state.checkpoint(messages),
+                        "provider_state": conversation_state.checkpoint(
+                            messages,
+                            model_messages=checkpoint_model_messages,
+                        ),
                     },
                 )
                 empty_content_retries = 0
@@ -612,7 +631,11 @@ class AgentRunner:
                 )
 
             clean = hook.finalize_content(context, response.content)
-            if response.finish_reason not in ("error", "length") and is_blank_text(clean):
+            if (
+                response.finish_reason
+                not in {"error", "length", "refusal", "content_filter"}
+                and is_blank_text(clean)
+            ):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
                     logger.warning(
@@ -711,9 +734,12 @@ class AgentRunner:
             # so streaming channels don't prematurely finalize the card.
             should_continue, injection_cycles = await self._try_drain_injections(
                 spec, messages, assistant_message, injection_cycles,
+                conversation_state=conversation_state,
                 phase="after final response",
                 iteration=iteration,
-                allow_goal_continue=True,
+                allow_goal_continue=(
+                    response.finish_reason not in {"refusal", "content_filter"}
+                ),
             )
             if should_continue:
                 had_injections = True
