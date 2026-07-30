@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
@@ -119,11 +120,13 @@ class FallbackProvider(LLMProvider):
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
         fallback_model_observer: FallbackModelObserver | None = None,
+        primary_context_window_tokens: int | None = None,
     ):
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
         self._fallback_model_observer = fallback_model_observer
+        self._primary_context_window_tokens = primary_context_window_tokens
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
@@ -155,7 +158,30 @@ class FallbackProvider(LLMProvider):
         return self._primary.can_resume_conversation_state(state, model)
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
-        return self._primary.supports_native_compaction(model)
+        # Fallback providers are constructed lazily, so route typed context
+        # whenever a fallback may need its own compaction window. Providers
+        # without contextual features inherit the no-op base implementation.
+        return (
+            self._primary.supports_native_compaction(model)
+            or self._has_fallbacks
+        )
+
+    def _primary_call_context(
+        self,
+        provider_context: ProviderCallContext,
+        model: str | None,
+    ) -> ProviderCallContext:
+        context_window_tokens = (
+            self._primary_context_window_tokens
+            if self._primary_context_window_tokens is not None
+            else provider_context.context_window_tokens
+        )
+        if not self._primary.supports_native_compaction(model):
+            context_window_tokens = None
+        return ProviderCallContext(
+            conversation_state=provider_context.conversation_state,
+            context_window_tokens=context_window_tokens,
+        )
 
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
@@ -180,7 +206,10 @@ class FallbackProvider(LLMProvider):
         **kwargs: Any,
     ) -> LLMResponse:
         call_kwargs: dict[str, Any] = dict(kwargs)
-        call_kwargs["provider_context"] = provider_context
+        call_kwargs["provider_context"] = self._primary_call_context(
+            provider_context,
+            kwargs.get("model"),
+        )
         if not self._has_fallbacks:
             return await self._primary.chat_with_context(**call_kwargs)
         return await self._try_with_fallback(
@@ -219,7 +248,10 @@ class FallbackProvider(LLMProvider):
     ) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
         call_kwargs: dict[str, Any] = dict(kwargs)
-        call_kwargs["provider_context"] = provider_context
+        call_kwargs["provider_context"] = self._primary_call_context(
+            provider_context,
+            kwargs.get("model"),
+        )
         if not self._has_fallbacks:
             return await self._primary.chat_stream_with_context(**call_kwargs)
 
@@ -250,6 +282,9 @@ class FallbackProvider(LLMProvider):
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
         primary_error = "unknown error"
+        # A primary error eligible for failover did not return a replacement
+        # continuation, so the incoming primary state remains reusable.
+        preserve_primary_state = True
 
         if self._primary_available():
             primary_was_attempted = True
@@ -355,9 +390,11 @@ class FallbackProvider(LLMProvider):
                     fallback_model,
                 ):
                     state = None
-                context_window_tokens = provider_context.context_window_tokens
-                if not fallback_provider.supports_native_compaction(fallback_model):
-                    context_window_tokens = None
+                context_window_tokens = (
+                    fallback.context_window_tokens
+                    if fallback_provider.supports_native_compaction(fallback_model)
+                    else None
+                )
                 fallback_kwargs["provider_context"] = ProviderCallContext(
                     conversation_state=state,
                     context_window_tokens=context_window_tokens,
@@ -388,11 +425,15 @@ class FallbackProvider(LLMProvider):
         )
         # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
-            return last_response
+            return replace(
+                last_response,
+                preserve_provider_state_on_error=preserve_primary_state,
+            )
         # Primary was tripped and we have no fallbacks — synthesize an error.
         return LLMResponse(
             content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
             finish_reason="error",
+            preserve_provider_state_on_error=preserve_primary_state,
         )
 
     async def _notify_fallback_model(self, model: str) -> None:
