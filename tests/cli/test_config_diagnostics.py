@@ -413,7 +413,7 @@ def test_gateway_missing_provider_managed_start_for_webui_setup(
     monkeypatch.setattr(GatewayRuntime, "start_background", fake_start_background)
     monkeypatch.setattr(GatewayRuntime, "restart", fake_restart)
     monkeypatch.setattr(
-        "nanobot.cli.commands.ensure_webui_bundle",
+        "nanobot.cli.webui_support.ensure_webui_bundle",
         lambda **_kwargs: None,
     )
 

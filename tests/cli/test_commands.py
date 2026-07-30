@@ -1909,7 +1909,7 @@ def _patch_cli_command_runtime(
         lambda _config_path=None: _test_provider_snapshot(provider_factory(config), config),
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._provider_setup_error",
+        "nanobot.cli.webui_support._provider_setup_error",
         lambda _config: None,
     )
     _patch_gateway_ports_free(monkeypatch)
@@ -2092,6 +2092,10 @@ def test_webui_yes_starts_first_run_without_provider_setup(monkeypatch, tmp_path
     config_file = tmp_path / "config.json"
     seen: dict[str, object] = {}
 
+    monkeypatch.setattr(
+        "nanobot.cli.webui_support._provider_setup_error",
+        lambda _config: "No API key configured for provider 'custom'.",
+    )
     monkeypatch.setattr(
         "nanobot.cli.commands._provider_setup_error",
         lambda _config: "No API key configured for provider 'custom'.",
@@ -2403,7 +2407,7 @@ def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> No
     def _interrupt(_seconds: float) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("nanobot.cli.commands.time.sleep", _interrupt)
+    monkeypatch.setattr("nanobot.cli.webui_support.time.sleep", _interrupt)
 
     cli_commands._attach_to_background_gateway(_FakeRuntime())
 
@@ -2600,7 +2604,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
-    monkeypatch.setattr("nanobot.cli.commands._provider_setup_error", lambda _config: None)
+    monkeypatch.setattr("nanobot.cli.webui_support._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
@@ -2728,7 +2732,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
-    monkeypatch.setattr("nanobot.cli.commands._provider_setup_error", lambda _config: None)
+    monkeypatch.setattr("nanobot.cli.webui_support._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
