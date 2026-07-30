@@ -39,6 +39,7 @@ from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_tools,
     is_compaction_compatibility_error,
+    is_replayable_finish_reason,
     parse_response_output,
     prepare_responses_input,
     resolve_compact_threshold,
@@ -450,9 +451,6 @@ class OpenAICompatProvider(LLMProvider):
     registry lookups needed.
     """
 
-    _responses_state_enabled = True
-    _responses_compaction_enabled = True
-    _responses_compact_threshold: int | None = None
     _native_compaction_available = True
 
     def __init__(
@@ -466,9 +464,6 @@ class OpenAICompatProvider(LLMProvider):
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
-        responses_state_enabled: bool = True,
-        responses_compaction_enabled: bool = True,
-        responses_compact_threshold: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -478,11 +473,6 @@ class OpenAICompatProvider(LLMProvider):
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
-        self._responses_state_enabled = bool(responses_state_enabled)
-        self._responses_compaction_enabled = (
-            self._responses_state_enabled and bool(responses_compaction_enabled)
-        )
-        self._responses_compact_threshold = responses_compact_threshold
         self._native_compaction_available = True
 
         if api_key and spec and spec.env_key:
@@ -1005,7 +995,7 @@ class OpenAICompatProvider(LLMProvider):
         state: ProviderConversationState,
         model: str | None = None,
     ) -> bool:
-        return self._responses_state_enabled and responses_state_matches(
+        return responses_state_matches(
             state,
             provider=self._responses_state_provider(),
             model=self._responses_state_model(model),
@@ -1015,8 +1005,7 @@ class OpenAICompatProvider(LLMProvider):
         """Enable server compaction only on direct OpenAI Responses endpoints."""
         _ = model
         if (
-            not self._responses_compaction_enabled
-            or not self._native_compaction_available
+            not self._native_compaction_available
             or self._api_type == "chat_completions"
         ):
             return False
@@ -1101,7 +1090,7 @@ class OpenAICompatProvider(LLMProvider):
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         sanitized_state = (
             provider_context.conversation_state
-            if self._responses_state_enabled and provider_context is not None
+            if provider_context is not None
             else None
         )
         if sanitized_state is not None:
@@ -1132,7 +1121,6 @@ class OpenAICompatProvider(LLMProvider):
                 else None
             ),
             max_tokens,
-            configured_threshold=self._responses_compact_threshold,
         )
         if self.supports_native_compaction(model_name) and compact_threshold is not None:
             body["context_management"] = [{
@@ -1143,10 +1131,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             body["temperature"] = temperature
 
-        if (
-            self._responses_state_enabled
-            and not self._supports_temperature(model_name, reasoning_effort)
-        ):
+        if not self._supports_temperature(model_name, reasoning_effort):
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
@@ -1160,8 +1145,6 @@ class OpenAICompatProvider(LLMProvider):
         extra_body = getattr(self, "_extra_body", {})
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
-        if not self._responses_compaction_enabled:
-            body.pop("context_management", None)
 
         return body
 
@@ -1762,17 +1745,9 @@ class OpenAICompatProvider(LLMProvider):
                     )
                     result = parse_response_output(
                         responses_raw,
-                        state_provider=(
-                            self._responses_state_provider()
-                            if self._responses_state_enabled
-                            else None
-                        ),
-                        state_model=str(body["model"]) if self._responses_state_enabled else None,
-                        state_input_items=(
-                            cast(list[dict[str, Any]], body["input"])
-                            if self._responses_state_enabled
-                            else None
-                        ),
+                        state_provider=self._responses_state_provider(),
+                        state_model=str(body["model"]),
+                        state_input_items=cast(list[dict[str, Any]], body["input"]),
                     )
                     self._record_responses_success(model, reasoning_effort)
                     return result
@@ -1841,11 +1816,7 @@ class OpenAICompatProvider(LLMProvider):
                             except StopAsyncIteration:
                                 break
 
-                    capture = (
-                        ResponsesStreamCapture()
-                        if self._responses_state_enabled
-                        else None
-                    )
+                    capture = ResponsesStreamCapture()
                     (
                         content,
                         tool_calls,
@@ -1866,7 +1837,7 @@ class OpenAICompatProvider(LLMProvider):
                         usage=usage,
                         reasoning_content=reasoning_content,
                     )
-                    if capture is not None and capture.completed:
+                    if capture.completed and is_replayable_finish_reason(finish_reason):
                         result.provider_state = build_responses_state(
                             provider=self._responses_state_provider(),
                             model=str(body["model"]),

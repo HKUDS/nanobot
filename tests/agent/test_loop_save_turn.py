@@ -20,7 +20,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMResponse, ProviderConversationState
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -819,10 +819,8 @@ async def test_subagent_followup_stages_provider_state_before_turn_runs(
     persisted = loop.sessions.get_or_create("cli:subagent-crash")
     assert persisted.messages[-1]["content"] == "subagent result"
     assert persisted.provider_state is not None
-    assert persisted.provider_state.pending_messages[-1] == {
-        "role": "user",
-        "content": "subagent result",
-    }
+    assert persisted.provider_state.pending_messages[-1]["role"] == "user"
+    assert persisted.provider_state.pending_messages[-1]["content"] == "subagent result"
 
 
 @pytest.mark.asyncio
@@ -856,6 +854,58 @@ async def test_subagent_followup_state_is_durable_before_prompt_assembly(
     assert persisted.provider_state.pending_messages[-1]["content"] == (
         "subagent result"
     )
+
+
+@pytest.mark.asyncio
+async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    build_initial_messages = loop._build_initial_messages
+    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("prompt boom"),
+    )
+    session = loop.sessions.get_or_create("cli:subagent-redelivery")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-redelivery",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+
+    with pytest.raises(RuntimeError, match="prompt boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-redelivery")
+    persisted = loop.sessions.get_or_create("cli:subagent-redelivery")
+    assert persisted.provider_state is not None
+    assert [
+        message.get("content")
+        for message in persisted.provider_state.pending_messages
+    ].count("subagent result") == 1
+    loop._build_initial_messages = build_initial_messages  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("provider boom"),
+    )
+    with pytest.raises(RuntimeError, match="provider boom"):
+        await loop._process_message(msg)
+
+    provider_state = loop._run_agent_loop.await_args.kwargs["provider_state"]
+    assert provider_state is not None
+    pending_results = [
+        message
+        for message in provider_state.pending_messages
+        if message.get("content") == "subagent result"
+    ]
+    assert len(pending_results) == 1
+    assert LLMProvider._sanitize_empty_content(pending_results) == [
+        {"role": "user", "content": "subagent result"},
+    ]
 
 
 @pytest.mark.asyncio

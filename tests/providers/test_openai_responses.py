@@ -18,11 +18,11 @@ from nanobot.providers.openai_responses.parsing import (
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
+    is_replayable_finish_reason,
     map_finish_reason,
     parse_response_output,
 )
 from nanobot.providers.openai_responses.state import (
-    build_compacted_responses_state,
     build_responses_state,
     is_compaction_compatibility_error,
     prepare_responses_input,
@@ -410,6 +410,17 @@ class TestMapFinishReason:
     def test_unknown_defaults_to_stop(self):
         assert map_finish_reason("some_new_status") == "stop"
 
+    @pytest.mark.parametrize("finish_reason", ["stop", "tool_calls", "function_call"])
+    def test_replayable_finish_reasons(self, finish_reason):
+        assert is_replayable_finish_reason(finish_reason) is True
+
+    @pytest.mark.parametrize(
+        "finish_reason",
+        ["length", "refusal", "content_filter", "error"],
+    )
+    def test_non_replayable_finish_reasons(self, finish_reason):
+        assert is_replayable_finish_reason(finish_reason) is False
+
 
 # ======================================================================
 # parsing - parse_response_output
@@ -430,6 +441,29 @@ class TestParseResponseOutput:
         assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         assert result.tool_calls == []
 
+    def test_refusal_response_surfaces_text_without_advancing_state(self):
+        refusal = "I can’t help with that request."
+        resp = {
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+            "status": "completed",
+            "usage": {},
+        }
+
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "request"}],
+        )
+
+        assert result.content == refusal
+        assert result.finish_reason == "refusal"
+        assert result.provider_state is None
+
     def test_tool_call_response(self):
         resp = {
             "output": [{
@@ -441,12 +475,18 @@ class TestParseResponseOutput:
             "status": "completed",
             "usage": {},
         }
-        result = parse_response_output(resp)
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "weather?"}],
+        )
         assert result.content is None
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "get_weather"
         assert result.tool_calls[0].arguments == {"city": "SF"}
         assert result.tool_calls[0].id == "call_1|fc_1"
+        assert result.provider_state is not None
 
     def test_malformed_tool_arguments_logged(self):
         """Malformed JSON arguments should log a warning and remain non-object."""
@@ -519,8 +559,25 @@ class TestParseResponseOutput:
             "incomplete_details": {"reason": reason},
             "usage": {},
         }
-        result = parse_response_output(resp)
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "prompt"}],
+        )
         assert result.finish_reason == expected_finish_reason
+        assert result.provider_state is None
+
+    def test_unknown_status_does_not_advance_provider_state(self):
+        result = parse_response_output(
+            {"output": [], "status": "future_terminal_status", "usage": {}},
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "prompt"}],
+        )
+
+        assert result.finish_reason == "stop"
+        assert result.provider_state is None
 
     def test_sdk_model_object(self):
         """parse_response_output should handle SDK objects with model_dump()."""
@@ -623,20 +680,6 @@ class TestResponsesConversationState:
 
         assert responses_state_items(state) == [*canonical_input, *output]
 
-    def test_standalone_compaction_output_is_never_pruned(self):
-        canonical = [
-            {"type": "message", "role": "user", "content": "retained"},
-            {"type": "compaction", "encrypted_content": "compact"},
-        ]
-
-        state = build_compacted_responses_state(
-            provider="openai:test",
-            model="gpt-5.6",
-            output_items=canonical,
-        )
-
-        assert responses_state_items(state) == canonical
-
     @pytest.mark.parametrize(
         ("context_window", "max_output", "expected"),
         [
@@ -652,23 +695,6 @@ class TestResponsesConversationState:
         expected,
     ):
         assert resolve_compact_threshold(context_window, max_output) == expected
-
-    def test_configured_compact_threshold_is_clamped_to_safe_headroom(self):
-        assert resolve_compact_threshold(
-            100_000,
-            30_000,
-            configured_threshold=95_000,
-        ) == 70_000
-        assert resolve_compact_threshold(
-            100_000,
-            30_000,
-            configured_threshold=60_000,
-        ) == 60_000
-        assert resolve_compact_threshold(
-            None,
-            30_000,
-            configured_threshold=60_000,
-        ) == 60_000
 
     def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
         error = TypeError("create() got an unexpected keyword argument 'context_management'")
@@ -795,6 +821,122 @@ class TestConsumeSse:
         assert content == "hi"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_refusal_events_reconcile_parts_and_terminal_output(self):
+        refusal = "First and second sentence. Done-only. Terminal suffix."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_2",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        response = _SseResponse([
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "delta": "First",
+            },
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_1",
+                "content_index": 1,
+                "delta": " and second",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "refusal": "First",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_1",
+                "content_index": 1,
+                "refusal": " and second sentence.",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_2",
+                "content_index": 0,
+                "refusal": " Done-only.",
+            },
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_2",
+                "content_index": 1,
+                "delta": " Terminal",
+            },
+            {"type": "response.completed", "response": terminal_response},
+        ])
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        content, _, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response,
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [
+            "First",
+            " and second",
+            " sentence.",
+            " Done-only.",
+            " Terminal",
+            " suffix.",
+        ]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("source", ["events", "terminal"])
+    async def test_refusal_without_deltas_has_non_replayable_finish(self, source: str):
+        refusal = "I can’t help with that request."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        events = (
+            [
+                {"type": "response.refusal.done", "refusal": refusal},
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+            if source == "events"
+            else [{"type": "response.completed", "response": terminal_response}]
+        )
+        response = _SseResponse(events)
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        content, _, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response,
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [refusal]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
@@ -1130,6 +1272,131 @@ class TestConsumeSdkStream:
         assert content == "Hello world"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_refusal_events_reconcile_parts_and_terminal_output(self):
+        refusal = "First and second sentence. Done-only. Terminal suffix."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_2",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        resp_obj.model_dump.return_value = terminal_response
+        events = [
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_1",
+                content_index=0,
+                delta="First",
+            ),
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_1",
+                content_index=1,
+                delta=" and second",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_1",
+                content_index=0,
+                refusal="First",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_1",
+                content_index=1,
+                refusal=" and second sentence.",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_2",
+                content_index=0,
+                refusal=" Done-only.",
+            ),
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_2",
+                content_index=1,
+                delta=" Terminal",
+            ),
+            MagicMock(type="response.completed", response=resp_obj),
+        ]
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for event in events:
+                yield event
+
+        content, _, finish_reason, _, _ = await consume_sdk_stream(
+            stream(),
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [
+            "First",
+            " and second",
+            " sentence.",
+            " Done-only.",
+            " Terminal",
+            " suffix.",
+        ]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("source", ["events", "terminal"])
+    async def test_refusal_without_deltas_has_non_replayable_finish(self, source: str):
+        refusal = "I can’t help with that request."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        resp_obj.model_dump.return_value = terminal_response
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            if source == "events":
+                yield MagicMock(type="response.refusal.done", refusal=refusal)
+                yield MagicMock(
+                    type="response.completed",
+                    response={"status": "completed"},
+                )
+            else:
+                yield MagicMock(type="response.completed", response=resp_obj)
+
+        content, _, finish_reason, _, _ = await consume_sdk_stream(
+            stream(),
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [refusal]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
 
     @pytest.mark.asyncio
     async def test_on_content_delta_called(self):

@@ -106,6 +106,7 @@ if TYPE_CHECKING:
     from nanobot.triggers.local_store import LocalTriggerStore
 
 _T = TypeVar("_T")
+_SUBAGENT_PROVIDER_TASK_META = "subagent_provider_task_id"
 
 
 class TurnKind(Enum):
@@ -1713,10 +1714,34 @@ class AgentLoop:
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
-            ctx.provider_state = stored_state.with_pending_messages([
-                *stored_state.pending_messages,
-                current_provider_message,
-            ])
+            task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
+            already_staged = False
+            if isinstance(task_id, str) and task_id:
+                internal_meta = current_provider_message.get("_meta")
+                current_provider_message["_meta"] = {
+                    **(
+                        cast(dict[str, Any], internal_meta)
+                        if isinstance(internal_meta, dict)
+                        else {}
+                    ),
+                    _SUBAGENT_PROVIDER_TASK_META: task_id,
+                }
+                already_staged = any(
+                    isinstance(message.get("_meta"), dict)
+                    and cast(dict[str, Any], message["_meta"]).get(
+                        _SUBAGENT_PROVIDER_TASK_META
+                    )
+                    == task_id
+                    for message in stored_state.pending_messages
+                )
+            ctx.provider_state = (
+                stored_state
+                if already_staged
+                else stored_state.with_pending_messages([
+                    *stored_state.pending_messages,
+                    current_provider_message,
+                ])
+            )
             if (
                 not ctx.ephemeral
                 and (ctx.kind is TurnKind.USER or subagent_followup_persisted)

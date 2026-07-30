@@ -60,10 +60,7 @@ class ProviderConversationStateController:
         context_window_tokens: int | None,
     ) -> ProviderCallContext | None:
         """Return typed provider context for a request that does not resume state."""
-        if (
-            context_window_tokens is None
-            or not self._provider.supports_native_compaction(self._model)
-        ):
+        if context_window_tokens is None:
             return None
         return ProviderCallContext(context_window_tokens=context_window_tokens)
 

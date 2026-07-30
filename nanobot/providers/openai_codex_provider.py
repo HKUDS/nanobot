@@ -19,7 +19,6 @@ from nanobot.providers.base import (
     LLMResponse,
     ProviderCallContext,
     ProviderConversationState,
-    ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.openai_responses import (
@@ -28,6 +27,7 @@ from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_tools,
     is_compaction_compatibility_error,
+    is_replayable_finish_reason,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -50,19 +50,11 @@ class OpenAICodexProvider(LLMProvider):
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
-        responses_state_enabled: bool = True,
-        responses_compaction_enabled: bool = True,
-        responses_compact_threshold: int | None = None,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
-        self._responses_state_enabled = bool(responses_state_enabled)
-        self._responses_compaction_enabled = (
-            self._responses_state_enabled and bool(responses_compaction_enabled)
-        )
-        self._responses_compact_threshold = responses_compact_threshold
         self._native_compaction_available = True
 
     async def _call_codex(
@@ -83,7 +75,7 @@ class OpenAICodexProvider(LLMProvider):
         sanitized_messages = self._sanitize_empty_content(messages)
         sanitized_state = (
             provider_context.conversation_state
-            if self._responses_state_enabled and provider_context is not None
+            if provider_context is not None
             else None
         )
         if sanitized_state is not None:
@@ -108,8 +100,7 @@ class OpenAICodexProvider(LLMProvider):
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
-        if self._responses_state_enabled:
-            body["include"] = ["reasoning.encrypted_content"]
+        body["include"] = ["reasoning.encrypted_content"]
         reasoning_options = _build_reasoning_options(reasoning_effort)
         if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
             reasoning_options = dict(reasoning_options or {})
@@ -168,7 +159,6 @@ class OpenAICodexProvider(LLMProvider):
                     else None
                 ),
                 max_tokens,
-                configured_threshold=self._responses_compact_threshold,
             )
             if (
                 self.supports_native_compaction(model)
@@ -211,11 +201,7 @@ class OpenAICodexProvider(LLMProvider):
                     )
 
             stage = "codex_request"
-            request_result = await _send(body, emit_deltas=True)
-            result = _codex_result_to_response(request_result)
-            if not self._responses_state_enabled:
-                result.provider_state = None
-            return result
+            return await _send(body, emit_deltas=True)
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
@@ -308,7 +294,7 @@ class OpenAICodexProvider(LLMProvider):
         state: ProviderConversationState,
         model: str | None = None,
     ) -> bool:
-        return self._responses_state_enabled and responses_state_matches(
+        return responses_state_matches(
             state,
             provider=self._responses_state_provider(),
             model=_strip_model_prefix(model or self.default_model),
@@ -317,7 +303,7 @@ class OpenAICodexProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Use the Codex backend's inline compaction trigger when needed."""
         _ = model
-        return self._responses_compaction_enabled and self._native_compaction_available
+        return self._native_compaction_available
 
 
 def _strip_model_prefix(model: str) -> str:
@@ -484,7 +470,7 @@ async def _request_codex(
                 usage=usage,
                 reasoning_content=reasoning_content,
             )
-            if capture.completed:
+            if capture.completed and is_replayable_finish_reason(finish_reason):
                 result.provider_state = build_responses_state(
                     provider=f"openai_codex:{url.rstrip('/')}",
                     model=str(body.get("model") or ""),
@@ -493,22 +479,6 @@ async def _request_codex(
                     usage=usage,
                 )
             return result
-
-
-def _codex_result_to_response(
-    result: LLMResponse | tuple[str, list[ToolCallRequest], str, dict[str, int], str | None],
-) -> LLMResponse:
-    """Normalize legacy tuple-shaped test adapters and the native response."""
-    if isinstance(result, LLMResponse):
-        return result
-    content, tool_calls, finish_reason, usage, reasoning_content = result
-    return LLMResponse(
-        content=content,
-        tool_calls=tool_calls,
-        finish_reason=finish_reason,
-        usage=usage,
-        reasoning_content=reasoning_content,
-    )
 
 
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:

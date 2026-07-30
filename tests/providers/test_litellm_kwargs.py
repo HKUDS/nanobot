@@ -16,7 +16,6 @@ import pytest
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.openai_responses import build_responses_state
 from nanobot.providers.registry import find_by_name
 
 
@@ -711,43 +710,6 @@ async def test_direct_openai_reasoning_prefers_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["reasoning"] == {"effort": "medium"}
     assert call_kwargs["include"] == ["reasoning.encrypted_content"]
-
-
-def test_direct_openai_responses_state_kill_switch_removes_state_and_compaction() -> None:
-    spec = find_by_name("openai")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider(
-            api_key="sk-test-key",
-            default_model="gpt-5.6",
-            spec=spec,
-            responses_state_enabled=False,
-            responses_compaction_enabled=True,
-        )
-    state = build_responses_state(
-        provider=provider._responses_state_provider(),
-        model="gpt-5.6",
-        input_items=[{"role": "user", "content": "opaque-old-input"}],
-        output_items=[{"type": "reasoning", "encrypted_content": "opaque-state"}],
-    )
-
-    body = provider._build_responses_body(
-        [{"role": "user", "content": "fresh input"}],
-        None,
-        "gpt-5.6",
-        10_000,
-        0.1,
-        "high",
-        None,
-        provider_context=ProviderCallContext(
-            conversation_state=state,
-            context_window_tokens=200_000,
-        ),
-    )
-
-    assert provider.can_resume_conversation_state(state, "gpt-5.6") is False
-    assert "opaque-state" not in str(body)
-    assert "include" not in body
-    assert "context_management" not in body
 
 
 @pytest.mark.asyncio

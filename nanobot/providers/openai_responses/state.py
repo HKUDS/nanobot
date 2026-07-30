@@ -101,27 +101,6 @@ def build_responses_state(
     )
 
 
-def build_compacted_responses_state(
-    *,
-    provider: str,
-    model: str,
-    output_items: list[dict[str, Any]],
-    usage: dict[str, int] | None = None,
-) -> ProviderConversationState:
-    """Keep standalone ``/responses/compact`` output as the canonical window."""
-    payload: dict[str, Any] = {_ITEMS_KEY: deepcopy(output_items)}
-    context_tokens = _context_tokens_from_usage(usage)
-    if context_tokens > 0:
-        payload[_CONTEXT_TOKENS_KEY] = context_tokens
-    return ProviderConversationState(
-        kind=RESPONSES_STATE_KIND,
-        provider=provider,
-        model=model,
-        version=RESPONSES_STATE_VERSION,
-        payload=payload,
-    )
-
-
 def responses_state_items(
     state: ProviderConversationState,
 ) -> list[dict[str, Any]] | None:
@@ -141,18 +120,13 @@ def responses_state_context_tokens(state: ProviderConversationState) -> int:
 def resolve_compact_threshold(
     context_window_tokens: int | None,
     max_output_tokens: int,
-    *,
-    configured_threshold: int | None = None,
 ) -> int | None:
     """Derive Codex-compatible 90% compaction headroom for a model window."""
     if context_window_tokens is None or context_window_tokens <= 0:
-        return max(1, configured_threshold) if configured_threshold is not None else None
+        return None
     ninety_percent = max(1, context_window_tokens * 9 // 10)
     output_headroom = max(1, context_window_tokens - max(1, max_output_tokens))
-    safe_limit = min(ninety_percent, output_headroom)
-    if configured_threshold is None:
-        return safe_limit
-    return min(max(1, configured_threshold), safe_limit)
+    return min(ninety_percent, output_headroom)
 
 
 def is_compaction_compatibility_error(exc: Exception) -> bool:

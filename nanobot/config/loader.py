@@ -155,22 +155,14 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     data = config.model_dump(mode="json", by_alias=True)
     # OAuth credentials live in dedicated token stores. Persist only the
     # non-credential request settings consumed by these provider backends.
-    for alias, provider, included_fields in (
-        (
-            "openaiCodex",
-            config.providers.openai_codex,
-            {"proxy", "extra_body"},
-        ),
-        (
-            "xaiGrok",
-            config.providers.xai_grok,
-            {"proxy", "extra_body"},
-        ),
+    for alias, provider in (
+        ("openaiCodex", config.providers.openai_codex),
+        ("xaiGrok", config.providers.xai_grok),
     ):
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include=included_fields,
+            include={"proxy", "extra_body"},
             exclude_none=True,
         )
         if settings:

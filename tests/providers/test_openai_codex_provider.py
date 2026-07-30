@@ -235,7 +235,7 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
     ):
         _ = proxy, on_thinking_delta, on_tool_call_delta
         bodies.append(body)
-        return "ok", [], "stop", {}, None
+        return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
 
@@ -275,7 +275,7 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
 
     async def fake_request(_url, _headers, body, **_kwargs):
         bodies.append(body)
-        return "ok", [], "stop", {}, None
+        return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
     config = Config.model_validate({
@@ -340,7 +340,7 @@ async def test_codex_provider_passes_proxy_to_oauth_and_response_request(monkeyp
     ):
         _ = url, headers, body, verify, on_content_delta, on_thinking_delta, on_tool_call_delta
         seen["request_proxy"] = proxy
-        return "ok", [], "stop", {}, None
+        return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider.get_codex_token", fake_token)
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -427,7 +427,7 @@ async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None
         calls += 1
         if calls == 1:
             raise httpx.ReadTimeout("")
-        return "ok", [], "stop", {}, None
+        return provider_base.LLMResponse(content="ok")
 
     async def fake_sleep(delay: float) -> None:
         delays.append(delay)
@@ -850,7 +850,12 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
             await on_content_delta("answer")
         if on_thinking_delta:
             await on_thinking_delta("summary")
-        return "answer", [], "stop", {"prompt_tokens": 10, "completion_tokens": 5}, "summary"
+        return provider_base.LLMResponse(
+            content="answer",
+            finish_reason="stop",
+            usage={"prompt_tokens": 10, "completion_tokens": 5},
+            reasoning_content="summary",
+        )
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
 

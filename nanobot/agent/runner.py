@@ -532,7 +532,6 @@ class AgentRunner:
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
-                        "provider_state": conversation_state.checkpoint(messages),
                     },
                 )
 
@@ -1132,6 +1131,10 @@ class AgentRunner:
             original_finish_reason,
         )
         response.tool_calls = valid
+        # The opaque candidate still contains every raw function_call item.
+        # Advancing it after dropping even one call would replay an unmatched
+        # call without a corresponding tool output on the next request.
+        response.provider_state = None
         if not valid:
             response.finish_reason = "stop"
         return (dropped, not valid, original_finish_reason)

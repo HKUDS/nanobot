@@ -19,6 +19,7 @@ FINISH_REASON_MAP = {
     "failed": "error",
     "cancelled": "error",
 }
+REPLAYABLE_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
 
 
 @dataclass(slots=True)
@@ -91,6 +92,11 @@ def map_finish_reason(status: str | None) -> str:
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
+def is_replayable_finish_reason(finish_reason: str) -> bool:
+    """Return whether a response can safely advance opaque conversation state."""
+    return finish_reason in REPLAYABLE_FINISH_REASONS
+
+
 def _response_finish_reason(
     response: object,
     *,
@@ -150,6 +156,47 @@ def _tool_arguments_source(*values: Any) -> Any:
             continue
         return value
     return "{}"
+
+
+def _refusal_event_key(
+    item_id: object,
+    content_index: object,
+) -> tuple[str | None, int | None]:
+    """Identify one streamed refusal content part across delta/done events."""
+    return (
+        item_id if isinstance(item_id, str) else None,
+        (
+            content_index
+            if isinstance(content_index, int) and not isinstance(content_index, bool)
+            else None
+        ),
+    )
+
+
+def _remaining_refusal_text(streamed_text: str, refusal_text: str) -> str:
+    """Return only text not already surfaced by refusal deltas."""
+    if not streamed_text:
+        return refusal_text
+    if refusal_text.startswith(streamed_text):
+        return refusal_text[len(streamed_text):]
+    return ""
+
+
+def _extract_refusal_text_from_output(output: object) -> tuple[bool, str]:
+    """Extract refusal content from terminal Responses output items."""
+    refusal_seen = False
+    parts: list[str] = []
+    for item in _response_object_list(output):
+        if item.get("type") != "message":
+            continue
+        for block in _response_object_list(item.get("content")):
+            if block.get("type") != "refusal":
+                continue
+            refusal_seen = True
+            refusal_text = block.get("refusal")
+            if isinstance(refusal_text, str):
+                parts.append(refusal_text)
+    return refusal_seen, "".join(parts)
 
 
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
@@ -217,6 +264,9 @@ async def consume_sse_with_reasoning(
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
     streamed_reasoning = False
+    refusal_seen = False
+    refusal_deltas: dict[tuple[str | None, int | None], str] = {}
+    emitted_refusal_text = ""
 
     async for event in iter_sse(response):
         if on_response_event:
@@ -245,6 +295,33 @@ async def consume_sse_with_reasoning(
             content += delta_text
             if on_content_delta and delta_text:
                 await on_content_delta(delta_text)
+        elif event_type == "response.refusal.delta":
+            refusal_seen = True
+            delta_text = event.get("delta")
+            if isinstance(delta_text, str) and delta_text:
+                key = _refusal_event_key(
+                    event.get("item_id"),
+                    event.get("content_index"),
+                )
+                refusal_deltas[key] = refusal_deltas.get(key, "") + delta_text
+                content += delta_text
+                emitted_refusal_text += delta_text
+                if on_content_delta:
+                    await on_content_delta(delta_text)
+        elif event_type == "response.refusal.done":
+            refusal_seen = True
+            refusal_text = event.get("refusal")
+            key = _refusal_event_key(
+                event.get("item_id"),
+                event.get("content_index"),
+            )
+            streamed_text = refusal_deltas.pop(key, "")
+            if isinstance(refusal_text, str) and refusal_text:
+                remaining_text = _remaining_refusal_text(streamed_text, refusal_text)
+                content += remaining_text
+                emitted_refusal_text += remaining_text
+                if on_content_delta and remaining_text:
+                    await on_content_delta(remaining_text)
         elif event_type == "response.reasoning_summary_text.delta":
             delta_text = event.get("delta") or ""
             if delta_text:
@@ -334,6 +411,19 @@ async def consume_sse_with_reasoning(
                 fallback_status=event_type.removeprefix("response."),
             )
             usage = _usage_from_response_obj(response_obj) or usage
+            terminal_refusal, terminal_refusal_text = _extract_refusal_text_from_output(
+                response_obj.get("output")
+            )
+            if terminal_refusal:
+                refusal_seen = True
+                remaining_text = _remaining_refusal_text(
+                    emitted_refusal_text,
+                    terminal_refusal_text,
+                )
+                content += remaining_text
+                emitted_refusal_text += remaining_text
+                if on_content_delta and remaining_text:
+                    await on_content_delta(remaining_text)
             if not reasoning_content:
                 summary = _extract_reasoning_summary_from_output(response_obj.get("output"))
                 if summary:
@@ -344,6 +434,8 @@ async def consume_sse_with_reasoning(
             detail = event.get("error") or event.get("message") or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
+    if refusal_seen:
+        finish_reason = "refusal"
     return content, tool_calls, finish_reason, usage, reasoning_content
 
 
@@ -374,15 +466,22 @@ def parse_response_output(
     content_parts: list[str] = []
     tool_calls: list[ToolCallRequest] = []
     reasoning_content: str | None = None
+    refusal_seen = False
 
     for item in output:
         item_type = item.get("type")
         if item_type == "message":
             for block in _response_object_list(item.get("content")):
-                if block.get("type") == "output_text":
+                block_type = block.get("type")
+                if block_type == "output_text":
                     text = block.get("text")
                     if isinstance(text, str):
                         content_parts.append(text)
+                elif block_type == "refusal":
+                    refusal_seen = True
+                    refusal = block.get("refusal")
+                    if isinstance(refusal, str):
+                        content_parts.append(refusal)
         elif item_type == "reasoning":
             for s in _response_object_list(item.get("summary")):
                 if s.get("type") == "summary_text" and s.get("text"):
@@ -403,7 +502,7 @@ def parse_response_output(
     usage = _usage_from_response_obj(response_object)
 
     status = response_object.get("status")
-    finish_reason = _response_finish_reason(response_object)
+    finish_reason = "refusal" if refusal_seen else _response_finish_reason(response_object)
 
     result = LLMResponse(
         content="".join(content_parts) or None,
@@ -416,7 +515,8 @@ def parse_response_output(
         state_provider is not None
         and state_model is not None
         and state_input_items is not None
-        and status in {"completed", "incomplete", None}
+        and (status is None or status == "completed")
+        and is_replayable_finish_reason(finish_reason)
     ):
         result.provider_state = build_responses_state(
             provider=state_provider,
@@ -442,6 +542,9 @@ async def consume_sdk_stream(
     finish_reason = "stop"
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
+    refusal_seen = False
+    refusal_deltas: dict[tuple[str | None, int | None], str] = {}
+    emitted_refusal_text = ""
 
     async for raw_event in stream:
         event: Any = raw_event
@@ -469,6 +572,33 @@ async def consume_sdk_stream(
             content += delta_text
             if on_content_delta and delta_text:
                 await on_content_delta(delta_text)
+        elif event_type == "response.refusal.delta":
+            refusal_seen = True
+            delta_text = getattr(event, "delta", None)
+            if isinstance(delta_text, str) and delta_text:
+                key = _refusal_event_key(
+                    getattr(event, "item_id", None),
+                    getattr(event, "content_index", None),
+                )
+                refusal_deltas[key] = refusal_deltas.get(key, "") + delta_text
+                content += delta_text
+                emitted_refusal_text += delta_text
+                if on_content_delta:
+                    await on_content_delta(delta_text)
+        elif event_type == "response.refusal.done":
+            refusal_seen = True
+            refusal_text = getattr(event, "refusal", None)
+            key = _refusal_event_key(
+                getattr(event, "item_id", None),
+                getattr(event, "content_index", None),
+            )
+            streamed_text = refusal_deltas.pop(key, "")
+            if isinstance(refusal_text, str) and refusal_text:
+                remaining_text = _remaining_refusal_text(streamed_text, refusal_text)
+                content += remaining_text
+                emitted_refusal_text += remaining_text
+                if on_content_delta and remaining_text:
+                    await on_content_delta(remaining_text)
         elif event_type == "response.function_call_arguments.delta":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
@@ -528,12 +658,29 @@ async def consume_sdk_stream(
                 )
         elif event_type in {"response.completed", "response.incomplete"}:
             resp = getattr(event, "response", None)
+            response_obj = _response_object(resp) or {}
             if capture is not None:
                 capture.record_completed(resp)
             finish_reason = _response_finish_reason(
                 resp,
                 fallback_status=event_type.removeprefix("response."),
             )
+            terminal_output = response_obj.get("output")
+            if terminal_output is None:
+                terminal_output = getattr(resp, "output", None)
+            terminal_refusal, terminal_refusal_text = _extract_refusal_text_from_output(
+                terminal_output
+            )
+            if terminal_refusal:
+                refusal_seen = True
+                remaining_text = _remaining_refusal_text(
+                    emitted_refusal_text,
+                    terminal_refusal_text,
+                )
+                content += remaining_text
+                emitted_refusal_text += remaining_text
+                if on_content_delta and remaining_text:
+                    await on_content_delta(remaining_text)
             if resp:
                 usage_obj = getattr(resp, "usage", None)
                 if usage_obj:
@@ -553,4 +700,6 @@ async def consume_sdk_stream(
             detail = getattr(event, "error", None) or getattr(event, "message", None) or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
+    if refusal_seen:
+        finish_reason = "refusal"
     return content, tool_calls, finish_reason, usage, reasoning_content

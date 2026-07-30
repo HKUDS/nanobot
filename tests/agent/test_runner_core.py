@@ -112,7 +112,9 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         nonlocal calls
         calls += 1
         if calls == 1:
-            assert kwargs["provider_context"] is None
+            provider_context = kwargs["provider_context"]
+            assert isinstance(provider_context, ProviderCallContext)
+            assert provider_context.conversation_state is None
             return LLMResponse(
                 content=None,
                 tool_calls=[
@@ -163,7 +165,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
     assert result.provider_state.payload == second_state.payload
     assert result.provider_state.pending_messages == []
     assert checkpoints[0]["phase"] == "awaiting_tools"
-    assert checkpoints[0]["provider_state"].pending_messages == []
+    assert "provider_state" not in checkpoints[0]
     assert checkpoints[1]["phase"] == "tools_completed"
     assert checkpoints[1]["provider_state"].pending_messages == [{
         "role": "tool",

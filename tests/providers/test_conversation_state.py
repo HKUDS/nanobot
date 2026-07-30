@@ -272,8 +272,8 @@ def test_terminal_response_discards_candidate_state(
     assert controller.finish(messages) is None
 
 
-def test_independent_request_only_exposes_native_compaction_context() -> None:
-    provider = _provider(compact=True)
+def test_independent_request_exposes_context_without_capability_check() -> None:
+    provider = _provider(compact=False)
     messages = [{"role": "user", "content": "hello"}]
     controller = ProviderConversationStateController(
         provider=provider,
@@ -288,3 +288,4 @@ def test_independent_request_only_exposes_native_compaction_context() -> None:
     assert provider_context is not None
     assert provider_context.conversation_state is None
     assert provider_context.context_window_tokens == 200_000
+    provider.supports_native_compaction.assert_not_called()

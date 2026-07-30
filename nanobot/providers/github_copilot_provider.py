@@ -174,14 +174,7 @@ def login_github_copilot(
 class GitHubCopilotProvider(OpenAICompatProvider):
     """Provider that exchanges a stored GitHub OAuth token for Copilot access tokens."""
 
-    def __init__(
-        self,
-        default_model: str = "github-copilot/gpt-4.1",
-        *,
-        responses_state_enabled: bool = True,
-        responses_compaction_enabled: bool = True,
-        responses_compact_threshold: int | None = None,
-    ):
+    def __init__(self, default_model: str = "github-copilot/gpt-4.1"):
         from nanobot.providers.registry import find_by_name
 
         self._copilot_access_token: str | None = None
@@ -197,9 +190,6 @@ class GitHubCopilotProvider(OpenAICompatProvider):
                 "User-Agent": USER_AGENT,
             },
             spec=find_by_name("github_copilot"),
-            responses_state_enabled=responses_state_enabled,
-            responses_compaction_enabled=responses_compaction_enabled,
-            responses_compact_threshold=responses_compact_threshold,
         )
 
     async def _get_copilot_access_token(self) -> str:

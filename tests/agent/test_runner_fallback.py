@@ -318,18 +318,7 @@ class TestFallbackOnPrimaryError:
         assert fallback.chat_calls[0]["model"] == "fallback-a"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("configured_threshold", "expected_threshold"),
-        [
-            (None, 180_000),
-            (175_000, 175_000),
-        ],
-    )
-    async def test_primary_compaction_uses_primary_context_window(
-        self,
-        configured_threshold: int | None,
-        expected_threshold: int,
-    ) -> None:
+    async def test_primary_compaction_uses_primary_context_window(self) -> None:
         primary = _FakeProvider("primary", _make_response("primary ok"))
         primary.compact = True
         fb = FallbackProvider(
@@ -354,8 +343,7 @@ class TestFallbackOnPrimaryError:
         assert resolve_compact_threshold(
             primary_context.context_window_tokens,
             10_000,
-            configured_threshold=configured_threshold,
-        ) == expected_threshold
+        ) == 180_000
 
     @pytest.mark.asyncio
     async def test_native_fallback_compaction_uses_its_own_context_window(self) -> None:
@@ -405,6 +393,7 @@ class TestFallbackOnPrimaryError:
             model="primary-model",
             messages=messages,
         )
+        assert fb.supports_native_compaction("primary-model") is False
         provider_context = controller.prepare_request(
             messages,
             context_window_tokens=50_000,

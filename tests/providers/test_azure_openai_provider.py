@@ -266,29 +266,6 @@ def test_build_body_enables_server_compaction():
     }]
 
 
-def test_build_body_respects_responses_compaction_kill_switch():
-    provider = AzureOpenAIProvider(
-        api_key="k",
-        api_base="https://res.openai.azure.com",
-        default_model="gpt-5.6",
-        responses_compaction_enabled=False,
-    )
-
-    body = provider._build_body(
-        [{"role": "user", "content": "hello"}],
-        None,
-        None,
-        10_000,
-        0.1,
-        "high",
-        None,
-        provider_context=ProviderCallContext(context_window_tokens=200_000),
-    )
-
-    assert body["include"] == ["reasoning.encrypted_content"]
-    assert "context_management" not in body
-
-
 def test_build_body_max_tokens_minimum():
     """max_output_tokens should never be less than 1."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
@@ -491,6 +468,7 @@ async def test_chat_with_tool_calls():
     assert len(result.tool_calls) == 1
     assert result.tool_calls[0].name == "get_weather"
     assert result.tool_calls[0].arguments == {"location": "SF"}
+    assert result.provider_state is not None
 
 
 @pytest.mark.asyncio
@@ -590,6 +568,7 @@ async def test_chat_stream_with_tool_calls():
     item_done.name = "get_weather"
     ev_item_done = MagicMock(type="response.output_item.done", item=item_done)
     resp_obj = MagicMock(status="completed")
+    resp_obj.model_dump.return_value = {"status": "completed", "output": []}
     ev_completed = MagicMock(type="response.completed", response=resp_obj)
 
     async def mock_stream():
@@ -607,6 +586,7 @@ async def test_chat_stream_with_tool_calls():
     assert len(result.tool_calls) == 1
     assert result.tool_calls[0].name == "get_weather"
     assert result.tool_calls[0].arguments == {"location": "SF"}
+    assert result.provider_state is not None
 
 
 @pytest.mark.asyncio

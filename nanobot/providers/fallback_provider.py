@@ -158,13 +158,7 @@ class FallbackProvider(LLMProvider):
         return self._primary.can_resume_conversation_state(state, model)
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
-        # Fallback providers are constructed lazily, so route typed context
-        # whenever a fallback may need its own compaction window. Providers
-        # without contextual features inherit the no-op base implementation.
-        return (
-            self._primary.supports_native_compaction(model)
-            or self._has_fallbacks
-        )
+        return self._primary.supports_native_compaction(model)
 
     def _primary_call_context(
         self,
