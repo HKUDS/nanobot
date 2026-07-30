@@ -1,10 +1,8 @@
 """Reproduction test for HKUDS/nanobot#4302.
 
-This test starts a real FastMCP streamable-http server in a child process,
-lets its idle timeout kill the session, and then exercises nanobot's MCP
-reconnect path.  The bug being reproduced is a gateway crash caused by
-improper cleanup of the old ``streamable_http_client`` async generator during
-reconnect / shutdown.
+This test starts a real MCP v2 streamable-http server in a child process and
+exercises both the 2026-07-28 stateless path and nanobot's reconnect/shutdown
+resource ownership.
 
 Run:
 
@@ -27,8 +25,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security import network as security_network
 
-_IDLE_TIMEOUT_SECONDS = 0.25
-_IDLE_EXPIRY_GRACE_SECONDS = 0.25
+_IDLE_WAIT_SECONDS = 0.5
 _TOOL_TIMEOUT_SECONDS = 10
 
 
@@ -39,31 +36,18 @@ def _free_port() -> int:
 
 
 def _run_mcp_server(port: int, ready_event: multiprocessing.Event) -> None:
-    """FastMCP server target for ``multiprocessing.Process``.
+    """MCP v2 server target for ``multiprocessing.Process``."""
+    from mcp.server import MCPServer
 
-    The server exposes a single ``greet`` tool and terminates idle sessions
-    after ``_IDLE_TIMEOUT_SECONDS``.
-    """
-    from mcp.server.fastmcp import FastMCP
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
-    mcp = FastMCP("IdleTimeoutDemo", json_response=True, port=port)
+    mcp = MCPServer("StatelessDemo")
 
     @mcp.tool()
     def greet(name: str = "World") -> str:  # noqa: N802
         """Greet someone."""
         return f"Hello, {name}!"
 
-    mcp._session_manager = StreamableHTTPSessionManager(
-        app=mcp._mcp_server,
-        json_response=mcp.settings.json_response,
-        stateless=mcp.settings.stateless_http,
-        security_settings=mcp.settings.transport_security,
-        session_idle_timeout=_IDLE_TIMEOUT_SECONDS,
-    )
-
     ready_event.set()
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=port, json_response=True)
 
 
 async def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
@@ -128,10 +112,6 @@ def _make_loop(tmp_path, *, mcp_servers: dict) -> AgentLoop:
 @pytest.fixture(autouse=True)
 def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
     """The repro server runs on 127.0.0.1; allow nanobot to talk to it."""
-    class TestPinnedDNSAsyncTransport(security_network.PinnedDNSAsyncTransport):
-        _resolver_lock = asyncio.Lock()
-
-    monkeypatch.setattr(mcp_module, "PinnedDNSAsyncTransport", TestPinnedDNSAsyncTransport)
     monkeypatch.setattr(
         mcp_module,
         "validate_url_target",
@@ -154,14 +134,14 @@ def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         mcp_module,
-        "httpx_env_proxy_mounts",
+        "_httpx2_env_proxy_mounts",
         lambda: {},
     )
 
 
 @pytest.mark.asyncio
-async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
-    """Reconnect to a real MCP server after its idle timeout kills the session."""
+async def test_mcp_v2_stateless_connection_survives_idle_time(tmp_path, mcp_server_url):
+    """Use the modern protocol without a transport session across idle time."""
     cfg = MCPServerConfig(
         type="streamableHttp",
         url=mcp_server_url,
@@ -175,12 +155,12 @@ async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
 
     tool = loop.tools.get("mcp_repro_greet")
     assert isinstance(tool, MCPToolWrapper)
+    assert tool._session.protocol_version == "2026-07-28"
 
     output = await asyncio.create_task(tool.execute(name="first"))
     assert "Hello, first" in output
 
-    # Wait for the server-side idle timeout to terminate the session.
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
+    await asyncio.sleep(_IDLE_WAIT_SECONDS)
 
     output = await asyncio.create_task(tool.execute(name="second"))
     assert "Hello, second" in output
@@ -208,7 +188,6 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
     assert isinstance(tool, MCPToolWrapper)
 
     await asyncio.create_task(tool.execute(name="first"))
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     reconnect_started = asyncio.Event()
     finish_reconnect = asyncio.Event()
@@ -220,7 +199,8 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
         return await real_connect(*args, **kwargs)
 
     monkeypatch.setattr(mcp_module, "connect_mcp_servers", gated_connect)
-    call_task = asyncio.create_task(tool.execute(name="second"))
+    assert tool._reconnect is not None
+    call_task = asyncio.create_task(tool._reconnect("repro", tool.name, tool))
     await asyncio.wait_for(reconnect_started.wait(), timeout=5)
     close_task = asyncio.create_task(loop.close_mcp())
     await asyncio.sleep(0)

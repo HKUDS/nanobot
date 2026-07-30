@@ -28,6 +28,9 @@ _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "http
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # Windows can still expose system proxy settings via urllib.getproxies().
+    # Default these tests to direct routing; explicit proxy tests override it.
+    monkeypatch.setenv("NO_PROXY", "*")
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):

@@ -57,6 +57,7 @@ async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch)
         "nanobot.agent.tools.mcp.resolve_url_target",
         lambda _url: (True, "", ("93.184.216.34",)),
     )
+    monkeypatch.setattr("nanobot.agent.tools.mcp.env_proxy_applies_to_url", lambda _url: False)
 
     async def _open_connection(host: str, port: int):
         attempts.append((host, port))
@@ -118,6 +119,7 @@ async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypat
 
     monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _resolver)
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.env_proxy_applies_to_url", lambda _url: False)
 
     assert await _probe_http_url("http://mcp.example:8765/mcp") is True
     assert attempts == [
