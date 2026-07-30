@@ -5,7 +5,7 @@ import time
 import pytest
 
 from nanobot.cron.service import CronJobSkippedError, CronService
-from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule
 
 
 async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
@@ -1125,3 +1125,27 @@ def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
     assert len(jobs[0].state.run_history) == 1
     assert jobs[0].state.run_history[0].run_at_ms == 1
     assert jobs[0].state.run_history[0].status == "ok"
+
+def test_cron_job_from_dict_handles_dataclass_instances() -> None:
+    """CronJob.from_dict must handle pre-instantiated CronSchedule, CronPayload, and CronJobState objects."""
+    schedule = CronSchedule(kind="cron", expr="0 * * * *")
+    payload = CronPayload(kind="agent_turn", message="hello")
+    state = CronJobState(run_history=[CronRunRecord(run_at_ms=100, status="ok")])
+
+    job = CronJob.from_dict({
+        "id": "j-dataclass",
+        "name": "Dataclass test",
+        "schedule": schedule,
+        "payload": payload,
+        "state": state,
+    })
+
+    assert job.id == "j-dataclass"
+    assert job.name == "Dataclass test"
+    assert job.schedule.kind == "cron"
+    assert job.schedule.expr == "0 * * * *"
+    assert job.payload.kind == "agent_turn"
+    assert job.payload.message == "hello"
+    assert len(job.state.run_history) == 1
+    assert job.state.run_history[0].run_at_ms == 100
+    assert job.state.run_history[0].status == "ok"

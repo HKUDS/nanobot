@@ -138,14 +138,36 @@ class CronJob:
 
     @classmethod
     def from_dict(cls, kwargs: dict):
-        state_kwargs = dict(kwargs.get("state", {}))
-        state_kwargs["run_history"] = [
-            record if isinstance(record, CronRunRecord) else CronRunRecord(**record)
-            for record in state_kwargs.get("run_history", [])
-        ]
-        kwargs["schedule"] = CronSchedule(**kwargs.get("schedule", {"kind": "every"}))
-        kwargs["payload"] = CronPayload(**kwargs.get("payload", {}))
-        kwargs["state"] = CronJobState(**state_kwargs)
+        kwargs = dict(kwargs)
+        raw_schedule = kwargs.get("schedule")
+        if isinstance(raw_schedule, CronSchedule):
+            pass
+        elif isinstance(raw_schedule, dict):
+            kwargs["schedule"] = CronSchedule(**raw_schedule)
+        else:
+            kwargs["schedule"] = CronSchedule(kind="every")
+
+        raw_payload = kwargs.get("payload")
+        if isinstance(raw_payload, CronPayload):
+            pass
+        elif isinstance(raw_payload, dict):
+            kwargs["payload"] = CronPayload(**raw_payload)
+        else:
+            kwargs["payload"] = CronPayload()
+
+        raw_state = kwargs.get("state")
+        if isinstance(raw_state, CronJobState):
+            pass
+        elif isinstance(raw_state, dict):
+            state_kwargs = dict(raw_state)
+            state_kwargs["run_history"] = [
+                record if isinstance(record, CronRunRecord) else CronRunRecord(**record)
+                for record in state_kwargs.get("run_history", [])
+            ]
+            kwargs["state"] = CronJobState(**state_kwargs)
+        else:
+            kwargs["state"] = CronJobState()
+
         return cls(**kwargs)
 
     @classmethod
