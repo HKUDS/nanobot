@@ -1,56 +1,54 @@
-"""Configuration coverage for Responses state retention and compaction."""
+"""Factory coverage for automatic Responses state retention and compaction."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import patch
 
-import pytest
-from pydantic import ValidationError
-
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import save_config
 from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.factory import make_provider, provider_signature
 
+_REMOVED_FIELD_NAMES = {
+    "responses_state_enabled",
+    "responses_compaction_enabled",
+    "responses_compact_threshold",
+}
+_REMOVED_FIELD_ALIASES = {
+    "responsesStateEnabled",
+    "responsesCompactionEnabled",
+    "responsesCompactThreshold",
+}
 
-def test_responses_settings_accept_camel_case_and_omit_defaults() -> None:
-    defaults = ProviderConfig().model_dump(mode="json", by_alias=True)
-    assert "responsesStateEnabled" not in defaults
-    assert "responsesCompactionEnabled" not in defaults
-    assert "responsesCompactThreshold" not in defaults
 
-    provider = ProviderConfig.model_validate({
+def test_responses_settings_are_not_part_of_provider_config() -> None:
+    assert _REMOVED_FIELD_NAMES.isdisjoint(ProviderConfig.model_fields)
+    schema_properties = ProviderConfig.model_json_schema(by_alias=True)["properties"]
+    assert _REMOVED_FIELD_ALIASES.isdisjoint(schema_properties)
+
+    attempted_override = ProviderConfig.model_validate({
         "responsesStateEnabled": False,
         "responsesCompactionEnabled": False,
-        "responsesCompactThreshold": 75_000,
+        "responsesCompactThreshold": 70_000,
     })
-
-    assert provider.responses_state_enabled is False
-    assert provider.responses_compaction_enabled is False
-    assert provider.responses_compact_threshold == 75_000
-    assert provider.model_dump(
-        mode="json",
-        by_alias=True,
-        exclude_defaults=True,
-        exclude_none=True,
-    ) == {
-        "responsesStateEnabled": False,
-        "responsesCompactionEnabled": False,
-        "responsesCompactThreshold": 75_000,
-    }
+    dumped = attempted_override.model_dump(mode="json", by_alias=True)
+    assert _REMOVED_FIELD_ALIASES.isdisjoint(dumped)
 
 
-def test_responses_compact_threshold_must_be_positive() -> None:
-    with pytest.raises(ValidationError):
-        ProviderConfig.model_validate({"responsesCompactThreshold": 0})
-
-
-def test_oauth_responses_settings_round_trip_without_credentials(tmp_path) -> None:
+def test_save_config_drops_removed_responses_settings(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config.model_validate({
         "providers": {
+            "openai": {
+                "apiKey": "sk-test",
+                "responsesStateEnabled": False,
+                "responsesCompactionEnabled": False,
+                "responsesCompactThreshold": 70_000,
+            },
             "openaiCodex": {
                 "apiKey": "codex-secret",
+                "proxy": "http://127.0.0.1:23458",
+                "extraBody": {"service_tier": "priority"},
                 "responsesStateEnabled": False,
                 "responsesCompactionEnabled": False,
                 "responsesCompactThreshold": 80_000,
@@ -64,26 +62,18 @@ def test_oauth_responses_settings_round_trip_without_credentials(tmp_path) -> No
 
     save_config(config, config_path)
 
-    raw = config_path.read_text(encoding="utf-8")
-    saved = json.loads(raw)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert _REMOVED_FIELD_ALIASES.isdisjoint(saved["providers"]["openai"])
     assert saved["providers"]["openaiCodex"] == {
-        "responsesStateEnabled": False,
-        "responsesCompactionEnabled": False,
-        "responsesCompactThreshold": 80_000,
+        "extraBody": {"service_tier": "priority"},
+        "proxy": "http://127.0.0.1:23458",
     }
-    assert saved["providers"]["githubCopilot"] == {
-        "responsesCompactionEnabled": False,
-    }
-    assert "codex-secret" not in raw
-    assert "copilot-secret" not in raw
-
-    reloaded = load_config(config_path)
-    assert reloaded.providers.openai_codex.responses_state_enabled is False
-    assert reloaded.providers.openai_codex.responses_compact_threshold == 80_000
-    assert reloaded.providers.github_copilot.responses_compaction_enabled is False
+    assert "githubCopilot" not in saved["providers"]
+    assert "codex-secret" not in config_path.read_text(encoding="utf-8")
+    assert "copilot-secret" not in config_path.read_text(encoding="utf-8")
 
 
-def test_factory_applies_responses_settings_and_tracks_them_in_signature() -> None:
+def test_factory_enables_responses_features_without_user_settings() -> None:
     base = {
         "agents": {
             "defaults": {
@@ -94,9 +84,6 @@ def test_factory_applies_responses_settings_and_tracks_them_in_signature() -> No
         "providers": {
             "openai": {
                 "apiKey": "sk-test",
-                "responsesStateEnabled": False,
-                "responsesCompactionEnabled": False,
-                "responsesCompactThreshold": 70_000,
             },
         },
     }
@@ -105,17 +92,43 @@ def test_factory_applies_responses_settings_and_tracks_them_in_signature() -> No
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = make_provider(config)
 
-    assert provider._responses_state_enabled is False
-    assert provider._responses_compaction_enabled is False
-    assert provider._responses_compact_threshold == 70_000
+    assert provider._responses_state_enabled is True
+    assert provider._responses_compaction_enabled is True
+    assert provider._responses_compact_threshold is None
 
-    changed = Config.model_validate({
+
+def test_removed_responses_settings_do_not_change_provider_behavior() -> None:
+    base = {
+        "agents": {
+            "defaults": {
+                "model": "gpt-5.6",
+                "provider": "openai",
+            },
+        },
+        "providers": {
+            "openai": {
+                "apiKey": "sk-test",
+            },
+        },
+    }
+    attempted_override = Config.model_validate({
         **base,
         "providers": {
             "openai": {
                 **base["providers"]["openai"],
-                "responsesStateEnabled": True,
+                "responsesStateEnabled": False,
+                "responsesCompactionEnabled": False,
+                "responsesCompactThreshold": 70_000,
             },
         },
     })
-    assert provider_signature(config) != provider_signature(changed)
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = make_provider(attempted_override)
+
+    assert provider._responses_state_enabled is True
+    assert provider._responses_compaction_enabled is True
+    assert provider._responses_compact_threshold is None
+    assert provider_signature(Config.model_validate(base)) == provider_signature(
+        attempted_override
+    )

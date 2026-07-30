@@ -356,28 +356,11 @@ Providers that use the Responses API can keep reasoning context across a
 conversation, which helps with multi-step tasks. Supported providers can also
 compact long conversations automatically.
 
-Both features are enabled by default for OpenAI Responses, OpenAI Codex, Azure
-OpenAI, and compatible GitHub Copilot models. Most users do not need to add
-these settings. To override the defaults, add them to the relevant provider:
-
-```json
-{
-  "providers": {
-    "openai": {
-      "apiKey": "${OPENAI_API_KEY}",
-      "responsesStateEnabled": true,
-      "responsesCompactionEnabled": true,
-      "responsesCompactThreshold": 175000
-    }
-  }
-}
-```
-
-| Field | Default | Meaning |
-|---|---:|---|
-| `responsesStateEnabled` | `true` | Keep Responses conversation context between model calls. Setting this to `false` also disables compaction. |
-| `responsesCompactionEnabled` | `true` | Compact long conversations when the provider supports it. |
-| `responsesCompactThreshold` | automatic | Start compaction at this token count. Leave unset to choose a safe value automatically. |
+nanobot preserves Responses conversation state automatically for OpenAI
+Responses, OpenAI Codex, Azure OpenAI, and compatible GitHub Copilot models.
+Native compaction is also automatic when the provider supports it. The
+threshold is derived from the active model's context window and reserved output
+headroom; no provider configuration is required.
 
 <details>
 <summary><b>Azure OpenAI</b></summary>
@@ -730,8 +713,6 @@ To opt in to Codex Fast mode, merge this provider setting into `config.json`:
 for models and accounts that support Fast mode; remove `service_tier` to return to standard
 processing. Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
-See [Responses conversation state and compaction](#responses-state-and-compaction)
-to override the defaults.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
 
@@ -786,7 +767,7 @@ a nanobot update.
 <details>
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
-GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config. An optional `providers.githubCopilot` block can override the shared [Responses state settings](#responses-state-and-compaction).
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash

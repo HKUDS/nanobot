@@ -159,22 +159,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         (
             "openaiCodex",
             config.providers.openai_codex,
-            {
-                "proxy",
-                "extra_body",
-                "responses_state_enabled",
-                "responses_compaction_enabled",
-                "responses_compact_threshold",
-            },
-        ),
-        (
-            "githubCopilot",
-            config.providers.github_copilot,
-            {
-                "responses_state_enabled",
-                "responses_compaction_enabled",
-                "responses_compact_threshold",
-            },
+            {"proxy", "extra_body"},
         ),
         (
             "xaiGrok",
