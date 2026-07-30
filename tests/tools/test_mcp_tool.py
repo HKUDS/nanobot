@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-import httpx
 import httpx2
 import pytest
 
@@ -28,8 +27,8 @@ _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "http
 
 
 def test_type_checking_only_mcp_annotations_are_deferred() -> None:
-    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "ClientSession"
-    assert MCPToolWrapper.__init__.__annotations__["session"] == "ClientSession"
+    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "Client | ClientSession"
+    assert MCPToolWrapper.__init__.__annotations__["session"] == "Client | ClientSession"
     assert MCPResourceWrapper.__init__.__annotations__["resource_def"] == "Resource"
     assert MCPPromptWrapper.__init__.__annotations__["prompt_def"] == "Prompt"
     assert connect_mcp_servers.__annotations__["mcp_servers"] == "dict[str, MCPServerConfig]"
@@ -944,14 +943,14 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
 
 
 @pytest.mark.asyncio
-async def test_validate_mcp_request_url_rejects_loopback_without_whitelist() -> None:
+async def test_validate_mcp_httpx2_request_url_rejects_loopback_without_whitelist() -> None:
     from nanobot.security.network import configure_ssrf_whitelist
 
     configure_ssrf_whitelist([])
-    request = httpx.Request("GET", "http://127.0.0.1/private")
+    request = httpx2.Request("GET", "http://127.0.0.1/private")
 
-    with pytest.raises(httpx.RequestError, match="Blocked unsafe MCP URL"):
-        await mcp_mod._validate_mcp_request_url(request)
+    with pytest.raises(httpx2.RequestError, match="Blocked unsafe MCP URL"):
+        await mcp_mod._validate_mcp_httpx2_request_url(request)
 
 
 @pytest.mark.asyncio
@@ -1004,7 +1003,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "_PinnedDNSHTTPX2Transport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
@@ -1039,7 +1038,7 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "mcp.example.com")
     monkeypatch.setattr(
         mcp_mod,
-        "_PinnedDNSHTTPX2Transport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
@@ -1050,10 +1049,11 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
         ),
     )
 
-    kwargs = mcp_mod._httpx2_client_kwargs()
+    transport, mounts = mcp_mod._httpx2_transport_config()
 
-    assert "transport" in kwargs
-    assert any(transport is None for transport in kwargs["mounts"].values())
+    assert transport is not None
+    assert mounts is not None
+    assert any(route is None for route in mounts.values())
 
 
 @pytest.mark.asyncio
@@ -1211,8 +1211,8 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        "Httpx2PinnedDNSAsyncTransport",
+        lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],

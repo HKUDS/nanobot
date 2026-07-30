@@ -12,7 +12,6 @@ from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, cast
 from weakref import WeakKeyDictionary
 
-import httpx
 import httpx2
 from loguru import logger
 
@@ -26,17 +25,16 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.security.network import (
-    PinnedDNSAsyncTransport,
+    Httpx2PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
-    httpx_env_proxy_mounts,
-    pin_resolved_url_dns,
+    httpx2_env_proxy_mounts,
     resolve_url_target,
     validate_url_target,
 )
 from nanobot.utils.cancellation import task_is_cancelling
 
 if TYPE_CHECKING:
-    from mcp import ClientSession
+    from mcp import Client, ClientSession
     from mcp.types import Prompt, Resource
     from mcp.types import Tool as MCPToolDefinition
 
@@ -260,80 +258,13 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
-def _pinned_transport_kwargs() -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"transport": PinnedDNSAsyncTransport()}
-    mounts = httpx_env_proxy_mounts()
-    if mounts:
-        kwargs["mounts"] = mounts
-    return kwargs
-
-
-class _PinnedDNSHTTPX2Transport(httpx2.AsyncBaseTransport):
-    """HTTPX2 transport that pins every direct MCP request to validated IPs."""
-
-    _resolver_lock = asyncio.Lock()
-
-    def __init__(self, inner: httpx2.AsyncBaseTransport | None = None) -> None:
-        self._inner = inner or httpx2.AsyncHTTPTransport()
-
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        url = str(request.url)
-        ok, error, resolved_ips = resolve_url_target(url)
-        if not ok:
-            raise httpx2.RequestError(error, request=request)
-        async with self._resolver_lock:
-            with pin_resolved_url_dns(url, resolved_ips):
-                return await self._inner.handle_async_request(request)
-
-    async def aclose(self) -> None:
-        await self._inner.aclose()
-
-
-def _httpx2_env_proxy_mounts() -> dict[str, httpx2.AsyncBaseTransport | None]:
-    """Mirror the project's HTTPX proxy routing for the MCP SDK's HTTPX2 client."""
-    from urllib.request import getproxies
-
-    from nanobot.security.network import _no_proxy_mount_pattern
-
-    proxies = getproxies()
-    mounts: dict[str, httpx2.AsyncBaseTransport | None] = {}
-    for scheme in ("http", "https", "all"):
-        proxy_url = proxies.get(scheme)
-        if proxy_url:
-            if "://" not in proxy_url:
-                proxy_url = f"http://{proxy_url}"
-            mounts[f"{scheme}://"] = httpx2.AsyncHTTPTransport(
-                proxy=httpx2.Proxy(proxy_url)
-            )
-
-    if not mounts:
-        return {}
-    no_proxy = proxies.get("no", "")
-    if no_proxy == "*":
-        return {}
-    for entry in no_proxy.split(","):
-        pattern = _no_proxy_mount_pattern(entry.strip())
-        if pattern:
-            mounts[pattern] = None
-    return mounts
-
-
-def _httpx2_client_kwargs() -> dict[str, object]:
-    kwargs: dict[str, object] = {"transport": _PinnedDNSHTTPX2Transport()}
-    mounts = _httpx2_env_proxy_mounts()
-    if mounts:
-        kwargs["mounts"] = mounts
-    return kwargs
-
-
-async def _validate_mcp_request_url(request: httpx.Request) -> None:
-    """Validate each outgoing MCP HTTP request, including redirect targets."""
-    ok, error = validate_url_target(str(request.url))
-    if not ok:
-        raise httpx.RequestError(
-            f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
-            request=request,
-        )
+def _httpx2_transport_config() -> tuple[
+    httpx2.AsyncBaseTransport,
+    dict[str, httpx2.AsyncBaseTransport | None] | None,
+]:
+    """Build the DNS-pinned direct transport and optional proxy routes for MCP HTTP."""
+    mounts = httpx2_env_proxy_mounts()
+    return Httpx2PinnedDNSAsyncTransport(), mounts or None
 
 
 async def _validate_mcp_httpx2_request_url(request: httpx2.Request) -> None:
@@ -550,11 +481,13 @@ class _MCPWrapperBase(Tool):
     """Common reconnect handling for wrappers bound to one MCP server session."""
 
     _plugin_discoverable = False
-    _session: "ClientSession"
+    _session: "Client | ClientSession"
     _server_name: str
     _name: str
 
-    def _set_mcp_connection(self, session: "ClientSession", server_name: str) -> None:
+    def _set_mcp_connection(
+        self, session: "Client | ClientSession", server_name: str
+    ) -> None:
         self._session = session
         self._server_name = server_name
         self._reconnect: _ReconnectCallback | None = None
@@ -644,7 +577,7 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: "ClientSession",
+        session: "Client | ClientSession",
         server_name: str,
         tool_def: "MCPToolDefinition",
         tool_timeout: int = 30,
@@ -653,7 +586,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
-        raw_schema = _mcp_attr(tool_def, "input_schema", "inputSchema") or {
+        raw_schema: Any = _mcp_attr(tool_def, "input_schema", "inputSchema") or {
             "type": "object",
             "properties": {},
         }
@@ -809,7 +742,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: "ClientSession",
+        session: "Client | ClientSession",
         server_name: str,
         resource_def: "Resource",
         resource_timeout: int = 30,
@@ -913,7 +846,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
     def __init__(
         self,
-        session: "ClientSession",
+        session: "Client | ClientSession",
         server_name: str,
         prompt_def: "Prompt",
         prompt_timeout: int = 30,
@@ -1114,6 +1047,7 @@ async def connect_mcp_servers(
                     timeout: httpx2.Timeout | None = None,
                     auth: httpx2.Auth | None = None,
                 ) -> httpx2.AsyncClient:
+                    transport, mounts = _httpx2_transport_config()
                     merged_headers = {
                         "Accept": "application/json, text/event-stream",
                         **(cfg.headers or {}),
@@ -1125,7 +1059,8 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        **_httpx2_client_kwargs(),
+                        transport=transport,
+                        mounts=mounts,
                     )
 
                 transport = sse_client(
@@ -1139,13 +1074,15 @@ async def connect_mcp_servers(
                     await server_stack.aclose()
                     return name, None
 
+                transport, mounts = _httpx2_transport_config()
                 http_client = await server_stack.enter_async_context(
                     httpx2.AsyncClient(
                         headers=cfg.headers or None,
                         event_hooks={"request": [_validate_mcp_httpx2_request_url]},
                         follow_redirects=True,
                         timeout=httpx2.Timeout(30.0, connect=10.0),
-                        **_httpx2_client_kwargs(),
+                        transport=transport,
+                        mounts=mounts,
                     )
                 )
                 transport = streamable_http_client(cfg.url, http_client=http_client)
