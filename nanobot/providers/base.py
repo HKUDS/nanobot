@@ -185,6 +185,55 @@ class ProviderConversationState:
             pending_messages=deepcopy(messages),
         )
 
+    def to_private_record(self) -> dict[str, Any]:
+        """Serialize for the private session sidecar, never for public history."""
+        return {
+            "kind": self.kind,
+            "provider": self.provider,
+            "model": self.model,
+            "version": self.version,
+            "payload": deepcopy(self.payload),
+            "pending_messages": deepcopy(self.pending_messages),
+        }
+
+    @classmethod
+    def from_private_record(
+        cls,
+        value: object,
+    ) -> ProviderConversationState | None:
+        """Validate and deserialize a private session-sidecar value."""
+        if not isinstance(value, dict):
+            return None
+        data = cast(dict[str, Any], value)
+        kind = data.get("kind")
+        provider = data.get("provider")
+        model = data.get("model")
+        version = data.get("version")
+        payload = data.get("payload")
+        pending = data.get("pending_messages", [])
+        if (
+            not isinstance(kind, str)
+            or not kind
+            or not isinstance(provider, str)
+            or not provider
+            or not isinstance(model, str)
+            or not model
+            or isinstance(version, bool)
+            or not isinstance(version, int)
+            or not isinstance(payload, dict)
+            or not isinstance(pending, list)
+            or any(not isinstance(message, dict) for message in pending)
+        ):
+            return None
+        return cls(
+            kind=kind,
+            provider=provider,
+            model=model,
+            version=version,
+            payload=deepcopy(cast(dict[str, Any], payload)),
+            pending_messages=deepcopy(cast(list[dict[str, Any]], pending)),
+        )
+
 
 @dataclass
 class LLMResponse:

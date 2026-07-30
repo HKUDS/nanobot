@@ -49,7 +49,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -126,6 +126,8 @@ class TurnContext:
 
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    provider_state_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -857,6 +859,8 @@ class AgentLoop:
         turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, list[str], list[dict[str, Any]], str, bool]:
         """Run the agent iteration loop.
 
@@ -872,7 +876,14 @@ class AgentLoop:
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
                 return
-            self._set_runtime_checkpoint(session, payload)
+            public_payload = dict(payload)
+            private_state = public_payload.pop("provider_state", None)
+            if "provider_state" in payload and (
+                private_state is None
+                or isinstance(private_state, ProviderConversationState)
+            ):
+                session.provider_state = private_state
+            self._set_runtime_checkpoint(session, public_payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Drain follow-up messages from the pending queue.
@@ -1070,6 +1081,8 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                provider_state=provider_state,
+                provider_state_messages=provider_state_messages,
             ))
         finally:
             turn_scope_stack.close()
@@ -1077,6 +1090,8 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        if session is not None and not ephemeral:
+            session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(
@@ -1676,12 +1691,46 @@ class AgentLoop:
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(ctx)
+        state = session.provider_state
+        current_provider_message: dict[str, Any] | None = None
+        if state is not None and runtime.provider.can_resume_conversation_state(
+            state,
+            runtime.model,
+        ):
+            current_provider_message = self.context.build_current_message(
+                ctx.msg.content,
+                media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
+                runtime_context_blocks=ctx.runtime_context_blocks,
+            )
+            ctx.provider_state = state
+            ctx.provider_state_messages = [current_provider_message]
+            if ctx.kind is TurnKind.USER and not ctx.ephemeral:
+                session.provider_state = state.with_pending_messages(
+                    [*state.pending_messages, current_provider_message]
+                )
+                ctx.provider_state = session.provider_state
+                ctx.provider_state_messages = []
+        elif state is not None:
+            session.provider_state = None
         if ctx.kind is TurnKind.USER:
             ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
                 session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
+            if (
+                not ctx.input_persisted_early
+                and not ctx.ephemeral
+                and ctx.provider_state is not None
+                and not ctx.provider_state_messages
+            ):
+                session.provider_state = state
+                ctx.provider_state = state
+                ctx.provider_state_messages = (
+                    [current_provider_message]
+                    if current_provider_message is not None
+                    else []
+                )
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
@@ -1715,6 +1764,8 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
             request_context=ctx.request_context,
+            provider_state=ctx.provider_state,
+            provider_state_messages=ctx.provider_state_messages,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

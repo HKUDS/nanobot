@@ -225,9 +225,6 @@ class ContextBuilder:
             if current_role == "user"
             else []
         )
-        user_content = self.build_user_content(current_message, image_paths=media)
-        blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
-        merged, runtime_context_meta = append_runtime_context(user_content, blocks)
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -243,20 +240,46 @@ class ContextBuilder:
             },
             *history,
         ]
+        current = self.build_current_message(
+            current_message,
+            media=media,
+            current_role=current_role,
+            runtime_context_blocks=runtime_context_blocks,
+        )
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
-            last["content"] = self._merge_message_content(last.get("content"), merged)
-            if current_role == "user" and runtime_context_meta is not None:
+            last["content"] = self._merge_message_content(
+                last.get("content"),
+                current.get("content"),
+            )
+            current_meta = current.get("_meta")
+            if current_role == "user" and isinstance(current_meta, dict):
                 internal_meta = dict(last.get("_meta") or {})
-                internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = runtime_context_meta
+                internal_meta.update(current_meta)
                 last["_meta"] = internal_meta
             messages[-1] = last
             return messages
-        current: dict[str, Any] = {"role": current_role, "content": merged}
-        if current_role == "user" and runtime_context_meta is not None:
-            current["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta}
         messages.append(current)
         return messages
+
+    def build_current_message(
+        self,
+        current_message: str,
+        *,
+        media: list[str] | None = None,
+        current_role: str = "user",
+        runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
+    ) -> dict[str, Any]:
+        """Build only the fresh turn message without merging it into history."""
+        content = self.build_user_content(current_message, image_paths=media)
+        blocks = list(runtime_context_blocks or ()) if current_role == "user" else []
+        merged, runtime_context_meta = append_runtime_context(content, blocks)
+        current: dict[str, Any] = {"role": current_role, "content": merged}
+        if current_role == "user" and runtime_context_meta is not None:
+            current["_meta"] = {
+                RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta,
+            }
+        return current
 
     def build_user_content(
         self,

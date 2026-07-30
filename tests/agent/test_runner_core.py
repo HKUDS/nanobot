@@ -85,7 +85,11 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
     captured_second_kwargs: dict = {}
+    checkpoints: list[dict] = []
     calls = 0
+
+    async def checkpoint(payload: dict) -> None:
+        checkpoints.append(payload)
 
     first_state = ProviderConversationState(
         kind="openai_responses",
@@ -136,6 +140,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         model="gpt-5.6",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        checkpoint_callback=checkpoint,
     ))
 
     assert captured_second_kwargs["provider_state"] is first_state
@@ -152,6 +157,17 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
     assert result.provider_state is not None
     assert result.provider_state.payload == second_state.payload
     assert result.provider_state.pending_messages == []
+    assert checkpoints[0]["phase"] == "awaiting_tools"
+    assert checkpoints[0]["provider_state"].pending_messages == []
+    assert checkpoints[1]["phase"] == "tools_completed"
+    assert checkpoints[1]["provider_state"].pending_messages == [{
+        "role": "tool",
+        "tool_call_id": "call_1|fc_1",
+        "name": "list_dir",
+        "content": "tool result",
+    }]
+    assert checkpoints[2]["phase"] == "final_response"
+    assert checkpoints[2]["provider_state"].payload == second_state.payload
 
 
 @pytest.mark.asyncio

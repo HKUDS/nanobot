@@ -452,6 +452,20 @@ class TestBuildMessages:
         assert "previous user message" in str(messages[1]["content"])
         assert "new message" in str(messages[1]["content"])
 
+    def test_current_message_can_be_built_without_history_merge(self, tmp_path):
+        builder = _builder(tmp_path)
+        current = builder.build_current_message(
+            "new message",
+            runtime_context_blocks=[
+                RuntimeContextBlock(source="test", content="fresh context"),
+            ],
+        )
+
+        assert current["role"] == "user"
+        assert "new message" in current["content"]
+        assert "fresh context" in current["content"]
+        assert current["_meta"]["runtime_context"]["sources"] == ["test"]
+
     def test_different_role_appended(self, tmp_path):
         builder = _builder(tmp_path)
         history = [{"role": "assistant", "content": "previous response"}]

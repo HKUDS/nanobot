@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +20,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -614,6 +615,52 @@ def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
+
+
+@pytest.mark.asyncio
+async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={
+            "items": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "private-checkpoint-blob",
+                }
+            ]
+        },
+    )
+    loop.provider.can_resume_conversation_state.return_value = True
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", provider_state=state)
+    )
+    session = loop.sessions.get_or_create("cli:private-checkpoint")
+
+    await loop._run_agent_loop(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "question"},
+        ],
+        runtime=loop.llm_runtime(),
+        session=session,
+    )
+
+    assert session.provider_state is not None
+    checkpoint = session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY]
+    assert "provider_state" not in checkpoint
+    assert "private-checkpoint-blob" not in json.dumps(session.metadata)
+
+    public_payload = loop.sessions.read_session_file(session.key)
+    assert public_payload is not None
+    assert "private-checkpoint-blob" not in json.dumps(public_payload)
+    raw = loop.sessions._get_session_path(session.key).read_text(encoding="utf-8")
+    assert "private-checkpoint-blob" in raw
 
 
 @pytest.mark.asyncio

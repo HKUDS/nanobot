@@ -165,7 +165,7 @@ class AgentRunner:
                 and internal_meta.get(_PROVIDER_STATE_OUTPUT_META) is True
             ):
                 continue
-            pending.append(message)
+            pending.append(deepcopy(message))
         return pending
 
     @staticmethod
@@ -176,6 +176,22 @@ class AgentRunner:
         internal_meta = dict(messages[-1].get("_meta") or {})
         internal_meta[_PROVIDER_STATE_BOUNDARY_META] = True
         messages[-1]["_meta"] = internal_meta
+
+    @classmethod
+    def _provider_state_for_checkpoint(
+        cls,
+        state: ProviderConversationState | None,
+        messages: list[dict[str, Any]],
+        boundary: int,
+    ) -> ProviderConversationState | None:
+        """Attach only post-response Chat deltas to a durable private checkpoint."""
+        if state is None:
+            return None
+        pending = [
+            *state.pending_messages,
+            *cls._messages_after_provider_state(messages, boundary),
+        ]
+        return state.with_pending_messages(pending)
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -591,6 +607,11 @@ class AgentRunner:
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "provider_state": self._provider_state_for_checkpoint(
+                            provider_state,
+                            messages,
+                            provider_state_boundary,
+                        ),
                     },
                 )
 
@@ -654,6 +675,11 @@ class AgentRunner:
                         "assistant_message": assistant_message,
                         "completed_tool_results": completed_tool_results,
                         "pending_tool_calls": [],
+                        "provider_state": self._provider_state_for_checkpoint(
+                            provider_state,
+                            messages,
+                            provider_state_boundary,
+                        ),
                     },
                 )
                 empty_content_retries = 0
@@ -863,6 +889,11 @@ class AgentRunner:
                     "assistant_message": messages[-1],
                     "completed_tool_results": [],
                     "pending_tool_calls": [],
+                    "provider_state": self._provider_state_for_checkpoint(
+                        provider_state,
+                        messages,
+                        provider_state_boundary,
+                    ),
                 },
             )
             if length_recovery_parts:

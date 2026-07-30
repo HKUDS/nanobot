@@ -17,6 +17,7 @@ from weakref import WeakValueDictionary
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
@@ -43,6 +44,7 @@ _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
+_PROVIDER_STATE_RECORD_TYPE = "provider_state"
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -146,10 +148,13 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
             self.metadata = {}
+        if not isinstance(cast(object, self.provider_state), ProviderConversationState):
+            self.provider_state = None
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
         last_consolidated = cast(object, self.last_consolidated)
         if (
@@ -304,6 +309,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
@@ -517,6 +523,7 @@ class JsonlSessionStore:
             created_at: datetime | None = None
             updated_at: datetime | None = None
             last_consolidated = 0
+            provider_state: ProviderConversationState | None = None
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -527,7 +534,8 @@ class JsonlSessionStore:
                     raw_data: object = json.loads(line)
                     data = _json_object(raw_data)
 
-                    if data.get("_type") == "metadata":
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
                         metadata_value = cast(object, data.get("metadata", {}))
                         metadata = (
                             cast(dict[str, Any], metadata_value)
@@ -552,6 +560,10 @@ class JsonlSessionStore:
                             if isinstance(offset, int) and not isinstance(offset, bool)
                             else 0
                         )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        provider_state = ProviderConversationState.from_private_record(
+                            data.get("state")
+                        )
                     else:
                         messages.append(data)
 
@@ -562,6 +574,7 @@ class JsonlSessionStore:
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated,
+                provider_state=provider_state,
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -586,6 +599,7 @@ class JsonlSessionStore:
             created_at: datetime | None = None
             updated_at: datetime | None = None
             last_consolidated = 0
+            provider_state: ProviderConversationState | None = None
             skipped = 0
 
             with open(path, encoding="utf-8") as f:
@@ -603,7 +617,8 @@ class JsonlSessionStore:
                         continue
                     data = cast(dict[str, Any], raw_data)
 
-                    if data.get("_type") == "metadata":
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
                         metadata_value = cast(object, data.get("metadata", {}))
                         metadata = (
                             cast(dict[str, Any], metadata_value)
@@ -624,13 +639,21 @@ class JsonlSessionStore:
                             if isinstance(offset, int) and not isinstance(offset, bool)
                             else 0
                         )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        candidate = ProviderConversationState.from_private_record(
+                            data.get("state")
+                        )
+                        if candidate is None:
+                            skipped += 1
+                        else:
+                            provider_state = candidate
                     else:
                         messages.append(data)
 
             if skipped:
                 logger.warning("Skipped {} corrupt lines in session {}", skipped, key)
 
-            if not messages and not metadata:
+            if not messages and not metadata and provider_state is None:
                 return None
 
             return Session(
@@ -640,6 +663,7 @@ class JsonlSessionStore:
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated,
+                provider_state=provider_state,
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -670,6 +694,12 @@ class JsonlSessionStore:
                     "last_consolidated": session.last_consolidated,
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+                if session.provider_state is not None:
+                    provider_state_line = {
+                        "_type": _PROVIDER_STATE_RECORD_TYPE,
+                        "state": session.provider_state.to_private_record(),
+                    }
+                    f.write(json.dumps(provider_state_line, ensure_ascii=False) + "\n")
                 for msg in session.messages:
                     f.write(json.dumps(msg, ensure_ascii=False) + "\n")
                 if fsync:
@@ -726,7 +756,8 @@ class JsonlSessionStore:
                         continue
                     raw_data: object = json.loads(line)
                     data = _json_object(raw_data)
-                    if data.get("_type") == "metadata":
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
                         metadata_value = cast(object, data.get("metadata", {}))
                         metadata = (
                             cast(dict[str, Any], metadata_value)
@@ -745,6 +776,8 @@ class JsonlSessionStore:
                         stored_key = (
                             stored_key_value if isinstance(stored_key_value, str) else None
                         )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        continue
                     else:
                         messages.append(data)
             return {
@@ -846,7 +879,10 @@ class JsonlSessionStore:
                                     break
                                 raw_item: object = json.loads(line)
                                 item = _json_object(raw_item)
-                                if item.get("_type") == "metadata":
+                                if item.get("_type") in {
+                                    "metadata",
+                                    _PROVIDER_STATE_RECORD_TYPE,
+                                }:
                                     continue
                                 text = _message_preview_text(item)
                                 if not text:
