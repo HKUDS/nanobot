@@ -1,18 +1,22 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import {
+  fetchSkills,
   fetchTrendingMarketplaceSkills,
   searchMarketplaceSkills,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
+import { SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
 import { ClientProvider } from "@/providers/ClientProvider";
+import { useSkills } from "@/hooks/useSkills";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
+    fetchSkills: vi.fn(),
     fetchTrendingMarketplaceSkills: vi.fn(),
     searchMarketplaceSkills: vi.fn(),
   };
@@ -31,6 +35,39 @@ function marketplace(token: string) {
     </ClientProvider>
   );
 }
+
+describe("useSkills", () => {
+  it("does not let an older request overwrite a newer skill event", async () => {
+    let resolveSkills!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+    vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSkills = resolve;
+      }),
+    );
+    const installed = {
+      name: "react-testing",
+      description: "Test React apps.",
+      source: "workspace",
+      available: true,
+    };
+    const getToken = () => "tok";
+    const { result } = renderHook(() => useSkills(getToken));
+
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
+    act(() => {
+      window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT, {
+        detail: { skills: [installed] },
+      }));
+    });
+    expect(result.current).toEqual([installed]);
+
+    await act(async () => {
+      resolveSkills({ skills: [] });
+    });
+
+    expect(result.current).toEqual([installed]);
+  });
+});
 
 describe("SkillsMarketplace", () => {
   beforeEach(() => {

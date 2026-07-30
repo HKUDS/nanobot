@@ -9,14 +9,23 @@ export function useSkills(getToken: () => string): SkillSummary[] {
 
   useEffect(() => {
     let cancelled = false;
+    let payloadVersion = 0;
     const refresh = () => {
+      const version = payloadVersion;
       fetchSkills(getToken())
-        .then(({ skills: nextSkills }) => !cancelled && setSkills(nextSkills))
-        .catch(() => !cancelled && setSkills([]));
+        .then(({ skills: nextSkills }) => {
+          if (!cancelled && version === payloadVersion) setSkills(nextSkills);
+        })
+        .catch(() => {
+          if (!cancelled && version === payloadVersion) setSkills([]);
+        });
     };
     const onSkillsChanged = (event: Event) => {
       const payload = (event as CustomEvent<unknown>).detail;
-      if (!cancelled && isSkillsPayload(payload)) setSkills(payload.skills);
+      if (!cancelled && isSkillsPayload(payload)) {
+        payloadVersion += 1;
+        setSkills(payload.skills);
+      }
     };
 
     refresh();
