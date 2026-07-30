@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.providers.conversation_state import (
     ProviderConversationStateController,
@@ -210,6 +213,61 @@ def test_non_retryable_response_discards_saved_state() -> None:
         ),
         messages,
     )
+
+    assert controller.finish(messages) is None
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "exposes_tool_call"),
+    [
+        ("length", False),
+        ("length", True),
+        ("refusal", True),
+        ("content_filter", True),
+    ],
+)
+def test_terminal_response_discards_candidate_state(
+    finish_reason: str,
+    exposes_tool_call: bool,
+) -> None:
+    provider = _provider()
+    messages = [{"role": "user", "content": "continue"}]
+    controller = ProviderConversationStateController(
+        provider=provider,
+        model="gpt-5.6",
+        messages=messages,
+        state=_state("saved"),
+    )
+
+    controller.prepare_request(messages, context_window_tokens=200_000)
+    candidate = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={
+            "items": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec",
+                "arguments": "{}",
+            }],
+        },
+    )
+    response = LLMResponse(
+        content="terminal response",
+        tool_calls=(
+            [ToolCallRequest(id="call_1", name="exec", arguments={})]
+            if exposes_tool_call
+            else []
+        ),
+        finish_reason=finish_reason,
+        provider_state=candidate,
+    )
+    assert response.has_tool_calls is exposes_tool_call
+    assert response.should_execute_tools is False
+
+    controller.observe_response(response, messages)
 
     assert controller.finish(messages) is None
 

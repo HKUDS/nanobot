@@ -820,6 +820,56 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
 
 
 @pytest.mark.asyncio
+async def test_empty_finalization_retry_discards_candidate_provider_state():
+    from nanobot.agent.runner import AgentRunner
+
+    candidate = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={
+            "items": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec",
+                "arguments": "{}",
+            }],
+        },
+    )
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[], usage={}),
+        LLMResponse(content=None, tool_calls=[], usage={}),
+        LLMResponse(
+            content="finalized without tools",
+            tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={})],
+            finish_reason="stop",
+            provider_state=candidate,
+            usage={},
+        ),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="must not run")
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    tools.execute.assert_not_awaited()
+    assert result.final_content == "finalized without tools"
+    assert result.provider_state is None
+
+
+@pytest.mark.asyncio
 async def test_runner_length_recovery_returns_all_segments():
     """Recovered output segments are returned together instead of only the tail."""
     from nanobot.agent.runner import AgentRunner

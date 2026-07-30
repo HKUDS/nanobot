@@ -121,11 +121,19 @@ class ProviderConversationStateController:
         self,
         response: LLMResponse,
         messages: list[dict[str, Any]],
+        *,
+        adopt_candidate_state: bool = True,
     ) -> None:
         """Advance, preserve, or discard state after one provider response."""
-        candidate = response.provider_state
+        candidate = response.provider_state if adopt_candidate_state else None
+        candidate_is_replayable = response.finish_reason in {
+            "stop",
+            "tool_calls",
+            "function_call",
+        }
         if (
             candidate is not None
+            and candidate_is_replayable
             and self._provider.can_resume_conversation_state(
                 candidate,
                 self._model,

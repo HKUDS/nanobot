@@ -1176,7 +1176,11 @@ class AgentRunner:
             retry_messages,
             provider_context=provider_context,
         )
-        conversation_state.observe_response(response, transcript)
+        conversation_state.observe_response(
+            response,
+            transcript,
+            adopt_candidate_state=False,
+        )
         return response
 
     @staticmethod
