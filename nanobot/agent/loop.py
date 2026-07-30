@@ -1678,14 +1678,24 @@ class AgentLoop:
             "extend_to_user": is_subagent,
         }
         ctx.history = session.get_history(**_hist_kwargs)
+        stored_state = session.provider_state
+        subagent_followup_persisted = False
         if is_subagent:
             # Keep the durable internal delivery as an assistant record, but
             # present this completion to the model as fresh follow-up input.
             # Providers without assistant-prefill support drop trailing
             # assistant messages, so using the persisted record as the current
             # prompt would hide an independently dispatched subagent result.
-            if self._persist_subagent_followup(session, ctx.msg):
+            subagent_followup_persisted = self._persist_subagent_followup(
+                session,
+                ctx.msg,
+            )
+            if subagent_followup_persisted:
                 logger.debug("Subagent result persisted for session {}", ctx.session_key)
+                # Establish a durable, replay-safe baseline before any fallible
+                # provider compatibility or prompt assembly work. A compatible
+                # staged state replaces this in a second atomic save below.
+                session.provider_state = None
                 self.sessions.save(session)
             ctx.input_persisted_early = True
         ctx.delivery.record_runtime(runtime)
@@ -1693,8 +1703,6 @@ class AgentLoop:
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
-        ctx.initial_messages = self._build_initial_messages(ctx)
-        stored_state = session.provider_state
         staged_provider_state = False
         if stored_state is not None and runtime.provider.can_resume_conversation_state(
             stored_state,
@@ -1709,7 +1717,10 @@ class AgentLoop:
                 *stored_state.pending_messages,
                 current_provider_message,
             ])
-            if ctx.kind is TurnKind.USER and not ctx.ephemeral:
+            if (
+                not ctx.ephemeral
+                and (ctx.kind is TurnKind.USER or subagent_followup_persisted)
+            ):
                 session.provider_state = ctx.provider_state
                 staged_provider_state = True
         elif stored_state is not None:
@@ -1722,6 +1733,11 @@ class AgentLoop:
             )
             if staged_provider_state and not ctx.input_persisted_early:
                 session.provider_state = stored_state
+        elif subagent_followup_persisted and staged_provider_state:
+            # Upgrade the replay-safe baseline to the resumable state before
+            # prompt assembly and the first model checkpoint.
+            self.sessions.save(session)
+        ctx.initial_messages = self._build_initial_messages(ctx)
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()

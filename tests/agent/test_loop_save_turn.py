@@ -794,6 +794,100 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_subagent_followup_stages_provider_state_before_turn_runs(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    session = loop.sessions.get_or_create("cli:subagent-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1] == {
+        "role": "user",
+        "content": "subagent result",
+    }
+
+
+@pytest.mark.asyncio
+async def test_subagent_followup_state_is_durable_before_prompt_assembly(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("prompt boom"),
+    )
+    session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-prompt-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="prompt boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-prompt-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-prompt-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1]["content"] == (
+        "subagent result"
+    )
+
+
+@pytest.mark.asyncio
+async def test_subagent_followup_clears_state_before_compatibility_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.side_effect = RuntimeError(
+        "compatibility boom"
+    )
+    session = loop.sessions.get_or_create("cli:subagent-compat-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-compat-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="compatibility boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-compat-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-compat-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is None
+
+
+@pytest.mark.asyncio
 async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop._unified_session = True
