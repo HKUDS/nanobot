@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, cast
 
 import httpx
 from loguru import logger
 
 from nanobot.providers.base import LLMResponse, ToolCallRequest, parse_tool_arguments
+from nanobot.providers.openai_responses.state import build_responses_state
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -17,6 +19,40 @@ FINISH_REASON_MAP = {
     "failed": "error",
     "cancelled": "error",
 }
+
+
+@dataclass(slots=True)
+class ResponsesStreamCapture:
+    """Losslessly capture completed output items without changing stream results."""
+
+    completed: bool = False
+    response: dict[str, Any] | None = field(default=None, repr=False)
+    _items_by_index: dict[int, dict[str, Any]] = field(default_factory=dict, repr=False)
+
+    def record_output_item(self, index: object, item: object) -> None:
+        item_object = _response_object(item)
+        if item_object is None:
+            return
+        try:
+            output_index = int(index)
+        except (TypeError, ValueError):
+            output_index = len(self._items_by_index)
+        self._items_by_index[output_index] = item_object
+
+    def record_completed(self, response: object) -> None:
+        response_object = _response_object(response)
+        if response_object is None:
+            return
+        self.completed = True
+        self.response = response_object
+
+    @property
+    def output_items(self) -> list[dict[str, Any]]:
+        if self.response is not None:
+            output = _response_object_list(self.response.get("output"))
+            if output or "output" in self.response:
+                return output
+        return [self._items_by_index[index] for index in sorted(self._items_by_index)]
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
@@ -153,6 +189,7 @@ async def consume_sse_with_reasoning(
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
@@ -239,6 +276,8 @@ async def consume_sse_with_reasoning(
                     })
         elif event_type == "response.output_item.done":
             item = _as_json_object(event.get("item")) or {}
+            if capture is not None:
+                capture.record_output_item(event.get("output_index"), item)
             if item.get("type") == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
@@ -271,6 +310,8 @@ async def consume_sse_with_reasoning(
                         await on_reasoning_delta(summary)
         elif event_type == "response.completed":
             response_obj = _response_object(event.get("response")) or {}
+            if capture is not None:
+                capture.record_completed(response_obj)
             status = response_obj.get("status")
             finish_reason = map_finish_reason(status)
             usage = _usage_from_response_obj(response_obj) or usage
@@ -300,7 +341,13 @@ def _extract_reasoning_summary_from_output(output: object) -> str | None:
     return "".join(parts) or None
 
 
-def parse_response_output(response: object) -> LLMResponse:
+def parse_response_output(
+    response: object,
+    *,
+    state_provider: str | None = None,
+    state_model: str | None = None,
+    state_input_items: list[dict[str, Any]] | None = None,
+) -> LLMResponse:
     """Parse an SDK ``Response`` object into an ``LLMResponse``."""
     response_object = _response_object(response) or {}
 
@@ -339,19 +386,33 @@ def parse_response_output(response: object) -> LLMResponse:
     status = response_object.get("status")
     finish_reason = map_finish_reason(status if isinstance(status, str) else None)
 
-    return LLMResponse(
+    result = LLMResponse(
         content="".join(content_parts) or None,
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         usage=usage,
         reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
     )
+    if (
+        state_provider is not None
+        and state_model is not None
+        and state_input_items is not None
+        and status in {"completed", "incomplete", None}
+    ):
+        result.provider_state = build_responses_state(
+            provider=state_provider,
+            model=state_model,
+            input_items=state_input_items,
+            output_items=output,
+        )
+    return result
 
 
 async def consume_sdk_stream(
     stream: Any,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
     """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
     content = ""
@@ -416,6 +477,8 @@ async def consume_sdk_stream(
                     })
         elif event_type == "response.output_item.done":
             item = getattr(event, "item", None)
+            if capture is not None:
+                capture.record_output_item(getattr(event, "output_index", None), item)
             if item and getattr(item, "type", None) == "function_call":
                 call_id = getattr(item, "call_id", None)
                 if not call_id:
@@ -445,6 +508,8 @@ async def consume_sdk_stream(
                 )
         elif event_type == "response.completed":
             resp = getattr(event, "response", None)
+            if capture is not None:
+                capture.record_completed(resp)
             status = getattr(resp, "status", None) if resp else None
             finish_reason = map_finish_reason(status)
             if resp:

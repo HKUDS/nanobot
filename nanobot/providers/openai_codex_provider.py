@@ -17,13 +17,17 @@ from oauth_cli_kit import get_token as get_codex_token
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderConversationState,
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.openai_responses import (
+    ResponsesStreamCapture,
+    build_responses_state,
     consume_sse_with_reasoning,
-    convert_messages,
     convert_tools,
+    prepare_responses_input,
+    responses_state_matches,
 )
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -56,10 +60,29 @@ class OpenAICodexProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
-        system_prompt, input_items = convert_messages(messages)
+        sanitized_messages = self._sanitize_empty_content(messages)
+        sanitized_state = provider_state
+        if provider_state is not None:
+            sanitized_state = provider_state.with_pending_messages(
+                self._sanitize_empty_content(provider_state.pending_messages)
+            )
+        sanitized_state_messages = (
+            self._sanitize_empty_content(provider_state_messages)
+            if provider_state_messages is not None
+            else None
+        )
+        system_prompt, input_items, replayed = prepare_responses_input(
+            sanitized_messages,
+            state=sanitized_state,
+            state_messages=sanitized_state_messages,
+            provider=self._responses_state_provider(),
+            model=_strip_model_prefix(model),
+        )
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -74,6 +97,9 @@ class OpenAICodexProvider(LLMProvider):
             "parallel_tool_calls": True,
         }
         reasoning_options = _build_reasoning_options(reasoning_effort)
+        if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
+            reasoning_options = dict(reasoning_options or {})
+            reasoning_options["context"] = "all_turns"
         if reasoning_options:
             body["reasoning"] = reasoning_options
         if tools:
@@ -89,7 +115,7 @@ class OpenAICodexProvider(LLMProvider):
 
             stage = "codex_request"
             try:
-                content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
+                request_result = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=True,
                     proxy=self.proxy,
                     on_content_delta=on_content_delta,
@@ -100,20 +126,14 @@ class OpenAICodexProvider(LLMProvider):
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
                 logger.warning("SSL verification failed for Codex API; retrying with verify=False")
-                content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
+                request_result = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=False,
                     proxy=self.proxy,
                     on_content_delta=on_content_delta,
                     on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta,
                 )
-            return LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                finish_reason=finish_reason,
-                usage=usage,
-                reasoning_content=reasoning_content,
-            )
+            return _codex_result_to_response(request_result)
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
@@ -137,8 +157,18 @@ class OpenAICodexProvider(LLMProvider):
         model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+        return await self._call_codex(
+            messages,
+            tools,
+            model,
+            reasoning_effort,
+            tool_choice,
+            provider_state=provider_state,
+            provider_state_messages=provider_state_messages,
+        )
 
     async def chat_stream(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -148,6 +178,8 @@ class OpenAICodexProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages,
@@ -158,10 +190,27 @@ class OpenAICodexProvider(LLMProvider):
             on_content_delta,
             on_thinking_delta,
             on_tool_call_delta,
+            provider_state,
+            provider_state_messages,
         )
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    @staticmethod
+    def _responses_state_provider() -> str:
+        return f"openai_codex:{DEFAULT_CODEX_URL.rstrip('/')}"
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return responses_state_matches(
+            state,
+            provider=self._responses_state_provider(),
+            model=_strip_model_prefix(model or self.default_model),
+        )
 
 
 def _strip_model_prefix(model: str) -> str:
@@ -220,7 +269,7 @@ async def _request_codex(
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> LLMResponse:
     idle_timeout_s = resolve_stream_idle_timeout_s()
     client_kwargs: dict[str, Any] = {"timeout": idle_timeout_s, "verify": verify}
     if proxy:
@@ -241,12 +290,51 @@ async def _request_codex(
                     error_code=error_code,
                     should_retry=_should_retry_status(response.status_code, error_type, error_code, raw),
                 )
-            return await consume_sse_with_reasoning(
+            capture = ResponsesStreamCapture()
+            (
+                content,
+                tool_calls,
+                finish_reason,
+                usage,
+                reasoning_content,
+            ) = await consume_sse_with_reasoning(
                 response,
                 on_content_delta=on_content_delta,
                 on_tool_call_delta=on_tool_call_delta,
                 on_reasoning_delta=on_thinking_delta,
+                capture=capture,
             )
+            result = LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+                usage=usage,
+                reasoning_content=reasoning_content,
+            )
+            if capture.completed:
+                result.provider_state = build_responses_state(
+                    provider=f"openai_codex:{url.rstrip('/')}",
+                    model=str(body.get("model") or ""),
+                    input_items=cast(list[dict[str, Any]], body.get("input") or []),
+                    output_items=capture.output_items,
+                )
+            return result
+
+
+def _codex_result_to_response(
+    result: LLMResponse | tuple[str, list[ToolCallRequest], str, dict[str, int], str | None],
+) -> LLMResponse:
+    """Normalize legacy tuple-shaped test adapters and the native response."""
+    if isinstance(result, LLMResponse):
+        return result
+    content, tool_calls, finish_reason, usage, reasoning_content = result
+    return LLMResponse(
+        content=content,
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        usage=usage,
+        reasoning_content=reasoning_content,
+    )
 
 
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:

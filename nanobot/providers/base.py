@@ -1,5 +1,7 @@
 """Base LLM provider interface."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -7,6 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -151,6 +154,39 @@ def tool_arguments_json_for_replay(arguments: Any) -> str:
 
 
 @dataclass
+class ProviderConversationState:
+    """Opaque provider-owned continuation state.
+
+    ``payload`` may contain encrypted reasoning or other provider-private
+    protocol items. Keep it out of normal logs and public chat history.
+    ``pending_messages`` are Chat-style messages produced after the most
+    recent provider response and are materialized by the owning provider on
+    the next request.
+    """
+
+    kind: str
+    provider: str
+    model: str
+    version: int
+    payload: dict[str, Any] = field(default_factory=dict, repr=False)
+    pending_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+
+    def with_pending_messages(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> ProviderConversationState:
+        """Return a state copy with an isolated pending-message list."""
+        return ProviderConversationState(
+            kind=self.kind,
+            provider=self.provider,
+            model=self.model,
+            version=self.version,
+            payload=self.payload,
+            pending_messages=deepcopy(messages),
+        )
+
+
+@dataclass
 class LLMResponse:
     """Response from an LLM provider."""
     content: str | None
@@ -160,6 +196,7 @@ class LLMResponse:
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
     # Structured error metadata used by retry policy when finish_reason == "error".
     error_status_code: int | None = None
     error_kind: str | None = None  # e.g. "timeout", "connection"
@@ -273,6 +310,14 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        """Whether this provider can safely consume an opaque saved state."""
+        return False
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

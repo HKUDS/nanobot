@@ -11,7 +11,12 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -71,6 +76,82 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
         msg.get("role") == "tool" and msg.get("content") == "tool result"
         for msg in captured_second_call
     )
+
+
+@pytest.mark.asyncio
+async def test_runner_replays_provider_state_without_chat_projection_duplicates():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    captured_second_kwargs: dict = {}
+    calls = 0
+
+    first_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "reasoning", "encrypted_content": "opaque"}]},
+    )
+    second_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "message", "role": "assistant"}]},
+    )
+
+    async def chat_with_retry(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            assert "provider_state" not in kwargs
+            return LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_1|fc_1",
+                        name="list_dir",
+                        arguments={"path": "."},
+                    ),
+                ],
+                provider_state=first_state,
+            )
+        captured_second_kwargs.update(kwargs)
+        return LLMResponse(content="done", provider_state=second_state)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "do task"},
+        ],
+        tools=tools,
+        model="gpt-5.6",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert captured_second_kwargs["provider_state"] is first_state
+    assert captured_second_kwargs["provider_state_messages"] == [{
+        "role": "tool",
+        "tool_call_id": "call_1|fc_1",
+        "name": "list_dir",
+        "content": "tool result",
+    }]
+    assert not any(
+        message.get("role") == "assistant"
+        for message in captured_second_kwargs["provider_state_messages"]
+    )
+    assert result.provider_state is not None
+    assert result.provider_state.payload == second_state.payload
+    assert result.provider_state.pending_messages == []
 
 
 @pytest.mark.asyncio

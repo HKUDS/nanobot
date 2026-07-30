@@ -8,12 +8,19 @@ from nanobot.providers.openai_responses.converters import (
 )
 from nanobot.providers.openai_responses.parsing import (
     FINISH_REASON_MAP,
+    ResponsesStreamCapture,
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
     iter_sse,
     map_finish_reason,
     parse_response_output,
+)
+from nanobot.providers.openai_responses.state import (
+    build_responses_state,
+    prepare_responses_input,
+    responses_state_items,
+    responses_state_matches,
 )
 
 __all__ = [
@@ -25,7 +32,12 @@ __all__ = [
     "consume_sse",
     "consume_sse_with_reasoning",
     "consume_sdk_stream",
+    "ResponsesStreamCapture",
     "map_finish_reason",
     "parse_response_output",
+    "build_responses_state",
+    "prepare_responses_input",
+    "responses_state_items",
+    "responses_state_matches",
     "FINISH_REASON_MAP",
 ]

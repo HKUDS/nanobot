@@ -12,11 +12,17 @@ from nanobot.providers.openai_responses.converters import (
     split_tool_call_id,
 )
 from nanobot.providers.openai_responses.parsing import (
+    ResponsesStreamCapture,
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
     map_finish_reason,
     parse_response_output,
+)
+from nanobot.providers.openai_responses.state import (
+    build_responses_state,
+    prepare_responses_input,
+    responses_state_items,
 )
 
 # ======================================================================
@@ -523,6 +529,95 @@ class TestParseResponseOutput:
         assert result.usage["completion_tokens"] == 50
         assert result.usage["total_tokens"] == 150
 
+    def test_preserves_every_output_item_as_opaque_state(self):
+        input_items = [{"role": "user", "content": "inspect the repo"}]
+        output = [
+            {
+                "id": "rs_1",
+                "type": "reasoning",
+                "encrypted_content": "opaque-secret",
+                "summary": [],
+            },
+            {
+                "id": "future_1",
+                "type": "future_item_type",
+                "provider_field": {"nested": True},
+            },
+            {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "done"}],
+            },
+        ]
+
+        result = parse_response_output(
+            {"output": output, "status": "completed", "usage": {}},
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=input_items,
+        )
+
+        assert result.provider_state is not None
+        assert responses_state_items(result.provider_state) == [*input_items, *output]
+
+
+class TestResponsesConversationState:
+    def test_replays_exact_items_then_only_pending_and_new_messages(self):
+        prior_items = [
+            {"role": "user", "content": "first"},
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": '{"path":"a.py"}',
+            },
+        ]
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=prior_items[:1],
+            output_items=prior_items[1:],
+        ).with_pending_messages([
+            {
+                "role": "tool",
+                "tool_call_id": "call_1|fc_1",
+                "content": "file contents",
+            },
+        ])
+
+        instructions, items, replayed = prepare_responses_input(
+            [
+                {"role": "system", "content": "current instructions"},
+                {"role": "user", "content": "a lossy public transcript"},
+            ],
+            state=state,
+            state_messages=[{"role": "user", "content": "continue"}],
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert instructions == "current instructions"
+        assert replayed is True
+        assert items[:3] == prior_items
+        assert items[3] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "file contents",
+        }
+        assert items[4] == {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        }
+        assert "lossy public transcript" not in str(items)
+
 
 # ======================================================================
 # parsing - consume_sse
@@ -598,6 +693,58 @@ class TestConsumeSse:
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
         assert reasoning == "cached summary"
+
+    @pytest.mark.asyncio
+    async def test_capture_commits_exact_items_only_after_completed_event(self):
+        output = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+            },
+            {"type": "future_item_type", "id": "future_1", "value": 7},
+        ]
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": output[0],
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": output[1],
+            },
+            {
+                "type": "response.completed",
+                "response": {"status": "completed", "output": output},
+            },
+        ])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is True
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
+    async def test_capture_does_not_commit_interrupted_stream(self):
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "opaque-secret",
+                },
+            },
+        ])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is False
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_done_item(self):

@@ -25,12 +25,15 @@ from typing import Any, cast
 
 from openai import AsyncOpenAI
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
 from nanobot.providers.openai_responses import (
+    ResponsesStreamCapture,
+    build_responses_state,
     consume_sdk_stream,
-    convert_messages,
     convert_tools,
     parse_response_output,
+    prepare_responses_input,
+    responses_state_matches,
 )
 
 _AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -142,6 +145,20 @@ class AzureOpenAIProvider(LLMProvider):
         name = deployment_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
+    def _responses_state_provider(self) -> str:
+        return f"azure_openai:{str(self.api_base).rstrip('/')}"
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return responses_state_matches(
+            state,
+            provider=self._responses_state_provider(),
+            model=model or self.default_model,
+        )
+
     def _build_body(
         self,
         messages: list[dict[str, Any]],
@@ -151,10 +168,29 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
-        instructions, input_items = convert_messages(self._sanitize_empty_content(messages))
+        sanitized_messages = self._sanitize_empty_content(messages)
+        sanitized_state = provider_state
+        if provider_state is not None:
+            sanitized_state = provider_state.with_pending_messages(
+                self._sanitize_empty_content(provider_state.pending_messages)
+            )
+        sanitized_state_messages = (
+            self._sanitize_empty_content(provider_state_messages)
+            if provider_state_messages is not None
+            else None
+        )
+        instructions, input_items, replayed = prepare_responses_input(
+            sanitized_messages,
+            state=sanitized_state,
+            state_messages=sanitized_state_messages,
+            provider=self._responses_state_provider(),
+            model=deployment,
+        )
 
         body: dict[str, Any] = {
             "model": deployment,
@@ -171,6 +207,8 @@ class AzureOpenAIProvider(LLMProvider):
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
             body["include"] = ["reasoning.encrypted_content"]
+        if replayed and "gpt-5.6" in deployment.lower():
+            body.setdefault("reasoning", {})["context"] = "all_turns"
 
         if tools:
             body["tools"] = convert_tools(tools)
@@ -202,14 +240,22 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
+            provider_state, provider_state_messages,
         )
         try:
             response = cast(Any, await self._client.responses.create(**body))
-            return parse_response_output(response)
+            return parse_response_output(
+                response,
+                state_provider=self._responses_state_provider(),
+                state_model=str(body["model"]),
+                state_input_items=cast(list[dict[str, Any]], body["input"]),
+            )
         except Exception as e:
             return self._handle_error(e)
 
@@ -225,26 +271,43 @@ class AzureOpenAIProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
+            provider_state, provider_state_messages,
         )
         body["stream"] = True
 
         try:
             stream = cast(Any, await self._client.responses.create(**body))
+            capture = ResponsesStreamCapture()
             content, tool_calls, finish_reason, usage, reasoning_content = (
-                await consume_sdk_stream(stream, on_content_delta, on_tool_call_delta)
+                await consume_sdk_stream(
+                    stream,
+                    on_content_delta,
+                    on_tool_call_delta,
+                    capture=capture,
+                )
             )
-            return LLMResponse(
+            result = LLMResponse(
                 content=content or None,
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
                 usage=usage,
                 reasoning_content=reasoning_content,
             )
+            if capture.completed:
+                result.provider_state = build_responses_state(
+                    provider=self._responses_state_provider(),
+                    model=str(body["model"]),
+                    input_items=cast(list[dict[str, Any]], body["input"]),
+                    output_items=capture.output_items,
+                )
+            return result
         except Exception as e:
             return self._handle_error(e)
 

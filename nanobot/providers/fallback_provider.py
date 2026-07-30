@@ -10,7 +10,12 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ProviderConversationState,
+)
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -140,6 +145,13 @@ class FallbackProvider(LLMProvider):
     @property
     def supports_progress_deltas(self) -> bool:
         return bool(getattr(self._primary, "supports_progress_deltas", False))
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return self._primary.can_resume_conversation_state(state, model)
 
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
@@ -286,6 +298,16 @@ class FallbackProvider(LLMProvider):
                 "max_tokens": fallback.max_tokens,
                 "temperature": fallback.temperature,
             }
+            provider_state = fallback_kwargs.get("provider_state")
+            if (
+                isinstance(provider_state, ProviderConversationState)
+                and not fallback_provider.can_resume_conversation_state(
+                    provider_state,
+                    fallback_model,
+                )
+            ):
+                fallback_kwargs.pop("provider_state", None)
+                fallback_kwargs.pop("provider_state_messages", None)
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
             else:

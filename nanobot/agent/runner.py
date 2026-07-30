@@ -19,7 +19,12 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     detach_runtime_context,
@@ -64,6 +69,8 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_PROVIDER_STATE_OUTPUT_META = "provider_state_output"
+_PROVIDER_STATE_BOUNDARY_META = "provider_state_boundary"
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
@@ -104,6 +111,8 @@ class AgentRunSpec:
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
+    provider_state: ProviderConversationState | None = None
+    provider_state_messages: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -120,6 +129,7 @@ class AgentRunResult:
     had_injections: bool = False
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
     pending_stream_content: str | None = None
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
 
 
 class AgentRunner:
@@ -127,6 +137,45 @@ class AgentRunner:
 
     def __init__(self) -> None:
         self.context_governor = ContextGovernor()
+
+    @staticmethod
+    def _mark_provider_state_output(
+        message: dict[str, Any],
+        response: LLMResponse,
+    ) -> dict[str, Any]:
+        """Mark a Chat projection already represented by exact provider output."""
+        if response.provider_state is None:
+            return message
+        internal_meta = dict(message.get("_meta") or {})
+        internal_meta[_PROVIDER_STATE_OUTPUT_META] = True
+        message["_meta"] = internal_meta
+        return message
+
+    @staticmethod
+    def _messages_after_provider_state(
+        messages: list[dict[str, Any]],
+        start: int,
+    ) -> list[dict[str, Any]]:
+        """Return messages not represented by state, excluding Chat projections."""
+        pending: list[dict[str, Any]] = []
+        for message in messages[start:]:
+            internal_meta = message.get("_meta")
+            if (
+                isinstance(internal_meta, dict)
+                and internal_meta.get(_PROVIDER_STATE_OUTPUT_META) is True
+            ):
+                continue
+            pending.append(message)
+        return pending
+
+    @staticmethod
+    def _seal_provider_state_boundary(messages: list[dict[str, Any]]) -> None:
+        """Prevent later same-role injection merging across a state boundary."""
+        if not messages:
+            return
+        internal_meta = dict(messages[-1].get("_meta") or {})
+        internal_meta[_PROVIDER_STATE_BOUNDARY_META] = True
+        messages[-1]["_meta"] = internal_meta
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -161,6 +210,10 @@ class AgentRunner:
                 and messages[-1].get("role") == "user"
                 and not is_hidden_history_message(injection)
                 and not is_hidden_history_message(messages[-1])
+                and not (
+                    isinstance(messages[-1].get("_meta"), dict)
+                    and messages[-1]["_meta"].get(_PROVIDER_STATE_BOUNDARY_META) is True
+                )
             ):
                 merged = dict(messages[-1])
                 left_meta = merged.get("_meta")
@@ -420,6 +473,21 @@ class AgentRunner:
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
         pending_stream_content: str | None = None
+        provider_state = spec.provider_state
+        if (
+            provider_state is not None
+            and not spec.runtime.provider.can_resume_conversation_state(
+                provider_state,
+                spec.runtime.model,
+            )
+        ):
+            provider_state = None
+        provider_state_boundary = len(messages)
+        initial_provider_state_messages = (
+            list(spec.provider_state_messages or [])
+            if provider_state is not None
+            else None
+        )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -450,7 +518,36 @@ class AgentRunner:
                 session_key=spec.session_key,
             )
             await hook.before_iteration(context)
-            response = await self._request_model(spec, messages_for_model, hook, context)
+            provider_state_messages = (
+                initial_provider_state_messages
+                if initial_provider_state_messages is not None
+                else self._messages_after_provider_state(
+                    messages,
+                    provider_state_boundary,
+                )
+            )
+            response = await self._request_model(
+                spec,
+                messages_for_model,
+                hook,
+                context,
+                provider_state=provider_state,
+                provider_state_messages=provider_state_messages,
+            )
+            initial_provider_state_messages = None
+            if (
+                response.provider_state is not None
+                and spec.runtime.provider.can_resume_conversation_state(
+                    response.provider_state,
+                    spec.runtime.model,
+                )
+            ):
+                provider_state = response.provider_state
+                provider_state_boundary = len(messages)
+                self._seal_provider_state_boundary(messages)
+            else:
+                provider_state = None
+                provider_state_boundary = len(messages)
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
@@ -479,6 +576,10 @@ class AgentRunner:
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
+                )
+                assistant_message = self._mark_provider_state_output(
+                    assistant_message,
+                    response,
                 )
                 messages.append(assistant_message)
                 await self._emit_checkpoint(
@@ -598,7 +699,25 @@ class AgentRunner:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
                 retry_messages = self._finalization_retry_messages(messages_for_model)
-                response = await self._request_finalization_retry(spec, messages_for_model)
+                response = await self._request_finalization_retry(
+                    spec,
+                    messages_for_model,
+                    provider_state=provider_state,
+                    provider_state_messages=[],
+                )
+                if (
+                    response.provider_state is not None
+                    and spec.runtime.provider.can_resume_conversation_state(
+                        response.provider_state,
+                        spec.runtime.model,
+                    )
+                ):
+                    provider_state = response.provider_state
+                    provider_state_boundary = len(messages)
+                    self._seal_provider_state_boundary(messages)
+                else:
+                    provider_state = None
+                    provider_state_boundary = len(messages)
                 retry_usage = self._usage_or_estimate(spec, retry_messages, response)
                 self._accumulate_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
@@ -623,10 +742,13 @@ class AgentRunner:
                     if hook.wants_streaming():
                         context.stream_continues_current_message = True
                         await hook.on_stream_end(context, resuming=True)
-                    messages.append(build_assistant_message(
-                        clean,
-                        reasoning_content=response.reasoning_content,
-                        thinking_blocks=response.thinking_blocks,
+                    messages.append(self._mark_provider_state_output(
+                        build_assistant_message(
+                            clean,
+                            reasoning_content=response.reasoning_content,
+                            thinking_blocks=response.thinking_blocks,
+                        ),
+                        response,
                     ))
                     messages.append(build_length_recovery_message(clean or ""))
                     await hook.after_iteration(context)
@@ -655,6 +777,10 @@ class AgentRunner:
                     clean,
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
+                )
+                assistant_message = self._mark_provider_state_output(
+                    assistant_message,
+                    response,
                 )
 
             # Check for mid-turn injections BEFORE signaling stream end.
@@ -717,11 +843,17 @@ class AgentRunner:
                     continue
                 break
 
-            messages.append(assistant_message or build_assistant_message(
-                clean,
-                reasoning_content=response.reasoning_content,
-                thinking_blocks=response.thinking_blocks,
-            ))
+            messages.append(
+                assistant_message
+                or self._mark_provider_state_output(
+                    build_assistant_message(
+                        clean,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    ),
+                    response,
+                )
+            )
             await self._emit_checkpoint(
                 spec,
                 {
@@ -777,6 +909,16 @@ class AgentRunner:
                 final_content = terminal_content
             self._append_final_message(messages, terminal_content)
 
+        if provider_state is not None:
+            pending_messages = [
+                *provider_state.pending_messages,
+                *self._messages_after_provider_state(
+                    messages,
+                    provider_state_boundary,
+                ),
+            ]
+            provider_state = provider_state.with_pending_messages(pending_messages)
+
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -787,6 +929,7 @@ class AgentRunner:
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
+            provider_state=provider_state,
         )
 
     def _build_request_kwargs(
@@ -795,6 +938,8 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "messages": messages,
@@ -807,6 +952,15 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens
         kwargs["reasoning_effort"] = generation.reasoning_effort
+        if (
+            provider_state is not None
+            and spec.runtime.provider.can_resume_conversation_state(
+                provider_state,
+                spec.runtime.model,
+            )
+        ):
+            kwargs["provider_state"] = provider_state
+            kwargs["provider_state_messages"] = list(provider_state_messages or [])
         return kwargs
 
     async def _request_model(
@@ -817,6 +971,8 @@ class AgentRunner:
         context: AgentHookContext,
         *,
         malformed_retry: bool = False,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
@@ -835,6 +991,8 @@ class AgentRunner:
             spec,
             messages,
             tools=spec.tools.get_definitions(),
+            provider_state=provider_state,
+            provider_state_messages=provider_state_messages,
         )
         wants_streaming = hook.wants_streaming()
         progress_callback = spec.progress_callback
@@ -1060,9 +1218,21 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
+        *,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         retry_messages = self._finalization_retry_messages(messages)
-        return await self._request_no_tools(spec, retry_messages)
+        state_messages = [
+            *(provider_state_messages or []),
+            retry_messages[-1],
+        ]
+        return await self._request_no_tools(
+            spec,
+            retry_messages,
+            provider_state=provider_state,
+            provider_state_messages=state_messages,
+        )
 
     @staticmethod
     def _finalization_retry_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1115,8 +1285,17 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
+        *,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
-        kwargs = self._build_request_kwargs(spec, messages, tools=None)
+        kwargs = self._build_request_kwargs(
+            spec,
+            messages,
+            tools=None,
+            provider_state=provider_state,
+            provider_state_messages=provider_state_messages,
+        )
         return await spec.runtime.provider.chat_with_retry(**kwargs)
 
     @staticmethod

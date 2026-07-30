@@ -26,16 +26,20 @@ from pydantic.alias_generators import to_snake
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderConversationState,
     ToolCallRequest,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
+    ResponsesStreamCapture,
+    build_responses_state,
     consume_sdk_stream,
-    convert_messages,
     convert_tools,
     parse_response_output,
+    prepare_responses_input,
+    responses_state_matches,
 )
 
 if TYPE_CHECKING:
@@ -971,6 +975,24 @@ class OpenAICompatProvider(LLMProvider):
 
         return self._responses_circuit_allows_probe(model, reasoning_effort)
 
+    def _responses_state_provider(self) -> str:
+        spec_name = self._spec.name if self._spec is not None else "custom"
+        return f"openai_compat:{spec_name}:{self._effective_base.rstrip('/')}"
+
+    def _responses_state_model(self, model: str | None) -> str:
+        return self._request_model_name(model or self.default_model)
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return responses_state_matches(
+            state,
+            provider=self._responses_state_provider(),
+            model=self._responses_state_model(model),
+        )
+
     def _responses_circuit_allows_probe(
         self,
         model: str | None,
@@ -1040,12 +1062,34 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
-        instructions, input_items = convert_messages(sanitized_messages)
+        sanitized_state = provider_state
+        if provider_state is not None:
+            sanitized_state = provider_state.with_pending_messages(
+                self._sanitize_messages(
+                    self._sanitize_empty_content(provider_state.pending_messages)
+                )
+            )
+        sanitized_state_messages = (
+            self._sanitize_messages(
+                self._sanitize_empty_content(provider_state_messages)
+            )
+            if provider_state_messages is not None
+            else None
+        )
+        instructions, input_items, replayed = prepare_responses_input(
+            sanitized_messages,
+            state=sanitized_state,
+            state_messages=sanitized_state_messages,
+            provider=self._responses_state_provider(),
+            model=model_name,
+        )
 
         body: dict[str, Any] = {
             "model": model_name,
@@ -1062,6 +1106,8 @@ class OpenAICompatProvider(LLMProvider):
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
             body["include"] = ["reasoning.encrypted_content"]
+        if replayed and "gpt-5.6" in model_name.lower():
+            body.setdefault("reasoning", {})["context"] = "all_turns"
 
         if tools:
             body["tools"] = convert_tools(tools)
@@ -1608,6 +1654,8 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         try:
@@ -1616,12 +1664,18 @@ class OpenAICompatProvider(LLMProvider):
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
+                        provider_state, provider_state_messages,
                     )
                     responses_raw = cast(
                         Any,
                         await client.responses.create(**body),
                     )
-                    result = parse_response_output(responses_raw)
+                    result = parse_response_output(
+                        responses_raw,
+                        state_provider=self._responses_state_provider(),
+                        state_model=str(body["model"]),
+                        state_input_items=cast(list[dict[str, Any]], body["input"]),
+                    )
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
@@ -1660,6 +1714,8 @@ class OpenAICompatProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
@@ -1669,6 +1725,7 @@ class OpenAICompatProvider(LLMProvider):
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
+                        provider_state, provider_state_messages,
                     )
                     body["stream"] = True
                     responses_stream = cast(
@@ -1687,6 +1744,7 @@ class OpenAICompatProvider(LLMProvider):
                             except StopAsyncIteration:
                                 break
 
+                    capture = ResponsesStreamCapture()
                     (
                         content,
                         tool_calls,
@@ -1697,15 +1755,24 @@ class OpenAICompatProvider(LLMProvider):
                         _timed_stream(),
                         on_content_delta,
                         on_tool_call_delta=on_tool_call_delta,
+                        capture=capture,
                     )
                     self._record_responses_success(model, reasoning_effort)
-                    return LLMResponse(
+                    result = LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
                     )
+                    if capture.completed:
+                        result.provider_state = build_responses_state(
+                            provider=self._responses_state_provider(),
+                            model=str(body["model"]),
+                            input_items=cast(list[dict[str, Any]], body["input"]),
+                            output_items=capture.output_items,
+                        )
+                    return result
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
