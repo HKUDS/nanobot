@@ -996,7 +996,7 @@ class SQLiteSessionStore:
                     ):
                         raise
                     sleep(0.05)
-            try:
+            with connection:
                 connection.execute("BEGIN IMMEDIATE")
                 raw_version: object = connection.execute("PRAGMA user_version").fetchone()
                 if not isinstance(raw_version, tuple):
@@ -1011,7 +1011,6 @@ class SQLiteSessionStore:
                         f"expected {_SQLITE_SCHEMA_VERSION}"
                     )
                 if version == _SQLITE_SCHEMA_VERSION:
-                    connection.commit()
                     return
 
                 connection.execute(
@@ -1041,10 +1040,6 @@ class SQLiteSessionStore:
                     "CREATE INDEX sessions_updated_at ON sessions(updated_at DESC)"
                 )
                 connection.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
-                connection.commit()
-            except BaseException:
-                connection.rollback()
-                raise
 
     @staticmethod
     def _encode_json(value: object) -> str:
@@ -1110,7 +1105,6 @@ class SQLiteSessionStore:
         connection: sqlite3.Connection,
         key: str,
     ) -> str:
-        preview = ""
         fallback_preview = ""
         scanned_chars = 0
         rows = connection.execute(
@@ -1142,11 +1136,10 @@ class SQLiteSessionStore:
             if not text:
                 continue
             if message.get("role") == "user":
-                preview = text
-                break
+                return text
             if not fallback_preview and message.get("role") == "assistant":
                 fallback_preview = text
-        return preview or fallback_preview
+        return fallback_preview
 
     def load(self, key: str) -> Session | None:
         with self._connection() as connection, connection:
