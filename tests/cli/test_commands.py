@@ -17,6 +17,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cli import commands as cli_commands
+from nanobot.cli import gateway_runtime as cli_gateway_runtime
 from nanobot.cli import provider as provider_commands
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.commands import app
@@ -115,7 +116,7 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         task = asyncio.create_task(never.wait())
         output: list[str] = []
 
-        restore = cli_commands._install_gateway_shutdown_handlers(
+        restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
             loop, shutdown_event, [task], output.append,
         )
         try:
@@ -211,11 +212,11 @@ def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
     store.append_history("first")
     store.append_history("second")
 
-    cli_commands._advance_dream_cursor_if_behind(store)
+    cli_gateway_runtime._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 2
 
     store.set_last_dream_cursor(10)
-    cli_commands._advance_dream_cursor_if_behind(store)
+    cli_gateway_runtime._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 10
 
 
@@ -227,7 +228,7 @@ def test_commit_dream_changes_skips_noop_run(tmp_path) -> None:
     store.git.auto_commit("initial")
     store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
 
-    assert cli_commands._commit_dream_changes(store) is None
+    assert cli_gateway_runtime._commit_dream_changes(store) is None
     store.git.auto_commit.assert_not_called()
 
 
@@ -240,7 +241,7 @@ def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
     store.write_memory("# Memory\n- Research notes")
     store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
 
-    sha = cli_commands._commit_dream_changes(store)
+    sha = cli_gateway_runtime._commit_dream_changes(store)
 
     assert sha is not None
     store.git.auto_commit.assert_called_once()
@@ -1776,20 +1777,20 @@ def test_heartbeat_retains_recent_messages_by_default():
     ],
 )
 def test_heartbeat_has_active_tasks(content, expected):
-    from nanobot.cli.commands import _heartbeat_has_active_tasks
+    from nanobot.cli.gateway_runtime import _heartbeat_has_active_tasks
 
     assert _heartbeat_has_active_tasks(content) is expected
 
 
 def test_heartbeat_skips_bundled_template():
-    from nanobot.cli.commands import _heartbeat_has_active_tasks
+    from nanobot.cli.gateway_runtime import _heartbeat_has_active_tasks
     from nanobot.utils.helpers import load_bundled_template
 
     assert _heartbeat_has_active_tasks(load_bundled_template("HEARTBEAT.md")) is False
 
 
 def test_heartbeat_target_skips_archived_webui_sessions():
-    from nanobot.cli.commands import _pick_heartbeat_target_from_sessions
+    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
 
     target = _pick_heartbeat_target_from_sessions(
         enabled_channels=["websocket"],
@@ -1804,7 +1805,7 @@ def test_heartbeat_target_skips_archived_webui_sessions():
 
 
 def test_heartbeat_target_uses_last_channel_for_unified_session():
-    from nanobot.cli.commands import _pick_heartbeat_target_from_sessions
+    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
     from nanobot.session.keys import LAST_CHANNEL_METADATA_KEY, UNIFIED_SESSION_KEY
 
     target = _pick_heartbeat_target_from_sessions(
@@ -1826,7 +1827,7 @@ def test_heartbeat_target_uses_last_channel_for_unified_session():
     ],
 )
 def test_heartbeat_target_rejects_unroutable_unified_metadata(metadata):
-    from nanobot.cli.commands import _pick_heartbeat_target_from_sessions
+    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
     from nanobot.session.keys import UNIFIED_SESSION_KEY
 
     target = _pick_heartbeat_target_from_sessions(
@@ -1870,6 +1871,14 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_a, **_kw: False)
     monkeypatch.setattr("nanobot.cli.commands._tcp_endpoint_reachable", lambda *_a, **_kw: False)
     monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        "nanobot.cli.gateway_runtime._tcp_endpoint_reachable",
+        lambda *_a, **_kw: False,
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.gateway_runtime._webui_endpoint_reachable",
+        lambda *_a, **_kw: False,
+    )
 
 
 def _patch_cli_command_runtime(
@@ -1894,6 +1903,10 @@ def _patch_cli_command_runtime(
     monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
+        sync_templates or (lambda _path: None),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.gateway_runtime.sync_workspace_templates",
         sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
@@ -2010,10 +2023,10 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         session_manager=_FakeSessionManager,
         cron_service=_FakeCron,
     )
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
-    monkeypatch.setattr("nanobot.cli.commands.read_webui_sidebar_state", lambda: {})
-    monkeypatch.setattr("nanobot.cli.commands.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -2602,7 +2615,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
     monkeypatch.setattr("nanobot.cli.webui_support._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
@@ -2678,10 +2691,10 @@ def test_gateway_unbound_agent_cron_is_skipped(
         raise AssertionError("unbound cron job must not be evaluated for delivery")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "nanobot.cli.commands.evaluate_response",
+        "nanobot.cli.gateway_runtime.evaluate_response",
         _capture_evaluate_response,
     )
 
@@ -2730,7 +2743,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
     monkeypatch.setattr("nanobot.cli.webui_support._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
@@ -2794,9 +2807,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
         raise AssertionError("bound cron must not use legacy response evaluator")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
-    monkeypatch.setattr("nanobot.cli.commands.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
     assert isinstance(result.exception, _StopGatewayError)
@@ -3022,7 +3035,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         seen["local_trigger_queue_kwargs"] = kwargs
         raise _StopGatewayError("stop")
 
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr(
         "nanobot.triggers.local_runner.run_local_trigger_queue",
@@ -3130,7 +3143,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
 
 def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
     """Legacy global jobs.json is moved into the workspace on first run."""
-    from nanobot.cli.commands import _migrate_cron_store
+    from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
@@ -3151,7 +3164,7 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
 
 def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> None:
     """Migration does not overwrite an existing workspace cron store."""
-    from nanobot.cli.commands import _migrate_cron_store
+    from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
@@ -3318,7 +3331,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
@@ -3369,13 +3382,14 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
                 async def read(self, _size: int) -> bytes:
                     nonlocal started
                     started += 1
-                    if started == cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS:
+                    if started == cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS:
                         all_started.set()
                     await release.wait()
                     return b"GET /health HTTP/1.1\r\n\r\n"
 
             active_writers = [
-                _FakeWriter() for _ in range(cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS)
+                _FakeWriter()
+                for _ in range(cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS)
             ]
             active_tasks = [
                 asyncio.create_task(health_handler(_BlockingReader(), writer))
@@ -3400,7 +3414,11 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             async def read(self, _size: int) -> bytes:
                 await asyncio.Event().wait()
 
-        monkeypatch.setattr(cli_commands, "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(
+            cli_gateway_runtime,
+            "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS",
+            0.01,
+        )
         timed_out_writer = _FakeWriter()
         asyncio.run(health_handler(_NeverRespondingReader(), timed_out_writer))
         assert timed_out_writer.closed is True
@@ -3491,7 +3509,7 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
@@ -3607,12 +3625,12 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
     monkeypatch.setattr(
-        "nanobot.cli.commands._install_gateway_shutdown_handlers",
+        "nanobot.cli.gateway_runtime._install_gateway_shutdown_handlers",
         _fake_install_shutdown_handlers,
     )
 
