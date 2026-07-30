@@ -136,14 +136,17 @@ class ToolRegistry:
         params = self._coerce_params(tool, params)
         # Truncated/malformed JSON object strings (e.g. '{"recap": "') must not
         # be executed — they cause complete_goal/update_goal retry loops (#4864).
+        # Keep the "parameters must be a JSON object" phrase so existing registry
+        # / runner tests and model retries still match on the same signal.
         if isinstance(params, str):
             stripped = params.strip()
             if stripped.startswith(("{", "[")):
                 return tool, params, (
                     ToolResult.error(
-                        f"Error: Tool '{name}' received truncated or invalid JSON arguments: "
-                        f"{stripped[:120]!r}. Retry with a complete JSON object matching the "
-                        f"tool schema (for goals: {{\"action\": \"complete\", \"recap\": \"...\"}})."
+                        f"Error: Tool '{name}' parameters must be a JSON object, got "
+                        f"truncated or invalid JSON arguments: {stripped[:120]!r}. "
+                        f"Retry with a complete JSON object matching the tool schema "
+                        f'(for goals: {{"action": "complete", "recap": "..."}}).'
                     )
                 )
         if not isinstance(params, dict):

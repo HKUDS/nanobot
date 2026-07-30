@@ -1,6 +1,4 @@
 """#4864: reject truncated JSON tool args and circuit-break retry loops."""
-import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +28,7 @@ async def test_truncated_json_args_rejected():
     bad = '{"recap": "'
     out = await reg.execute("update_goal", bad)
     assert isinstance(out, ToolResult) and out.is_error
+    assert "parameters must be a JSON object" in str(out)
     assert "truncated" in str(out).lower() or "invalid JSON" in str(out)
 
 
