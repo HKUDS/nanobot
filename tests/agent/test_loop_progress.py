@@ -28,7 +28,10 @@ from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
 )
-from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -903,6 +906,12 @@ class TestToolEventProgress:
         turn_id = turn_ids.pop()
         assert isinstance(turn_id, str)
         assert turn_id.startswith("subagent:")
+        owners = {
+            message.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            for message in visible_events
+        }
+        assert len(owners) == 1
+        assert isinstance(owners.pop(), str)
         assert all(
             (message.channel, message.chat_id) == ("websocket", "chat-a")
             and message.metadata.get("webui") is True
@@ -910,6 +919,7 @@ class TestToolEventProgress:
             and set(message.metadata) <= {
                 "webui",
                 "_wants_stream",
+                WEBSOCKET_TURN_OWNER_METADATA_KEY,
                 WEBUI_TURN_METADATA_KEY,
                 "latency_ms",
             }

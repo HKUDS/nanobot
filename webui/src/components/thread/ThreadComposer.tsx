@@ -1038,7 +1038,7 @@ export function ThreadComposer({
     if (skillQuery !== null) {
       const query = skillQuery.text;
       return skills
-        .filter((skill) => skill.available)
+        .filter((skill) => skill.enabled !== false && skill.available)
         .flatMap((skill) => {
           const matchRank = skillMatchRank(skill, query);
           return matchRank === null

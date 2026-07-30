@@ -405,6 +405,26 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.queryByRole("button", { name: /tasks/i })).not.toBeInTheDocument();
   });
 
+  it("keeps loose ordered-list titles beside their markers", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>
+        {
+          "1. **一个约 16 MB 的 CLI 可执行文件**\n   - `~/.local/bin/inferencesh`\n   - `belt` 和 `infsh` 只是指向它的软链接。\n\n2. **登录凭据文件**\n   - `~/.inferencesh/config.json`\n   - 权限是 `600`。\n\n3. **Shell PATH 配置**\n   - `.zshrc`"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    const items = container.querySelectorAll("ol > li");
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveClass("[&>p]:inline");
+    expect(items[0].firstElementChild).toHaveTextContent(
+      "一个约 16 MB 的 CLI 可执行文件",
+    );
+    expect(items[0].querySelector("ul")).toHaveTextContent(
+      "~/.local/bin/inferencesh",
+    );
+  });
+
   it("renders GFM tables in a responsive data surface", () => {
     const { container } = render(
       <MarkdownTextRenderer>
@@ -503,6 +523,21 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it("renders bold CJK text when more CJK text follows immediately", () => {
+    render(
+      <MarkdownTextRenderer streaming>
+        {
+          "**结论：目前看风险可控，没有发现常驻或可疑安装。**如果你之后不想再用，我可以帮你彻底卸载。"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByText("结论：目前看风险可控，没有发现常驻或可疑安装。").tagName,
+    ).toBe("STRONG");
+    expect(screen.getByText(/如果你之后不想再用/)).toBeInTheDocument();
+  });
+
   it("adds line numbers to multiline fenced code without changing inline code", () => {
     render(
       <MarkdownTextRenderer highlightCode={false}>
@@ -528,6 +563,21 @@ describe("MarkdownTextRenderer", () => {
       "VBeats mentions $24 million, while Globe states a total of $130.6 million since founding.",
     );
     expect(container.querySelector(".katex")).toBeNull();
+  });
+
+  it("keeps currency rates and later totals out of one inline math span", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "费用预估为 **$0.10/5秒（720p）**，在余额内。我选择做一条 **8秒、16:9、带自然环境音** 的电影感梦幻片，预计约 **$0.16**，现在开始生成。"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container).toHaveTextContent("$0.10/5秒（720p）");
+    expect(container).toHaveTextContent("$0.16");
+    expect(container.querySelectorAll("strong")).toHaveLength(3);
   });
 
   it("renders guarded single-dollar inline math", () => {

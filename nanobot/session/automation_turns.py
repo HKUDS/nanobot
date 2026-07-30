@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 AUTOMATION_HISTORY_META = "_automation_turn"
 
@@ -17,7 +17,7 @@ class AutomationTurnSpec:
     kind: str
     trigger_meta_key: str
     legacy_history_meta_key: str | None = None
-    history_fields: Mapping[str, str] = field(default_factory=dict)
+    history_fields: Mapping[str, str] = field(default_factory=dict[str, str])
     text_builder: Callable[[Mapping[str, Any]], str | None] | None = None
 
 
@@ -27,7 +27,7 @@ def automation_trigger(
 ) -> dict[str, Any] | None:
     """Return source trigger metadata for *spec* when present."""
     raw = (metadata or {}).get(spec.trigger_meta_key)
-    return raw if isinstance(raw, dict) else None
+    return cast(dict[str, Any], raw) if isinstance(raw, dict) else None
 
 
 def automation_history_overrides_for_spec(

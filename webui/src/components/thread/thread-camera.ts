@@ -4,7 +4,7 @@ interface ThreadCameraMotionProfile {
    * camera closes roughly 95% of an uncapped distance in three time constants.
    */
   responseTimeMs: number;
-  /** Prevents a large completion batch from turning into a one-frame jump. */
+  /** Prevents a long explicit navigation from turning into a one-frame jump. */
   maxSpeedPxPerSecond: number;
   /** Avoids spending frames chasing sub-pixel layout noise. */
   settleDistancePx: number;
@@ -12,28 +12,9 @@ interface ThreadCameraMotionProfile {
   maxFrameDeltaMs: number;
 }
 
-const THREAD_CAMERA_FOLLOW_MOTION: Readonly<ThreadCameraMotionProfile> = {
-  responseTimeMs: 90,
-  maxSpeedPxPerSecond: 1_200,
-  settleDistancePx: 0.5,
-  maxFrameDeltaMs: 50,
-};
-
 const THREAD_CAMERA_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile> = {
   responseTimeMs: 110,
   maxSpeedPxPerSecond: 12_000,
-  settleDistancePx: 0.5,
-  maxFrameDeltaMs: 50,
-};
-
-/**
- * Reduced motion still preserves spatial continuity. Snapping a long thread
- * to its destination removes the very context that helps users understand
- * where the viewport moved; this profile shortens that motion instead.
- */
-const THREAD_CAMERA_REDUCED_MOTION: Readonly<ThreadCameraMotionProfile> = {
-  responseTimeMs: 55,
-  maxSpeedPxPerSecond: 2_400,
   settleDistancePx: 0.5,
   maxFrameDeltaMs: 50,
 };
@@ -63,12 +44,10 @@ interface ThreadCameraOptions {
   prefersReducedMotion?: () => boolean;
 }
 
-type ThreadCameraMotionKind = "follow" | "navigation";
-
 /**
  * A time-based ease-out chase rather than a start/end tween. The target can
- * move on every streamed line without restarting a duration or adding another
- * frame loop.
+ * move during explicit history navigation without restarting a duration or
+ * adding another frame loop.
  */
 function easeOutChase(
   current: number,
@@ -108,7 +87,6 @@ export class ThreadCameraController {
   private phase: "idle" | "following" = "idle";
   private target = 0;
   private lastTimestamp: number | null = null;
-  private motionKind: ThreadCameraMotionKind = "follow";
 
   constructor(
     getViewport: () => ThreadCameraViewport | null,
@@ -131,25 +109,31 @@ export class ThreadCameraController {
     this.write(viewport, this.target);
   }
 
+  /**
+   * Automatic follow is a layout constraint, not navigation. Resolve it in
+   * the geometry frame so streamed content and viewport resizing cannot build
+   * up hidden travel below the visible tail.
+   */
   followTo(top: number): ThreadCameraFollowResult | null {
-    return this.moveTo(top, "follow");
+    const viewport = this.getViewport();
+    if (!viewport) return null;
+    this.cancel();
+    this.target = Math.max(0, top);
+    this.write(viewport, this.target);
+    return "settled";
   }
 
   navigateTo(top: number): ThreadCameraFollowResult | null {
-    return this.moveTo(top, "navigation");
+    return this.moveTo(top);
   }
 
-  private moveTo(
-    top: number,
-    motionKind: ThreadCameraMotionKind,
-  ): ThreadCameraFollowResult | null {
+  private moveTo(top: number): ThreadCameraFollowResult | null {
     const viewport = this.getViewport();
     if (!viewport) return null;
     const current = viewport.scrollTop;
     this.target = Math.max(0, top);
-    this.motionKind = motionKind;
 
-    const motion = this.currentMotion(motionKind);
+    const motion = this.currentMotion();
     if (this.phase === "following") {
       return "retargeted";
     }
@@ -171,7 +155,6 @@ export class ThreadCameraController {
     }
     this.phase = "idle";
     this.lastTimestamp = null;
-    this.motionKind = "follow";
   }
 
   dispose(): void {
@@ -186,7 +169,7 @@ export class ThreadCameraController {
       return;
     }
 
-    const motion = this.currentMotion(this.motionKind);
+    const motion = this.currentMotion();
     const previousTimestamp = this.lastTimestamp ?? timestamp - (1000 / 60);
     const deltaMs = Math.min(
       motion.maxFrameDeltaMs,
@@ -203,12 +186,20 @@ export class ThreadCameraController {
     }
 
     const deltaSeconds = deltaMs / 1000;
-    const nextTop = easeOutChase(
+    const easedTop = easeOutChase(
       current,
       this.target,
       deltaSeconds,
       motion,
     );
+    // Some browsers quantize scrollTop writes to whole pixels. Keep the
+    // ease-out curve, but never let its subpixel tail round back to the same
+    // position forever.
+    const minimumStep = Math.min(1, Math.abs(remainingDistance));
+    const nextTop =
+      Math.abs(easedTop - current) < minimumStep
+        ? current + Math.sign(remainingDistance) * minimumStep
+        : easedTop;
     const settled = Math.abs(this.target - nextTop) <= motion.settleDistancePx;
     this.write(viewport, settled ? this.target : nextTop);
 
@@ -220,15 +211,10 @@ export class ThreadCameraController {
     this.frameId = this.scheduler.request(this.advance);
   };
 
-  private currentMotion(kind: ThreadCameraMotionKind): ThreadCameraMotionProfile {
-    if (kind === "navigation") {
-      return this.prefersReducedMotion()
-        ? THREAD_CAMERA_REDUCED_NAVIGATION_MOTION
-        : THREAD_CAMERA_NAVIGATION_MOTION;
-    }
+  private currentMotion(): ThreadCameraMotionProfile {
     return this.prefersReducedMotion()
-      ? THREAD_CAMERA_REDUCED_MOTION
-      : THREAD_CAMERA_FOLLOW_MOTION;
+      ? THREAD_CAMERA_REDUCED_NAVIGATION_MOTION
+      : THREAD_CAMERA_NAVIGATION_MOTION;
   }
 
   private write(viewport: ThreadCameraViewport, top: number): void {

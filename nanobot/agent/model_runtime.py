@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from types import MappingProxyType
+from typing import cast
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -139,7 +140,7 @@ class ModelRuntimeResolver:
 
     def select_model(self, model: str) -> LLMRuntime:
         """Change the default model without reconstructing downstream consumers."""
-        if not isinstance(model, str) or not model.strip():
+        if not isinstance(cast(object, model), str) or not model.strip():
             raise ValueError("model must be a non-empty string")
         self._runtime = replace(
             self._runtime,
@@ -150,8 +151,9 @@ class ModelRuntimeResolver:
 
     def select_context_window(self, context_window_tokens: int) -> LLMRuntime:
         """Change the default context limit for future admissions."""
-        if not isinstance(context_window_tokens, int) or isinstance(
-            context_window_tokens,
+        raw_context_window = cast(object, context_window_tokens)
+        if not isinstance(raw_context_window, int) or isinstance(
+            raw_context_window,
             bool,
         ):
             raise TypeError("context_window_tokens must be an integer")

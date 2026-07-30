@@ -1,5 +1,7 @@
 """Sustained-goal tools with explicit user opt-in at the execution boundary."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -11,7 +13,7 @@ from nanobot.agent.goal_permission import (
     revoke_goal_mutation_permission,
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import RequestContext, current_request_context
+from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
@@ -132,23 +134,24 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
 
     def __init__(
         self,
-        sessions: Any,
+        sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
     ) -> None:
         _GoalToolsMixin.__init__(self, sessions, runtime_events)
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        sess = getattr(ctx, "sessions", None)
-        assert sess is not None
+    def create(cls, ctx: ToolContext) -> Tool:
+        sess = ctx.sessions
+        if sess is None:
+            raise RuntimeError("CreateGoalTool requires an initialized session manager")
         return cls(
             sessions=sess,
-            runtime_events=getattr(ctx, "runtime_events", None),
+            runtime_events=ctx.runtime_events,
         )
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
-        return getattr(ctx, "sessions", None) is not None
+    def enabled(cls, ctx: ToolContext) -> bool:
+        return ctx.sessions is not None
 
     @property
     def name(self) -> str:
@@ -262,23 +265,24 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
 
     def __init__(
         self,
-        sessions: Any,
+        sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
     ) -> None:
         _GoalToolsMixin.__init__(self, sessions, runtime_events)
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        sess = getattr(ctx, "sessions", None)
-        assert sess is not None
+    def create(cls, ctx: ToolContext) -> Tool:
+        sess = ctx.sessions
+        if sess is None:
+            raise RuntimeError("UpdateGoalTool requires an initialized session manager")
         return cls(
             sessions=sess,
-            runtime_events=getattr(ctx, "runtime_events", None),
+            runtime_events=ctx.runtime_events,
         )
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
-        return getattr(ctx, "sessions", None) is not None
+    def enabled(cls, ctx: ToolContext) -> bool:
+        return ctx.sessions is not None
 
     @property
     def name(self) -> str:

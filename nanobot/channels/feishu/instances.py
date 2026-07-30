@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -46,7 +46,7 @@ def update_managed_feishu_instance(
     *,
     instance_id: str = DEFAULT_INSTANCE_ID,
 ) -> dict[str, Any]:
-    existing = section if isinstance(section, dict) else {}
+    existing = cast(dict[str, Any], section) if isinstance(section, dict) else {}
     return upsert_feishu_instance(
         existing,
         feishu_default_config(),
@@ -69,8 +69,8 @@ def _normalize_feishu_instance(
     inherited: dict[str, Any] | None = None,
     fallback_id: str = DEFAULT_INSTANCE_ID,
 ) -> dict[str, Any]:
-    config = merge_missing_defaults(inherited or {}, defaults)
-    config = merge_missing_defaults(raw, config)
+    config = cast(dict[str, Any], merge_missing_defaults(inherited or {}, defaults))
+    config = cast(dict[str, Any], merge_missing_defaults(raw, config))
 
     raw_id = raw.get("id") or raw.get("instanceId") or raw.get("instance_id") or fallback_id
     instance_id = validate_instance_id(str(raw_id))
@@ -97,12 +97,13 @@ def _feishu_instance_inputs(
         section = section.model_dump(mode="json", by_alias=True)
     if not isinstance(section, dict):
         section = {}
+    section_data = cast(dict[str, Any], section)
 
-    instances = section.get("instances")
+    instances = section_data.get("instances")
     if isinstance(instances, list):
-        inherited = {key: value for key, value in section.items() if key != "instances"}
-        return list(instances), inherited
-    return ([section] if section else [_base_feishu_instance_config(defaults)]), None
+        inherited = {key: value for key, value in section_data.items() if key != "instances"}
+        return list(cast(list[Any], instances)), inherited
+    return ([section_data] if section_data else [_base_feishu_instance_config(defaults)]), None
 
 
 def feishu_instance_specs(
@@ -124,7 +125,7 @@ def feishu_instance_specs(
         fallback_id = DEFAULT_INSTANCE_ID if index == 0 else f"assistant-{index + 1}"
         try:
             config = _normalize_feishu_instance(
-                raw,
+                cast(dict[str, Any], raw),
                 defaults,
                 inherited=inherited,
                 fallback_id=fallback_id,
@@ -179,7 +180,7 @@ def canonical_feishu_section(section: Any, defaults: dict[str, Any]) -> dict[str
         fallback_id = DEFAULT_INSTANCE_ID if index == 0 else f"assistant-{index + 1}"
         try:
             config = _normalize_feishu_instance(
-                raw,
+                cast(dict[str, Any], raw),
                 defaults,
                 inherited=inherited,
                 fallback_id=fallback_id,
@@ -238,9 +239,9 @@ def update_feishu_instance_preserving_shape(
     if (
         instance_id == DEFAULT_INSTANCE_ID
         and isinstance(section, dict)
-        and not isinstance(section.get("instances"), list)
+        and not isinstance(cast(dict[str, Any], section).get("instances"), list)
     ):
-        return {**section, **values}
+        return {**cast(dict[str, Any], section), **values}
 
     return upsert_feishu_instance(section, defaults, instance_id, values)
 

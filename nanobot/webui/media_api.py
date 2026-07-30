@@ -12,7 +12,7 @@ import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -182,14 +182,17 @@ def attach_signed_media_urls(
     messages = payload.get("messages")
     if not isinstance(messages, list):
         return
-    for msg in messages:
+    raw_messages = cast(list[Any], messages)
+    for msg in raw_messages:
         if not isinstance(msg, dict):
             continue
-        media = msg.get("media")
+        message = cast(dict[str, Any], msg)
+        media = message.get("media")
         if not isinstance(media, list) or not media:
             continue
+        media_entries = cast(list[Any], media)
         urls: list[dict[str, str]] = []
-        for entry in media:
+        for entry in media_entries:
             if not isinstance(entry, str) or not entry:
                 continue
             signed = sign_path(Path(entry))
@@ -197,8 +200,8 @@ def attach_signed_media_urls(
                 continue
             urls.append({"url": signed, "name": Path(entry).name})
         if urls:
-            msg["media_urls"] = urls
-        msg.pop("media", None)
+            message["media_urls"] = urls
+        message.pop("media", None)
 
 
 def serve_signed_media(

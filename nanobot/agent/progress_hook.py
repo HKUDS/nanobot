@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from loguru import logger
 
@@ -124,7 +124,7 @@ class AgentProgressHook(AgentHook):
         arguments = event.get("arguments")
         if not isinstance(arguments, dict):
             arguments = {}
-        payload = {
+        payload: dict[str, Any] = {
             "version": 1,
             "phase": phase,
             "call_id": str(call_id),
@@ -169,7 +169,7 @@ class AgentProgressHook(AgentHook):
             tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
             await invoke_on_progress(
                 self._on_progress,
-                tool_hint,
+                cast(str, tool_hint),
                 tool_hint=True,
                 tool_events=tool_events,
             )

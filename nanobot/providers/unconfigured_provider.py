@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -14,13 +16,13 @@ class UnconfiguredProvider(LLMProvider):
 
     async def chat(
         self,
-        messages: list[dict],
-        tools: list[dict] | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
-        tool_choice: str | dict | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         return LLMResponse(
             content=(

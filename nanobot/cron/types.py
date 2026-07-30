@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast, overload
 
 from nanobot.utils.dict_keys import get_camel_snake
+
+
+@overload
+def _store_int(value: Any, default: Literal[None]) -> int | None: ...
+
+
+@overload
+def _store_int(value: Any, default: int = 0) -> int: ...
 
 
 def _store_int(value: Any, default: int | None = 0) -> int | None:
@@ -103,7 +111,10 @@ class CronJobState:
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronJobState:
-        history = get_camel_snake(data, "runHistory", "run_history", []) or []
+        history = cast(
+            list[object],
+            get_camel_snake(data, "runHistory", "run_history", []) or [],
+        )
         return cls(
             next_run_at_ms=_store_int(
                 get_camel_snake(data, "nextRunAtMs", "next_run_at_ms"), None
@@ -116,7 +127,7 @@ class CronJobState:
             run_history=[
                 record
                 if isinstance(record, CronRunRecord)
-                else CronRunRecord.from_store_dict(record)
+                else CronRunRecord.from_store_dict(cast(dict[str, Any], record))
                 for record in history
                 if isinstance(record, (dict, CronRunRecord))
             ],
@@ -137,16 +148,20 @@ class CronJob:
     delete_after_run: bool = False
 
     @classmethod
-    def from_dict(cls, kwargs: dict):
-        state_kwargs = dict(kwargs.get("state", {}))
+    def from_dict(cls, kwargs: dict[str, Any]) -> CronJob:
+        state_kwargs = dict(cast(dict[str, Any], kwargs.get("state", {})))
         state_kwargs["run_history"] = [
-            record if isinstance(record, CronRunRecord) else CronRunRecord(**record)
-            for record in state_kwargs.get("run_history", [])
+            record
+            if isinstance(record, CronRunRecord)
+            else CronRunRecord(**cast(dict[str, Any], record))
+            for record in cast(list[object], state_kwargs.get("run_history", []))
         ]
-        kwargs["schedule"] = CronSchedule(**kwargs.get("schedule", {"kind": "every"}))
-        kwargs["payload"] = CronPayload(**kwargs.get("payload", {}))
+        kwargs["schedule"] = CronSchedule(
+            **cast(dict[str, Any], kwargs.get("schedule", {"kind": "every"}))
+        )
+        kwargs["payload"] = CronPayload(**cast(dict[str, Any], kwargs.get("payload", {})))
         kwargs["state"] = CronJobState(**state_kwargs)
-        return cls(**kwargs)
+        return cls(**cast(Any, kwargs))
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronJob:

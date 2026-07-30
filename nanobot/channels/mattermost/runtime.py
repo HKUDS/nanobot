@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import Field
@@ -86,7 +86,7 @@ class MattermostChannel(BaseChannel):
         self._server_url = config.server_url.rstrip("/")
         self._ws_url = _server_url_to_ws_url(self._server_url)
         self._http_client: httpx.AsyncClient | None = None
-        self._ws_task: asyncio.Task | None = None
+        self._ws_task: asyncio.Task[None] | None = None
         self._self_id: str | None = None
         self._self_username: str | None = None
         self._self_email: str | None = None
@@ -118,7 +118,7 @@ class MattermostChannel(BaseChannel):
         try:
             resp = await self._http_client.get("/api/v4/users/me")
             resp.raise_for_status()
-            me = resp.json()
+            me = cast(dict[str, Any], resp.json())
             self._self_id = me.get("id")
             self._self_username = me.get("username")
             self._self_email = me.get("email", "")
@@ -169,7 +169,7 @@ class MattermostChannel(BaseChannel):
                     self.logger.debug("websocket connected")
                     delay = MATTERMOST_WS_RECONNECT_BASE_DELAY
                     async for raw in ws:
-                        await self._handle_ws_message(json.loads(raw))
+                        await self._handle_ws_message(cast(dict[str, Any], json.loads(raw)))
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -191,12 +191,15 @@ class MattermostChannel(BaseChannel):
     # Event: posted ------------------------------------------------------------
 
     async def _handle_posted_event(self, msg: dict[str, Any]) -> None:
-        data = msg.get("data", {})
-        broadcast = msg.get("broadcast", {})
+        data = cast(dict[str, Any], msg.get("data", {}))
+        broadcast = cast(dict[str, Any], msg.get("broadcast", {}))
 
         raw_post = data.get("post", "{}")
         try:
-            post = json.loads(raw_post) if isinstance(raw_post, str) else raw_post
+            post = cast(
+                dict[str, Any],
+                json.loads(raw_post) if isinstance(raw_post, str) else raw_post,
+            )
         except json.JSONDecodeError:
             self.logger.warning("failed to parse post json")
             return
@@ -206,7 +209,7 @@ class MattermostChannel(BaseChannel):
         message_text = post.get("message", "")
         root_id = post.get("root_id", "") or ""
         post_id = post.get("id", "")
-        file_ids: list[str] = post.get("file_ids", [])
+        file_ids = cast(list[str], post.get("file_ids", []))
 
         if self._self_id and sender_id == self._self_id:
             return
@@ -292,11 +295,11 @@ class MattermostChannel(BaseChannel):
     # Event: action ------------------------------------------------------------
 
     async def _handle_action_event(self, msg: dict[str, Any]) -> None:
-        data = msg.get("data", {})
+        data = cast(dict[str, Any], msg.get("data", {}))
         sender_id = data.get("user_id", "")
         channel_id = data.get("channel_id", "")
-        context = data.get("context", {}) or {}
-        value = context.get("selected_option", "")
+        context = cast(dict[str, Any], data.get("context", {}) or {})
+        value = cast(str, context.get("selected_option", ""))
 
         if not sender_id or not channel_id or not value:
             return
@@ -319,10 +322,13 @@ class MattermostChannel(BaseChannel):
     # Event: post_deleted ------------------------------------------------------
 
     async def _handle_post_deleted_event(self, msg: dict[str, Any]) -> None:
-        data = msg.get("data", {})
+        data = cast(dict[str, Any], msg.get("data", {}))
         raw_post = data.get("post", "{}")
         try:
-            post = json.loads(raw_post) if isinstance(raw_post, str) else raw_post
+            post = cast(
+                dict[str, Any],
+                json.loads(raw_post) if isinstance(raw_post, str) else raw_post,
+            )
         except json.JSONDecodeError:
             return
         post_id = post.get("id", "")
@@ -363,15 +369,15 @@ class MattermostChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return False
 
-    _BOT_MENTION_RE: re.Pattern | None = None
+    _bot_mention_re: re.Pattern[str] | None = None
 
     def _is_mentioned(self, text: str) -> bool:
         if not self._self_username:
             return False
-        if self._BOT_MENTION_RE is None:
+        if self._bot_mention_re is None:
             pat = r"(?<![@\w])@" + re.escape(self._self_username) + r"(?![@\w])"
-            self._BOT_MENTION_RE = re.compile(pat)
-        return bool(self._BOT_MENTION_RE.search(text))
+            self._bot_mention_re = re.compile(pat)
+        return bool(self._bot_mention_re.search(text))
 
     def _strip_bot_mention(self, text: str) -> str:
         if not text or not self._self_username:
@@ -432,8 +438,8 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("thread context unavailable for {}: {}", key, e)
             return text
 
-        posts = data.get("posts", {})
-        order = data.get("order", [])
+        posts = cast(dict[str, dict[str, Any]], data.get("posts", {}))
+        order = cast(list[str], data.get("order", []))
         if not order:
             return text
 
@@ -467,8 +473,11 @@ class MattermostChannel(BaseChannel):
         try:
             chat_id = msg.chat_id
             meta = msg.metadata or {}
-            mm_meta = meta.get("mattermost", {}) or {}
-            root_id = mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id")
+            mm_meta = cast(dict[str, Any], meta.get("mattermost", {}) or {})
+            root_id = cast(
+                str | None,
+                mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id"),
+            )
 
             file_ids: list[str] = []
             for media_path in msg.media or []:
@@ -521,7 +530,7 @@ class MattermostChannel(BaseChannel):
             return
 
         meta = metadata or {}
-        stream_id = stream_id or meta.get("_stream_id") or chat_id
+        stream_id = cast(str, stream_id or meta.get("_stream_id") or chat_id)
         stream_end = stream_end or bool(meta.get("_stream_end"))
         resuming = resuming or bool(meta.get("_resuming"))
 
@@ -541,13 +550,17 @@ class MattermostChannel(BaseChannel):
                 return
 
             if final and not meta.get("_progress"):
-                mm_meta = (meta.get("mattermost", {}) or {}) if isinstance(meta.get("mattermost"), dict) else {}
-                root_id = (
+                mm_meta = (
+                    cast(dict[str, Any], meta.get("mattermost", {}) or {})
+                    if isinstance(meta.get("mattermost"), dict)
+                    else {}
+                )
+                root_id = cast(str | None, (
                     mm_meta.get("root_id")
                     or mm_meta.get("thread_ts")
                     or meta.get("root_id")
                     or self._stream_root_ids.get(stream_id)
-                )
+                ))
                 chunks = split_message(final, MATTERMOST_MAX_MESSAGE_LEN)
                 first_post_id: str | None = None
                 try:
@@ -579,8 +592,15 @@ class MattermostChannel(BaseChannel):
         if not delta.strip():
             return
 
-        mm_meta = (meta.get("mattermost", {}) or {}) if isinstance(meta.get("mattermost"), dict) else {}
-        root_id = mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id")
+        mm_meta = (
+            cast(dict[str, Any], meta.get("mattermost", {}) or {})
+            if isinstance(meta.get("mattermost"), dict)
+            else {}
+        )
+        root_id = cast(
+            str | None,
+            mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id"),
+        )
         if root_id:
             self._stream_root_ids[stream_id] = root_id
         committed = self._stream_committed.get(stream_id, "")
@@ -598,20 +618,25 @@ class MattermostChannel(BaseChannel):
 
     # API helpers ---------------------------------------------------------------
 
+    def _require_http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            raise RuntimeError("Mattermost client is not started")
+        return self._http_client
+
     async def _api_get(self, path: str) -> dict[str, Any]:
-        resp = await self._http_client.get(path)
+        resp = await self._require_http_client().get(path)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     async def _api_post(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._http_client.post(path, json=json_data)
+        resp = await self._require_http_client().post(path, json=json_data)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     async def _api_put(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._http_client.put(path, json=json_data)
+        resp = await self._require_http_client().put(path, json=json_data)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     async def _create_post(
         self,
@@ -642,14 +667,14 @@ class MattermostChannel(BaseChannel):
 
         try:
             files = {"files": (path.name, path.read_bytes())}
-            resp = await self._http_client.post(
+            resp = await self._require_http_client().post(
                 "/api/v4/files",
                 data={"channel_id": channel_id},
                 files=files,
             )
             resp.raise_for_status()
-            data = resp.json()
-            infos = data.get("file_infos", [])
+            data = cast(dict[str, Any], resp.json())
+            infos = cast(list[dict[str, Any]], data.get("file_infos", []))
             if infos:
                 return infos[0].get("id")
         except Exception as e:
@@ -658,14 +683,15 @@ class MattermostChannel(BaseChannel):
 
     async def _download_file(self, file_id: str) -> str | None:
         try:
-            info_resp = await self._http_client.get(f"/api/v4/files/{file_id}/info")
+            client = self._require_http_client()
+            info_resp = await client.get(f"/api/v4/files/{file_id}/info")
             info_resp.raise_for_status()
-            info = info_resp.json()
+            info = cast(dict[str, Any], info_resp.json())
             name = Path(info.get("name", file_id)).name
             out = Path(get_media_dir("mattermost")) / safe_filename(f"{file_id}_{name}")
             out.parent.mkdir(parents=True, exist_ok=True)
 
-            dl = await self._http_client.get(f"/api/v4/files/{file_id}")
+            dl = await client.get(f"/api/v4/files/{file_id}")
             dl.raise_for_status()
             out.write_bytes(dl.content)
             return str(out)
@@ -685,7 +711,7 @@ class MattermostChannel(BaseChannel):
     async def _remove_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
-        resp = await self._http_client.delete(
+        resp = await self._require_http_client().delete(
             f"/api/v4/users/{self._self_id}/posts/{post_id}/reactions/{emoji}",
         )
         if resp.status_code >= 400:

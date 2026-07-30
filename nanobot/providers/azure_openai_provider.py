@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 
@@ -208,7 +208,7 @@ class AzureOpenAIProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         try:
-            response = await self._client.responses.create(**body)
+            response = cast(Any, await self._client.responses.create(**body))
             return parse_response_output(response)
         except Exception as e:
             return self._handle_error(e)
@@ -234,7 +234,7 @@ class AzureOpenAIProvider(LLMProvider):
         body["stream"] = True
 
         try:
-            stream = await self._client.responses.create(**body)
+            stream = cast(Any, await self._client.responses.create(**body))
             content, tool_calls, finish_reason, usage, reasoning_content = (
                 await consume_sdk_stream(stream, on_content_delta, on_tool_call_delta)
             )

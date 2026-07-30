@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from loguru import logger
@@ -309,7 +309,7 @@ def _decode_access_token_claims(token: str) -> dict[str, Any]:
         claims = json.loads(decoded)
     except (ValueError, TypeError):
         return {}
-    return claims if isinstance(claims, dict) else {}
+    return cast(dict[str, Any], claims) if isinstance(claims, dict) else {}
 
 
 class _XAIHTTPError(RuntimeError):
@@ -356,7 +356,8 @@ async def _fetch_xai_model_capabilities(
 
 def _parse_xai_model_capabilities(payload: Any) -> dict[str, bool]:
     if isinstance(payload, dict):
-        rows = payload.get("data")
+        payload = cast(dict[str, Any], payload)
+        rows: object = payload.get("data")
         if not isinstance(rows, list):
             rows = payload.get("models")
     else:
@@ -365,10 +366,12 @@ def _parse_xai_model_capabilities(payload: Any) -> dict[str, bool]:
         return {}
 
     capabilities: dict[str, bool] = {}
-    for row in rows:
-        if not isinstance(row, dict):
+    for row_value in cast(list[object], rows):
+        if not isinstance(row_value, dict):
             continue
-        meta = row.get("_meta") if isinstance(row.get("_meta"), dict) else {}
+        row = cast(dict[str, Any], row_value)
+        meta_value = row.get("_meta")
+        meta = cast(dict[str, Any], meta_value) if isinstance(meta_value, dict) else {}
         support_value = row.get("supportsBackendSearch")
         if not isinstance(support_value, bool):
             support_value = row.get("supports_backend_search")
@@ -444,7 +447,10 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
     if event_type != "response.output_item.done":
         return None
     item = event.get("item")
-    if not isinstance(item, dict) or item.get("type") != "custom_tool_call":
+    if not isinstance(item, dict):
+        return None
+    item = cast(dict[str, Any], item)
+    if item.get("type") != "custom_tool_call":
         return None
     tool_name = item.get("name")
     if not isinstance(tool_name, str) or not tool_name.startswith("x_"):
@@ -468,14 +474,14 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
 
 def _xai_hosted_tool_arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
-        return dict(value)
+        return cast(dict[str, Any], value)
     if not isinstance(value, str) or not value.strip():
         return {}
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
 
 
 def _build_xai_http_error(
@@ -483,8 +489,8 @@ def _build_xai_http_error(
     headers: httpx.Headers,
     raw: str,
 ) -> _XAIHTTPError:
-    retry_after = LLMProvider._extract_retry_after_from_headers(headers)
-    error_type, error_code = LLMProvider._extract_error_type_code(raw)
+    retry_after = LLMProvider._extract_retry_after_from_headers(headers)  # pyright: ignore[reportPrivateUsage]
+    error_type, error_code = LLMProvider._extract_error_type_code(raw)  # pyright: ignore[reportPrivateUsage]
     response_body = _bounded_error_body(raw)
     return _XAIHTTPError(
         _friendly_error(status_code, response_body),
@@ -522,12 +528,16 @@ def _bounded_error_body(raw: str) -> str | None:
 
 def _redact_error_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
-        return {
-            key: "[REDACTED]" if _is_sensitive_error_key(key) else _redact_error_payload(value)
-            for key, value in payload.items()
-        }
+        redacted: dict[str, Any] = {}
+        payload_mapping: dict[str, Any] = cast(dict[str, Any], payload)
+        for key in payload_mapping:
+            value = payload_mapping[key]
+            redacted[key] = (
+                "[REDACTED]" if _is_sensitive_error_key(key) else _redact_error_payload(value)
+            )
+        return redacted
     if isinstance(payload, list):
-        return [_redact_error_payload(value) for value in payload]
+        return [_redact_error_payload(value) for value in cast(list[Any], payload)]
     return payload
 
 
@@ -593,7 +603,7 @@ def _should_retry_status(
     content: str | None,
 ) -> bool:
     if status_code == 429:
-        return LLMProvider._is_retryable_429_response(
+        return LLMProvider._is_retryable_429_response(  # pyright: ignore[reportPrivateUsage]
             LLMResponse(
                 content=content or "",
                 finish_reason="error",
@@ -602,4 +612,4 @@ def _should_retry_status(
                 error_code=error_code,
             )
         )
-    return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500
+    return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500  # pyright: ignore[reportPrivateUsage]

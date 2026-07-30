@@ -16,7 +16,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from loguru import logger
@@ -87,7 +87,20 @@ from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
-from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
+from nanobot.webui.skills_api import (
+    SkillManagementError,
+    delete_webui_skill,
+    set_webui_skill_enabled,
+    webui_skill_detail_payload,
+    webui_skills_payload,
+)
+from nanobot.webui.skills_marketplace import (
+    SkillsMarketplaceError,
+    install_marketplace_skill,
+    marketplace_skill_trends,
+    search_marketplace_skills,
+    trending_marketplace_skills,
+)
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -97,6 +110,7 @@ _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -151,7 +165,7 @@ class GatewayHTTPHandler:
     def __init__(
         self,
         *,
-        config: Any,  # WebSocketConfig
+        config: WebSocketConfig,
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,
@@ -170,6 +184,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -182,7 +197,11 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
-        self.disabled_skills = disabled_skills or set()
+        self.disabled_skills: set[str] = (
+            disabled_skills if disabled_skills is not None else set()
+        )
+        self.skill_state_action = skill_state_action
+        self._skill_install_lock = asyncio.Lock()
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -410,7 +429,7 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        cleaned = []
+        cleaned: list[dict[str, Any]] = []
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
@@ -440,9 +459,15 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         messages = data.get("messages")
         if isinstance(messages, list):
-            scrub_subagent_messages_for_channel(messages)
+            session_messages = cast(list[dict[str, Any]], messages)
+            scrub_subagent_messages_for_channel(session_messages)
+            raw_session_messages = cast(list[Any], messages)
             data["messages"] = public_history_messages(
-                message for message in messages if isinstance(message, dict)
+                [
+                    cast(dict[str, Any], message)
+                    for message in raw_session_messages
+                    if isinstance(message, dict)
+                ]
             )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
@@ -461,7 +486,12 @@ class GatewayHTTPHandler:
             session_data = self.session_manager.read_session_file(decoded_key)
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
             if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
+                raw_session_messages = cast(list[Any], raw_messages)
+                session_messages = [
+                    cast(dict[str, Any], raw_message)
+                    for raw_message in raw_session_messages
+                    if isinstance(raw_message, dict)
+                ]
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -474,6 +504,18 @@ class GatewayHTTPHandler:
         if direction is not None and direction not in {"latest"}:
             return _http_error(400, "invalid direction")
         before = _query_first(query, "before")
+        from nanobot.session.webui_turns import (
+            websocket_turn_id,
+            websocket_turn_transcript_persistence_failed,
+            websocket_turn_wall_started_at,
+        )
+
+        chat_id = decoded_key.split(":", 1)[1]
+        active_turn_started_at = websocket_turn_wall_started_at(chat_id)
+        active_turn_id = websocket_turn_id(chat_id)
+        active_turn_transcript_persistence_failed = (
+            websocket_turn_transcript_persistence_failed(chat_id)
+        )
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -483,6 +525,11 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages=session_messages,
+            active_turn_started_at=active_turn_started_at,
+            active_turn_id=active_turn_id,
+            active_turn_transcript_persistence_failed=(
+                active_turn_transcript_persistence_failed
+            ),
             limit=limit,
             direction=direction,
             before=before,
@@ -766,6 +813,18 @@ class GatewayHTTPHandler:
             return self._handle_commands(request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
+        if got == "/api/webui/skills/search":
+            return await self._handle_webui_skills_search(request)
+        if got == "/api/webui/skills/trending":
+            return await self._handle_webui_skills_trending(request)
+        if got == "/api/webui/skills/trends":
+            return await self._handle_webui_skill_trends(request)
+        if got == "/api/webui/skills/install":
+            return await self._handle_webui_skill_install(connection, request)
+        if got == "/api/webui/skills/update":
+            return self._handle_webui_skill_update(request)
+        if got == "/api/webui/skills/delete":
+            return self._handle_webui_skill_delete(connection, request)
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
@@ -800,6 +859,159 @@ class GatewayHTTPHandler:
                 disabled_skills=self.disabled_skills,
             )
         )
+
+    async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        params = _parse_query(request.path)
+        query = _query_first(params, "q") or ""
+        provider = _query_first(params, "provider") or "all"
+        try:
+            payload = await search_marketplace_skills(
+                query,
+                self.skills_workspace_path,
+                provider=provider,
+            )
+        except SkillsMarketplaceError as exc:
+            return _http_error(exc.status, exc.message)
+        except Exception:
+            self._log.exception("skills marketplace search failed")
+            return _http_error(500, "skills marketplace search failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skills_trending(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        provider = _query_first(_parse_query(request.path), "provider") or "all"
+        try:
+            payload = await trending_marketplace_skills(
+                self.skills_workspace_path,
+                provider=provider,
+            )
+        except SkillsMarketplaceError as exc:
+            return _http_error(exc.status, exc.message)
+        except Exception:
+            self._log.exception("skills marketplace trending lookup failed")
+            return _http_error(500, "skills marketplace trending lookup failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skill_trends(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        skill_ids = _parse_query(request.path).get("id", [])
+        try:
+            payload = await marketplace_skill_trends(skill_ids)
+        except Exception:
+            self._log.exception("skills.sh trend history lookup failed")
+            return _http_error(500, "skills.sh trend history lookup failed")
+        return _http_json_response(payload)
+
+    async def _handle_webui_skill_install(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self._allow_webui_package_install(connection, request):
+            return _http_error(403, "remote skill installation is disabled")
+        if self._skill_install_lock.locked():
+            return _http_error(409, "another skill installation is already in progress")
+
+        query = _parse_query(request.path)
+        provider = _query_first(query, "provider") or "skills_sh"
+        source = _query_first(query, "source") or ""
+        skill_id = _query_first(query, "skill") or ""
+        version = _query_first(query, "version") or ""
+        async with self._skill_install_lock:
+            try:
+                action = await install_marketplace_skill(
+                    source,
+                    skill_id,
+                    self.skills_workspace_path,
+                    provider=provider,
+                    version=version,
+                )
+            except SkillsMarketplaceError as exc:
+                return _http_error(exc.status, exc.message)
+            except Exception:
+                self._log.exception("skill installation failed")
+                return _http_error(500, "skill installation failed")
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _allow_webui_package_install(self, connection: Any, request: WsRequest) -> bool:
+        if _is_local_browser_request(connection, request.headers):
+            return True
+        try:
+            from nanobot.config.loader import load_config
+
+            return bool(load_config().tools.webui_allow_remote_package_install)
+        except Exception:
+            self._log.exception("failed to load remote package install policy")
+            return False
+
+    def _handle_webui_skill_update(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        name = _query_first(query, "name") or ""
+        raw_enabled = (_query_first(query, "enabled") or "").lower()
+        if raw_enabled not in {"true", "false"}:
+            return _http_error(400, "enabled must be true or false")
+        try:
+            action = set_webui_skill_enabled(
+                self.skills_workspace_path,
+                name,
+                enabled=raw_enabled == "true",
+                disabled_skills=self.disabled_skills,
+            )
+        except SkillManagementError as exc:
+            return _http_error(exc.status, exc.message)
+        self._apply_skill_state()
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _handle_webui_skill_delete(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not _is_local_browser_request(connection, request.headers):
+            return _http_error(403, "remote skill deletion is disabled")
+        name = _query_first(_parse_query(request.path), "name") or ""
+        try:
+            action = delete_webui_skill(
+                self.skills_workspace_path,
+                name,
+                disabled_skills=self.disabled_skills,
+            )
+        except SkillManagementError as exc:
+            return _http_error(exc.status, exc.message)
+        self._apply_skill_state()
+        return _http_json_response({
+            **webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            ),
+            "last_action": action,
+        })
+
+    def _apply_skill_state(self) -> None:
+        if self.skill_state_action is not None:
+            self.skill_state_action(set(self.disabled_skills))
 
     def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):
@@ -837,7 +1049,7 @@ class GatewayHTTPHandler:
         if not isinstance(decoded, dict):
             return _http_error(400, "state must be an object")
         try:
-            state = write_webui_sidebar_state(decoded)
+            state = write_webui_sidebar_state(cast(dict[str, Any], decoded))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:
@@ -898,7 +1110,7 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
             values = json.loads(unquote(raw))
         except Exception:
             return None
-    return values if isinstance(values, dict) else None
+    return cast(dict[str, Any], values) if isinstance(values, dict) else None
 
 
 def _parse_automation_update(
@@ -927,7 +1139,7 @@ def _parse_automation_update(
         raw_schedule = values.get("schedule")
         if not isinstance(raw_schedule, dict):
             return "schedule must be an object"
-        parsed_schedule = _parse_automation_schedule(raw_schedule)
+        parsed_schedule = _parse_automation_schedule(cast(dict[str, Any], raw_schedule))
         if isinstance(parsed_schedule, str):
             return parsed_schedule
         if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
@@ -1017,7 +1229,7 @@ def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
 
         tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
         base = datetime.now(tz=tz)
-        croniter(schedule.expr, base).get_next(datetime)
+        croniter(cast(str, schedule.expr), base).get_next(datetime)
     except Exception:
         return "cron schedule is invalid"
     return None

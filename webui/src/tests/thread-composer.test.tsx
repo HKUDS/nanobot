@@ -825,10 +825,10 @@ describe("ThreadComposer", () => {
     expect(onTranscribeAudio).not.toHaveBeenCalled();
   });
 
-  it("warns during recording when microphone input is silent", async () => {
+  it("transcribes recorded audio even when waveform samples are silent", async () => {
     mockVoiceRecorder();
     mockVoiceAudioInput();
-    const onTranscribeAudio = vi.fn(async () => "should not appear");
+    const onTranscribeAudio = vi.fn(async () => "quiet voice");
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -843,9 +843,11 @@ describe("ThreadComposer", () => {
       await new Promise((resolve) => setTimeout(resolve, 1_150));
     });
 
-    expect(screen.getByText("No microphone input detected.")).toBeInTheDocument();
+    expect(screen.queryByText("No microphone input detected.")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
-    expect(onTranscribeAudio).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue("quiet voice")).toBeInTheDocument();
   });
 
   it("does not treat unavailable microphone levels as silence", async () => {
@@ -1478,12 +1480,29 @@ describe("ThreadComposer", () => {
         <ThreadComposer
           onSend={vi.fn()}
           placeholder="Type your message..."
-          skills={[{
-            name: skillName,
-            description: "Fetch and summarize the latest AI research papers every day",
-            source: "builtin",
-            available: true,
-          }]}
+          skills={[
+            {
+              name: skillName,
+              description: "Fetch and summarize the latest AI research papers every day",
+              source: "builtin",
+              enabled: true,
+              available: true,
+            },
+            {
+              name: "arxiv-disabled",
+              description: "Disabled research workflow",
+              source: "builtin",
+              enabled: false,
+              available: true,
+            },
+            {
+              name: "arxiv-unavailable",
+              description: "Unavailable research workflow",
+              source: "builtin",
+              enabled: true,
+              available: false,
+            },
+          ]}
           slashCommands={COMMANDS}
         />,
     );
@@ -1499,6 +1518,8 @@ describe("ThreadComposer", () => {
     const name = within(option).getByText(skillName);
     expect(name).not.toHaveClass("truncate");
     expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
+    expect(within(palette).queryByText("arxiv-disabled")).not.toBeInTheDocument();
+    expect(within(palette).queryByText("arxiv-unavailable")).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Tab" });

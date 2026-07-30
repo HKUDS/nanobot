@@ -1,5 +1,7 @@
 """Provider wrapper that transparently fails over to fallback models on error."""
 
+# pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import time
@@ -8,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -121,11 +123,11 @@ class FallbackProvider(LLMProvider):
         self._primary_tripped_at: float | None = None
 
     @property
-    def generation(self):
+    def generation(self) -> GenerationSettings:
         return self._primary.generation
 
     @generation.setter
-    def generation(self, value):
+    def generation(self, value: GenerationSettings) -> None:
         self._primary.generation = value
 
     def get_default_model(self) -> str:

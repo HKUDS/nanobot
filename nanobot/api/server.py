@@ -12,7 +12,7 @@ import hmac
 import json as _json
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
 from aiohttp import web
 from loguru import logger
@@ -30,6 +30,9 @@ from nanobot.utils.media_decode import (
 )
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
+if TYPE_CHECKING:
+    from nanobot.agent.loop import AgentLoop
+
 __all__ = (
     "MAX_FILE_SIZE",
     "_FileSizeExceeded",
@@ -44,7 +47,7 @@ API_CHAT_ID = "default"
 _AGENT_LOOP_KEY = web.AppKey[Any]("agent_loop")
 _MODEL_NAME_KEY = web.AppKey[str]("model_name")
 _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
-_SESSION_LOCKS_KEY = web.AppKey[dict]("session_locks")
+_SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _MISSING = object()
 
 
@@ -111,6 +114,26 @@ def _response_text(value: Any) -> str:
         return str(getattr(value, "content") or "")
     return str(value)
 
+
+def _as_str(value: object) -> str:
+    """Return *value* when it is text, otherwise an empty string."""
+    return value if isinstance(value, str) else ""
+
+
+def _require_json_object(value: object, field: str) -> dict[str, Any]:
+    """Validate an object-valued field from an untrusted JSON request."""
+    if not isinstance(value, dict):
+        raise TypeError(f"{field} must be an object")
+    return cast(dict[str, Any], value)
+
+
+def _require_json_string(value: object, field: str) -> str:
+    """Validate a string-valued field from an untrusted JSON request."""
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # SSE helpers
 # ---------------------------------------------------------------------------
@@ -141,13 +164,19 @@ _SSE_DONE = b"data: [DONE]\n\n"
 # ---------------------------------------------------------------------------
 
 
-def _parse_json_content(body: dict) -> tuple[str, list[str]]:
+def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
     """Parse JSON request body. Returns (text, media_paths)."""
-    messages = body.get("messages")
-    if not isinstance(messages, list) or len(messages) != 1:
+    messages_value = cast(object, body.get("messages"))
+    if not isinstance(messages_value, list):
         raise ValueError("Only a single user message is supported")
-    message = messages[0]
-    if not isinstance(message, dict) or message.get("role") != "user":
+    messages = cast(list[object], messages_value)
+    if len(messages) != 1:
+        raise ValueError("Only a single user message is supported")
+    message_value: object = messages[0]
+    if not isinstance(message_value, dict):
+        raise ValueError("Only a single user message is supported")
+    message = cast(dict[str, Any], message_value)
+    if message.get("role") != "user":
         raise ValueError("Only a single user message is supported")
 
     user_content = message.get("content", "")
@@ -156,13 +185,26 @@ def _parse_json_content(body: dict) -> tuple[str, list[str]]:
 
     if isinstance(user_content, list):
         text_parts: list[str] = []
-        for part in user_content:
-            if not isinstance(part, dict):
+        for part_value in cast(list[object], user_content):
+            if not isinstance(part_value, dict):
                 continue
+            part = cast(dict[str, Any], part_value)
             if part.get("type") == "text":
-                text_parts.append(part.get("text", ""))
+                text_parts.append(
+                    _require_json_string(
+                        cast(object, part.get("text", "")),
+                        "messages[0].content[].text",
+                    )
+                )
             elif part.get("type") == "image_url":
-                url = part.get("image_url", {}).get("url", "")
+                image_url = _require_json_object(
+                    cast(object, part.get("image_url", {})),
+                    "messages[0].content[].image_url",
+                )
+                url = _require_json_string(
+                    cast(object, image_url.get("url", "")),
+                    "messages[0].content[].image_url.url",
+                )
                 if url.startswith("data:"):
                     saved = _save_base64_data_url(url, media_dir)
                     if saved:
@@ -191,7 +233,7 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
     media_paths: list[str] = []
 
     while True:
-        part = await reader.next()
+        part: Any = await reader.next()
         if part is None:
             break
         if part.name == "message":
@@ -223,11 +265,9 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
 # ---------------------------------------------------------------------------
 
 
-async def handle_chat_completions(request: web.Request) -> web.Response:
+async def handle_chat_completions(request: web.Request) -> web.Response | web.StreamResponse:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
-    content_type = request.content_type or ""
-    if not isinstance(content_type, str):
-        content_type = ""
+    content_type = _as_str(cast(object, request.content_type or ""))
 
     agent_loop = _app_value(request.app, _AGENT_LOOP_KEY, "agent_loop")
     timeout_s: float = _app_value(
@@ -247,6 +287,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                 body = await request.json()
             except Exception:
                 return _error_json(400, "Invalid JSON body")
+            if not isinstance(body, dict):
+                return _error_json(400, "Invalid JSON body")
+            body = cast(dict[str, Any], body)
             stream = body.get("stream", False)
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
@@ -405,7 +448,7 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 def create_app(
-    agent_loop,
+    agent_loop: "AgentLoop",
     model_name: str = "nanobot",
     request_timeout: float = 120.0,
     api_key: str = "",
@@ -425,7 +468,10 @@ def create_app(
     app[_SESSION_LOCKS_KEY] = {}  # per-user locks, keyed by session_key
 
     @web.middleware
-    async def auth_middleware(request: web.Request, handler) -> web.StreamResponse:
+    async def auth_middleware(
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
         # Allow unauthenticated health checks.
         if request.path == "/health":
             return await handler(request)

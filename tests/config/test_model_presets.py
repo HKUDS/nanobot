@@ -1,7 +1,10 @@
+import json
 import warnings
 
 import pytest
 
+from nanobot.agent.model_presets import load_model_preset_catalog
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.schema import Config
 
 
@@ -14,6 +17,24 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.context_window_tokens == config.agents.defaults.context_window_tokens
     assert resolved.temperature == config.agents.defaults.temperature
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
+
+
+def test_model_preset_catalog_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    name = "NANOBOT_TEST_CATALOG_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_model_preset_catalog(config_path)
+
+    assert exc_info.value.path == config_path
 
 
 def test_agent_timezone_rejects_unknown_iana_name() -> None:

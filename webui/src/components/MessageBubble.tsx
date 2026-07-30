@@ -9,6 +9,7 @@ import {
 import {
   Check,
   ChevronRight,
+  CircleAlert,
   Clock3,
   Copy,
   ImageIcon,
@@ -44,6 +45,8 @@ import type {
   UIImage,
   UIMediaAttachment,
   UIMessage,
+  MessageDeliveryErrorKind,
+  MessageDeliveryStatus,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -130,6 +133,91 @@ function MessageCopyButton({ content }: { content: string }) {
   );
 }
 
+function deliveryErrorCopy(
+  kind: MessageDeliveryErrorKind | undefined,
+  t: (key: string) => string,
+): { title: string; body: string } {
+  switch (kind) {
+    case "message_too_big":
+      return {
+        title: t("errors.messageTooBig.title"),
+        body: t("errors.messageTooBig.body"),
+      };
+    case "workspace_scope_rejected":
+      return {
+        title: t("errors.workspaceScopeRejected.title"),
+        body: t("errors.workspaceScopeRejected.body"),
+      };
+    case "turn_rejected":
+    case undefined:
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
+      };
+    default: {
+      const _exhaustive: never = kind;
+      return { title: String(_exhaustive), body: "" };
+    }
+  }
+}
+
+function UserDeliveryStatus({
+  status,
+  errorKind,
+}: {
+  status: MessageDeliveryStatus | undefined;
+  errorKind: MessageDeliveryErrorKind | undefined;
+}) {
+  const { t } = useTranslation();
+  if (status !== "sending" && status !== "failed") return null;
+  if (status === "sending") {
+    return (
+      <span
+        role="status"
+        className="inline-flex items-center gap-1 text-[12px] leading-none text-muted-foreground"
+      >
+        <Clock3 className="h-3.5 w-3.5" aria-hidden />
+        {t("message.delivery.sending")}
+      </span>
+    );
+  }
+
+  const label = t("message.delivery.failed");
+  const { title, body } = deliveryErrorCopy(errorKind, t);
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label}: ${title}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-sm text-[12px] leading-none",
+              "text-destructive/80 transition-colors hover:text-destructive",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "dark:text-red-400/80 dark:hover:text-red-400",
+            )}
+          >
+            <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+            {label}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="end"
+          className="max-w-72 px-3 py-2.5 text-left"
+        >
+          <p className="font-medium text-popover-foreground">{title}</p>
+          <p className="mt-1 leading-relaxed text-muted-foreground">{body}</p>
+        </TooltipContent>
+      </Tooltip>
+      <span role="alert" aria-live="assertive" className="sr-only">
+        {title}. {body}
+      </span>
+    </>
+  );
+}
+
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
@@ -163,6 +251,8 @@ export function MessageBubble({
     const parsedMessage = parseQuotedUserMessage(message.content);
     const userContent = parsedMessage.content;
     const hasText = userContent.trim().length > 0;
+    const showDeliveryStatus =
+      message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const messageText = slashCommand ? (
@@ -208,10 +298,14 @@ export function MessageBubble({
             {messageText}
           </p>
         ) : null}
-        {hasText && showCopyAction ? (
+        {showDeliveryStatus || (hasText && showCopyAction) ? (
           <TooltipProvider delayDuration={220} skipDelayDuration={80}>
-            <div className="flex min-h-8 items-center justify-end text-muted-foreground">
-              <MessageCopyButton content={message.content} />
+            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+              <UserDeliveryStatus
+                status={message.deliveryStatus}
+                errorKind={message.deliveryErrorKind}
+              />
+              {hasText && showCopyAction ? <MessageCopyButton content={message.content} /> : null}
             </div>
           </TooltipProvider>
         ) : null}

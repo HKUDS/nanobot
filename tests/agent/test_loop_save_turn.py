@@ -713,10 +713,9 @@ def test_unified_session_route_ignores_non_user_destinations(
     assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
 
 
-# 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
-# at the top of ``_process_message`` and filters ``msg.media`` down to
-# paths that magic-byte-sniff as images, so the test fixture needs real
-# bytes on disk (not just placeholder paths).
+# 1x1 PNG used by the media-persistence tests. Attachment preparation filters
+# ``msg.media`` down to paths that magic-byte-sniff as images, so the test
+# fixture needs real bytes on disk (not just placeholder paths).
 _PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n"
     b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"

@@ -355,6 +355,9 @@
     transition:
       grid-template-rows 900ms cubic-bezier(0.33, 1, 0.68, 1);
   }
+  .thread-layout[data-layout="thread"] {
+    grid-template-rows: minmax(0, 1fr) auto 0fr;
+  }
   @media (min-width: 640px) {
     .thread-layout[data-layout="hero"] {
       grid-template-rows: minmax(min-content, 1fr) auto 1fr;

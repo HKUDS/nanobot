@@ -67,6 +67,13 @@ class TestExtractText:
         result = extract_text(txt_file)
         assert result == content
 
+    def test_extract_text_accepts_string_path(self, tmp_path: Path):
+        """String paths retain the compatibility behavior of Path inputs."""
+        txt_file = tmp_path / "string-path.txt"
+        txt_file.write_text("string path", encoding="utf-8")
+
+        assert extract_text(str(txt_file)) == "string path"
+
     def test_extract_text_txt_file_with_truncation(self, tmp_path: Path):
         """Test that large text files are truncated."""
         txt_file = tmp_path / "large.txt"

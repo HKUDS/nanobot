@@ -8,7 +8,7 @@ import http
 import ipaddress
 import json
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from websockets.datastructures import Headers
@@ -120,7 +120,7 @@ def is_localhost(connection: Any) -> bool:
     addr = getattr(connection, "remote_address", None)
     if not addr:
         return False
-    host = addr[0] if isinstance(addr, tuple) else addr
+    host = cast(Any, addr[0] if isinstance(addr, tuple) else addr)
     if not isinstance(host, str):
         return False
     if host.startswith("::ffff:"):

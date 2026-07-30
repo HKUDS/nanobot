@@ -65,6 +65,17 @@ def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None
     assert jobs[0].state.run_history[0].duration_ms == 12
 
 
+def test_cron_job_from_dict_rejects_malformed_run_history() -> None:
+    with pytest.raises(TypeError):
+        CronJob.from_dict(
+            {
+                "id": "j1",
+                "name": "t",
+                "state": {"run_history": [None]},
+            }
+        )
+
+
 def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     store_path.parent.mkdir(parents=True)

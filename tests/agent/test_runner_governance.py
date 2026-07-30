@@ -891,7 +891,8 @@ def test_drop_malformed_tool_calls_trims_response():
         tool_calls=[
             ToolCallRequest(id="1", name=None, arguments={}),
             ToolCallRequest(id="2", name="", arguments={}),
-            ToolCallRequest(id="3", name="read_file", arguments={}),
+            ToolCallRequest(id="3", name={"unexpected": "object"}, arguments={}),
+            ToolCallRequest(id="4", name="read_file", arguments={}),
         ],
         finish_reason="tool_calls",
     )
@@ -899,7 +900,7 @@ def test_drop_malformed_tool_calls_trims_response():
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
     assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
-    assert dropped == 2
+    assert dropped == 3
     assert all_dropped is False
     assert orig == "tool_calls"
 

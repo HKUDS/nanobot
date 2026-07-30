@@ -4,6 +4,9 @@ The WebSocket channel owns transport/authentication. This module owns the
 settings payload shape and the allowlisted config mutations exposed to WebUI.
 """
 
+# oauth-cli-kit is an optional dependency and does not publish type stubs.
+# pyright: reportMissingTypeStubs=false
+
 from __future__ import annotations
 
 import json
@@ -13,8 +16,9 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Iterable
 from contextlib import suppress
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -27,7 +31,7 @@ from nanobot.audio.transcription_registry import (
     transcription_provider_names,
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
-from nanobot.config.schema import ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -184,8 +188,12 @@ def decorate_settings_payload(
     surface_value = _normalize_surface(surface)
     sections = restart_required_sections
     if sections is None:
-        raw_sections = payload.get("restart_required_sections") or []
-        sections = [str(section) for section in raw_sections if isinstance(section, str)]
+        raw_sections: object = payload.get("restart_required_sections") or []
+        sections = [
+            section
+            for section in cast(Iterable[object], raw_sections)
+            if isinstance(section, str)
+        ]
     sections = sorted(dict.fromkeys(sections))
     result = dict(payload)
     result["surface"] = surface_value
@@ -230,12 +238,12 @@ def _provider_json_setting(
     if not raw:
         return None
     try:
-        value = json.loads(raw)
+        value: object = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise WebUISettingsError(f"{snake} must be a JSON object") from exc
     if not isinstance(value, dict):
         raise WebUISettingsError(f"{snake} must be a JSON object")
-    return value or None
+    return cast(dict[str, Any], value) or None
 
 
 _REDACTED_PROVIDER_SECRET = "••••••••"
@@ -280,15 +288,19 @@ def _redact_provider_secret_values(value: Any, *, secret: bool = False) -> Any:
     if secret and value not in (None, ""):
         return _REDACTED_PROVIDER_SECRET
     if isinstance(value, dict):
+        value_mapping = cast(dict[str, Any], value)
         return {
             key: _redact_provider_secret_values(
                 item,
                 secret=_provider_setting_key_is_secret(key),
             )
-            for key, item in value.items()
+            for key, item in value_mapping.items()
         }
     if isinstance(value, list):
-        return [_redact_provider_secret_values(item) for item in value]
+        return [
+            _redact_provider_secret_values(item)
+            for item in cast(list[Any], value)
+        ]
     return value
 
 
@@ -301,23 +313,25 @@ def _restore_redacted_provider_secret_values(
     if secret and submitted == _REDACTED_PROVIDER_SECRET:
         return current
     if isinstance(submitted, dict):
-        current_mapping = current if isinstance(current, dict) else {}
+        submitted_mapping = cast(dict[str, Any], submitted)
+        current_mapping = cast(dict[str, Any], current) if isinstance(current, dict) else {}
         return {
             key: _restore_redacted_provider_secret_values(
                 item,
                 current_mapping.get(key),
                 secret=_provider_setting_key_is_secret(key),
             )
-            for key, item in submitted.items()
+            for key, item in submitted_mapping.items()
         }
     if isinstance(submitted, list):
-        current_items = current if isinstance(current, list) else []
+        submitted_items = cast(list[Any], submitted)
+        current_items = cast(list[Any], current) if isinstance(current, list) else []
         return [
             _restore_redacted_provider_secret_values(
                 item,
                 current_items[index] if index < len(current_items) else None,
             )
-            for index, item in enumerate(submitted)
+            for index, item in enumerate(submitted_items)
         ]
     return submitted
 
@@ -366,7 +380,12 @@ def _validated_provider_config(
     try:
         return config_type.model_validate(values)
     except ValueError as exc:
-        errors = getattr(exc, "errors", lambda: [])()
+        errors_callback = getattr(exc, "errors", None)
+        errors: list[dict[str, Any]] = (
+            cast(Any, errors_callback)()
+            if callable(errors_callback)
+            else []
+        )
         if errors:
             error = errors[0]
             field = ".".join(str(part) for part in error.get("loc", ()))
@@ -515,16 +534,17 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     )
 
 
-def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
+def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
+    model_extra = config.providers.model_extra or {}
     return [
         (name, provider_config)
-        for name, provider_config in (config.providers.model_extra or {}).items()
+        for name, provider_config in model_extra.items()
         if isinstance(provider_config, ProviderConfig)
     ]
 
 
 def _resolve_settings_provider(
-    config: Any,
+    config: Config,
     provider_name: str,
 ) -> tuple[Any, str, ProviderConfig] | None:
     spec = find_by_name(provider_name)
@@ -610,7 +630,7 @@ def _provider_settings_row(
     return row
 
 
-def _provider_settings_rows(config: Any, selected_provider: str | None) -> list[dict[str, Any]]:
+def _provider_settings_rows(config: Config, selected_provider: str | None) -> list[dict[str, Any]]:
     """Return one Settings row per provider family while preserving legacy configs."""
     aliases: dict[str, list[Any]] = {}
     for spec in PROVIDERS:
@@ -664,8 +684,9 @@ def _model_id_from_row(row: Any) -> str | None:
         return row.strip() or None
     if not isinstance(row, dict):
         return None
+    row_mapping = cast(dict[str, Any], row)
     for key in ("id", "name", "model"):
-        value = row.get(key)
+        value = row_mapping.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
@@ -674,6 +695,7 @@ def _model_id_from_row(row: Any) -> str | None:
 def _model_context_window(row: Any) -> int | None:
     if not isinstance(row, dict):
         return None
+    row_mapping = cast(dict[str, Any], row)
     for key in (
         "context_window",
         "context_length",
@@ -681,7 +703,7 @@ def _model_context_window(row: Any) -> int | None:
         "max_model_len",
         "max_input_tokens",
     ):
-        value = row.get(key)
+        value = row_mapping.get(key)
         if isinstance(value, int) and value > 0:
             return value
         if isinstance(value, float) and value > 0:
@@ -697,13 +719,22 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
     description: str | None = None
     owned_by: str | None = None
     if isinstance(row, dict):
-        raw_label = row.get("display_name") or row.get("label") or row.get("name")
+        row_mapping = cast(dict[str, Any], row)
+        raw_label = (
+            row_mapping.get("display_name")
+            or row_mapping.get("label")
+            or row_mapping.get("name")
+        )
         if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
             label = raw_label.strip()
-        raw_description = row.get("description")
+        raw_description = row_mapping.get("description")
         if isinstance(raw_description, str) and raw_description.strip():
             description = raw_description.strip()
-        raw_owner = row.get("owned_by") or row.get("owner") or row.get("organization")
+        raw_owner = (
+            row_mapping.get("owned_by")
+            or row_mapping.get("owner")
+            or row_mapping.get("organization")
+        )
         if isinstance(raw_owner, str) and raw_owner.strip():
             owned_by = raw_owner.strip()
     payload = {
@@ -718,12 +749,12 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
 
 
 def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
-    raw_rows = body.get("data") if isinstance(body, dict) else body
+    raw_rows = cast(dict[str, Any], body).get("data") if isinstance(body, dict) else body
     if not isinstance(raw_rows, list):
         return []
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw_row in raw_rows:
+    for raw_row in cast(list[object], raw_rows):
         row = _model_row_payload(raw_row)
         if row is None or row["id"] in seen:
             continue
@@ -907,7 +938,7 @@ def _model_configuration_slug(label: str) -> str:
     return normalized
 
 
-def _custom_provider_key(config: Any, display_name: str) -> str:
+def _custom_provider_key(config: Config, display_name: str) -> str:
     slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
     base = f"custom-{slug or 'provider'}"
     if len(base) > 56:
@@ -925,7 +956,7 @@ def _custom_provider_key(config: Any, display_name: str) -> str:
 
 
 def _provider_display_name_exists(
-    config: Any,
+    config: Config,
     display_name: str,
     *,
     exclude_key: str | None = None,
@@ -945,7 +976,7 @@ def _provider_display_name_exists(
     return False
 
 
-def _unique_model_configuration_name(config: Any, label: str) -> str:
+def _unique_model_configuration_name(config: Config, label: str) -> str:
     """Return a stable, unused preset name for a migrated model configuration."""
     try:
         base = _model_configuration_slug(label)
@@ -963,7 +994,7 @@ def _model_configuration_label(model: str) -> str:
     return model.rsplit("/", 1)[-1] or model
 
 
-def _model_call_order_state(config: Any) -> tuple[list[str], bool]:
+def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
     defaults = config.agents.defaults
     primary = defaults.model_preset
     if not primary or primary == "default" or primary not in config.model_presets:
@@ -976,7 +1007,7 @@ def _model_call_order_state(config: Any) -> tuple[list[str], bool]:
     return order, True
 
 
-def _validate_configured_provider(config: Any, provider: str) -> None:
+def _validate_configured_provider(config: Config, provider: str) -> None:
     if provider == "auto":
         return
     resolved_provider = _resolve_settings_provider(config, provider)
@@ -989,7 +1020,7 @@ def _validate_configured_provider(config: Any, provider: str) -> None:
         raise WebUISettingsError("provider is not configured")
 
 
-def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
+def _image_generation_provider_rows(config: Config) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in image_gen_provider_names():
         image_provider = get_image_gen_provider(name)
@@ -1062,7 +1093,7 @@ def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
     return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
-def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
+def _transcription_provider_rows(config: Config) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in transcription_provider_names():
         spec = find_by_name(name)
@@ -1549,17 +1580,23 @@ def update_model_call_order(query: QueryParams) -> dict[str, Any]:
     if raw_order is None:
         raise WebUISettingsError("model call order is required")
     try:
-        order = json.loads(raw_order)
+        order: object = json.loads(raw_order)
     except json.JSONDecodeError:
         raise WebUISettingsError("model call order must be a JSON array") from None
     if (
         not isinstance(order, list)
         or not order
-        or any(not isinstance(name, str) or not name.strip() for name in order)
+        or any(
+            not isinstance(name, str) or not name.strip()
+            for name in cast(list[object], order)
+        )
     ):
         raise WebUISettingsError("model call order must contain at least one preset")
 
-    normalized_order = [name.strip() for name in order]
+    normalized_order = [
+        cast(str, name).strip()
+        for name in cast(list[object], order)
+    ]
     config = load_config()
     _, editable = _model_call_order_state(config)
     if not editable:
@@ -1572,7 +1609,7 @@ def update_model_call_order(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
 
     defaults = config.agents.defaults
-    fallback_models = normalized_order[1:]
+    fallback_models: list[FallbackCandidate] = list(normalized_order[1:])
     if (
         defaults.model_preset != normalized_order[0]
         or defaults.fallback_models != fallback_models
@@ -1605,7 +1642,7 @@ def migrate_model_configurations(_query: QueryParams | None = None) -> dict[str,
         defaults.model_preset = name
         created.append(name)
 
-    fallback_models: list[str] = []
+    fallback_models: list[FallbackCandidate] = []
     for fallback in defaults.fallback_models:
         if isinstance(fallback, str):
             fallback_models.append(fallback)

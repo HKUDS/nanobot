@@ -1,5 +1,7 @@
 """Spawn tool for creating background subagents."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -16,6 +18,7 @@ from nanobot.security.workspace_access import current_workspace_scope
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import ToolContext
 
 
 @tool_parameters(
@@ -49,8 +52,11 @@ class SpawnTool(Tool):
         self._manager = manager
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls(manager=ctx.subagent_manager)
+    def create(cls, ctx: ToolContext) -> Tool:
+        manager = ctx.subagent_manager
+        if manager is None:
+            raise RuntimeError("SpawnTool requires an initialized subagent manager")
+        return cls(manager=manager)
 
     @property
     def name(self) -> str:

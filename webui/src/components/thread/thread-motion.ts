@@ -5,18 +5,22 @@ import type {
 
 type ThreadMotionMode =
   | "idle"
+  | "follow-latest"
   | "anchor-prompt"
   | "follow-output"
   | "follow-completion"
+  | "navigating-latest"
   | "navigating-history"
   | "browsing-history";
 
 type AutomaticThreadMotionMode =
   | "idle"
+  | "follow-latest"
   | "anchor-prompt"
   | "follow-output";
 
 type ThreadMotionEvent =
+  | "navigate-latest"
   | "navigate-history"
   | "navigation-settled"
   | "user-scroll"
@@ -34,25 +38,43 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
   >
 > = {
   idle: {
+    "navigate-latest": "navigating-latest",
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
+  },
+  "follow-latest": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
   "anchor-prompt": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "turn-completed": "follow-completion",
   },
   "follow-output": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "turn-completed": "follow-completion",
   },
   "follow-completion": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "composer-input": "idle",
   },
+  "navigating-latest": {
+    "navigate-latest": "navigating-latest",
+    "navigate-history": "navigating-history",
+    "navigation-settled": "current-automatic-mode",
+    "user-scroll": "browsing-history",
+    "boundary-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
+  },
   "navigating-history": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "navigation-settled": "browsing-history",
     "user-scroll": "browsing-history",
@@ -60,6 +82,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "resume-follow": "current-automatic-mode",
   },
   "browsing-history": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "resume-follow": "current-automatic-mode",
   },
@@ -124,9 +147,10 @@ function defaultScheduler(): ThreadMotionScheduler {
 }
 
 /**
- * Owns the policy that turns discrete layout events into continuous camera
- * motion. Callers only invalidate geometry; one display frame coalesces those
- * notifications, reads the authoritative layout, and retargets the camera.
+ * Owns the policy that turns discrete layout events into automatic tail
+ * pinning or explicit camera navigation. Callers only invalidate geometry;
+ * one display frame coalesces those notifications and reads the authoritative
+ * layout before applying either policy.
  */
 export class ThreadMotionCoordinator {
   private readonly camera: ThreadMotionCamera;
@@ -241,8 +265,18 @@ export class ThreadMotionCoordinator {
     this.camera.jumpTo(top);
   }
 
-  animateTo(top: number): ThreadCameraFollowResult | null {
-    return this.camera.navigateTo(top);
+  /**
+   * Explicitly navigate to the live tail while allowing authoritative layout
+   * frames to retarget that destination as streamed output continues to grow.
+   */
+  navigateLatestTo(top: number): ThreadCameraFollowResult | null {
+    this.camera.cancel();
+    this.transition("navigate-latest");
+    const result = this.camera.navigateTo(top);
+    if (!result || result === "settled") {
+      this.settleLatestNavigation();
+    }
+    return result;
   }
 
   navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
@@ -271,6 +305,15 @@ export class ThreadMotionCoordinator {
    */
   observeScroll(nearBottom: boolean): ThreadScrollOwner {
     switch (this.mode) {
+      case "navigating-latest":
+        if (!this.camera.isFollowing()) {
+          if (nearBottom) {
+            this.settleLatestNavigation();
+          } else {
+            this.invalidateGeometry();
+          }
+        }
+        return "navigation";
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
@@ -307,13 +350,14 @@ export class ThreadMotionCoordinator {
 
   private isHistoryMode(): boolean {
     return (
-      this.mode === "navigating-history"
+      this.mode === "navigating-latest"
+      || this.mode === "navigating-history"
       || this.mode === "browsing-history"
     );
   }
 
   private automaticMode(): AutomaticThreadMotionMode {
-    if (!this.turn.id) return "idle";
+    if (!this.turn.id) return "follow-latest";
     return this.promptPositioned && this.turn.hasOutput
       ? "follow-output"
       : "anchor-prompt";
@@ -336,13 +380,15 @@ export class ThreadMotionCoordinator {
     const result = this.camera.followTo(target);
     if (
       result
-      && (
-        Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
-        || result === "retargeted"
-      )
+      && Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
     ) {
       this.onAutoFollow?.();
     }
+  }
+
+  private settleLatestNavigation(): void {
+    if (!this.transition("navigation-settled")) return;
+    this.invalidateGeometry();
   }
 
   private readonly flushGeometry = (): void => {
@@ -358,8 +404,21 @@ export class ThreadMotionCoordinator {
     if (!geometry) return;
     this.onGeometry?.(geometry);
 
+    if (this.mode === "navigating-latest") {
+      const result = this.camera.navigateTo(geometry.maxScrollTop);
+      if (!result || result === "settled") {
+        this.settleLatestNavigation();
+      }
+      return;
+    }
     if (this.mode === "follow-completion") {
       this.followGeometry(geometry);
+      return;
+    }
+    if (this.mode === "follow-latest") {
+      if (geometry.maxScrollTop - geometry.scrollTop > GEOMETRY_EPSILON_PX) {
+        this.camera.jumpTo(geometry.maxScrollTop);
+      }
       return;
     }
     if (this.isHistoryMode() || !this.turn.id) return;
@@ -374,8 +433,9 @@ export class ThreadMotionCoordinator {
         return;
       }
       // Before output exists, the real lower scroll boundary is the only
-      // position with zero hidden downward travel. Once output exists, start
-      // from the prompt origin and let the follow camera reveal its growth.
+      // position with zero hidden downward travel. Once output exists, first
+      // establish the prompt origin; automatic follow below then resolves the
+      // current tail in this same authoritative geometry frame.
       this.camera.jumpTo(
         this.turn.hasOutput ? geometry.promptTop : geometry.maxScrollTop,
       );

@@ -1,7 +1,9 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -102,6 +104,11 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
+  const listContentRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLDivElement>(null);
+  const activeHighlightRef = useRef<HTMLDivElement>(null);
+  const activeHighlightSurfaceRef = useRef<HTMLDivElement>(null);
+  const highlightVisibleRef = useRef(false);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -156,6 +163,74 @@ export const ChatList = memo(function ChatList({
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
   }, [showArchived, sort]);
 
+  useLayoutEffect(() => {
+    let resetTransitionFrame: number | null = null;
+
+    const updateHighlight = () => {
+      const content = listContentRef.current;
+      const row = activeRowRef.current;
+      const highlight = activeHighlightRef.current;
+      const surface = activeHighlightSurfaceRef.current;
+
+      if (!highlight || !surface) return;
+      if (!content || !row) {
+        surface.style.opacity = "0";
+        surface.style.transform = "scale(0.97)";
+        highlightVisibleRef.current = false;
+        return;
+      }
+
+      const shouldFloatIn = !highlightVisibleRef.current;
+      if (shouldFloatIn) {
+        highlight.style.transitionProperty = "none";
+      }
+
+      const contentRect = content.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      highlight.style.width = `${rowRect.width}px`;
+      highlight.style.height = `${rowRect.height}px`;
+      highlight.style.transform = `translate3d(${rowRect.left - contentRect.left}px, ${
+        rowRect.top - contentRect.top
+      }px, 0)`;
+
+      if (shouldFloatIn) {
+        void highlight.offsetWidth;
+      }
+
+      surface.style.opacity = "1";
+      surface.style.transform = "scale(1)";
+      highlightVisibleRef.current = true;
+
+      if (shouldFloatIn) {
+        resetTransitionFrame = window.requestAnimationFrame(() => {
+          highlight.style.removeProperty("transition-property");
+          resetTransitionFrame = null;
+        });
+      }
+    };
+
+    updateHighlight();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateHighlight);
+    if (resizeObserver) {
+      if (listContentRef.current) resizeObserver.observe(listContentRef.current);
+      if (activeRowRef.current) resizeObserver.observe(activeRowRef.current);
+    }
+    window.addEventListener("resize", updateHighlight);
+
+    return () => {
+      if (resetTransitionFrame !== null) {
+        window.cancelAnimationFrame(resetTransitionFrame);
+      }
+      activeHighlightRef.current?.style.removeProperty("transition-property");
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateHighlight);
+    };
+  }, [activeKey, density, limitedGroups, showPreviews, showTimestamps]);
+
   if (loading && sessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] text-muted-foreground">
@@ -181,7 +256,11 @@ export const ChatList = memo(function ChatList({
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
-      <div className="min-w-0 space-y-3 px-2 py-1.5">
+      <div
+        ref={listContentRef}
+        data-chat-list-content
+        className="relative min-w-0 space-y-3 px-2 py-1.5"
+      >
         {limitedGroups.map((group, index) => {
           const foldableChatsGroup = isFoldableChatsGroup(group);
           const foldedChatsGroup = isFoldedChatsGroup(group, collapsedGroups);
@@ -194,7 +273,7 @@ export const ChatList = memo(function ChatList({
           const canToggleFold = group.sessions.length > COLLAPSED_CHATS_VISIBLE_COUNT;
 
           return (
-            <section key={group.id} aria-label={group.label}>
+            <section key={group.id} aria-label={group.label} className="relative z-[1]">
               {index === firstProjectGroupIndex ? (
                 <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
                   {labels.projects}
@@ -251,17 +330,20 @@ export const ChatList = memo(function ChatList({
                     return (
                       <li key={s.key} className="min-w-0">
                         <div
+                          ref={active ? activeRowRef : undefined}
+                          data-chat-row={s.key}
                           className={cn(
                             "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] transition-colors",
                             compact ? "min-h-7" : "min-h-8",
                             active
-                              ? "bg-sidebar-accent/70 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.16)]"
-                              : "text-sidebar-foreground/82 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                              ? "text-sidebar-accent-foreground"
+                              : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
                           )}
                         >
                           <button
                             type="button"
                             onClick={() => onSelect(s.key)}
+                            aria-current={active ? "page" : undefined}
                             title={tooltipTitle}
                             className={cn(
                               "min-w-0 flex-1 overflow-hidden text-left",
@@ -379,7 +461,7 @@ export const ChatList = memo(function ChatList({
           );
         })}
         {hiddenSessionCount > 0 ? (
-          <div className="px-2 pb-2 pt-1">
+          <div className="relative z-[1] px-2 pb-2 pt-1">
             <button
               type="button"
               onClick={() =>
@@ -393,6 +475,18 @@ export const ChatList = memo(function ChatList({
             </button>
           </div>
         ) : null}
+        <div
+          ref={activeHighlightRef}
+          data-testid="active-chat-highlight"
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-0 z-0 !mt-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none"
+        >
+          <div
+            ref={activeHighlightSurfaceRef}
+            data-testid="active-chat-highlight-surface"
+            className="h-full w-full scale-[0.97] rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none dark:bg-white/[0.07]"
+          />
+        </div>
       </div>
     </div>
   );

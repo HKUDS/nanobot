@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cli import commands as cli_commands
@@ -33,6 +34,10 @@ from nanobot.webui.metadata import (
 )
 
 runner = CliRunner()
+
+
+def _without_rendered_line_breaks(output: str) -> str:
+    return "".join(output.splitlines())
 
 
 def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
@@ -65,6 +70,26 @@ def _fake_provider():
 
 class _StopGatewayError(RuntimeError):
     pass
+
+
+class _GatewayAgentContractStub:
+    """Minimal stable AgentLoop surface required by gateway assembly tests."""
+
+    tools = ToolRegistry()
+
+    @staticmethod
+    def pending_cron_job_ids_for_session(_session_key: str) -> set[str]:
+        return set()
+
+    @staticmethod
+    def pending_local_trigger_ids_for_session(_session_key: str) -> set[str]:
+        return set()
+
+    async def submit_local_trigger_turn(
+        self,
+        _msg: InboundMessage,
+    ) -> OutboundMessage | None:
+        return None
 
 
 def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
@@ -1904,12 +1929,10 @@ def _test_provider_snapshot(provider: object, config: Config) -> ProviderSnapsho
 
 
 def _patch_webui_provider_ready(monkeypatch) -> None:
-    provider = _fake_provider()
-
-    def _snapshot(config: Config, **_kwargs) -> ProviderSnapshot:
-        return _test_provider_snapshot(provider, config)
-
-    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _snapshot)
+    monkeypatch.setattr(
+        "nanobot.providers.factory.validate_provider_setup",
+        lambda _config: None,
+    )
 
 
 def _patch_gateway_ports_free(monkeypatch) -> None:
@@ -1958,6 +1981,10 @@ def _patch_cli_command_runtime(
     monkeypatch.setattr(
         "nanobot.providers.factory.load_provider_snapshot",
         lambda _config_path=None: _test_provider_snapshot(provider_factory(config), config),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.commands._provider_setup_error",
+        lambda _config: None,
     )
     _patch_gateway_ports_free(monkeypatch)
 
@@ -2019,7 +2046,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         def register_system_job(self, _job: CronJob) -> None:
             raise _StopGatewayError("stop")
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -2192,6 +2219,9 @@ def test_webui_missing_runtime_env_fails_before_starting_gateway(
 
     assert result.exit_code == 1
     assert missing_env in result.stdout
+    assert "nanobot status --config" in result.stdout
+    assert config_file.name in result.stdout
+    assert "Traceback" not in result.stdout
     assert f"${{{missing_env}}}" in config_file.read_text(encoding="utf-8")
 
 
@@ -2221,6 +2251,10 @@ def test_webui_yes_still_refuses_invalid_custom_model_setup(
 
     assert result.exit_code == 1
     assert "provider/model setup is incomplete" in result.stdout
+    assert "Settings → Models" in _without_rendered_line_breaks(result.stdout)
+    assert "nanobot onboard --wizard" in result.stdout
+    assert "nanobot status --config" in result.stdout
+    assert config_file.name in result.stdout
 
 
 def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path: Path) -> None:
@@ -2644,6 +2678,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
+    monkeypatch.setattr("nanobot.cli.commands._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
@@ -2681,7 +2716,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
             self.on_job = None
             seen["cron"] = self
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -2771,6 +2806,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
+    monkeypatch.setattr("nanobot.cli.commands._provider_setup_error", lambda _config: None)
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
@@ -2796,7 +2832,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
         def write_run_record(self, run_id: str, record: dict[str, object]) -> None:
             seen["run_records"].append((run_id, record))
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -3014,7 +3050,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         def register_system_job(self, _job) -> None:
             return None
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             seen["agent_from_config_kwargs"] = extra
@@ -3080,6 +3116,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     kwargs = seen["local_trigger_queue_kwargs"]
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
     assert agent_kwargs["resource_view"] is resource_view
+    refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
+    assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)
     assert "local_trigger_store" in agent_kwargs
     assert kwargs["store"] is agent_kwargs["local_trigger_store"]
     assert "bus" not in kwargs
@@ -3266,7 +3304,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -3459,7 +3497,7 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)
@@ -3558,7 +3596,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         def flush_all(self) -> int:
             return 0
 
-    class _FakeAgentLoop:
+    class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             return cls(**extra)

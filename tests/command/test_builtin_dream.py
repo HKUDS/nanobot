@@ -231,6 +231,7 @@ def _build_runnable_dream(
         context=SimpleNamespace(memory=store, timezone="UTC"),
         sessions=SimpleNamespace(sessions_dir=sessions_dir),
         process_direct=process_direct,
+        dream_runtime=lambda: None,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, store
@@ -317,6 +318,7 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
         context=SimpleNamespace(memory=store, timezone="UTC"),
         sessions=SimpleNamespace(sessions_dir=sessions_dir),
         process_direct=process_direct,
+        dream_runtime=lambda: None,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 

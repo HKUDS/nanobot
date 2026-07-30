@@ -75,6 +75,41 @@ def _tool_round(call_id: str) -> list[dict]:
 
 
 class TestConsolidatorSummarize:
+    async def test_archive_prompt_includes_media_breadcrumb(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        path = "/home/user/.nanobot/media/websocket/upload_photo.png"
+        summary = "User uploaded a photo."
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=summary,
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "please inspect this", "media": [path]}],
+            runtime=runtime,
+        )
+
+        prompt = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert f"[image: {path}]" in prompt
+        assert result == summary
+        assert [entry["content"] for entry in entries] == [summary]
+
+    def test_format_messages_keeps_media_only_user_turn(self):
+        path = "/home/user/.nanobot/media/websocket/clip.mp4"
+
+        formatted = MemoryStore._format_messages([
+            {
+                "role": "user",
+                "content": "",
+                "media": [path],
+                "timestamp": "2026-07-27",
+            }
+        ])
+
+        assert formatted == f"[2026-07-27] USER: [image: {path}]"
+
     async def test_archive_excludes_model_only_runtime_context(
         self, consolidator, mock_provider, runtime
     ):

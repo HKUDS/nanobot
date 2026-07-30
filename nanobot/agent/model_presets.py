@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
-from nanobot.config.schema import ModelPresetConfig
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 
@@ -22,7 +21,7 @@ def default_selection_signature(
     return (model_preset, *signature[:2]) if signature else None
 
 
-def configured_model_presets(config: Any) -> dict[str, ModelPresetConfig]:
+def configured_model_presets(config: Config) -> dict[str, ModelPresetConfig]:
     return {**config.model_presets, "default": config.resolve_default_preset()}
 
 
@@ -33,12 +32,15 @@ def load_model_preset_catalog(
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return configured_model_presets(
-        resolve_config_env_vars(load_config(config_path)),
+        resolve_config_env_vars(
+            load_config(config_path),
+            config_path=config_path,
+        ),
     )
 
 
 def make_preset_snapshot_loader(
-    config: Any,
+    config: Config,
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
 ) -> PresetSnapshotLoader:
     if provider_snapshot_loader is not None:

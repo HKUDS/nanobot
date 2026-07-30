@@ -39,6 +39,7 @@ class AgentTurnHookSpec:
     turn_hooks: list[AgentHook] = field(default_factory=list)
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
+    attributes: dict[str, Any] | None = None
 
 
 def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
@@ -62,6 +63,7 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         message_id=spec.message_id,
         session_key=spec.session_key,
         metadata=dict(spec.metadata or {}),
+        attributes=dict(spec.attributes or {}),
         ephemeral=spec.ephemeral,
     )
     hook_chain: list[AgentHook] = [progress_hook]

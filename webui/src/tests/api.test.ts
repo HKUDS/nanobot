@@ -5,6 +5,7 @@ import {
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
+  deleteSkill,
   deleteModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -14,6 +15,7 @@ import {
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
+  fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -21,9 +23,11 @@ import {
   fetchSidebarState,
   fetchSkillDetail,
   fetchSkills,
+  fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
+  installMarketplaceSkill,
   listSessions,
   listSlashCommands,
   loginProviderOAuth,
@@ -35,6 +39,7 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  searchMarketplaceSkills,
   startApiService,
   stopApiService,
   cancelChannelConnect,
@@ -49,6 +54,7 @@ import {
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSkillEnabled,
   updateWebSearchSettings,
   validateChannel,
 } from "@/lib/api";
@@ -77,6 +83,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });
@@ -280,6 +287,78 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/webui/skills/current%20web",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("encodes marketplace search queries and provider", async () => {
+    await searchMarketplaceSkills("tok", "React & testing");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/search?q=React+%26+testing&provider=all",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches a provider marketplace leaderboard", async () => {
+    await fetchTrendingMarketplaceSkills("tok", "skillhub");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trending?provider=skillhub",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches skills.sh trend history independently", async () => {
+    await fetchMarketplaceSkillTrends("tok", [
+      "vercel-labs/skills/find-skills",
+      "acme/skills/react",
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills&id=acme%2Fskills%2Freact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("encodes provider install coordinates", async () => {
+    await installMarketplaceSkill(
+      "tok",
+      "skillhub",
+      "@tencent/skills",
+      "ima-skills",
+      "1.1.8",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/install?provider=skillhub&source=%40tencent%2Fskills&skill=ima-skills&version=1.1.8",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("updates and deletes installed skills with encoded names", async () => {
+    await updateSkillEnabled("tok", "custom skill", false);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/update?name=custom+skill&enabled=false",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await deleteSkill("tok", "custom skill");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/delete?name=custom+skill",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

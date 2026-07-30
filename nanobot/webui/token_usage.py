@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
@@ -126,9 +126,10 @@ def _normalize_usage_row(row: dict[str, Any]) -> dict[str, int]:
 def _normalize_sources(raw: Any, fallback: dict[str, int]) -> dict[str, dict[str, int]]:
     sources: dict[str, dict[str, int]] = {}
     if isinstance(raw, dict):
-        for source, row in raw.items():
-            if not isinstance(row, dict):
+        for source, row_value in cast(dict[Any, Any], raw).items():
+            if not isinstance(row_value, dict):
                 continue
+            row = cast(dict[str, Any], row_value)
             normalized = _normalize_usage_row(row)
             if normalized["total_tokens"] <= 0 and normalized["requests"] <= 0:
                 continue
@@ -148,14 +149,16 @@ def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
     state = default_token_usage_state()
     if not isinstance(raw, dict):
         return state
+    raw = cast(dict[str, Any], raw)
     days_raw = raw.get("days")
     if not isinstance(days_raw, dict):
         return state
 
     days: dict[str, dict[str, Any]] = {}
-    for date, row in sorted(days_raw.items())[-_MAX_DAYS_RETAINED:]:
-        if not isinstance(date, str) or len(date) != 10 or not isinstance(row, dict):
+    for date, row_value in sorted(cast(dict[Any, Any], days_raw).items())[-_MAX_DAYS_RETAINED:]:
+        if not isinstance(date, str) or len(date) != 10 or not isinstance(row_value, dict):
             continue
+        row = cast(dict[str, Any], row_value)
         normalized = _normalize_usage_row(row)
         if normalized["total_tokens"] <= 0 and normalized["requests"] <= 0:
             continue
@@ -232,8 +235,9 @@ def record_token_usage(
 
     with _WRITE_LOCK:
         state = read_token_usage_state()
+        days_by_date = cast(dict[str, dict[str, Any]], state["days"])
         day = _local_day(now, timezone_name=timezone_name)
-        row = dict(state["days"].get(day) or {"date": day, "requests": 0})
+        row: dict[str, Any] = dict(days_by_date.get(day) or {"date": day, "requests": 0})
         for key in _USAGE_KEYS:
             row[key] = _clean_int(row.get(key)) + normalized.get(key, 0)
         row["requests"] = _clean_int(row.get("requests")) + 1
@@ -243,8 +247,10 @@ def record_token_usage(
             row["provider_requests"] = _clean_int(row.get("provider_requests")) + 1
 
         source_key = _clean_source(source)
-        sources = dict(row.get("sources") or {})
-        source_row = dict(sources.get(source_key) or {"requests": 0})
+        sources: dict[str, dict[str, Any]] = dict(
+            cast(Mapping[str, dict[str, Any]], row.get("sources") or {})
+        )
+        source_row: dict[str, Any] = dict(sources.get(source_key) or {"requests": 0})
         for key in _USAGE_KEYS:
             source_row[key] = _clean_int(source_row.get(key)) + normalized.get(key, 0)
         source_row["requests"] = _clean_int(source_row.get("requests")) + 1
@@ -255,10 +261,9 @@ def record_token_usage(
         sources[source_key] = source_row
         row["sources"] = sources
 
-        state["days"][day] = row
-        if len(state["days"]) > _MAX_DAYS_RETAINED:
-            kept = dict(sorted(state["days"].items())[-_MAX_DAYS_RETAINED:])
-            state["days"] = kept
+        days_by_date[day] = row
+        if len(days_by_date) > _MAX_DAYS_RETAINED:
+            state["days"] = dict(sorted(days_by_date.items())[-_MAX_DAYS_RETAINED:])
         return write_token_usage_state(state)
 
 
@@ -285,28 +290,29 @@ def token_usage_payload(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     state = read_token_usage_state()
+    days_by_date = cast(dict[str, dict[str, Any]], state["days"])
     today = datetime.fromisoformat(_local_day(now, timezone_name=timezone_name)).date()
     start = today - timedelta(days=max(1, days) - 1)
     day_rows = [
         row
-        for date, row in sorted(state["days"].items())
+        for date, row in sorted(days_by_date.items())
         if start.isoformat() <= date <= today.isoformat()
     ]
     last_30_start = today - timedelta(days=29)
     last_30 = [
         row
-        for date, row in state["days"].items()
+        for date, row in days_by_date.items()
         if last_30_start.isoformat() <= date <= today.isoformat()
     ]
     last_365_start = today - timedelta(days=364)
     last_365 = [
         row
-        for date, row in state["days"].items()
+        for date, row in days_by_date.items()
         if last_365_start.isoformat() <= date <= today.isoformat()
     ]
     active_dates = {
         datetime.fromisoformat(date).date()
-        for date, row in state["days"].items()
+        for date, row in days_by_date.items()
         if _clean_int(row.get("total_tokens")) > 0
     }
     current_streak = 0
@@ -324,7 +330,7 @@ def token_usage_payload(
             running_streak = 1
         longest_streak = max(longest_streak, running_streak)
 
-    all_rows = list(state["days"].values())
+    all_rows = list(days_by_date.values())
     return {
         "days": day_rows,
         "total_tokens": sum(_clean_int(row.get("total_tokens")) for row in all_rows),

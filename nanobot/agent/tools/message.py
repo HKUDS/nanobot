@@ -1,13 +1,15 @@
 """Message tool for sending messages to users."""
 
-from contextvars import ContextVar
+# pyright: reportIncompatibleMethodOverride=false
+
+from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
@@ -73,7 +75,7 @@ class MessageTool(Tool):
         )
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
         return cls(
             send_callback=send_callback,
@@ -89,11 +91,11 @@ class MessageTool(Tool):
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
 
-    def set_suppress_delivery(self, active: bool):
+    def set_suppress_delivery(self, active: bool) -> Token[bool]:
         """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
         return self._suppress_delivery_var.set(active)
 
-    def reset_suppress_delivery(self, token) -> None:
+    def reset_suppress_delivery(self, token: Token[bool]) -> None:
         """Restore previous delivery-suppression state."""
         self._suppress_delivery_var.reset(token)
 
@@ -148,19 +150,23 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
-        buttons: list[list[str]] | None = None,
+        buttons: Any = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
         from nanobot.utils.helpers import strip_think
 
         content = strip_think(content)
 
+        button_rows: list[list[str]] | None = None
         if buttons is not None:
-            if not isinstance(buttons, list) or any(
-                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
-                for row in buttons
+            raw_buttons = cast(list[Any], buttons) if isinstance(buttons, list) else None
+            if raw_buttons is None or any(
+                not isinstance(row, list)
+                or any(not isinstance(label, str) for label in cast(list[Any], row))
+                for row in raw_buttons
             ):
                 return ToolResult.error("Error: buttons must be a list of list of strings")
+            button_rows = cast(list[list[str]], raw_buttons)
         request_ctx = current_request_context()
         default_channel = (
             request_ctx.channel if request_ctx is not None else self._fallback_channel
@@ -228,7 +234,7 @@ class MessageTool(Tool):
             chat_id=chat_id,
             content=content,
             media=media or [],
-            buttons=buttons or [],
+            buttons=button_rows or [],
             metadata=metadata,
         )
 
@@ -241,7 +247,11 @@ class MessageTool(Tool):
             if channel == default_channel and chat_id == default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
+            button_info = (
+                f" with {sum(len(row) for row in button_rows)} button(s)"
+                if button_rows
+                else ""
+            )
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return ToolResult.error(f"Error sending message: {str(e)}")

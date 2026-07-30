@@ -24,12 +24,71 @@ const INITIAL_HISTORY_PAGE_LIMIT = 160;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
+export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
+
 function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
   return messages.map((m, idx) => ({
     ...m,
     id: m.id ?? `hist-${idx}`,
     createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
   }));
+}
+
+function sameSemanticMessage(a: UIMessage, b: UIMessage): boolean {
+  return (
+    a.role === b.role
+    && (a.kind ?? "") === (b.kind ?? "")
+    && a.content === b.content
+    && (!a.turnId || !b.turnId || a.turnId === b.turnId)
+  );
+}
+
+function longestSemanticOverlap(previous: UIMessage[], latest: UIMessage[]): number {
+  const maxOverlap = Math.min(previous.length, latest.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const previousStart = previous.length - overlap;
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (!sameSemanticMessage(previous[previousStart + index], latest[index])) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return overlap;
+  }
+  return 0;
+}
+
+function mergeLatestHistory(
+  previous: UIMessage[],
+  latest: UIMessage[],
+  initial: boolean,
+): {
+  continuity: SessionHistoryContinuity;
+  messages: UIMessage[];
+  retainedPrefixLength: number;
+} {
+  if (initial) {
+    return {
+      continuity: "initial",
+      messages: latest,
+      retainedPrefixLength: 0,
+    };
+  }
+  const overlapLength = longestSemanticOverlap(previous, latest);
+  if (overlapLength === 0) {
+    return {
+      continuity: "reset",
+      messages: latest,
+      retainedPrefixLength: 0,
+    };
+  }
+  const retainedPrefixLength = previous.length - overlapLength;
+  return {
+    continuity: "overlap",
+    messages: [...previous.slice(0, retainedPrefixLength), ...latest],
+    retainedPrefixLength,
+  };
 }
 
 function hasPendingToolCallsFromThread(
@@ -40,6 +99,17 @@ function hasPendingToolCallsFromThread(
     return body.has_pending_tool_calls;
   }
   return hasPendingAgentActivity(messages);
+}
+
+function completedTurnIdsFromThread(
+  body: Awaited<ReturnType<typeof fetchWebuiThread>>,
+): string[] {
+  if (!Array.isArray(body?.completed_turn_ids)) return [];
+  return Array.from(new Set(
+    body.completed_turn_ids.filter(
+      (turnId): turnId is string => typeof turnId === "string" && turnId.length > 0,
+    ),
+  ));
 }
 
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
@@ -191,11 +261,20 @@ export function useSessionHistory(key: string | null): {
   userMessageOffset: number;
   version: number;
   forkBoundaryMessageCount: number | null;
-  /** ``true`` when the replayed transcript ends with a trace row (turn still in flight). */
+  /** ``true`` when the server reports that the turn is still in flight. */
   hasPendingToolCalls: boolean;
+  /** Turn identities backed by explicit persisted completion events. */
+  completedTurnIds: string[];
+  /** Relationship between the latest canonical page and its predecessor. */
+  continuity: SessionHistoryContinuity;
+  /** Stable across overlapping latest pages; changes on initial load or reset. */
+  lineage: number;
+  /** Exact active turn when supplied by a current gateway. */
+  activeTurnId: string | null;
 } {
   const { token } = useClient();
   const loadingOlderRef = useRef(false);
+  const historyVersionRef = useRef(0);
   const [refreshSeq, setRefreshSeq] = useState(0);
   const refresh = useCallback(() => {
     setRefreshSeq((value) => value + 1);
@@ -207,11 +286,15 @@ export function useSessionHistory(key: string | null): {
     loadingOlder: boolean;
     error: string | null;
     hasPendingToolCalls: boolean;
+    completedTurnIds: string[];
     forkBoundaryMessageCount: number | null;
     beforeCursor: string | null;
     hasMoreBefore: boolean;
     userMessageOffset: number;
     version: number;
+    continuity: SessionHistoryContinuity;
+    lineage: number;
+    activeTurnId: string | null;
   }>({
     key: null,
     messages: [],
@@ -219,11 +302,15 @@ export function useSessionHistory(key: string | null): {
     loadingOlder: false,
     error: null,
     hasPendingToolCalls: false,
+    completedTurnIds: [],
     forkBoundaryMessageCount: null,
     beforeCursor: null,
     hasMoreBefore: false,
     userMessageOffset: 0,
     version: 0,
+    continuity: "initial",
+    lineage: 0,
+    activeTurnId: null,
   });
 
   useEffect(() => {
@@ -235,11 +322,15 @@ export function useSessionHistory(key: string | null): {
         loadingOlder: false,
         error: null,
         hasPendingToolCalls: false,
+        completedTurnIds: [],
         forkBoundaryMessageCount: null,
         beforeCursor: null,
         hasMoreBefore: false,
         userMessageOffset: 0,
         version: 0,
+        continuity: "initial",
+        lineage: 0,
+        activeTurnId: null,
       });
       return;
     }
@@ -255,11 +346,15 @@ export function useSessionHistory(key: string | null): {
           loadingOlder: false,
           error: null,
           hasPendingToolCalls: false,
+          completedTurnIds: [],
           forkBoundaryMessageCount: null,
           beforeCursor: null,
           hasMoreBefore: false,
           userMessageOffset: 0,
           version: 0,
+          continuity: "initial",
+          lineage: 0,
+          activeTurnId: null,
         });
     (async () => {
       try {
@@ -268,56 +363,83 @@ export function useSessionHistory(key: string | null): {
           direction: "latest",
         });
         if (cancelled) return;
-        if (!body?.messages?.length) {
-          setState((prev) => ({
+        historyVersionRef.current += 1;
+        const responseVersion = historyVersionRef.current;
+        const completedTurnIds = completedTurnIdsFromThread(body);
+        const ui = persistedMessagesToUi(body?.messages ?? []);
+        const hasPending = hasPendingToolCallsFromThread(body, ui);
+        const forkBoundary = typeof body?.fork_boundary_message_count === "number"
+          ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
+          : null;
+        setState((prev) => {
+          const merged = prev.key === key
+            ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
+            : mergeLatestHistory([], ui, true);
+          const retainedPrefix = merged.retainedPrefixLength > 0;
+          const retainedForkBoundary = (
+            retainedPrefix
+            && prev.forkBoundaryMessageCount !== null
+            && prev.forkBoundaryMessageCount <= merged.retainedPrefixLength
+          )
+            ? prev.forkBoundaryMessageCount
+            : null;
+          return {
             key,
-            messages: [],
+            messages: merged.messages,
             loading: false,
             loadingOlder: false,
             error: null,
-            hasPendingToolCalls: false,
-            forkBoundaryMessageCount: null,
-            beforeCursor: null,
-            hasMoreBefore: false,
-            userMessageOffset: 0,
-            version: prev.key === key ? prev.version + 1 : 1,
-          }));
-          return;
-        }
-        const ui = persistedMessagesToUi(body.messages);
-        const hasPending = hasPendingToolCallsFromThread(body, ui);
-        const forkBoundary = typeof body.fork_boundary_message_count === "number"
-          ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
-          : null;
-        setState((prev) => ({
-          key,
-          messages: ui,
-          loading: false,
-          loadingOlder: false,
-          error: null,
-          hasPendingToolCalls: hasPending,
-          forkBoundaryMessageCount: forkBoundary,
-          beforeCursor: body.page?.before_cursor ?? null,
-          hasMoreBefore: body.page?.has_more_before === true,
-          userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
-          version: prev.key === key ? prev.version + 1 : 1,
-        }));
+            hasPendingToolCalls: hasPending,
+            completedTurnIds,
+            forkBoundaryMessageCount: forkBoundary === null
+              ? retainedForkBoundary
+              : forkBoundary + merged.retainedPrefixLength,
+            beforeCursor: retainedPrefix
+              ? prev.beforeCursor
+              : body?.page?.before_cursor ?? null,
+            hasMoreBefore: retainedPrefix
+              ? prev.hasMoreBefore
+              : body?.page?.has_more_before === true,
+            userMessageOffset: retainedPrefix
+              ? prev.userMessageOffset
+              : Math.max(0, body?.page?.user_message_offset ?? 0),
+            version: responseVersion,
+            continuity: merged.continuity,
+            lineage: merged.continuity === "overlap"
+              ? prev.lineage
+              : responseVersion,
+            activeTurnId: typeof body?.active_turn_id === "string"
+              ? body.active_turn_id
+              : null,
+          };
+        });
       } catch (e) {
         if (cancelled) return;
         if (e instanceof ApiError && e.status === 404) {
-          setState((prev) => ({
-            key,
-            messages: [],
-            loading: false,
-            loadingOlder: false,
-            error: null,
-            hasPendingToolCalls: false,
-            forkBoundaryMessageCount: null,
-            beforeCursor: null,
-            hasMoreBefore: false,
-            userMessageOffset: 0,
-            version: prev.key === key ? prev.version + 1 : 1,
-          }));
+          historyVersionRef.current += 1;
+          const responseVersion = historyVersionRef.current;
+          setState((prev) => {
+            const continuity = prev.key === key && prev.lineage > 0
+              ? "reset"
+              : "initial";
+            return {
+              key,
+              messages: [],
+              loading: false,
+              loadingOlder: false,
+              error: null,
+              hasPendingToolCalls: false,
+              completedTurnIds: [],
+              forkBoundaryMessageCount: null,
+              beforeCursor: null,
+              hasMoreBefore: false,
+              userMessageOffset: 0,
+              version: responseVersion,
+              continuity,
+              lineage: responseVersion,
+              activeTurnId: null,
+            };
+          });
         } else {
           setState((prev) => ({
             key,
@@ -326,11 +448,15 @@ export function useSessionHistory(key: string | null): {
             loadingOlder: false,
             error: (e as Error).message,
             hasPendingToolCalls: false,
+            completedTurnIds: [],
             forkBoundaryMessageCount: null,
             beforeCursor: null,
             hasMoreBefore: false,
             userMessageOffset: 0,
             version: prev.key === key ? prev.version : 0,
+            continuity: prev.key === key ? prev.continuity : "initial",
+            lineage: prev.key === key ? prev.lineage : 0,
+            activeTurnId: prev.key === key ? prev.activeTurnId : null,
           }));
         }
       }
@@ -342,17 +468,26 @@ export function useSessionHistory(key: string | null): {
 
   const loadOlder = useCallback(async () => {
     if (!key || loadingOlderRef.current) return;
-    const before = state.key === key ? state.beforeCursor : null;
-    if (!before || !state.hasMoreBefore) return;
+    const requestKey = key;
+    const requestLineage = state.key === requestKey ? state.lineage : 0;
+    const beforeCursor = state.key === requestKey ? state.beforeCursor : null;
+    if (!beforeCursor || !state.hasMoreBefore || requestLineage === 0) return;
+    const matchesRequest = (candidate: typeof state) => (
+      candidate.key === requestKey
+      && candidate.lineage === requestLineage
+      && candidate.beforeCursor === beforeCursor
+    );
     loadingOlderRef.current = true;
-    setState((prev) => prev.key === key ? { ...prev, loadingOlder: true, error: null } : prev);
+    setState((prev) => matchesRequest(prev)
+      ? { ...prev, loadingOlder: true, error: null }
+      : prev);
     try {
-      const body = await fetchWebuiThread(token, key, {
+      const body = await fetchWebuiThread(token, requestKey, {
         limit: OLDER_HISTORY_PAGE_LIMIT,
-        before,
+        before: beforeCursor,
       });
       setState((prev) => {
-        if (prev.key !== key) return prev;
+        if (!matchesRequest(prev)) return prev;
         if (!body?.messages?.length) {
           return {
             ...prev,
@@ -369,21 +504,21 @@ export function useSessionHistory(key: string | null): {
           ? null
           : prev.forkBoundaryMessageCount + older.length;
         const nextMessages = [...older, ...prev.messages];
+        // An older page cannot change the authoritative latest-turn lifecycle
+        // state or masquerade as a completed latest-page refresh.
         return {
           ...prev,
           messages: nextMessages,
           loadingOlder: false,
           error: null,
-          hasPendingToolCalls: hasPendingAgentActivity(nextMessages),
           forkBoundaryMessageCount: olderBoundary ?? shiftedBoundary,
           beforeCursor: body.page?.before_cursor ?? null,
           hasMoreBefore: body.page?.has_more_before === true,
           userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
-          version: prev.version + 1,
         };
       });
     } catch (e) {
-      setState((prev) => prev.key === key
+      setState((prev) => matchesRequest(prev)
         ? {
             ...prev,
             loadingOlder: false,
@@ -398,6 +533,7 @@ export function useSessionHistory(key: string | null): {
     state.beforeCursor,
     state.hasMoreBefore,
     state.key,
+    state.lineage,
     token,
   ]);
 
@@ -414,6 +550,10 @@ export function useSessionHistory(key: string | null): {
       version: 0,
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
+      completedTurnIds: [],
+      continuity: "initial",
+      lineage: 0,
+      activeTurnId: null,
     };
   }
 
@@ -432,6 +572,10 @@ export function useSessionHistory(key: string | null): {
       version: 0,
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
+      completedTurnIds: [],
+      continuity: "initial",
+      lineage: 0,
+      activeTurnId: null,
     };
   }
 
@@ -447,6 +591,10 @@ export function useSessionHistory(key: string | null): {
     version: state.version,
     forkBoundaryMessageCount: state.forkBoundaryMessageCount,
     hasPendingToolCalls: state.hasPendingToolCalls,
+    completedTurnIds: state.completedTurnIds,
+    continuity: state.continuity,
+    lineage: state.lineage,
+    activeTurnId: state.activeTurnId,
   };
 }
 

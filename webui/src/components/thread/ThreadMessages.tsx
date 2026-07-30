@@ -107,7 +107,11 @@ export function ThreadMessages({
           unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
-        if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
+        if (
+          unit.type === "message"
+          && unit.message.role === "user"
+          && unit.message.deliveryStatus !== "failed"
+        ) nextUserIndex += 1;
 
         return (
           <ThreadDisplayUnit

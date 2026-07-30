@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 from nanobot.webui.ingress_policy import (
@@ -93,9 +93,10 @@ def store_inbound_attachments(
     video_count = 0
     document_count = 0
     for item in media:
+        attachment = cast(dict[str, Any], item) if isinstance(item, dict) else None
         mime = (
-            extract_data_url_mime(item.get("data_url", ""))
-            if isinstance(item, dict)
+            extract_data_url_mime(attachment.get("data_url", ""))
+            if attachment is not None
             else None
         )
         if mime in _VIDEO_MIME_ALLOWED:
@@ -125,7 +126,8 @@ def store_inbound_attachments(
     for item in media:
         if not isinstance(item, dict):
             return abort("malformed")
-        data_url = item.get("data_url")
+        attachment = cast(dict[str, Any], item)
+        data_url = attachment.get("data_url")
         if not isinstance(data_url, str) or not data_url:
             return abort("malformed")
         mime = extract_data_url_mime(data_url)
@@ -140,8 +142,8 @@ def store_inbound_attachments(
             else limits.max_file_bytes
         )
         name = (
-            item.get("name")
-            if is_document and isinstance(item.get("name"), str)
+            attachment.get("name")
+            if is_document and isinstance(attachment.get("name"), str)
             else None
         )
         try:

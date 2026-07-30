@@ -10,6 +10,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
@@ -26,7 +27,12 @@ import type {
   SettingsUpdate,
   SidebarStatePayload,
   SkillDetail,
+  SkillActionPayload,
+  SkillInstallPayload,
   SkillsPayload,
+  SkillsSearchPayload,
+  SkillsTrendsPayload,
+  SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
   TranscriptionSettingsUpdate,
@@ -185,6 +191,7 @@ export async function fetchWebuiThread(
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
+    cache: "no-store",
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -306,6 +313,93 @@ export async function fetchSkillDetail(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateSkillEnabled(
+  token: string,
+  name: string,
+  enabled: boolean,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name, enabled: String(enabled) });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/update?${params}`,
+    token,
+  );
+}
+
+export async function deleteSkill(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/delete?${params}`,
+    token,
+  );
+}
+
+export async function searchMarketplaceSkills(
+  token: string,
+  query: string,
+  provider: MarketplaceProvider = "all",
+  base: string = "",
+): Promise<SkillsSearchPayload> {
+  const params = new URLSearchParams({ q: query, provider });
+  return request<SkillsSearchPayload>(
+    `${base}/api/webui/skills/search?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchTrendingMarketplaceSkills(
+  token: string,
+  provider: MarketplaceProvider = "all",
+  base: string = "",
+): Promise<SkillsTrendingPayload> {
+  const params = new URLSearchParams({ provider });
+  return request<SkillsTrendingPayload>(
+    `${base}/api/webui/skills/trending?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchMarketplaceSkillTrends(
+  token: string,
+  skillIds: string[],
+  base: string = "",
+): Promise<SkillsTrendsPayload> {
+  const params = new URLSearchParams();
+  skillIds.forEach((id) => params.append("id", id));
+  return request<SkillsTrendsPayload>(
+    `${base}/api/webui/skills/trends?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function installMarketplaceSkill(
+  token: string,
+  provider: Exclude<MarketplaceProvider, "all">,
+  source: string,
+  skill: string,
+  version: string = "",
+  base: string = "",
+): Promise<SkillInstallPayload> {
+  const params = new URLSearchParams({ provider, source, skill });
+  if (version) params.set("version", version);
+  return request<SkillInstallPayload>(
+    `${base}/api/webui/skills/install?${params}`,
+    token,
+    undefined,
+    150_000,
   );
 }
 

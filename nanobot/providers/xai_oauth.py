@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
@@ -31,7 +31,7 @@ from filelock import FileLock
 from loguru import logger
 
 from nanobot.config.paths import get_data_dir
-from nanobot.utils.helpers import _write_text_atomic
+from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
@@ -73,17 +73,18 @@ class XAIToken:
     def from_dict(cls, value: Any) -> XAIToken | None:
         if not isinstance(value, dict):
             return None
-        access = value.get("access")
+        token_data = cast(dict[str, Any], value)
+        access = token_data.get("access")
         if not isinstance(access, str) or not access:
             return None
-        refresh = value.get("refresh")
+        refresh = token_data.get("refresh")
         if not isinstance(refresh, str) or not refresh:
             refresh = None
         try:
-            expires = int(value.get("expires") or 0)
+            expires = int(token_data.get("expires") or 0)
         except (TypeError, ValueError):
             expires = 0
-        account_id = value.get("account_id")
+        account_id = token_data.get("account_id")
         if not isinstance(account_id, str) or not account_id:
             account_id = None
         return cls(access=access, refresh=refresh, expires=expires, account_id=account_id)
@@ -521,7 +522,7 @@ def _make_callback_server(
                 self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Private-Network", "true")
 
-        def log_message(self, _format: str, *_args: Any) -> None:
+        def log_message(self, format: str, *_args: Any) -> None:  # noqa: A002
             # Callback query strings contain an authorization code.
             return
 
@@ -641,9 +642,12 @@ def _token_payload(response: httpx.Response) -> dict[str, Any]:
         payload = response.json()
     except ValueError as exc:
         raise XAIOAuthError("xAI sign-in returned an invalid token response.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
+    if not isinstance(payload, dict):
         raise XAIOAuthError("xAI sign-in returned no access token.")
-    return payload
+    token_payload = cast(dict[str, Any], payload)
+    if not isinstance(token_payload.get("access_token"), str):
+        raise XAIOAuthError("xAI sign-in returned no access token.")
+    return token_payload
 
 
 def _token_from_response(
@@ -680,8 +684,9 @@ def _fetch_account(endpoint: str | None, access_token: str, proxy: str | None) -
         return None
     if not isinstance(payload, dict):
         return None
+    account_payload = cast(dict[str, Any], payload)
     for key in ("email", "preferred_username", "name", "sub"):
-        value = payload.get(key)
+        value = account_payload.get(key)
         if isinstance(value, str) and value:
             return value
     return None
@@ -693,8 +698,9 @@ def _oauth_http_error(response: httpx.Response, action: str) -> XAIOAuthError:
     with suppress(ValueError):
         payload = response.json()
         if isinstance(payload, dict):
-            raw_code = payload.get("error")
-            raw_description = payload.get("error_description") or payload.get("message")
+            error_payload = cast(dict[str, Any], payload)
+            raw_code = error_payload.get("error")
+            raw_description = error_payload.get("error_description") or error_payload.get("message")
             code = raw_code[:80] if isinstance(raw_code, str) else None
             description = raw_description[:200] if isinstance(raw_description, str) else None
     detail = ": ".join(value for value in (code, description) if value)

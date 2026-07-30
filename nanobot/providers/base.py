@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, cast
 
 import json_repair
 from loguru import logger
@@ -67,7 +67,8 @@ class ToolCallRequest:
         ``messages.content.N.tool_use.name: Input should be a valid string``),
         which permanently wedges the session.
         """
-        return isinstance(self.name, str) and bool(self.name)
+        runtime_name = cast(object, self.name)
+        return isinstance(runtime_name, str) and bool(runtime_name)
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
@@ -76,7 +77,7 @@ class ToolCallRequest:
             if isinstance(self.arguments, str)
             else json.dumps(self.arguments, ensure_ascii=False)
         )
-        tool_call = {
+        tool_call: dict[str, Any] = {
             "id": self.id,
             "type": "function",
             "function": {
@@ -126,7 +127,7 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
     if arguments is None:
         return {}
     if isinstance(arguments, dict):
-        return arguments
+        return cast(dict[str, Any], arguments)
     if not isinstance(arguments, str):
         return {}
 
@@ -141,7 +142,7 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
             parsed = json_repair.loads(stripped)
         except Exception:
             return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
 
 
 def tool_arguments_json_for_replay(arguments: Any) -> str:
@@ -158,7 +159,7 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
-    thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
+    thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
     # Structured error metadata used by retry policy when finish_reason == "error".
     error_status_code: int | None = None
     error_kind: str | None = None  # e.g. "timeout", "connection"
@@ -298,19 +299,20 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 new_items: list[Any] = []
                 changed = False
-                for item in content:
+                for raw_item in cast(list[object], content):
+                    item = cast(dict[str, Any], raw_item) if isinstance(raw_item, dict) else None
                     if (
-                        isinstance(item, dict)
+                        item is not None
                         and item.get("type") in ("text", "input_text", "output_text")
                         and not item.get("text")
                     ):
                         changed = True
                         continue
-                    if isinstance(item, dict) and "_meta" in item:
+                    if item is not None and "_meta" in item:
                         new_items.append({k: v for k, v in item.items() if k != "_meta"})
                         changed = True
                     else:
-                        new_items.append(item)
+                        new_items.append(raw_item)
                 if changed:
                     clean = dict(msg)
                     if new_items:
@@ -332,7 +334,7 @@ class LLMProvider(ABC):
         # Defense-in-depth: scrub lone UTF-16 surrogates from every string leaf.
         # This is idempotent and no-op when messages are already clean.
         sanitized = sanitize_surrogates_deep(result)
-        return sanitized if isinstance(sanitized, list) else result
+        return cast(list[dict[str, Any]], sanitized) if isinstance(sanitized, list) else result
 
     @staticmethod
     def _tool_name(tool: dict[str, Any]) -> str:
@@ -341,8 +343,9 @@ class LLMProvider(ABC):
         if isinstance(name, str):
             return name
         fn = tool.get("function")
-        if isinstance(fn, dict):
-            fname = fn.get("name")
+        fn_object = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
+        if fn_object is not None:
+            fname = fn_object.get("name")
             if isinstance(fname, str):
                 return fname
         return ""
@@ -372,7 +375,7 @@ class LLMProvider(ABC):
         allowed_keys: frozenset[str],
     ) -> list[dict[str, Any]]:
         """Keep only provider-safe message keys and normalize assistant content."""
-        sanitized = []
+        sanitized: list[dict[str, Any]] = []
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in allowed_keys}
             if clean.get("role") == "assistant" and "content" not in clean:
@@ -465,7 +468,7 @@ class LLMProvider(ABC):
     def _extract_error_type_code(cls, payload: Any) -> tuple[str | None, str | None]:
         data: dict[str, Any] | None = None
         if isinstance(payload, dict):
-            data = payload
+            data = cast(dict[str, Any], payload)
         elif isinstance(payload, str):
             text = payload.strip()
             if text:
@@ -474,16 +477,17 @@ class LLMProvider(ABC):
                 except Exception:
                     parsed = None
                 if isinstance(parsed, dict):
-                    data = parsed
-        if not isinstance(data, dict):
+                    data = cast(dict[str, Any], parsed)
+        if data is None:
             return None, None
 
         error_obj = data.get("error")
         type_value = data.get("type")
         code_value = data.get("code")
-        if isinstance(error_obj, dict):
-            type_value = error_obj.get("type") or type_value
-            code_value = error_obj.get("code") or code_value
+        error_object = cast(dict[str, Any], error_obj) if isinstance(error_obj, dict) else None
+        if error_object is not None:
+            type_value = error_object.get("type") or type_value
+            code_value = error_object.get("code") or code_value
 
         return cls._normalize_error_token(type_value), cls._normalize_error_token(code_value)
 
@@ -582,13 +586,14 @@ class LLMProvider(ABC):
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         """Replace image_url blocks with text placeholder. Returns None if no images found."""
         found = False
-        result = []
+        result: list[dict[str, Any]] = []
         for msg in messages:
             content = msg.get("content")
             if isinstance(content, list):
-                new_content = []
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "image_url":
+                new_content: list[Any] = []
+                for raw_block in cast(list[object], content):
+                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
+                    if block is not None and block.get("type") == "image_url":
                         placeholder = (
                             "[Image not delivered to model — "
                             "do not describe or reference it]"
@@ -596,7 +601,7 @@ class LLMProvider(ABC):
                         new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
-                        new_content.append(b)
+                        new_content.append(raw_block)
                 result.append({**msg, "content": new_content})
             else:
                 result.append(msg)
@@ -614,8 +619,9 @@ class LLMProvider(ABC):
         for msg in messages:
             content = msg.get("content")
             if isinstance(content, list):
-                for i, b in enumerate(content):
-                    if isinstance(b, dict) and b.get("type") == "image_url":
+                for i, raw_block in enumerate(cast(list[object], content)):
+                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
+                    if block is not None and block.get("type") == "image_url":
                         placeholder = (
                             "[Image not delivered to model — "
                             "do not describe or reference it]"
@@ -815,7 +821,7 @@ class LLMProvider(ABC):
                 if value is not None:
                     return value
             if isinstance(headers, dict):
-                for key, value in headers.items():
+                for key, value in cast(dict[object, Any], headers).items():
                     if isinstance(key, str) and key.lower() == name.lower():
                         return value
             return None
@@ -986,7 +992,7 @@ class LLMProvider(ABC):
                 on_retry_wait=on_retry_wait,
             )
 
-        return last_response if last_response is not None else await call(**kw)
+        return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
 
     @abstractmethod
     def get_default_model(self) -> str:

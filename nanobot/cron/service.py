@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from types import EllipsisType
 from typing import Any, Callable, Coroutine, Literal
 
 from filelock import FileLock
@@ -160,7 +161,7 @@ class CronService:
         self._lock = FileLock(str(self._action_path.parent) + ".lock")
         self.on_job = on_job
         self._store: CronStore | None = None
-        self._timer_task: asyncio.Task | None = None
+        self._timer_task: asyncio.Task[None] | None = None
         self._running = False
         self._timer_active = False
         self.max_sleep_ms = max_sleep_ms
@@ -243,19 +244,21 @@ class CronService:
                 return None
         return jobs, version
 
-    def _merge_action(self):
+    def _merge_action(self) -> None:
         if not self._action_path.exists():
             return
 
-        jobs_map = {j.id: j for j in self._store.jobs}
-        def _update(params: dict):
+        jobs_map = {job.id: job for job in self._store.jobs}  # pyright: ignore[reportOptionalMemberAccess]
+
+        def _update(params: dict[str, Any]) -> None:
             j = CronJob.from_dict(params)
             _normalize_agent_turn_job(j)
             jobs_map[j.id] = j
 
-        def _del(params: dict):
-            if job_id := params.get("job_id"):
-                jobs_map.pop(job_id)
+        def _del(params: dict[str, Any]) -> None:
+            job_id = params.get("job_id")
+            if isinstance(job_id, str) and job_id:
+                jobs_map.pop(job_id, None)
 
         with self._lock:
             with open(self._action_path, "r", encoding="utf-8") as f:
@@ -274,7 +277,7 @@ class CronService:
                     except Exception:
                         logger.exception("load action line error")
                         continue
-            self._store.jobs = list(jobs_map.values())
+            self._store.jobs = list(jobs_map.values())  # pyright: ignore[reportOptionalMemberAccess]
             if self._running and changed:
                 self._action_path.write_text("", encoding="utf-8")
                 self._save_store()
@@ -569,7 +572,8 @@ class CronService:
         # Handle one-shot jobs
         if job.schedule.kind == "at":
             if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+                store = self._require_store()
+                store.jobs = [item for item in store.jobs if item.id != job.id]
             else:
                 job.enabled = False
                 job.state.next_run_at_ms = None
@@ -577,7 +581,11 @@ class CronService:
             # Compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
-    def _append_action(self, action: Literal["add", "del", "update"], params: dict):
+    def _append_action(
+        self,
+        action: Literal["add", "del", "update"],
+        params: dict[str, Any],
+    ) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             with open(self._action_path, "a", encoding="utf-8") as f:
@@ -615,11 +623,11 @@ class CronService:
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
-        channel_meta: dict | None = None,
+        channel_meta: dict[str, Any] | None = None,
         session_key: str | None = None,
         origin_channel: str | None = None,
         origin_chat_id: str | None = None,
-        origin_metadata: dict | None = None,
+        origin_metadata: dict[str, Any] | None = None,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -727,8 +735,8 @@ class CronService:
         schedule: CronSchedule | None = None,
         message: str | None = None,
         deliver: bool | None = None,
-        channel: str | None = ...,
-        to: str | None = ...,
+        channel: str | None | EllipsisType = ...,
+        to: str | None | EllipsisType = ...,
         delete_after_run: bool | None = None,
     ) -> CronJob | Literal["not_found", "protected"]:
         """Update mutable fields of an existing job. System jobs cannot be updated.
@@ -804,7 +812,7 @@ class CronService:
         store = self._require_store()
         return next((j for j in store.jobs if j.id == job_id), None)
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, object]:
         """Get service status."""
         store = self._require_store()
         return {

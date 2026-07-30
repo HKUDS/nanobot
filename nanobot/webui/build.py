@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 BuildMode = Literal["auto", "prompt", "warn", "skip"]
 
@@ -186,7 +186,7 @@ def build_webui_bundle(
     source_dir: Path | None = None,
     dist_dir: Path | None = None,
     runner: str | None = None,
-    subprocess_run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run,
     output: Callable[[str], None] | None = None,
 ) -> WebUIBundleStatus:
     """Install frontend dependencies and build the WebUI bundle."""
@@ -221,7 +221,7 @@ def ensure_webui_bundle(
     output: Callable[[str], None] | None = None,
     runner: str | None = None,
     environ: Mapping[str, str] | None = None,
-    subprocess_run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run,
 ) -> WebUIBundleStatus:
     """Ensure or warn about a stale WebUI bundle according to the selected mode."""
     env = environ or os.environ
@@ -275,7 +275,7 @@ def _run_frontend_command(
     command: list[str],
     *,
     cwd: Path,
-    subprocess_run: Callable[..., subprocess.CompletedProcess],
+    subprocess_run: Callable[..., subprocess.CompletedProcess[Any]],
 ) -> None:
     try:
         subprocess_run(command, cwd=cwd, check=True)

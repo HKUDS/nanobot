@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -137,7 +137,10 @@ class Nanobot:
             if resolved is not None
             else get_config_path().expanduser().resolve(strict=False)
         )
-        config: Config = resolve_config_env_vars(load_config(resolved))
+        config: Config = resolve_config_env_vars(
+            load_config(resolved),
+            config_path=effective_config_path,
+        )
         if workspace is not None:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()
@@ -168,6 +171,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -183,6 +187,9 @@ class Nanobot:
             sender_id: Logical sender identifier for runtime context.
             media: Optional local media paths attached to the message.
             ephemeral: If true, do not persist the turn or compact session history.
+            attributes: Optional caller-owned request data exposed to context
+                providers and turn-hook factories. Attributes are kept separate
+                from nanobot's trusted internal message metadata.
             hooks: Optional lifecycle hooks for this run.
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
@@ -201,6 +208,7 @@ class Nanobot:
             sender_id=sender_id,
             media=media,
             ephemeral=ephemeral,
+            attributes=attributes,
         )
         if runtime is not None:
             kwargs["runtime"] = runtime
@@ -222,6 +230,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -276,6 +285,7 @@ class Nanobot:
                 sender_id=sender_id,
                 media=media,
                 ephemeral=ephemeral,
+                attributes=attributes,
                 on_stream=_on_stream,
                 on_stream_end=_on_stream_end,
             )
@@ -323,6 +333,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -336,6 +347,7 @@ class Nanobot:
             sender_id=sender_id,
             media=media,
             ephemeral=ephemeral,
+            attributes=attributes,
             hooks=hooks,
             model=model,
             model_preset=model_preset,

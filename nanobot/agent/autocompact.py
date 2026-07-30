@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, cast
 
 from loguru import logger
 
@@ -65,7 +65,7 @@ class AutoCompact:
 
     def check_expired(
         self,
-        schedule_background: Callable[[Coroutine], None],
+        schedule_background: Callable[[Coroutine[Any, Any, None]], None],
         resolve_runtime: Callable[[Session], LLMRuntime],
         active_session_keys: Collection[str] = (),
     ) -> None:
@@ -103,8 +103,8 @@ class AutoCompact:
                 meta = session.metadata.get("_last_summary")
                 if isinstance(meta, dict):
                     self._summaries[key] = (
-                        meta["text"],
-                        datetime.fromisoformat(meta["last_active"]),
+                        cast(str, meta["text"]),
+                        datetime.fromisoformat(cast(str, meta["last_active"])),
                     )
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
@@ -126,5 +126,8 @@ class AutoCompact:
         # Cold path: summary persisted in session metadata (process restarted).
         meta = session.metadata.get("_last_summary")
         if isinstance(meta, dict):
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
+            return session, self._format_summary(
+                cast(str, meta["text"]),
+                datetime.fromisoformat(cast(str, meta["last_active"])),
+            )
         return session, None

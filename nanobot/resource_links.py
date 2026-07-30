@@ -15,7 +15,7 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from filelock import FileLock, Timeout
 
@@ -284,7 +284,7 @@ def _read_marker(
     if not isinstance(payload, dict):
         warnings.append(f"Invalid {label} ownership marker: {marker_path}")
         return None
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def _write_marker(marker_path: Path, payload: dict[str, Any]) -> None:
