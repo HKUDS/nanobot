@@ -807,7 +807,7 @@ _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 
 class Consolidator:
-    """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
+    """Summarize messages excluded from live model replay into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
 
@@ -1000,10 +1000,11 @@ class Consolidator:
     ) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
-        ``messages`` are the messages being archived (removed from the live
-        session); they are what gets raw-dumped if the LLM call fails.
-        ``summary_messages``, when given, lets callers include retained
-        messages in the summary without archiving them.
+        ``messages`` are the messages being excluded from live model replay;
+        they are what gets raw-dumped if the LLM call fails. Callers may keep
+        the original records in durable session history. ``summary_messages``,
+        when given, lets callers include the visible suffix in the summary
+        without archiving that suffix.
 
         Returns the summary text on success, None if nothing to archive.
         """
@@ -1166,12 +1167,14 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 8,
     ) -> str | None:
-        """Hard-truncate an idle session under the consolidation lock.
+        """Soft-compact an idle session under the consolidation lock.
 
         Used by AutoCompact so all session mutation goes through a single
-        lock-protected path.  Returns the summary text on success, ``None``
-        if the LLM failed (raw_archive fallback), or ``""`` if there was
-        nothing to archive.
+        lock-protected path. Original messages remain in durable session
+        history; ``last_consolidated`` advances so model replay sees only the
+        recent legal suffix plus the generated summary. Returns the summary
+        text on success, ``None`` if the LLM failed (raw_archive fallback), or
+        ``""`` if there was nothing to archive.
         """
         lock = self.get_lock(session_key)
         async with lock:
@@ -1192,18 +1195,18 @@ class Consolidator:
                 last_consolidated=0,
             )
             result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
-            messages_to_keep = probe.messages
+            visible_suffix = probe.messages
             messages_to_remove = result.dropped[result.already_consolidated_count:]
 
-            if not messages_to_remove and not messages_to_keep:
+            if not messages_to_remove and not visible_suffix:
                 self.sessions.save(session)
                 return ""
 
             last_active = session.updated_at
             summary: str | None = ""
             if messages_to_remove:
-                # Summarize the retained suffix too, but only remove/raw-dump
-                # the messages that are no longer kept in the live session.
+                # Summarize the visible suffix too, but only raw-dump messages
+                # excluded from model replay if the provider call fails.
                 summary = await self.archive(
                     messages_to_remove,
                     runtime=runtime,
@@ -1217,16 +1220,19 @@ class Consolidator:
                     "last_active": last_active.isoformat(),
                 }
 
-            session.messages = messages_to_keep
-            session.last_consolidated = 0
+            # Keep the raw records durable and move only the model-replay
+            # boundary. ``visible_suffix`` is contiguous because the probe
+            # requested user-turn extension and only trims from the front.
+            session.last_consolidated = len(session.messages) - len(visible_suffix)
             self.sessions.save(session)
 
             if messages_to_remove:
                 logger.info(
-                    "Idle-session compact for {}: archived={}, kept={}, summary={}",
+                    "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
                     session_key,
                     len(messages_to_remove),
-                    len(messages_to_keep),
+                    len(visible_suffix),
+                    len(session.messages),
                     bool(summary),
                 )
 
