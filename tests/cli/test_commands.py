@@ -20,6 +20,8 @@ from nanobot.cli import commands as cli_commands
 from nanobot.cli import gateway_runtime as cli_gateway_runtime
 from nanobot.cli import provider as provider_commands
 from nanobot.cli import terminal as cli_terminal
+from nanobot.cli import webui as cli_webui
+from nanobot.cli import webui_support as cli_webui_support
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
@@ -182,7 +184,7 @@ def test_webui_restores_tty_before_loading_config(monkeypatch, tmp_path: Path) -
     config_file = tmp_path / "config.json"
     config_file.write_text("{}", encoding="utf-8")
     calls: list[str] = []
-    original_resolve = cli_commands._resolve_webui_config_path
+    original_resolve = cli_webui._resolve_webui_config_path
 
     monkeypatch.setattr(
         cli_terminal,
@@ -190,16 +192,16 @@ def test_webui_restores_tty_before_loading_config(monkeypatch, tmp_path: Path) -
         lambda: calls.append("tty"),
     )
     monkeypatch.setattr(
-        cli_commands,
+        cli_webui,
         "_resolve_webui_config_path",
         lambda path: calls.append("config") or original_resolve(path),
     )
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr(cli_commands, "sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(cli_commands, "_gateway_health_ready", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(cli_commands, "_webui_endpoint_reachable", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(cli_commands, "_tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(cli_commands, "_run_gateway", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_webui, "sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(cli_webui, "_gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_webui, "_webui_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_webui, "_tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_webui, "_run_gateway", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
 
@@ -1868,9 +1870,9 @@ def _patch_webui_provider_ready(monkeypatch) -> None:
 
 
 def _patch_gateway_ports_free(monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_a, **_kw: False)
-    monkeypatch.setattr("nanobot.cli.commands._tcp_endpoint_reachable", lambda *_a, **_kw: False)
-    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_a, **_kw: False)
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_a, **_kw: False)
+    monkeypatch.setattr("nanobot.cli.webui._tcp_endpoint_reachable", lambda *_a, **_kw: False)
+    monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_a, **_kw: False)
     monkeypatch.setattr(
         "nanobot.cli.gateway_runtime._tcp_endpoint_reachable",
         lambda *_a, **_kw: False,
@@ -1903,6 +1905,10 @@ def _patch_cli_command_runtime(
     monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
+        sync_templates or (lambda _path: None),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.webui.sync_workspace_templates",
         sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
@@ -2049,7 +2055,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr(
-        "nanobot.cli.commands.sync_workspace_templates",
+        "nanobot.cli.webui.sync_workspace_templates",
         lambda path: seen.__setitem__("templates", path),
     )
 
@@ -2057,7 +2063,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         seen["gateway_config"] = config
         seen["gateway_kwargs"] = kwargs
 
-    monkeypatch.setattr("nanobot.cli.commands._run_gateway", _fake_run_gateway)
+    monkeypatch.setattr("nanobot.cli.webui._run_gateway", _fake_run_gateway)
 
     result = runner.invoke(
         app,
@@ -2110,13 +2116,13 @@ def test_webui_yes_starts_first_run_without_provider_setup(monkeypatch, tmp_path
         lambda _config: "No API key configured for provider 'custom'.",
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._provider_setup_error",
+        "nanobot.cli.webui._provider_setup_error",
         lambda _config: "No API key configured for provider 'custom'.",
     )
     _patch_gateway_ports_free(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
-        "nanobot.cli.commands._run_gateway",
+        "nanobot.cli.webui._run_gateway",
         lambda config, **kwargs: seen.update(config=config, **kwargs),
     )
 
@@ -2154,7 +2160,7 @@ def test_webui_missing_runtime_env_fails_before_starting_gateway(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._run_gateway",
+        "nanobot.cli.webui._run_gateway",
         lambda *_args, **_kwargs: pytest.fail("gateway must not start with unresolved config"),
     )
 
@@ -2208,9 +2214,9 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     config_file.write_text("{}")
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
-        "nanobot.cli.commands._prepare_webui_bundle_for_gateway",
+        "nanobot.cli.webui._prepare_webui_bundle_for_gateway",
         lambda *_args, **_kwargs: None,
     )
 
@@ -2232,7 +2238,7 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
     monkeypatch.setattr(
-        "nanobot.cli.commands._open_webui_browser",
+        "nanobot.cli.webui._open_webui_browser",
         lambda url: seen.__setitem__("opened_url", url),
     )
 
@@ -2275,7 +2281,7 @@ def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> Non
     url = "http://127.0.0.1:8765/#/?bootstrapSecret=super-secret"
     monkeypatch.setattr("webbrowser.open", lambda value: opened.append(value))
 
-    cli_commands._open_webui_browser(url, wait=False)
+    cli_webui_support._open_webui_browser(url, wait=False)
 
     assert opened == [url]
     output = _strip_ansi(capsys.readouterr().out)
@@ -2294,9 +2300,9 @@ def test_webui_background_restarts_when_config_changes_and_gateway_is_running(
     config_file.write_text("{}")
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
-        "nanobot.cli.commands._prepare_webui_bundle_for_gateway",
+        "nanobot.cli.webui._prepare_webui_bundle_for_gateway",
         lambda *_args, **_kwargs: None,
     )
 
@@ -2325,7 +2331,7 @@ def test_webui_background_restarts_when_config_changes_and_gateway_is_running(
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
     monkeypatch.setattr(
-        "nanobot.cli.commands._open_webui_browser",
+        "nanobot.cli.webui._open_webui_browser",
         lambda url: seen.__setitem__("opened_url", url),
     )
 
@@ -2366,15 +2372,15 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     config_file.write_text("{}")
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
-        "nanobot.cli.commands._open_webui_browser",
+        "nanobot.cli.webui._open_webui_browser",
         lambda url, **kwargs: seen.update({"opened_url": url, "open_kwargs": kwargs}),
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._run_gateway",
+        "nanobot.cli.webui._run_gateway",
         lambda *_args, **_kwargs: pytest.fail("existing gateway should be reused"),
     )
 
@@ -2387,7 +2393,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
     monkeypatch.setattr(
-        "nanobot.cli.commands._attach_to_background_gateway",
+        "nanobot.cli.webui._attach_to_background_gateway",
         lambda runtime: seen.__setitem__("attached_runtime", runtime),
     )
 
@@ -2422,7 +2428,7 @@ def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> No
 
     monkeypatch.setattr("nanobot.cli.webui_support.time.sleep", _interrupt)
 
-    cli_commands._attach_to_background_gateway(_FakeRuntime())
+    cli_webui_support._attach_to_background_gateway(_FakeRuntime())
 
     assert stopped is True
     output = capsys.readouterr().out
@@ -2435,12 +2441,12 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args: True)
-    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args: True)
-    monkeypatch.setattr("nanobot.cli.commands._open_webui_browser", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args: True)
+    monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args: True)
+    monkeypatch.setattr("nanobot.cli.webui._open_webui_browser", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        "nanobot.cli.commands._attach_to_background_gateway",
+        "nanobot.cli.webui._attach_to_background_gateway",
         lambda _runtime: pytest.fail("unmanaged gateway must not be attached"),
     )
 
@@ -2463,12 +2469,12 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr("nanobot.cli.commands._tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.webui._tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
-        "nanobot.cli.commands._run_gateway",
+        "nanobot.cli.webui._run_gateway",
         lambda *_args, **_kwargs: pytest.fail("gateway should not start on occupied ports"),
     )
 
