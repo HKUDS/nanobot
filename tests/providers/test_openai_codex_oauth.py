@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from http.client import HTTPConnection
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
@@ -51,7 +50,8 @@ def _fake_interactive_login(
         )
         print_fn("Open this URL:")
         print_fn(_authorization_url())
-        captured["callback_url"] = prompt_fn("Paste callback URL")
+        if not open_browser:
+            captured["callback_url"] = prompt_fn("Paste callback URL")
         if error is not None:
             raise error
         return OAuthToken(
@@ -67,7 +67,7 @@ def _fake_interactive_login(
 def test_authorization_url_comes_from_oauth_cli_kit() -> None:
     flow = start_openai_codex_oauth_login(
         timeout_s=2,
-        listen_for_callback=False,
+        open_browser=False,
     )
     try:
         params = parse_qs(urlsplit(flow.authorization_url).query)
@@ -81,41 +81,28 @@ def test_authorization_url_comes_from_oauth_cli_kit() -> None:
         flow.cancel()
 
 
-def test_local_flow_relays_loopback_callback_to_public_oauth_cli_kit(
+def test_local_flow_delegates_browser_and_callback_to_public_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-    monkeypatch.setattr(codex_oauth, "_CALLBACK_PORT", 0)
     monkeypatch.setattr(
         codex_oauth,
         "login_oauth_interactive",
         _fake_interactive_login(captured),
     )
     flow = start_openai_codex_oauth_login(timeout_s=5)
-    callback_url = (
-        "http://localhost:1455/auth/callback?"
-        + urlencode({"code": "authorization-code", "state": "expected-state"})
-    )
-    server = flow._callback_server
-    assert server is not None
 
     try:
-        callback = urlsplit(callback_url)
-        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
-        try:
-            connection.request("GET", callback.path + "?" + callback.query)
-            response = connection.getresponse()
-            assert response.status == 200
-            response.read()
-        finally:
-            connection.close()
         token = _wait_for_completion(flow)
     finally:
         flow.cancel()
 
     assert token.account_id == "acct-test"
-    assert captured["callback_url"] == callback_url
-    assert captured["open_browser"] is False
+    assert captured == {
+        "provider": codex_oauth.OPENAI_CODEX_PROVIDER,
+        "proxy": None,
+        "open_browser": True,
+    }
 
 
 def test_remote_flow_delegates_pasted_callback_to_public_oauth_cli_kit(
@@ -130,7 +117,7 @@ def test_remote_flow_delegates_pasted_callback_to_public_oauth_cli_kit(
     flow = start_openai_codex_oauth_login(
         proxy="http://127.0.0.1:7890",
         timeout_s=5,
-        listen_for_callback=False,
+        open_browser=False,
     )
     callback_url = (
         "http://localhost:1455/auth/callback?"
@@ -167,7 +154,7 @@ def test_remote_flow_rejects_callback_from_another_login(
     )
     flow = start_openai_codex_oauth_login(
         timeout_s=5,
-        listen_for_callback=False,
+        open_browser=False,
     )
     callback_url = (
         "http://localhost:1455/auth/callback?"
@@ -192,7 +179,7 @@ def test_remote_flow_reports_authorization_denial_without_exchanging_code(
     )
     flow = start_openai_codex_oauth_login(
         timeout_s=5,
-        listen_for_callback=False,
+        open_browser=False,
     )
     callback_url = (
         "http://localhost:1455/auth/callback?"
@@ -221,7 +208,7 @@ def test_dependency_error_is_bounded_and_does_not_expose_callback(
     )
     flow = start_openai_codex_oauth_login(
         timeout_s=5,
-        listen_for_callback=False,
+        open_browser=False,
     )
     callback_url = (
         "http://localhost:1455/auth/callback?"
@@ -249,7 +236,7 @@ def test_remote_flow_expires_while_waiting_for_callback(
     )
     flow = start_openai_codex_oauth_login(
         timeout_s=0.05,
-        listen_for_callback=False,
+        open_browser=False,
     )
     try:
         time.sleep(0.08)

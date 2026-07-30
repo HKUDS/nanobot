@@ -2804,12 +2804,8 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
-    const popup = {
-      opener: window,
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    vi.stubGlobal("open", vi.fn(() => popup));
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -2821,7 +2817,7 @@ describe("SettingsView Apps catalog", () => {
       "/api/settings/provider/oauth-login?provider=openai_codex",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
-    expect(popup.location.href).toBe(authorization.authorization_url);
+    expect(openMock).not.toHaveBeenCalled();
     expect(
       within(dialog).getByText(
         "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",

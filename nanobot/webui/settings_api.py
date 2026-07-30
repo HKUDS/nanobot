@@ -1830,7 +1830,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             flow = start_openai_codex_oauth_login(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
-                listen_for_callback=not remote_browser,
+                open_browser=not remote_browser,
             )
         except Exception as e:
             raise WebUISettingsError(f"OpenAI Codex OAuth login failed: {e}", status=502) from e

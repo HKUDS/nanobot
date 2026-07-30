@@ -1465,11 +1465,11 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
         def cancel(self) -> None:
             captured["cancelled"] = True
 
-    def fake_start(*, proxy=None, timeout_s=None, listen_for_callback=None):
+    def fake_start(*, proxy=None, timeout_s=None, open_browser=None):
         captured.update(
             proxy=proxy,
             timeout_s=timeout_s,
-            listen_for_callback=listen_for_callback,
+            open_browser=open_browser,
         )
         return FakeFlow()
 
@@ -1483,7 +1483,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     assert captured == {
         "proxy": proxy,
         "timeout_s": 600,
-        "listen_for_callback": True,
+        "open_browser": True,
     }
     assert payload["status"] == "authorization_required"
     assert payload["provider"] == "openai_codex"
@@ -1527,7 +1527,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     ]
 
 
-def test_openai_codex_remote_login_disables_loopback_listener(
+def test_openai_codex_remote_login_uses_headless_dependency_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1561,7 +1561,7 @@ def test_openai_codex_remote_login_disables_loopback_listener(
         _clear_webui_oauth_flows("openai_codex")
 
     assert payload["completion_input"] == "callback_url"
-    assert captured["listen_for_callback"] is False
+    assert captured["open_browser"] is False
     assert captured["cancelled"] is True
 
 

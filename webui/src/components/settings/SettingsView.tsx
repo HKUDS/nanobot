@@ -1622,7 +1622,7 @@ export function SettingsView({
     let popup: Window | null = null;
     if (
       action === "login"
-      && (providerName === "xai_grok" || providerName === "openai_codex")
+      && providerName === "xai_grok"
       && !remoteBrowserAccess
     ) {
       try {
