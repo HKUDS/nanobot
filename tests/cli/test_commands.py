@@ -1472,12 +1472,12 @@ def mock_agent_runtime(tmp_path):
 
     with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
          patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
-         patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
+         patch("nanobot.cli.agent.sync_workspace_templates") as mock_sync_templates, \
          patch("nanobot.providers.factory.make_provider", return_value=_fake_provider()), \
          patch("nanobot.cli.terminal._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
          patch("nanobot.cron.service.CronService"), \
-         patch("nanobot.cli.commands.AgentLoop.from_config") as mock_from_config:
+         patch("nanobot.cli.agent.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
         agent_loop.channels_config = None
         agent_loop.process_direct = AsyncMock(
@@ -1546,7 +1546,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         lambda path: seen.__setitem__("config_path", path),
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
@@ -1564,7 +1564,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1584,7 +1584,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
@@ -1606,7 +1606,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1633,7 +1633,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -1656,7 +1656,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -1689,7 +1689,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -1712,7 +1712,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr(
         "nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None
     )

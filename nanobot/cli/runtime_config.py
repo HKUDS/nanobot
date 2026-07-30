@@ -148,6 +148,19 @@ def _load_inspection_config(
     return display_path, loaded
 
 
+def _migrate_cron_store(config: "Config") -> None:
+    """One-time migration: move legacy global cron store into the workspace."""
+    from nanobot.config.paths import get_cron_dir
+
+    legacy_path = get_cron_dir() / "jobs.json"
+    new_path = config.workspace_path / "cron" / "jobs.json"
+    if legacy_path.is_file() and not new_path.exists():
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+
+        shutil.move(str(legacy_path), str(new_path))
+
+
 def _provider_setup_error(config: Config) -> str | None:
     """Return a local provider/model configuration error, or None."""
     from nanobot.providers.factory import validate_provider_setup
