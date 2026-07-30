@@ -45,7 +45,7 @@ export function SkillsMarketplace({
   installing: string;
   onInstallingChange: (skillId: string) => void;
 }) {
-  const { token } = useClient();
+  const { getToken } = useClient();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MarketplaceSkillSummary[]>([]);
@@ -78,7 +78,7 @@ export function SkillsMarketplace({
   useEffect(() => {
     let cancelled = false;
     setTrendingLoading(true);
-    fetchTrendingMarketplaceSkills(token)
+    fetchTrendingMarketplaceSkills(getToken())
       .then((payload) => {
         if (cancelled) return;
         setTrending(payload.skills);
@@ -92,7 +92,7 @@ export function SkillsMarketplace({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [getToken]);
 
   useEffect(() => {
     const skills = query.trim().length < 2 ? trending : results;
@@ -102,7 +102,7 @@ export function SkillsMarketplace({
     if (!unresolved.length) return;
 
     let cancelled = false;
-    fetchMarketplaceSkillTrends(token, unresolved.map((skill) => skill.id))
+    fetchMarketplaceSkillTrends(getToken(), unresolved.map((skill) => skill.id))
       .then((payload) => {
         if (!cancelled) {
           setTrends((current) => ({ ...current, ...payload.trends }));
@@ -112,7 +112,7 @@ export function SkillsMarketplace({
     return () => {
       cancelled = true;
     };
-  }, [query, results, token, trending, trends]);
+  }, [getToken, query, results, trending, trends]);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -127,7 +127,7 @@ export function SkillsMarketplace({
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      searchMarketplaceSkills(token, normalized)
+      searchMarketplaceSkills(getToken(), normalized)
         .then((payload) => {
           if (cancelled) return;
           setResults(payload.skills);
@@ -152,7 +152,7 @@ export function SkillsMarketplace({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, t, token]);
+  }, [getToken, query, t]);
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
@@ -160,7 +160,7 @@ export function SkillsMarketplace({
     setError("");
     try {
       const payload = await installMarketplaceSkill(
-        token,
+        getToken(),
         skill.provider,
         skill.source,
         skill.skill_id,
