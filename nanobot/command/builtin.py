@@ -311,7 +311,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot and runtime is not None:
-        loop._schedule_background(  # pyright: ignore[reportPrivateUsage]
+        loop.schedule_background(
             loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
                 snapshot,
                 runtime=runtime,

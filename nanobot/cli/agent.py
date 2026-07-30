@@ -1,7 +1,5 @@
 """Direct and interactive agent CLI command."""
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
-
 import asyncio
 import signal
 import sys

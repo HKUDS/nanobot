@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
 from collections.abc import Callable
 from contextlib import suppress
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
 from rich.console import Console
@@ -19,9 +19,6 @@ if TYPE_CHECKING:
 
 console = Console()
 provider_app = typer.Typer(help="Manage providers")
-
-_LOGIN_HANDLERS: dict[str, Callable[[], None]] = {}
-_LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 
 _PROVIDER_DISPLAY: dict[str, str] = {
     "openai_codex": "OpenAI Codex",
@@ -36,28 +33,72 @@ _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
 }
 
 
-def _register_login(
-    name: str,
-) -> Callable[[Callable[[], None]], Callable[[], None]]:
-    """Register an OAuth login handler."""
-
-    def decorator(fn: Callable[[], None]) -> Callable[[], None]:
-        _LOGIN_HANDLERS[name] = fn
-        return fn
-
-    return decorator
+class _OAuthToken(Protocol):
+    access: str | None
+    account_id: str | None
 
 
-def _register_logout(
-    name: str,
-) -> Callable[[Callable[[], None]], Callable[[], None]]:
-    """Register an OAuth logout handler."""
+class _GetOAuthToken(Protocol):
+    def __call__(self, *, proxy: str | None = None) -> _OAuthToken | None: ...
 
-    def decorator(fn: Callable[[], None]) -> Callable[[], None]:
-        _LOGOUT_HANDLERS[name] = fn
-        return fn
 
-    return decorator
+class _LoginOAuthInteractive(Protocol):
+    def __call__(
+        self,
+        *,
+        print_fn: Callable[[str], None],
+        prompt_fn: Callable[[str], str],
+        proxy: str | None = None,
+    ) -> _OAuthToken | None: ...
+
+
+class _OAuthProviderConfig(Protocol):
+    token_filename: str
+
+
+class _TokenStorage(Protocol):
+    def get_token_path(self) -> Path: ...
+
+
+class _FileTokenStorageFactory(Protocol):
+    def __call__(self, *, token_filename: str) -> _TokenStorage: ...
+
+
+def _required_module_attribute(module_name: str, attribute: str) -> object:
+    """Load an optional dependency attribute with import-compatible errors."""
+    module = import_module(module_name)
+    try:
+        return getattr(module, attribute)
+    except AttributeError as exc:
+        raise ImportError(f"{module_name}.{attribute} is unavailable") from exc
+
+
+def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]:
+    """Load the optional untyped OAuth client behind a typed boundary."""
+    return (
+        cast(_GetOAuthToken, _required_module_attribute("oauth_cli_kit", "get_token")),
+        cast(
+            _LoginOAuthInteractive,
+            _required_module_attribute("oauth_cli_kit", "login_oauth_interactive"),
+        ),
+    )
+
+
+def _load_openai_oauth_storage() -> tuple[_OAuthProviderConfig, _FileTokenStorageFactory]:
+    """Load the optional untyped OAuth storage API behind a typed boundary."""
+    return (
+        cast(
+            _OAuthProviderConfig,
+            _required_module_attribute(
+                "oauth_cli_kit.providers",
+                "OPENAI_CODEX_PROVIDER",
+            ),
+        ),
+        cast(
+            _FileTokenStorageFactory,
+            _required_module_attribute("oauth_cli_kit.storage", "FileTokenStorage"),
+        ),
+    )
 
 
 def _resolve_oauth_provider(provider: str) -> ProviderSpec:
@@ -172,13 +213,11 @@ def provider_logout(
     handler()
 
 
-@_register_login("openai_codex")
 def _login_openai_codex() -> None:
     try:
-        from oauth_cli_kit import get_token, login_oauth_interactive
-
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
+        get_token, login_oauth_interactive = _load_openai_oauth_client()
         proxy = None
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -206,21 +245,18 @@ def _login_openai_codex() -> None:
         raise typer.Exit(1)
 
 
-@_register_logout("openai_codex")
 def _logout_openai_codex() -> None:
     """Clear local OAuth credentials for OpenAI Codex."""
     try:
-        from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-        from oauth_cli_kit.storage import FileTokenStorage
+        provider_config, storage_factory = _load_openai_oauth_storage()
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
 
-    storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    storage = storage_factory(token_filename=provider_config.token_filename)
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
 
 
-@_register_login("xai_grok")
 def _login_xai_grok() -> None:
     """Authenticate with xAI using the Grok subscription OAuth contract."""
     from nanobot.config.loader import load_config, resolve_config_env_vars
@@ -255,7 +291,6 @@ def _login_xai_grok() -> None:
     )
 
 
-@_register_logout("xai_grok")
 def _logout_xai_grok() -> None:
     """Clear local xAI OAuth credentials for this nanobot instance."""
     from nanobot.providers.xai_oauth import get_xai_oauth_storage_path, logout_xai_oauth
@@ -269,7 +304,6 @@ def _logout_xai_grok() -> None:
         console.print(f"[yellow]! No local OAuth credentials found for {provider_label}[/yellow]")
 
 
-@_register_logout("github_copilot")
 def _logout_github_copilot() -> None:
     """Clear local OAuth credentials for GitHub Copilot."""
     try:
@@ -308,7 +342,6 @@ def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
         console.print(f"[yellow]! Could not remove {path}: {exc}[/yellow]")
 
 
-@_register_login("github_copilot")
 def _login_github_copilot() -> None:
     try:
         from nanobot.providers.github_copilot_provider import login_github_copilot
@@ -325,3 +358,15 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+_LOGIN_HANDLERS: dict[str, Callable[[], None]] = {
+    "openai_codex": _login_openai_codex,
+    "xai_grok": _login_xai_grok,
+    "github_copilot": _login_github_copilot,
+}
+_LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {
+    "openai_codex": _logout_openai_codex,
+    "xai_grok": _logout_xai_grok,
+    "github_copilot": _logout_github_copilot,
+}

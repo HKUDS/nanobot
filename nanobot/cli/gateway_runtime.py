@@ -1,7 +1,5 @@
 """Foreground gateway runtime and lifecycle helpers."""
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
-
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
@@ -37,6 +35,8 @@ from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.build import BuildMode
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
+
+__all__ = ["_run_gateway"]
 
 console = Console()
 
@@ -349,7 +349,7 @@ def _run_gateway(
         hook_factories=[create_file_edit_activity_hook],
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
-        agent._schedule_background(cast(Coroutine[Any, Any, None], awaitable))
+        agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
 
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,

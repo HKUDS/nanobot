@@ -14,7 +14,7 @@ def mock_prompt_session():
     """Mock the global prompt session."""
     mock_session = MagicMock()
     mock_session.prompt_async = AsyncMock()
-    with patch("nanobot.cli.terminal._PROMPT_SESSION", mock_session), \
+    with patch("nanobot.cli.terminal._prompt_session", mock_session), \
          patch("nanobot.cli.terminal.patch_stdout"):
         yield mock_session
 
@@ -44,7 +44,7 @@ async def test_read_interactive_input_async_handles_eof(mock_prompt_session):
 def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
-    terminal._PROMPT_SESSION = None
+    terminal._prompt_session = None
 
     with patch("nanobot.cli.terminal.PromptSession") as mock_session_cls, \
          patch("nanobot.cli.terminal.FileHistory"), \
@@ -54,7 +54,7 @@ def test_init_prompt_session_creates_session():
 
         terminal._init_prompt_session()
 
-        assert terminal._PROMPT_SESSION is not None
+        assert terminal._prompt_session is not None
         mock_session_cls.assert_called_once()
         _, kwargs = mock_session_cls.call_args
         # Buffer is multiline-capable so Alt+Enter can insert newlines;
@@ -103,7 +103,7 @@ async def test_raw_lf_enter_still_submits_like_wsl_terminals():
     with create_pipe_input() as pipe_input:
         with create_app_session(input=pipe_input, output=DummyOutput()):
             terminal._init_prompt_session()
-            session = terminal._PROMPT_SESSION
+            session = terminal._prompt_session
             pipe_input.send_text("hello\x0aworld\r")
             result = await session.prompt_async("> ")
 
@@ -120,7 +120,7 @@ async def test_alt_enter_inserts_newline_on_lf_terminals():
     with create_pipe_input() as pipe_input:
         with create_app_session(input=pipe_input, output=DummyOutput()):
             terminal._init_prompt_session()
-            session = terminal._PROMPT_SESSION
+            session = terminal._prompt_session
             pipe_input.send_text("foo\x1b\x0abar\r")
             result = await session.prompt_async("> ")
 
@@ -137,7 +137,7 @@ async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
     with create_pipe_input() as pipe_input:
         with create_app_session(input=pipe_input, output=DummyOutput()):
             terminal._init_prompt_session()
-            session = terminal._PROMPT_SESSION
+            session = terminal._prompt_session
             pipe_input.send_text("foo\x1b[13;2ubar\r")
             result = await session.prompt_async("> ")
 

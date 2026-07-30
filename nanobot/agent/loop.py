@@ -1342,6 +1342,10 @@ class AgentLoop:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
+    def schedule_background(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Schedule a tracked background task for an external coordinator."""
+        self._schedule_background(coro)
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False

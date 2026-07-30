@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
 import os
 import select
 import sys
@@ -32,11 +31,27 @@ from nanobot.bus.outbound_events import (
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
 
+__all__ = [
+    "_ReasoningBuffer",
+    "_ensure_interactive_tty_mode",
+    "_flush_cli_reasoning",
+    "_flush_pending_tty_input",
+    "_init_prompt_session",
+    "_is_exit_command",
+    "_maybe_print_interactive_progress",
+    "_print_agent_response",
+    "_print_cli_progress_line",
+    "_print_cli_reasoning",
+    "_print_interactive_response",
+    "_read_interactive_input_async",
+    "_restore_terminal",
+]
+
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
-_PROMPT_SESSION: PromptSession[str] | None = None
+_prompt_session: PromptSession[str] | None = None
 _saved_term_attrs: list[Any] | None = None
 
 
@@ -156,7 +171,7 @@ def _build_cli_key_bindings() -> KeyBindings:
 
 def _init_prompt_session() -> None:
     """Create the prompt_toolkit session with persistent file history."""
-    global _PROMPT_SESSION, _saved_term_attrs
+    global _prompt_session, _saved_term_attrs
 
     # Save terminal state so we can restore it on exit
     with suppress(Exception):
@@ -169,7 +184,7 @@ def _init_prompt_session() -> None:
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    _PROMPT_SESSION = PromptSession(
+    _prompt_session = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
         # Multiline-capable buffer; Enter still submits via the custom key
@@ -402,11 +417,11 @@ async def _read_interactive_input_async() -> str:
     - History navigation (up/down arrows)
     - Clean display (no ghost characters or artifacts)
     """
-    if _PROMPT_SESSION is None:
+    if _prompt_session is None:
         raise RuntimeError("Call _init_prompt_session() first")
     try:
         with patch_stdout():
-            return await _PROMPT_SESSION.prompt_async(
+            return await _prompt_session.prompt_async(
                 HTML("<b fg='ansiblue'>You:</b> "),
             )
     except EOFError as exc:

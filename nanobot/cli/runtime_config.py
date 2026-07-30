@@ -1,7 +1,5 @@
 """Configuration loading and diagnostics shared by CLI commands."""
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
-
 from pathlib import Path
 
 import typer
@@ -11,6 +9,19 @@ from rich.markup import escape
 from rich.text import Text
 
 from nanobot.config.schema import Config
+
+__all__ = [
+    "_load_config_for_cli",
+    "_load_inspection_config",
+    "_load_runtime_config",
+    "_migrate_cron_store",
+    "_model_display",
+    "_print_agent_start_error",
+    "_print_config_error",
+    "_print_model_setup_steps",
+    "_print_runtime_config_validation_error",
+    "_provider_setup_error",
+]
 
 console = Console()
 

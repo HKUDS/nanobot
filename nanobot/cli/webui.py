@@ -1,7 +1,5 @@
 """WebUI CLI command."""
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
-
 from pathlib import Path
 
 import typer

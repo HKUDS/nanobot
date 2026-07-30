@@ -676,6 +676,18 @@ def test_provider_login_rejects_unknown_provider():
     assert "Unknown OAuth provider" in result.stdout
 
 
+def test_provider_login_openai_codex_handles_missing_oauth_symbol(monkeypatch):
+    import oauth_cli_kit
+
+    monkeypatch.delattr(oauth_cli_kit, "get_token")
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 1
+    assert "oauth_cli_kit not installed" in result.stdout
+    assert result.exception is not None
+
+
 def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
     called = False

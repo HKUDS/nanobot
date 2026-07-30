@@ -1,7 +1,5 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
-# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
-
 import sys
 import time
 from pathlib import Path
@@ -29,6 +27,32 @@ from nanobot.webui.build import (
 
 if TYPE_CHECKING:
     from nanobot.gateway.runtime import GatewayRuntime
+
+__all__ = [
+    "_attach_to_background_gateway",
+    "_confirm_webui_action",
+    "_ensure_local_webui_channel",
+    "_gateway_health_bind_note",
+    "_gateway_health_ready",
+    "_gateway_health_url",
+    "_gateway_instance_command",
+    "_host_for_local_browser",
+    "_load_webui_setup_config",
+    "_open_webui_browser",
+    "_prepare_webui_bundle_for_gateway",
+    "_print_foreground_port_conflict",
+    "_print_webui_foreground_lifecycle",
+    "_resolve_webui_config_path",
+    "_run_quick_start_for_webui",
+    "_tcp_endpoint_reachable",
+    "_validate_gateway_startup",
+    "_warn_webui_bind_scope",
+    "_webui_browser_url",
+    "_webui_build_mode_for_interactive",
+    "_webui_channel_enabled",
+    "_webui_display_url",
+    "_webui_endpoint_reachable",
+]
 
 console = Console()
 
