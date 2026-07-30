@@ -5,12 +5,15 @@ import errno
 import json
 import os
 import re
+import sqlite3
 from collections import OrderedDict
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any, Callable, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
@@ -48,6 +51,8 @@ _PROVIDER_STATE_RECORD_TYPE = "provider_state"
 _PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
     r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
 )
+_SQLITE_DB_NAME = "sessions.db"
+_SQLITE_SCHEMA_VERSION = 1
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -950,6 +955,334 @@ class JsonlSessionStore:
                     )
                 continue
         return sorted(sessions, key=lambda item: item["updated_at"], reverse=True)
+
+
+class SQLiteSessionStore:
+    """SQLite implementation of session persistence."""
+
+    def __init__(self, workspace: Path):
+        self.db_path = ensure_dir(workspace) / _SQLITE_DB_NAME
+        self._initialize()
+
+    @contextmanager
+    def _connection(self, *, durable: bool = False) -> Generator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.db_path, timeout=5.0)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute(
+                "PRAGMA synchronous = FULL" if durable else "PRAGMA synchronous = NORMAL"
+            )
+            yield connection
+        finally:
+            connection.close()
+
+    def _initialize(self) -> None:
+        with self._connection(durable=True) as connection:
+            deadline = monotonic() + 5.0
+            while True:
+                try:
+                    journal_mode: object = connection.execute(
+                        "PRAGMA journal_mode = WAL"
+                    ).fetchone()
+                    if journal_mode != ("wal",):
+                        raise RuntimeError(f"Failed to enable SQLite WAL mode: {journal_mode!r}")
+                    break
+                except sqlite3.OperationalError as exc:
+                    error_code = exc.sqlite_errorcode & 0xFF
+                    if (
+                        error_code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                        or monotonic() >= deadline
+                    ):
+                        raise
+                    sleep(0.05)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                raw_version: object = connection.execute("PRAGMA user_version").fetchone()
+                if not isinstance(raw_version, tuple):
+                    raise RuntimeError("Failed to read SQLite session schema version")
+                version_row = cast(tuple[object, ...], raw_version)
+                if len(version_row) != 1 or not isinstance(version_row[0], int):
+                    raise RuntimeError("Failed to read SQLite session schema version")
+                version = version_row[0]
+                if version not in (0, _SQLITE_SCHEMA_VERSION):
+                    raise RuntimeError(
+                        f"Unsupported SQLite session schema version {version}; "
+                        f"expected {_SQLITE_SCHEMA_VERSION}"
+                    )
+                if version == _SQLITE_SCHEMA_VERSION:
+                    connection.commit()
+                    return
+
+                connection.execute(
+                    """
+                    CREATE TABLE sessions (
+                        key TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        metadata TEXT NOT NULL,
+                        last_consolidated INTEGER NOT NULL DEFAULT 0
+                            CHECK (last_consolidated >= 0)
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE messages (
+                        session_key TEXT NOT NULL,
+                        position INTEGER NOT NULL CHECK (position >= 0),
+                        payload TEXT NOT NULL,
+                        PRIMARY KEY (session_key, position),
+                        FOREIGN KEY (session_key) REFERENCES sessions(key) ON DELETE CASCADE
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX sessions_updated_at ON sessions(updated_at DESC)"
+                )
+                connection.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _encode_json(value: object) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _decode_json_object(value: object) -> dict[str, Any]:
+        if not isinstance(value, str):
+            raise ValueError("SQLite session JSON must be text")
+        return _json_object(json.loads(value))
+
+    @classmethod
+    def _decode_session_row(
+        cls,
+        row: object,
+    ) -> tuple[str, str, str, dict[str, Any], int]:
+        if not isinstance(row, tuple):
+            raise ValueError("Invalid SQLite session row")
+        values = cast(tuple[object, ...], row)
+        if len(values) != 5:
+            raise ValueError("Invalid SQLite session row")
+        key, created_at, updated_at, metadata_json, last_consolidated = values
+        if (
+            not isinstance(key, str)
+            or not isinstance(created_at, str)
+            or not isinstance(updated_at, str)
+            or not isinstance(last_consolidated, int)
+            or isinstance(last_consolidated, bool)
+        ):
+            raise ValueError("Invalid SQLite session fields")
+        return (
+            key,
+            created_at,
+            updated_at,
+            cls._decode_json_object(metadata_json),
+            last_consolidated,
+        )
+
+    @classmethod
+    def _read_messages(
+        cls,
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        rows = connection.execute(
+            "SELECT payload FROM messages WHERE session_key = ? ORDER BY position",
+            (key,),
+        )
+        for raw_row in rows:
+            row: object = raw_row
+            if not isinstance(row, tuple):
+                raise ValueError("Invalid SQLite message row")
+            values = cast(tuple[object, ...], row)
+            if len(values) != 1:
+                raise ValueError("Invalid SQLite message row")
+            messages.append(cls._decode_json_object(values[0]))
+        return messages
+
+    @classmethod
+    def _preview(
+        cls,
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> str:
+        preview = ""
+        fallback_preview = ""
+        scanned_chars = 0
+        rows = connection.execute(
+            """
+            SELECT payload
+            FROM messages
+            WHERE session_key = ?
+            ORDER BY position
+            LIMIT ?
+            """,
+            (key, _SESSION_LIST_PREVIEW_MAX_RECORDS + 1),
+        )
+        for index, raw_row in enumerate(rows, start=1):
+            row: object = raw_row
+            if not isinstance(row, tuple):
+                raise ValueError("Invalid SQLite message row")
+            values = cast(tuple[object, ...], row)
+            if len(values) != 1 or not isinstance(values[0], str):
+                raise ValueError("Invalid SQLite message row")
+            payload = values[0]
+            scanned_chars += len(payload) + 1
+            if (
+                index > _SESSION_LIST_PREVIEW_MAX_RECORDS
+                or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
+            ):
+                break
+            message = cls._decode_json_object(payload)
+            text = _message_preview_text(message)
+            if not text:
+                continue
+            if message.get("role") == "user":
+                preview = text
+                break
+            if not fallback_preview and message.get("role") == "assistant":
+                fallback_preview = text
+        return preview or fallback_preview
+
+    def load(self, key: str) -> Session | None:
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN")
+            row: object = connection.execute(
+                """
+                SELECT key, created_at, updated_at, metadata, last_consolidated
+                FROM sessions
+                WHERE key = ?
+                """,
+                (key,),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                stored_key, created_at, updated_at, metadata, last_consolidated = (
+                    self._decode_session_row(row)
+                )
+                messages = self._read_messages(connection, stored_key)
+                return Session(
+                    key=stored_key,
+                    messages=messages,
+                    created_at=datetime.fromisoformat(created_at),
+                    updated_at=datetime.fromisoformat(updated_at),
+                    metadata=metadata,
+                    last_consolidated=last_consolidated,
+                )
+            except _SESSION_DATA_ERRORS as exc:
+                logger.warning("Failed to load SQLite session {}: {}", key, exc)
+                return None
+
+    def save(self, session: Session, *, fsync: bool = False) -> None:
+        metadata_json = self._encode_json(session.metadata)
+        message_rows = [
+            (session.key, position, self._encode_json(message))
+            for position, message in enumerate(session.messages)
+        ]
+        with self._connection(durable=fsync) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO sessions (
+                    key, created_at, updated_at, metadata, last_consolidated
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    metadata = excluded.metadata,
+                    last_consolidated = excluded.last_consolidated
+                """,
+                (
+                    session.key,
+                    session.created_at.isoformat(),
+                    session.updated_at.isoformat(),
+                    metadata_json,
+                    session.last_consolidated,
+                ),
+            )
+            connection.execute("DELETE FROM messages WHERE session_key = ?", (session.key,))
+            connection.executemany(
+                """
+                INSERT INTO messages (session_key, position, payload)
+                VALUES (?, ?, ?)
+                """,
+                message_rows,
+            )
+
+    def delete(self, key: str) -> bool:
+        with self._connection() as connection, connection:
+            cursor = connection.execute("DELETE FROM sessions WHERE key = ?", (key,))
+            return cursor.rowcount > 0
+
+    def read(self, key: str) -> SessionPayload | None:
+        session = self.load(key)
+        if session is None:
+            return None
+        return {
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "messages": session.messages,
+        }
+
+    def read_metadata(self, key: str) -> SessionMetadataPayload | None:
+        with self._connection() as connection:
+            row: object = connection.execute(
+                """
+                SELECT key, created_at, updated_at, metadata, last_consolidated
+                FROM sessions
+                WHERE key = ?
+                """,
+                (key,),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                stored_key, created_at, updated_at, metadata, _ = self._decode_session_row(row)
+            except _SESSION_DATA_ERRORS as exc:
+                logger.warning("Failed to read SQLite session metadata {}: {}", key, exc)
+                return None
+            return {
+                "key": stored_key,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "metadata": metadata,
+            }
+
+    def list_sessions(self) -> list[SessionInfo]:
+        sessions: list[SessionInfo] = []
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN")
+            rows = connection.execute(
+                """
+                SELECT key, created_at, updated_at, metadata, last_consolidated
+                FROM sessions
+                ORDER BY updated_at DESC, key
+                """
+            )
+            for raw_row in rows:
+                row: object = raw_row
+                try:
+                    key, created_at, updated_at, metadata, _ = self._decode_session_row(row)
+                    sessions.append(
+                        {
+                            "key": key,
+                            "created_at": created_at,
+                            "updated_at": updated_at,
+                            "title": _metadata_title(metadata),
+                            "preview": self._preview(connection, key),
+                            "path": str(self.db_path),
+                        }
+                    )
+                except _SESSION_DATA_ERRORS as exc:
+                    logger.warning("Failed to list SQLite session: {}", exc)
+        return sessions
 
 
 class SessionManager:
