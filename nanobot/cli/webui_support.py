@@ -1,5 +1,7 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
+
 import sys
 import time
 from pathlib import Path

@@ -1,5 +1,7 @@
 """Configuration loading and diagnostics shared by CLI commands."""
 
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
+
 from pathlib import Path
 
 import typer

@@ -1,5 +1,7 @@
 """Foreground gateway runtime and lifecycle helpers."""
 
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
+
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable

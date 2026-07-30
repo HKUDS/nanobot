@@ -1,5 +1,7 @@
 """Runtime log visibility controls shared by CLI commands."""
 
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
+
 from loguru import logger
 
 

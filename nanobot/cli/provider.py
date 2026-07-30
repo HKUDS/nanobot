@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# pyright: reportMissingTypeStubs=false
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path

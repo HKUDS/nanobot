@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# pyright: reportMissingTypeStubs=false, reportPrivateUsage=false
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false, reportUnusedFunction=false
 import os
 import select
 import sys
