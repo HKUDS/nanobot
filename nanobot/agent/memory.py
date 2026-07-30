@@ -807,7 +807,7 @@ _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 
 class Consolidator:
-    """Summarize messages excluded from live model replay into history.jsonl."""
+    """Summarize compacted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
 
@@ -998,15 +998,9 @@ class Consolidator:
         session_key: str | None = None,
         summary_messages: list[dict[str, Any]] | None = None,
     ) -> str | None:
-        """Summarize messages via LLM and append to history.jsonl.
+        """Summarize messages and append the result to history.jsonl.
 
-        ``messages`` are the messages being excluded from live model replay;
-        they are what gets raw-dumped if the LLM call fails. Callers may keep
-        the original records in durable session history. ``summary_messages``,
-        when given, lets callers include the visible suffix in the summary
-        without archiving that suffix.
-
-        Returns the summary text on success, None if nothing to archive.
+        ``summary_messages`` adds context but is excluded from raw fallback.
         """
         if not messages:
             return None
@@ -1167,15 +1161,7 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 8,
     ) -> str | None:
-        """Soft-compact an idle session under the consolidation lock.
-
-        Used by AutoCompact so all session mutation goes through a single
-        lock-protected path. Original messages remain in durable session
-        history; ``last_consolidated`` advances so model replay sees only the
-        recent legal suffix plus the generated summary. Returns the summary
-        text on success, ``None`` if the LLM failed (raw_archive fallback), or
-        ``""`` if there was nothing to archive.
-        """
+        """Archive an idle prefix and hide it from replay without deleting it."""
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
@@ -1203,8 +1189,7 @@ class Consolidator:
                 return ""
 
             last_active = session.updated_at
-            # Summarize the visible suffix too, but only raw-dump messages
-            # excluded from model replay if the provider call fails.
+            # The visible suffix informs the summary but stays out of raw fallback.
             summary = await self.archive(
                 messages_to_remove,
                 runtime=runtime,
@@ -1218,9 +1203,7 @@ class Consolidator:
                     "last_active": last_active.isoformat(),
                 }
 
-            # Keep the raw records durable and move only the model-replay
-            # boundary. ``visible_suffix`` is contiguous because the probe
-            # requested user-turn extension and only trims from the front.
+            # Preserve history and advance only the replay boundary.
             session.last_consolidated = len(session.messages) - len(visible_suffix)
             self.sessions.save(session)
 

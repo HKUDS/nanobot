@@ -586,7 +586,7 @@ class TestConsolidatorTokenBudget:
 
 
 class TestCompactIdleSession:
-    """Tests for lock-protected, non-destructive idle compaction."""
+    """Idle compaction tests."""
 
     @pytest.fixture
     def real_consolidator(self, store, mock_provider):
@@ -605,7 +605,6 @@ class TestCompactIdleSession:
     async def test_archives_prefix_preserves_messages_and_hides_prefix(
         self, real_consolidator, mock_provider, runtime
     ):
-        """Idle compaction preserves raw history while replaying only the suffix."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary of old conversation.", finish_reason="stop"
         )
@@ -670,9 +669,7 @@ class TestCompactIdleSession:
     async def test_raw_dumps_only_dropped_messages_on_llm_failure(
         self, real_consolidator, mock_provider, store, runtime
     ):
-        """Summarizing over the full tail must not widen what gets raw-dumped on
-        LLM failure: the breadcrumb should contain only the replay-hidden prefix,
-        not the visible suffix. Regression for #4264."""
+        """Extra summary context must not enter raw fallback. Regression for #4264."""
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:rawdrop")
@@ -768,7 +765,6 @@ class TestCompactIdleSession:
     async def test_llm_failure_preserves_history_but_advances_replay_boundary(
         self, real_consolidator, mock_provider, store, runtime
     ):
-        """RAW fallback hides the prefix from replay without deleting it."""
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:fail")
@@ -786,7 +782,6 @@ class TestCompactIdleSession:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert any("[RAW]" in e["content"] for e in entries)
 
-        # Durable history remains intact while replay uses the recent suffix.
         reloaded = sessions.get_or_create("cli:fail")
         assert len(reloaded.messages) == 20
         assert reloaded.messages[0]["content"] == "u0"
@@ -837,7 +832,6 @@ class TestCompactIdleSession:
         mock_provider,
         runtime,
     ):
-        """Assistant-only tails extend to a user turn without deleting history."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -1007,15 +1001,12 @@ class TestConsolidatorSessionRefresh:
         # Simulate: background consolidation captures old reference
         old_ref = session
 
-        # AutoCompact moves the replay boundary while preserving raw history.
         await consolidator.compact_idle_session(
             "cli:test",
             runtime=runtime,
             max_suffix=8,
         )
 
-        # Background consolidation runs with a stale reference and must use
-        # the refreshed session rather than resetting the replay boundary.
         await consolidator.maybe_consolidate_by_tokens(
             old_ref,
             runtime=runtime,

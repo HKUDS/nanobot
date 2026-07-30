@@ -80,7 +80,6 @@ def _make_fake_compact(
     track_archived: list | None = None,
     track_count: bool = False,
 ):
-    """Return a fake compact_idle_session that mirrors its replay-boundary update."""
     from nanobot.session.manager import Session as _Session
 
     state = {"count": 0}
@@ -367,7 +366,6 @@ class TestAutoCompact:
 
     @pytest.mark.asyncio
     async def test_auto_compact_archives_prefix_without_deleting_history(self, tmp_path):
-        """_archive should preserve raw history and expose a recent legal suffix."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6)
@@ -480,11 +478,10 @@ class TestAutoCompact:
 
 
 class TestAutoCompactIdleDetection:
-    """Test idle detection around _process_message."""
+    """Idle detection tests."""
 
     @pytest.mark.asyncio
     async def test_no_auto_compact_when_ttl_disabled(self, tmp_path):
-        """No idle compaction should happen when TTL is 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "old message")
@@ -500,7 +497,6 @@ class TestAutoCompactIdleDetection:
 
     @pytest.mark.asyncio
     async def test_auto_compact_triggers_on_idle(self, tmp_path):
-        """Proactive compaction archives an expired prefix before the next turn."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="old")
@@ -530,7 +526,6 @@ class TestAutoCompactIdleDetection:
 
     @pytest.mark.asyncio
     async def test_no_auto_compact_when_active(self, tmp_path):
-        """No idle compaction should happen when session is recently active."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "recent message")
@@ -568,7 +563,6 @@ class TestAutoCompactIdleDetection:
 
     @pytest.mark.asyncio
     async def test_auto_compact_with_slash_new(self, tmp_path):
-        """Idle compaction may run first, but /new still explicitly clears the session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         for i in range(4):
@@ -586,7 +580,6 @@ class TestAutoCompactIdleDetection:
         assert "new session started" in response.content.lower()
 
         session_after = loop.sessions.get_or_create("cli:test")
-        # /new remains the explicit destructive operation.
         assert len(session_after.messages) == 0
         await loop.close_mcp()
 
@@ -627,11 +620,10 @@ class TestAutoCompactIdleDetection:
 
 
 class TestAutoCompactSystemMessages:
-    """Test that idle compaction also works for system messages."""
+    """System-message idle compaction tests."""
 
     @pytest.mark.asyncio
     async def test_auto_compact_triggers_for_system_messages(self, tmp_path):
-        """System messages resume from a compacted model view."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="old")
@@ -663,7 +655,6 @@ class TestAutoCompactEdgeCases:
 
     @pytest.mark.asyncio
     async def test_auto_compact_with_nothing_summary(self, tmp_path):
-        """Idle compaction should not inject when archive produces '(nothing)'."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="thanks")
@@ -688,7 +679,6 @@ class TestAutoCompactEdgeCases:
 
     @pytest.mark.asyncio
     async def test_auto_compact_archive_failure_preserves_raw_history(self, tmp_path):
-        """RAW fallback should hide only the prefix from model replay."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="important")
@@ -742,13 +732,10 @@ class TestAutoCompactEdgeCases:
 
 
 class TestAutoCompactIntegration:
-    """End-to-end tests for idle compaction."""
+    """Idle compaction integration tests."""
 
     @pytest.mark.asyncio
     async def test_full_lifecycle(self, tmp_path):
-        """
-        Full lifecycle: messages -> idle -> archive -> soft compact -> summary injection.
-        """
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
 
@@ -787,7 +774,6 @@ class TestAutoCompactIntegration:
         # Phase 4: Verify
         session_after = loop.sessions.get_or_create("cli:test")
 
-        # Durable history retains old messages, while model replay hides them.
         assert any(
             "past tense is used" in str(m.get("content", "")).lower()
             for m in session_after.messages
@@ -844,7 +830,7 @@ class TestAutoCompactIntegration:
 
 
 class TestProactiveAutoCompact:
-    """Test proactive compaction on idle ticks (TimeoutError path in run loop)."""
+    """Proactive idle compaction tests."""
 
     @staticmethod
     async def _run_check_expired(loop, active_session_keys=()):
