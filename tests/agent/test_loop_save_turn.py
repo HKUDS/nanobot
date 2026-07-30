@@ -60,6 +60,16 @@ def _mk_loop() -> AgentLoop:
     return loop
 
 
+def _provider_state() -> ProviderConversationState:
+    return ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
+
+
 def _runtime_message(content, blocks: list[RuntimeContextBlock]) -> dict:
     merged, marker = append_runtime_context(content, blocks)
     assert marker is not None
@@ -495,6 +505,7 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     loop = _mk_loop()
     session = Session(
         key="test:checkpoint",
+        provider_state=_provider_state(),
         metadata={
             AgentLoop._RUNTIME_CHECKPOINT_KEY: {
                 "assistant_message": {
@@ -540,6 +551,104 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
     assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+    assert session.provider_state is None
+
+
+def test_restore_final_response_checkpoint_preserves_matching_provider_state() -> None:
+    loop = _mk_loop()
+    state = _provider_state()
+    session = Session(
+        key="test:final-checkpoint",
+        provider_state=state,
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "final_response",
+                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
+                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+                ),
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "finished",
+                },
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "finished"
+    assert session.provider_state is state
+    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+
+
+def test_restore_legacy_final_checkpoint_discards_unproven_provider_state() -> None:
+    loop = _mk_loop()
+    session = Session(
+        key="test:legacy-final-checkpoint",
+        provider_state=_provider_state(),
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "final_response",
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "finished",
+                },
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "finished"
+    assert session.provider_state is None
+
+
+def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() -> None:
+    loop = _mk_loop()
+    tool_result = {
+        "role": "tool",
+        "tool_call_id": "call_done",
+        "name": "read_file",
+        "content": "compacted result",
+    }
+    state = _provider_state().with_pending_messages([tool_result])
+    session = Session(
+        key="test:completed-tools-checkpoint",
+        provider_state=state,
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "tools_completed",
+                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
+                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+                ),
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"},
+                        }
+                    ],
+                },
+                "completed_tool_results": [tool_result],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "compacted result"
+    assert session.provider_state is state
 
 
 def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
@@ -654,6 +763,9 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
     assert session.provider_state is not None
     checkpoint = session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY]
     assert "provider_state" not in checkpoint
+    assert checkpoint[AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] == (
+        AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+    )
     assert "private-checkpoint-blob" not in json.dumps(session.metadata)
 
     public_payload = loop.sessions.read_session_file(session.key)
@@ -1292,6 +1404,9 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
     session.metadata[AgentLoop._PENDING_USER_TURN_KEY] = True
+    session.provider_state = _provider_state().with_pending_messages([
+        {"role": "user", "content": "old question"},
+    ])
     loop.sessions.save(session)
 
     loop._run_agent_loop = AsyncMock(return_value=(
@@ -1325,6 +1440,7 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
         {"role": "assistant", "content": "new answer"},
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+    assert session.provider_state is None
 
 
 @pytest.mark.asyncio

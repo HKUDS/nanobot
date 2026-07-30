@@ -18,10 +18,12 @@ from loguru import logger
 from nanobot.config.paths import get_webui_dir
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
+    _PROVIDER_STATE_RECORD_TYPE,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_CHARS,  # pyright: ignore[reportPrivateUsage]
     _SESSION_LIST_PREVIEW_MAX_RECORDS,  # pyright: ignore[reportPrivateUsage]
     Session,
     SessionManager,
+    _is_provider_state_record_line,  # pyright: ignore[reportPrivateUsage]
     _message_preview_text,  # pyright: ignore[reportPrivateUsage]
     _metadata_title,  # pyright: ignore[reportPrivateUsage]
 )
@@ -298,7 +300,11 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
             for line in f:
                 if not line.strip():
                     continue
+                if _is_provider_state_record_line(line):
+                    continue
                 item = json.loads(line)
+                if item.get("_type") == _PROVIDER_STATE_RECORD_TYPE:
+                    continue
                 timestamp = _visible_message_timestamp(item)
                 if timestamp is not None:
                     visible_message_at = _latest_updated_at(visible_message_at, timestamp)

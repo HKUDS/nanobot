@@ -244,6 +244,8 @@ class AgentLoop:
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
+    _PROVIDER_STATE_CHECKPOINT_VERSION_KEY = "provider_state_checkpoint_version"
+    _PROVIDER_STATE_CHECKPOINT_VERSION = "v1"
 
     def __init__(
         self,
@@ -876,11 +878,15 @@ class AgentLoop:
                 return
             public_payload = dict(payload)
             private_state = public_payload.pop("provider_state", None)
+            public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
             if "provider_state" in payload and (
                 private_state is None
                 or isinstance(private_state, ProviderConversationState)
             ):
                 session.provider_state = private_state
+                public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
+                    self._PROVIDER_STATE_CHECKPOINT_VERSION
+                )
             self._set_runtime_checkpoint(session, public_payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
@@ -2087,7 +2093,36 @@ class AgentLoop:
             ):
                 overlap = size
                 break
-        session.messages.extend(restored_messages[overlap:])
+        appended_messages = restored_messages[overlap:]
+        session.messages.extend(appended_messages)
+        assistant_message_data = (
+            cast(dict[str, Any], assistant_message)
+            if isinstance(assistant_message, dict)
+            else None
+        )
+        provider_state_is_synchronized = (
+            checkpoint_data.get(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY)
+            == self._PROVIDER_STATE_CHECKPOINT_VERSION
+        )
+        phase = checkpoint_data.get("phase")
+        exact_final_response = (
+            phase == "final_response"
+            and assistant_message_data is not None
+            and assistant_message_data.get("role") == "assistant"
+            and not bool(checkpoint_data.get("completed_tool_results"))
+            and not bool(checkpoint_data.get("pending_tool_calls"))
+        )
+        exact_completed_tools = (
+            phase == "tools_completed"
+            and assistant_message_data is not None
+            and assistant_message_data.get("role") == "assistant"
+            and not bool(checkpoint_data.get("pending_tool_calls"))
+        )
+        if not (
+            provider_state_is_synchronized
+            and (exact_final_response or exact_completed_tools)
+        ):
+            session.provider_state = None
 
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
@@ -2108,6 +2143,7 @@ class AgentLoop:
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+            session.provider_state = None
             session.updated_at = datetime.now()
 
         self._clear_pending_user_turn(session)

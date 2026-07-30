@@ -150,6 +150,30 @@ class TestAtomicSave:
         assert secret not in json.dumps(public_payload)
         assert secret not in json.dumps(mgr.list_sessions())
 
+    def test_provider_state_does_not_consume_list_preview_budget(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        import nanobot.session.manager as session_manager
+
+        monkeypatch.setattr(session_manager, "_SESSION_LIST_PREVIEW_MAX_CHARS", 100)
+        mgr = SessionManager(tmp_path)
+        session = Session(
+            key="test:provider-state-preview",
+            provider_state=ProviderConversationState(
+                kind="openai_responses",
+                provider="openai:test",
+                model="test-model",
+                version=1,
+                payload={"items": [{"encrypted_content": "x" * 200}]},
+            ),
+        )
+        session.add_message("user", "visible preview")
+        mgr.save(session)
+
+        assert mgr.list_sessions()[0]["preview"] == "visible preview"
+
     def test_clear_and_fork_discard_provider_state(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)
         state = ProviderConversationState(

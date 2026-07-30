@@ -45,6 +45,9 @@ _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
 _PROVIDER_STATE_RECORD_TYPE = "provider_state"
+_PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
+    r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
+)
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -60,6 +63,11 @@ def _json_object(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("session records must be JSON objects")
     return cast(dict[str, Any], value)
+
+
+def _is_provider_state_record_line(line: str) -> bool:
+    """Recognize the canonical private record without decoding its opaque payload."""
+    return _PROVIDER_STATE_RECORD_PREFIX_RE.match(line) is not None
 
 
 def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
@@ -402,6 +410,8 @@ class Session:
 
         self.messages = retained
         self.last_consolidated = new_lc
+        if dropped:
+            self.provider_state = None
         self.updated_at = datetime.now()
         return RetentionResult(
             dropped=dropped,
@@ -869,6 +879,8 @@ class JsonlSessionStore:
                             scanned_chars = 0
                             for line in f:
                                 if not line.strip():
+                                    continue
+                                if _is_provider_state_record_line(line):
                                     continue
                                 scanned_records += 1
                                 scanned_chars += len(line)

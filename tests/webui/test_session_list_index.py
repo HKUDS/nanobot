@@ -8,6 +8,7 @@ import pytest
 
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.providers.base import ProviderConversationState
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
@@ -83,6 +84,26 @@ def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatc
 
     assert scanned == [manager._get_session_path("websocket:second").name]
     assert {row["preview"] for row in rows} == {"first", "second after"}
+
+
+def test_webui_session_list_skips_provider_state_before_preview_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(session_list_index, "_SESSION_LIST_PREVIEW_MAX_CHARS", 100)
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:private-state")
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"encrypted_content": "x" * 200}]},
+    )
+    session.add_message("user", "visible preview")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "visible preview"
 
 
 def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:

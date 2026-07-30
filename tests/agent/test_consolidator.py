@@ -10,7 +10,11 @@ from nanobot.agent.memory import (
     Consolidator,
     MemoryStore,
 )
-from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMResponse,
+    ProviderConversationState,
+)
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
@@ -72,6 +76,16 @@ def _tool_round(call_id: str) -> list[dict]:
         },
         {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
     ]
+
+
+def _provider_state() -> ProviderConversationState:
+    return ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
 
 
 class TestConsolidatorSummarize:
@@ -385,6 +399,7 @@ class TestConsolidatorTokenBudget:
         """Old messages that cannot be replayed should be materialized first."""
         consolidator._SAFETY_BUFFER = 0
         session = Session(key="test:replay-overflow")
+        session.provider_state = _provider_state()
         for i in range(10):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
@@ -404,6 +419,7 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[-1]["content"] == "a6"
         assert session.last_consolidated == 14
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
+        assert session.provider_state is None
         consolidator.sessions.save.assert_called()
 
     async def test_replay_window_overflow_extends_to_long_recent_user_turn(
@@ -479,6 +495,7 @@ class TestConsolidatorTokenBudget:
         session = MagicMock()
         session.last_consolidated = 0
         session.key = "test:key"
+        session.provider_state = _provider_state()
         session.messages = [
             {
                 "role": "user" if i in {0, 50, 61} else "assistant",
@@ -500,6 +517,7 @@ class TestConsolidatorTokenBudget:
         # pick_consolidation_boundary returns (50, tokens) — user turn at idx 50
         assert archived_chunk[0]["content"] == "m0"
         assert session.last_consolidated > 0
+        assert session.provider_state is None
 
     async def test_raw_archive_fallback_advances_last_consolidated(
         self, consolidator, runtime
@@ -610,6 +628,7 @@ class TestCompactIdleSession:
         )
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:test")
+        session.provider_state = _provider_state()
         old_ts = session.updated_at
         for i in range(20):
             session.add_message("user", f"user msg {i}")
@@ -627,6 +646,7 @@ class TestCompactIdleSession:
         assert len(reloaded.messages) == 40
         assert reloaded.messages[0]["content"] == "user msg 0"
         assert reloaded.last_consolidated == 32
+        assert reloaded.provider_state is None
         visible = reloaded.get_history(max_messages=40)
         assert len(visible) == 8
         assert visible[0]["content"] == "user msg 16"
