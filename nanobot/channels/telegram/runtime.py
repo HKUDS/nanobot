@@ -415,6 +415,14 @@ class TelegramConfig(Base):
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
+    # Custom Bot API endpoint (e.g. a self-hosted Telegram Bot API server or
+    # an enterprise gateway). When set, all Bot API requests target this base
+    # URL instead of the default https://api.telegram.org. Leave unset for the
+    # official API.
+    api_base: str | None = None
+    # Extra HTTP headers appended to every Bot API request (e.g. auth tokens
+    # for a corporate gateway). Merged on top of the library's defaults.
+    extra_headers: dict[str, str] | None = None
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
@@ -439,6 +447,21 @@ class TelegramConfig(Base):
         value = value.strip() or "/telegram"
         if not value.startswith("/"):
             raise ValueError('webhook_path must start with "/"')
+        return value
+
+    @field_validator("api_base")
+    @classmethod
+    def api_base_must_be_https(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(
+                "api_base must be a public HTTPS URL (e.g. https://my-bot-api.example.com)"
+            )
         return value
 
     @model_validator(mode="after")
@@ -619,14 +642,21 @@ class TelegramChannel(BaseChannel):
     async def _start_app(self) -> None:
         """Build, initialize and start the Telegram application."""
         proxy = self.config.proxy or None
+        api_base = self.config.api_base or None
+        extra_headers = self.config.extra_headers or None
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
+        # Gateway headers ride on the httpx clients as default request headers;
+        # the custom endpoint rides on the builder URLs, because PTB builds
+        # absolute request URLs and would ignore an httpx-level base_url.
+        httpx_kwargs = {"headers": extra_headers} if extra_headers else None
         api_request = HTTPXRequest(
             connection_pool_size=self.config.connection_pool_size,
             pool_timeout=self.config.pool_timeout,
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
+            httpx_kwargs=httpx_kwargs,
         )
         poll_request = HTTPXRequest(
             connection_pool_size=4,
@@ -634,6 +664,7 @@ class TelegramChannel(BaseChannel):
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
+            httpx_kwargs=httpx_kwargs,
         )
         builder = (
             Application.builder()
@@ -641,6 +672,9 @@ class TelegramChannel(BaseChannel):
             .request(api_request)
             .get_updates_request(_LivenessTrackedRequest(poll_request, self._note_poll_ok))
         )
+        if api_base:
+            base = api_base.rstrip("/")
+            builder = builder.base_url(f"{base}/bot").base_file_url(f"{base}/file/bot")
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
 

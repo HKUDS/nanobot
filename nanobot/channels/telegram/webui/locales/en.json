@@ -33,6 +33,11 @@
           "open": "All messages",
           "allowlist": "Allowlist"
         }
+      },
+      "apiBase": {
+        "label": "Bot API base URL",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "Optional. Point at a self-hosted Bot API server or gateway instead of api.telegram.org."
       }
     }
   }

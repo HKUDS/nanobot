@@ -33,6 +33,11 @@
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
+      },
+      "apiBase": {
+        "label": "URL cơ sở Bot API",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "Tùy chọn. Trỏ đến máy chủ Bot API tự lưu trữ hoặc cổng kết nối thay cho api.telegram.org."
       }
     }
   }

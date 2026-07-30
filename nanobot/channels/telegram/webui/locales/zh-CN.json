@@ -33,6 +33,11 @@
           "open": "所有消息",
           "allowlist": "白名单"
         }
+      },
+      "apiBase": {
+        "label": "Bot API 地址",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "可选。指向自托管的 Bot API 服务器或网关，而不是 api.telegram.org。"
       }
     }
   }
