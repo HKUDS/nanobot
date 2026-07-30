@@ -135,11 +135,12 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
             ) -> LLMResponse:
+                wire_body = _without_response_item_ids(request_body)
                 try:
                     return await _request_codex(
                         DEFAULT_CODEX_URL,
                         headers,
-                        request_body,
+                        wire_body,
                         verify=True,
                         proxy=self.proxy,
                         on_content_delta=on_content_delta if emit_deltas else None,
@@ -155,7 +156,7 @@ class OpenAICodexProvider(LLMProvider):
                     return await _request_codex(
                         DEFAULT_CODEX_URL,
                         headers,
-                        request_body,
+                        wire_body,
                         verify=False,
                         proxy=self.proxy,
                         on_content_delta=on_content_delta if emit_deltas else None,
@@ -308,6 +309,34 @@ def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
+
+
+def _without_response_item_ids(
+    request_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Match Codex's default ``store=false`` request-item contract."""
+    if request_body.get("store") is True:
+        return request_body
+    raw_input = request_body.get("input")
+    if not isinstance(raw_input, list):
+        return request_body
+
+    input_items: list[object] = cast(list[object], raw_input)
+    sanitized_input: list[object] = []
+    for raw_item in input_items:
+        if not isinstance(raw_item, dict):
+            sanitized_input.append(raw_item)
+            continue
+        item = cast(dict[str, Any], raw_item)
+        sanitized_input.append({
+            key: value
+            for key, value in item.items()
+            if key != "id"
+        })
+
+    body = dict(request_body)
+    body["input"] = sanitized_input
+    return body
 
 
 def _retained_compaction_messages(

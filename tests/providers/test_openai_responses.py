@@ -865,6 +865,41 @@ class TestConsumeSse:
         assert capture.output_items == output
 
     @pytest.mark.asyncio
+    async def test_capture_keeps_done_items_when_completed_output_is_empty(self):
+        output = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+                "summary": [],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": '{"path":"weather/SKILL.md"}',
+            },
+        ]
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": index,
+                "item": item,
+            }
+            for index, item in enumerate(output)
+        ] + [{
+            "type": "response.completed",
+            "response": {"status": "completed", "output": []},
+        }])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is True
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
     async def test_capture_does_not_commit_interrupted_stream(self):
         capture = ResponsesStreamCapture()
         response = _SseResponse([

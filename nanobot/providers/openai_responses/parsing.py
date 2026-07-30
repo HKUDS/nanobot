@@ -51,7 +51,7 @@ class ResponsesStreamCapture:
     def output_items(self) -> list[dict[str, Any]]:
         if self.response is not None:
             output = _response_object_list(self.response.get("output"))
-            if output or "output" in self.response:
+            if output:
                 return output
         return [self._items_by_index[index] for index in sorted(self._items_by_index)]
 

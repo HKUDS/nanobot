@@ -577,6 +577,81 @@ def test_codex_reasoning_options_request_summary_without_forcing_effort() -> Non
 
 
 @pytest.mark.asyncio
+async def test_codex_replayed_tool_turn_omits_server_item_ids(monkeypatch) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state = build_responses_state(
+        provider=provider._responses_state_provider(),
+        model="gpt-5.6-sol",
+        input_items=[{
+            "id": "msg_user",
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Check the weather"}],
+        }],
+        output_items=[
+            {
+                "id": "rs_reasoning",
+                "type": "reasoning",
+                "encrypted_content": "opaque reasoning",
+                "summary": [],
+            },
+            {
+                "id": "fc_read",
+                "type": "function_call",
+                "call_id": "call_read",
+                "name": "read_file",
+                "arguments": '{"path":"weather/SKILL.md"}',
+                "status": "completed",
+            },
+        ],
+    )
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        proxy=None,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        bodies.append(body)
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex",
+        fake_request,
+    )
+
+    response = await provider.chat(
+        [{"role": "user", "content": "Check the weather"}],
+        provider_state=state,
+        provider_state_messages=[{
+            "role": "tool",
+            "tool_call_id": "call_read|fc_read",
+            "content": "weather skill contents",
+        }],
+    )
+
+    assert response.content == "done"
+    assert len(bodies) == 1
+    input_items = bodies[0]["input"]
+    assert [item.get("type") for item in input_items] == [
+        "message",
+        "reasoning",
+        "function_call",
+        "function_call_output",
+    ]
+    assert all("id" not in item for item in input_items)
+    assert input_items[1]["encrypted_content"] == "opaque reasoning"
+    assert input_items[2]["call_id"] == "call_read"
+    assert input_items[3]["call_id"] == "call_read"
+
+
+@pytest.mark.asyncio
 async def test_codex_compacts_state_at_ninety_percent_before_next_request(
     monkeypatch,
 ) -> None:
