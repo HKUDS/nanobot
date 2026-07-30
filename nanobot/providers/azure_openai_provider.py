@@ -33,6 +33,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
     prepare_responses_input,
+    resolve_compact_threshold,
     responses_state_matches,
 )
 
@@ -159,6 +160,11 @@ class AzureOpenAIProvider(LLMProvider):
             model=model or self.default_model,
         )
 
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Azure's native Responses endpoint accepts context management."""
+        _ = model
+        return True
+
     def _build_body(
         self,
         messages: list[dict[str, Any]],
@@ -170,6 +176,7 @@ class AzureOpenAIProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
@@ -200,6 +207,15 @@ class AzureOpenAIProvider(LLMProvider):
             "store": False,
             "stream": False,
         }
+        compact_threshold = resolve_compact_threshold(
+            context_window_tokens,
+            max_tokens,
+        )
+        if compact_threshold is not None:
+            body["context_management"] = [{
+                "type": "compaction",
+                "compact_threshold": compact_threshold,
+            }]
 
         if self._supports_temperature(deployment, reasoning_effort):
             body["temperature"] = temperature
@@ -242,11 +258,13 @@ class AzureOpenAIProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
             provider_state, provider_state_messages,
+            context_window_tokens,
         )
         try:
             response = cast(Any, await self._client.responses.create(**body))
@@ -273,12 +291,14 @@ class AzureOpenAIProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
             provider_state, provider_state_messages,
+            context_window_tokens,
         )
         body["stream"] = True
 
@@ -306,6 +326,7 @@ class AzureOpenAIProvider(LLMProvider):
                     model=str(body["model"]),
                     input_items=cast(list[dict[str, Any]], body["input"]),
                     output_items=capture.output_items,
+                    usage=usage,
                 )
             return result
         except Exception as e:

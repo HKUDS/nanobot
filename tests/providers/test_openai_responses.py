@@ -20,8 +20,11 @@ from nanobot.providers.openai_responses.parsing import (
     parse_response_output,
 )
 from nanobot.providers.openai_responses.state import (
+    build_compacted_responses_state,
     build_responses_state,
     prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_context_tokens,
     responses_state_items,
 )
 
@@ -564,6 +567,61 @@ class TestParseResponseOutput:
 
 
 class TestResponsesConversationState:
+    def test_server_compaction_prunes_superseded_prefix(self):
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[
+                {"type": "message", "role": "user", "content": "old"},
+                {"type": "reasoning", "encrypted_content": "old-reasoning"},
+            ],
+            output_items=[
+                {"type": "compaction", "encrypted_content": "compact"},
+                {"type": "message", "role": "assistant", "content": "new"},
+            ],
+            usage={
+                "prompt_tokens": 90,
+                "completion_tokens": 10,
+                "total_tokens": 100,
+            },
+        )
+
+        assert responses_state_items(state) == [
+            {"type": "compaction", "encrypted_content": "compact"},
+            {"type": "message", "role": "assistant", "content": "new"},
+        ]
+        assert responses_state_context_tokens(state) == 100
+
+    def test_standalone_compaction_output_is_never_pruned(self):
+        canonical = [
+            {"type": "message", "role": "user", "content": "retained"},
+            {"type": "compaction", "encrypted_content": "compact"},
+        ]
+
+        state = build_compacted_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            output_items=canonical,
+        )
+
+        assert responses_state_items(state) == canonical
+
+    @pytest.mark.parametrize(
+        ("context_window", "max_output", "expected"),
+        [
+            (200_000, 20_000, 180_000),
+            (100_000, 30_000, 70_000),
+            (0, 4_096, None),
+        ],
+    )
+    def test_compact_threshold_reserves_codex_style_headroom(
+        self,
+        context_window,
+        max_output,
+        expected,
+    ):
+        assert resolve_compact_threshold(context_window, max_output) == expected
+
     def test_replays_exact_items_then_only_pending_and_new_messages(self):
         prior_items = [
             {"role": "user", "content": "first"},

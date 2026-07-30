@@ -17,8 +17,11 @@ from nanobot.providers.openai_responses.parsing import (
     parse_response_output,
 )
 from nanobot.providers.openai_responses.state import (
+    build_compacted_responses_state,
     build_responses_state,
     prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_context_tokens,
     responses_state_items,
     responses_state_matches,
 )
@@ -35,8 +38,11 @@ __all__ = [
     "ResponsesStreamCapture",
     "map_finish_reason",
     "parse_response_output",
+    "build_compacted_responses_state",
     "build_responses_state",
     "prepare_responses_input",
+    "resolve_compact_threshold",
+    "responses_state_context_tokens",
     "responses_state_items",
     "responses_state_matches",
     "FINISH_REASON_MAP",

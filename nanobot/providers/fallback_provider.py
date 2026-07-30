@@ -153,6 +153,9 @@ class FallbackProvider(LLMProvider):
     ) -> bool:
         return self._primary.can_resume_conversation_state(state, model)
 
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        return self._primary.supports_native_compaction(model)
+
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
         if self._primary_tripped_at is None:
@@ -308,6 +311,8 @@ class FallbackProvider(LLMProvider):
             ):
                 fallback_kwargs.pop("provider_state", None)
                 fallback_kwargs.pop("provider_state_messages", None)
+            if not fallback_provider.supports_native_compaction(fallback_model):
+                fallback_kwargs.pop("context_window_tokens", None)
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
             else:

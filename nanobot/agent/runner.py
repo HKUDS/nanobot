@@ -983,6 +983,8 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens
         kwargs["reasoning_effort"] = generation.reasoning_effort
+        if spec.runtime.provider.supports_native_compaction(spec.runtime.model):
+            kwargs["context_window_tokens"] = spec.runtime.context_window_tokens
         if (
             provider_state is not None
             and spec.runtime.provider.can_resume_conversation_state(

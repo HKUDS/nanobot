@@ -20,6 +20,7 @@ from nanobot.providers.openai_codex_provider import (
     _request_codex,
     _should_retry_status,
 )
+from nanobot.providers.openai_responses import build_responses_state
 from nanobot.providers.registry import find_by_name
 
 
@@ -531,6 +532,108 @@ def test_codex_reasoning_options_request_summary_without_forcing_effort() -> Non
     assert _build_reasoning_options(None) == {"summary": "auto"}
     assert _build_reasoning_options("high") == {"summary": "auto", "effort": "high"}
     assert _build_reasoning_options("none") == {"effort": "none"}
+
+
+@pytest.mark.asyncio
+async def test_codex_compacts_state_at_ninety_percent_before_next_request(
+    monkeypatch,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider,
+        model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old question"}],
+        output_items=[
+            {"type": "reasoning", "encrypted_content": "old opaque reasoning"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "old answer"}],
+            },
+        ],
+        usage={
+            "prompt_tokens": 90,
+            "completion_tokens": 5,
+            "total_tokens": 95,
+        },
+    )
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        proxy=None,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        _ = (
+            url,
+            headers,
+            verify,
+            proxy,
+            on_content_delta,
+            on_thinking_delta,
+            on_tool_call_delta,
+        )
+        bodies.append(body)
+        if body["input"][-1].get("type") == "compaction_trigger":
+            compact_item = {
+                "type": "compaction",
+                "encrypted_content": "compacted opaque state",
+            }
+            return provider_base.LLMResponse(
+                content=None,
+                provider_state=build_responses_state(
+                    provider=state_provider,
+                    model="gpt-5.6-sol",
+                    input_items=body["input"],
+                    output_items=[compact_item],
+                    usage={
+                        "prompt_tokens": 95,
+                        "completion_tokens": 2,
+                        "total_tokens": 97,
+                    },
+                ),
+            )
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex",
+        fake_request,
+    )
+
+    response = await provider.chat_with_retry(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "new question"},
+        ],
+        max_tokens=5,
+        provider_state=state,
+        provider_state_messages=[{"role": "user", "content": "new question"}],
+        context_window_tokens=100,
+    )
+
+    assert response.content == "done"
+    assert len(bodies) == 2
+    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
+    assert bodies[1]["input"][-1] == {
+        "type": "compaction",
+        "encrypted_content": "compacted opaque state",
+    }
+    assert not any(
+        item.get("type") == "reasoning"
+        for item in bodies[1]["input"]
+    )
+    assert any(
+        item.get("role") == "user"
+        and "new question" in str(item.get("content"))
+        for item in bodies[1]["input"]
+    )
 
 
 @pytest.mark.asyncio

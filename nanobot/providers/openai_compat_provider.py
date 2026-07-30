@@ -39,6 +39,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
     prepare_responses_input,
+    resolve_compact_threshold,
     responses_state_matches,
 )
 
@@ -977,7 +978,8 @@ class OpenAICompatProvider(LLMProvider):
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
-        return f"openai_compat:{spec_name}:{self._effective_base.rstrip('/')}"
+        effective_base = self._effective_base or "https://api.openai.com/v1"
+        return f"openai_compat:{spec_name}:{effective_base.rstrip('/')}"
 
     def _responses_state_model(self, model: str | None) -> str:
         return self._request_model_name(model or self.default_model)
@@ -992,6 +994,15 @@ class OpenAICompatProvider(LLMProvider):
             provider=self._responses_state_provider(),
             model=self._responses_state_model(model),
         )
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Enable server compaction only on direct OpenAI Responses endpoints."""
+        _ = model
+        if self._api_type == "chat_completions":
+            return False
+        if self._spec is not None and self._spec.name != "openai":
+            return False
+        return _is_direct_openai_base(self._effective_base)
 
     def _responses_circuit_allows_probe(
         self,
@@ -1064,6 +1075,7 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
@@ -1099,6 +1111,15 @@ class OpenAICompatProvider(LLMProvider):
             "store": False,
             "stream": False,
         }
+        compact_threshold = resolve_compact_threshold(
+            context_window_tokens,
+            max_tokens,
+        )
+        if self.supports_native_compaction(model_name) and compact_threshold is not None:
+            body["context_management"] = [{
+                "type": "compaction",
+                "compact_threshold": compact_threshold,
+            }]
 
         if self._supports_temperature(model_name, reasoning_effort):
             body["temperature"] = temperature
@@ -1656,6 +1677,7 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         try:
@@ -1665,6 +1687,7 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                         provider_state, provider_state_messages,
+                        context_window_tokens,
                     )
                     responses_raw = cast(
                         Any,
@@ -1716,6 +1739,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
@@ -1726,6 +1750,7 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                         provider_state, provider_state_messages,
+                        context_window_tokens,
                     )
                     body["stream"] = True
                     responses_stream = cast(
@@ -1771,6 +1796,7 @@ class OpenAICompatProvider(LLMProvider):
                             model=str(body["model"]),
                             input_items=cast(list[dict[str, Any]], body["input"]),
                             output_items=capture.output_items,
+                            usage=usage,
                         )
                     return result
                 except Exception as responses_error:

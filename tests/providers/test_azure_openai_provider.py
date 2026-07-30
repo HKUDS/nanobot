@@ -241,6 +241,30 @@ def test_build_body_basic():
     )
 
 
+def test_build_body_enables_server_compaction():
+    provider = AzureOpenAIProvider(
+        api_key="k",
+        api_base="https://res.openai.azure.com",
+        default_model="gpt-5.6",
+    )
+
+    body = provider._build_body(
+        [{"role": "user", "content": "hello"}],
+        None,
+        None,
+        10_000,
+        0.1,
+        "high",
+        None,
+        context_window_tokens=200_000,
+    )
+
+    assert body["context_management"] == [{
+        "type": "compaction",
+        "compact_threshold": 180_000,
+    }]
+
+
 def test_build_body_max_tokens_minimum():
     """max_output_tokens should never be less than 1."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")

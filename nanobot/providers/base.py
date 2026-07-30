@@ -368,6 +368,10 @@ class LLMProvider(ABC):
         """Whether this provider can safely consume an opaque saved state."""
         return False
 
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Whether requests may include provider-native context compaction."""
+        return False
+
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Sanitize message content: fix empty blocks, strip internal _meta fields.
@@ -487,6 +491,9 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -745,6 +752,9 @@ class LLMProvider(ABC):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         """Stream a chat completion, calling *on_content_delta* for each text chunk.
 
@@ -759,11 +769,21 @@ class LLMProvider(ABC):
         streaming should override this method.
         """
         _ = on_thinking_delta, on_tool_call_delta
-        response = await self.chat(
-            messages=messages, tools=tools, model=model,
-            max_tokens=max_tokens, temperature=temperature,
-            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
-        )
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "tools": tools,
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "reasoning_effort": reasoning_effort,
+            "tool_choice": tool_choice,
+        }
+        if provider_state is not None:
+            kwargs["provider_state"] = provider_state
+            kwargs["provider_state_messages"] = list(provider_state_messages or [])
+        if context_window_tokens is not None:
+            kwargs["context_window_tokens"] = context_window_tokens
+        response = await self.chat(**kwargs)
         if on_content_delta and response.content:
             await on_content_delta(response.content)
         return response
@@ -792,6 +812,9 @@ class LLMProvider(ABC):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -824,6 +847,11 @@ class LLMProvider(ABC):
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
         )
+        if provider_state is not None:
+            kw["provider_state"] = provider_state
+            kw["provider_state_messages"] = list(provider_state_messages or [])
+        if context_window_tokens is not None:
+            kw["context_window_tokens"] = context_window_tokens
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
         return await self._run_with_retry(
@@ -847,6 +875,9 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -869,6 +900,11 @@ class LLMProvider(ABC):
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
+        if provider_state is not None:
+            kw["provider_state"] = provider_state
+            kw["provider_state_messages"] = list(provider_state_messages or [])
+        if context_window_tokens is not None:
+            kw["context_window_tokens"] = context_window_tokens
         return await self._run_with_retry(
             self._safe_chat,
             kw,

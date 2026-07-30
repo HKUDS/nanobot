@@ -27,11 +27,15 @@ from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_tools,
     prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_context_tokens,
+    responses_state_items,
     responses_state_matches,
 )
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+_COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -55,6 +59,7 @@ class OpenAICodexProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         model: str | None,
+        max_tokens: int,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
@@ -62,6 +67,7 @@ class OpenAICodexProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
@@ -113,26 +119,79 @@ class OpenAICodexProvider(LLMProvider):
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(cast(str, token.account_id), token.access)
 
+            async def _send(
+                request_body: dict[str, Any],
+                *,
+                emit_deltas: bool,
+            ) -> LLMResponse:
+                try:
+                    return await _request_codex(
+                        DEFAULT_CODEX_URL,
+                        headers,
+                        request_body,
+                        verify=True,
+                        proxy=self.proxy,
+                        on_content_delta=on_content_delta if emit_deltas else None,
+                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                    )
+                except Exception as exc:
+                    if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+                        raise
+                    logger.warning(
+                        "SSL verification failed for Codex API; retrying with verify=False"
+                    )
+                    return await _request_codex(
+                        DEFAULT_CODEX_URL,
+                        headers,
+                        request_body,
+                        verify=False,
+                        proxy=self.proxy,
+                        on_content_delta=on_content_delta if emit_deltas else None,
+                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                    )
+
+            compact_threshold = resolve_compact_threshold(
+                context_window_tokens,
+                max_tokens,
+            )
+            if (
+                replayed
+                and sanitized_state is not None
+                and compact_threshold is not None
+                and responses_state_context_tokens(sanitized_state) >= compact_threshold
+            ):
+                stage = "codex_compaction"
+                compact_body = {
+                    **body,
+                    "input": [*input_items, {"type": "compaction_trigger"}],
+                }
+                try:
+                    compact_result = await _send(compact_body, emit_deltas=False)
+                    compact_items = (
+                        responses_state_items(compact_result.provider_state)
+                        if compact_result.provider_state is not None
+                        else None
+                    )
+                    if not compact_items or compact_items[-1].get("type") not in {
+                        "compaction",
+                        "compaction_summary",
+                        "context_compaction",
+                    }:
+                        raise RuntimeError("Codex compaction returned no compaction item")
+                    body["input"] = [
+                        *_retained_compaction_messages(input_items),
+                        *compact_items,
+                    ]
+                except Exception as compact_error:
+                    logger.warning(
+                        "Codex native compaction unavailable; continuing without it: {}",
+                        type(compact_error).__name__,
+                    )
+
             stage = "codex_request"
-            try:
-                request_result = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=True,
-                    proxy=self.proxy,
-                    on_content_delta=on_content_delta,
-                    on_thinking_delta=on_thinking_delta,
-                    on_tool_call_delta=on_tool_call_delta,
-                )
-            except Exception as e:
-                if "CERTIFICATE_VERIFY_FAILED" not in str(e):
-                    raise
-                logger.warning("SSL verification failed for Codex API; retrying with verify=False")
-                request_result = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=False,
-                    proxy=self.proxy,
-                    on_content_delta=on_content_delta,
-                    on_thinking_delta=on_thinking_delta,
-                    on_tool_call_delta=on_tool_call_delta,
-                )
+            request_result = await _send(body, emit_deltas=True)
             return _codex_result_to_response(request_result)
         except Exception as e:
             response = _codex_error_response(e)
@@ -159,15 +218,18 @@ class OpenAICodexProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages,
             tools,
             model,
+            max_tokens,
             reasoning_effort,
             tool_choice,
             provider_state=provider_state,
             provider_state_messages=provider_state_messages,
+            context_window_tokens=context_window_tokens,
         )
 
     async def chat_stream(
@@ -180,18 +242,21 @@ class OpenAICodexProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
-            messages,
-            tools,
-            model,
-            reasoning_effort,
-            tool_choice,
-            on_content_delta,
-            on_thinking_delta,
-            on_tool_call_delta,
-            provider_state,
-            provider_state_messages,
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+            on_content_delta=on_content_delta,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
+            provider_state=provider_state,
+            provider_state_messages=provider_state_messages,
+            context_window_tokens=context_window_tokens,
         )
 
     def get_default_model(self) -> str:
@@ -212,11 +277,40 @@ class OpenAICodexProvider(LLMProvider):
             model=_strip_model_prefix(model or self.default_model),
         )
 
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Use the Codex backend's inline compaction trigger when needed."""
+        _ = model
+        return True
+
 
 def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
+
+
+def _retained_compaction_messages(
+    input_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Mirror Codex's bounded retention of user/developer/system messages."""
+    retained_reversed: list[dict[str, Any]] = []
+    remaining = _COMPACTION_RETAINED_CHAR_BUDGET
+    for item in reversed(input_items):
+        if item.get("type") not in {None, "message"} or item.get("role") not in {
+            "user",
+            "developer",
+            "system",
+        }:
+            continue
+        size = len(json.dumps(item, ensure_ascii=False))
+        if size > remaining and retained_reversed:
+            continue
+        retained_reversed.append(item)
+        remaining = max(0, remaining - size)
+        if remaining == 0:
+            break
+    retained_reversed.reverse()
+    return retained_reversed
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:
@@ -317,6 +411,7 @@ async def _request_codex(
                     model=str(body.get("model") or ""),
                     input_items=cast(list[dict[str, Any]], body.get("input") or []),
                     output_items=capture.output_items,
+                    usage=usage,
                 )
             return result
 

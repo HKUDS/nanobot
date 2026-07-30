@@ -404,6 +404,7 @@ def parse_response_output(
             model=state_model,
             input_items=state_input_items,
             output_items=output,
+            usage=usage,
         )
     return result
 
