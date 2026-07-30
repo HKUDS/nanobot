@@ -171,6 +171,86 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
 
 
 @pytest.mark.asyncio
+async def test_runner_preserves_last_completed_provider_state_on_model_error():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="temporary upstream failure",
+        finish_reason="error",
+        error_kind="timeout",
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "reasoning", "encrypted_content": "opaque"}]},
+    )
+    unsaved_input = {"role": "user", "content": "ephemeral follow-up"}
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            unsaved_input,
+        ],
+        tools=tools,
+        model="gpt-5.6",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        provider_state=state,
+        provider_state_messages=[unsaved_input],
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.provider_state is not None
+    assert result.provider_state.payload == state.payload
+    assert result.provider_state.pending_messages[0] == unsaved_input
+    assert result.provider_state.pending_messages[1]["role"] == "assistant"
+    assert "model error" in result.provider_state.pending_messages[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_discards_provider_state_on_non_retryable_model_error():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="context length exceeded",
+        finish_reason="error",
+        error_status_code=400,
+        error_should_retry=False,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "reasoning", "encrypted_content": "opaque"}]},
+    )
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "continue"}],
+        tools=tools,
+        model="gpt-5.6",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        provider_state=state,
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.provider_state is None
+
+
+@pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
     from nanobot.agent.runner import AgentRunner
 

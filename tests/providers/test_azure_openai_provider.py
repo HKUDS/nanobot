@@ -234,6 +234,7 @@ def test_build_body_basic():
     assert body["max_output_tokens"] == 4096
     assert body["store"] is False
     assert "reasoning" not in body
+    assert "include" not in body
     # input should contain the converted user message only (system extracted)
     assert any(
         item.get("role") == "user"
@@ -263,6 +264,29 @@ def test_build_body_enables_server_compaction():
         "type": "compaction",
         "compact_threshold": 180_000,
     }]
+
+
+def test_build_body_respects_responses_compaction_kill_switch():
+    provider = AzureOpenAIProvider(
+        api_key="k",
+        api_base="https://res.openai.azure.com",
+        default_model="gpt-5.6",
+        responses_compaction_enabled=False,
+    )
+
+    body = provider._build_body(
+        [{"role": "user", "content": "hello"}],
+        None,
+        None,
+        10_000,
+        0.1,
+        "high",
+        None,
+        context_window_tokens=200_000,
+    )
+
+    assert body["include"] == ["reasoning.encrypted_content"]
+    assert "context_management" not in body
 
 
 def test_build_body_max_tokens_minimum():
@@ -380,6 +404,38 @@ async def test_chat_success():
     assert result.content == "Hello!"
     assert result.finish_reason == "stop"
     assert result.usage["prompt_tokens"] == 10
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_without_unsupported_server_compaction():
+    provider = AzureOpenAIProvider(
+        api_key="test-key",
+        api_base="https://test.openai.azure.com",
+        default_model="gpt-5.6",
+    )
+
+    class UnsupportedCompactionError(Exception):
+        status_code = 400
+        body = {"error": {"message": "Unknown parameter: context_management"}}
+
+    provider._client.responses = MagicMock()
+    provider._client.responses.create = AsyncMock(side_effect=[
+        UnsupportedCompactionError(),
+        _make_sdk_response(content="compaction fallback"),
+    ])
+
+    result = await provider.chat(
+        [{"role": "user", "content": "Hi"}],
+        context_window_tokens=200_000,
+    )
+
+    create = provider._client.responses.create
+    assert result.content == "compaction fallback"
+    assert result.provider_state is not None
+    assert create.await_count == 2
+    assert "context_management" in create.call_args_list[0].kwargs
+    assert "context_management" not in create.call_args_list[1].kwargs
+    assert provider.supports_native_compaction() is False
 
 
 @pytest.mark.asyncio

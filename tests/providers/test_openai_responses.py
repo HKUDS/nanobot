@@ -1,9 +1,11 @@
 """Tests for the shared openai_responses converters and parsers."""
 
 import json
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
@@ -22,6 +24,7 @@ from nanobot.providers.openai_responses.parsing import (
 from nanobot.providers.openai_responses.state import (
     build_compacted_responses_state,
     build_responses_state,
+    is_compaction_compatibility_error,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -592,6 +595,22 @@ class TestResponsesConversationState:
         ]
         assert responses_state_context_tokens(state) == 100
 
+    def test_existing_compaction_keeps_canonical_retained_prefix(self):
+        canonical_input = [
+            {"type": "message", "role": "user", "content": "retained"},
+            {"type": "compaction", "encrypted_content": "compact"},
+        ]
+        output = [{"type": "message", "role": "assistant", "content": "new"}]
+
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=canonical_input,
+            output_items=output,
+        )
+
+        assert responses_state_items(state) == [*canonical_input, *output]
+
     def test_standalone_compaction_output_is_never_pruned(self):
         canonical = [
             {"type": "message", "role": "user", "content": "retained"},
@@ -621,6 +640,66 @@ class TestResponsesConversationState:
         expected,
     ):
         assert resolve_compact_threshold(context_window, max_output) == expected
+
+    def test_configured_compact_threshold_is_clamped_to_safe_headroom(self):
+        assert resolve_compact_threshold(
+            100_000,
+            30_000,
+            configured_threshold=95_000,
+        ) == 70_000
+        assert resolve_compact_threshold(
+            100_000,
+            30_000,
+            configured_threshold=60_000,
+        ) == 60_000
+        assert resolve_compact_threshold(
+            None,
+            30_000,
+            configured_threshold=60_000,
+        ) == 60_000
+
+    def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
+        error = TypeError("create() got an unexpected keyword argument 'context_management'")
+        assert is_compaction_compatibility_error(error) is True
+        assert is_compaction_compatibility_error(TypeError("unrelated argument")) is False
+
+    def test_state_observability_logs_counts_without_opaque_content(self):
+        secret = "opaque-secret-that-must-not-be-logged"
+        state = build_responses_state(
+            provider=f"openai:https://example.test/?key={secret}",
+            model=f"secret-model-{secret}",
+            input_items=[{"role": "user", "content": secret}],
+            output_items=[{"type": "reasoning", "encrypted_content": secret}],
+        )
+        sink = StringIO()
+        sink_id = logger.add(sink, level="DEBUG", format="{message}")
+        try:
+            prepare_responses_input(
+                [{"role": "user", "content": secret}],
+                state=state,
+                state_messages=[{"role": "user", "content": secret}],
+                provider=state.provider,
+                model=state.model,
+            )
+            build_responses_state(
+                provider=state.provider,
+                model=state.model,
+                input_items=[
+                    {"role": "user", "content": secret},
+                    {"type": "reasoning", "encrypted_content": secret},
+                ],
+                output_items=[
+                    {"type": "compaction", "encrypted_content": secret},
+                ],
+            )
+        finally:
+            logger.remove(sink_id)
+
+        log_text = sink.getvalue()
+        assert "prior_items=2" in log_text
+        assert "pending_messages=1" in log_text
+        assert "dropped_items=2" in log_text
+        assert secret not in log_text
 
     def test_replays_exact_items_then_only_pending_and_new_messages(self):
         prior_items = [

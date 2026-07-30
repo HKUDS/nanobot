@@ -348,6 +348,70 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
 </details>
 
+<a id="responses-state-and-compaction"></a>
+
+### Responses conversation state and compaction
+
+nanobot preserves the complete opaque output-item chain returned by capable
+Responses API providers and replays it on the next model call. This includes
+encrypted reasoning items, function calls, and future item types that cannot be
+represented faithfully in Chat Completions history. Requests continue to use
+`store: false`; the continuation payload is kept in a private session-state
+record and is excluded from public chat history and Dream memory.
+
+This is a capability-based feature, not a Codex-only optimization:
+
+| Provider path | Retained Responses state | Native compaction |
+|---|---:|---:|
+| Direct OpenAI while using Responses | Yes | Server `context_management` |
+| OpenAI Codex OAuth | Yes | Inline `compaction_trigger` |
+| Azure OpenAI Responses | Yes | Server `context_management`, with compatibility fallback |
+| GitHub Copilot models routed through Responses | Yes | No |
+| xAI Grok subscription proxy | No change; replay contract is not assumed | No |
+| Chat Completions, Anthropic Messages, and other non-Responses paths | No change | No |
+
+State is resumed only for the same provider endpoint and model. Switching
+models/providers safely falls back to the ordinary chat transcript. A
+successfully completed response replaces the prior state; a transient failed
+request does not erase the last completed state.
+
+The defaults enable both retention and compaction. Add advanced switches to the
+relevant provider block only when you need a rollback or a fixed threshold:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "responsesStateEnabled": true,
+      "responsesCompactionEnabled": true,
+      "responsesCompactThreshold": 175000
+    }
+  }
+}
+```
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `responsesStateEnabled` | `true` | Preserve and replay exact Responses output items. Setting this to `false` also disables native compaction. |
+| `responsesCompactionEnabled` | `true` | Ask a capable Responses backend to compact long context. |
+| `responsesCompactThreshold` | automatic | Positive token threshold for compaction. |
+
+The automatic threshold follows Codex's safety policy: the lower of 90% of
+`contextWindowTokens` and the window remaining after `maxTokens` is reserved.
+A configured threshold is still clamped to that safe limit when the model
+context window is known.
+
+If an endpoint explicitly rejects a compaction field or trigger with a
+compatibility error, nanobot continues without compaction and disables further
+compaction attempts for that provider instance. Network failures, rate limits,
+and server errors do not trip this compatibility fallback.
+
+See OpenAI's
+[reasoning-state guidance](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-across-calls)
+and [compaction guide](https://developers.openai.com/api/docs/guides/compaction)
+for the underlying Responses API contracts.
+
 <details>
 <summary><b>Azure OpenAI</b></summary>
 
@@ -699,6 +763,8 @@ To opt in to Codex Fast mode, merge this provider setting into `config.json`:
 for models and accounts that support Fast mode; remove `service_tier` to return to standard
 processing. Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
+Codex also participates in the shared
+[Responses state and compaction](#responses-state-and-compaction) behavior.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
 
@@ -753,7 +819,7 @@ a nanobot update.
 <details>
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
-GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config. Models routed through Responses retain opaque state, but Copilot does not enable native compaction. An optional `providers.githubCopilot` block may contain the shared [Responses state switches](#responses-state-and-compaction).
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash

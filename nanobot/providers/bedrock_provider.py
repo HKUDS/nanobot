@@ -14,6 +14,7 @@ from typing import Any, cast
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderConversationState,
     ToolCallRequest,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
@@ -733,6 +734,9 @@ class BedrockProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         try:
             kwargs = self._build_kwargs(
@@ -758,6 +762,9 @@ class BedrockProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_state: ProviderConversationState | None = None,
+        provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta, on_tool_call_delta
         idle_timeout_s = resolve_stream_idle_timeout_s()

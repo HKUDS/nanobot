@@ -159,10 +159,12 @@ class AgentRunner:
         """Return messages not represented by state, excluding Chat projections."""
         pending: list[dict[str, Any]] = []
         for message in messages[start:]:
-            internal_meta = message.get("_meta")
+            internal_meta = cast(object, message.get("_meta"))
             if (
                 isinstance(internal_meta, dict)
-                and internal_meta.get(_PROVIDER_STATE_OUTPUT_META) is True
+                and cast(dict[str, Any], internal_meta).get(
+                    _PROVIDER_STATE_OUTPUT_META
+                ) is True
             ):
                 continue
             pending.append(deepcopy(message))
@@ -561,6 +563,16 @@ class AgentRunner:
                 provider_state = response.provider_state
                 provider_state_boundary = len(messages)
                 self._seal_provider_state_boundary(messages)
+            elif (
+                response.finish_reason == "error"
+                and LLMProvider.is_transient_response(response)
+            ):
+                if provider_state is not None and provider_state_messages:
+                    provider_state = provider_state.with_pending_messages([
+                        *provider_state.pending_messages,
+                        *provider_state_messages,
+                    ])
+                provider_state_boundary = len(messages)
             else:
                 provider_state = None
                 provider_state_boundary = len(messages)
@@ -741,7 +753,10 @@ class AgentRunner:
                     provider_state = response.provider_state
                     provider_state_boundary = len(messages)
                     self._seal_provider_state_boundary(messages)
-                else:
+                elif (
+                    response.finish_reason != "error"
+                    or not LLMProvider.is_transient_response(response)
+                ):
                     provider_state = None
                     provider_state_boundary = len(messages)
                 retry_usage = self._usage_or_estimate(spec, retry_messages, response)

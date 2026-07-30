@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.openai_responses import build_responses_state
 from nanobot.providers.registry import find_by_name
 
 
@@ -679,6 +680,7 @@ async def test_direct_openai_gpt5_uses_responses_api() -> None:
     assert call_kwargs["max_output_tokens"] == 4096
     assert "input" in call_kwargs
     assert "messages" not in call_kwargs
+    assert call_kwargs["include"] == ["reasoning.encrypted_content"]
 
 
 @pytest.mark.asyncio
@@ -708,6 +710,75 @@ async def test_direct_openai_reasoning_prefers_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["reasoning"] == {"effort": "medium"}
     assert call_kwargs["include"] == ["reasoning.encrypted_content"]
+
+
+def test_direct_openai_responses_state_kill_switch_removes_state_and_compaction() -> None:
+    spec = find_by_name("openai")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5.6",
+            spec=spec,
+            responses_state_enabled=False,
+            responses_compaction_enabled=True,
+        )
+    state = build_responses_state(
+        provider=provider._responses_state_provider(),
+        model="gpt-5.6",
+        input_items=[{"role": "user", "content": "opaque-old-input"}],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque-state"}],
+    )
+
+    body = provider._build_responses_body(
+        [{"role": "user", "content": "fresh input"}],
+        None,
+        "gpt-5.6",
+        10_000,
+        0.1,
+        "high",
+        None,
+        provider_state=state,
+        context_window_tokens=200_000,
+    )
+
+    assert provider.can_resume_conversation_state(state, "gpt-5.6") is False
+    assert "opaque-state" not in str(body)
+    assert "include" not in body
+    assert "context_management" not in body
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_retries_without_unsupported_server_compaction() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(side_effect=[
+        _FakeResponsesError(400, "Unknown parameter: context_management"),
+        _fake_responses_response("compaction fallback"),
+    ])
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_class:
+        client_instance = mock_client_class.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5.6",
+            spec=spec,
+        )
+
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5.6",
+            context_window_tokens=200_000,
+        )
+
+    assert result.content == "compaction fallback"
+    assert result.provider_state is not None
+    assert mock_responses.await_count == 2
+    assert "context_management" in mock_responses.call_args_list[0].kwargs
+    assert "context_management" not in mock_responses.call_args_list[1].kwargs
+    assert provider.supports_native_compaction("gpt-5.6") is False
+    mock_chat.assert_not_awaited()
 
 
 @pytest.mark.asyncio

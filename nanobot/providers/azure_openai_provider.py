@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
@@ -31,6 +32,7 @@ from nanobot.providers.openai_responses import (
     build_responses_state,
     consume_sdk_stream,
     convert_tools,
+    is_compaction_compatibility_error,
     parse_response_output,
     prepare_responses_input,
     resolve_compact_threshold,
@@ -98,9 +100,18 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        responses_state_enabled: bool = True,
+        responses_compaction_enabled: bool = True,
+        responses_compact_threshold: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._responses_state_enabled = bool(responses_state_enabled)
+        self._responses_compaction_enabled = (
+            self._responses_state_enabled and bool(responses_compaction_enabled)
+        )
+        self._responses_compact_threshold = responses_compact_threshold
+        self._native_compaction_available = True
 
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
@@ -154,7 +165,7 @@ class AzureOpenAIProvider(LLMProvider):
         state: ProviderConversationState,
         model: str | None = None,
     ) -> bool:
-        return responses_state_matches(
+        return self._responses_state_enabled and responses_state_matches(
             state,
             provider=self._responses_state_provider(),
             model=model or self.default_model,
@@ -163,7 +174,7 @@ class AzureOpenAIProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Azure's native Responses endpoint accepts context management."""
         _ = model
-        return True
+        return self._responses_compaction_enabled and self._native_compaction_available
 
     def _build_body(
         self,
@@ -181,14 +192,14 @@ class AzureOpenAIProvider(LLMProvider):
         """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
-        sanitized_state = provider_state
-        if provider_state is not None:
-            sanitized_state = provider_state.with_pending_messages(
-                self._sanitize_empty_content(provider_state.pending_messages)
+        sanitized_state = provider_state if self._responses_state_enabled else None
+        if sanitized_state is not None:
+            sanitized_state = sanitized_state.with_pending_messages(
+                self._sanitize_empty_content(sanitized_state.pending_messages)
             )
         sanitized_state_messages = (
             self._sanitize_empty_content(provider_state_messages)
-            if provider_state_messages is not None
+            if self._responses_state_enabled and provider_state_messages is not None
             else None
         )
         instructions, input_items, replayed = prepare_responses_input(
@@ -210,8 +221,9 @@ class AzureOpenAIProvider(LLMProvider):
         compact_threshold = resolve_compact_threshold(
             context_window_tokens,
             max_tokens,
+            configured_threshold=self._responses_compact_threshold,
         )
-        if compact_threshold is not None:
+        if self.supports_native_compaction(deployment) and compact_threshold is not None:
             body["context_management"] = [{
                 "type": "compaction",
                 "compact_threshold": compact_threshold,
@@ -220,9 +232,13 @@ class AzureOpenAIProvider(LLMProvider):
         if self._supports_temperature(deployment, reasoning_effort):
             body["temperature"] = temperature
 
+        if (
+            self._responses_state_enabled
+            and not self._supports_temperature(deployment, reasoning_effort)
+        ):
+            body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
-            body["include"] = ["reasoning.encrypted_content"]
         if replayed and "gpt-5.6" in deployment.lower():
             body.setdefault("reasoning", {})["context"] = "all_turns"
 
@@ -232,16 +248,70 @@ class AzureOpenAIProvider(LLMProvider):
 
         return body
 
+    async def _create_response_with_compaction_fallback(
+        self,
+        body: dict[str, Any],
+    ) -> Any:
+        """Retry once without server compaction when Azure rejects the option."""
+        try:
+            return cast(Any, await self._client.responses.create(**body))
+        except Exception as exc:
+            if (
+                "context_management" not in body
+                or not is_compaction_compatibility_error(exc)
+            ):
+                raise
+            self._native_compaction_available = False
+            body.pop("context_management", None)
+            logger.warning(
+                "Azure Responses server compaction unsupported; disabled for this provider "
+                "instance (status={})",
+                getattr(exc, "status_code", None),
+            )
+            return cast(Any, await self._client.responses.create(**body))
+
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
         response = getattr(e, "response", None)
         body = getattr(e, "body", None) or getattr(response, "text", None)
         body_text = str(body).strip() if body is not None else ""
         msg = f"Error: {body_text[:500]}" if body_text else f"Error calling Azure OpenAI: {e}"
-        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        headers = getattr(response, "headers", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(headers)
         if retry_after is None:
             retry_after = LLMProvider._extract_retry_after(msg)
-        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+        error_type, error_code = LLMProvider._extract_error_type_code(body)
+        should_retry: bool | None = None
+        if headers is not None:
+            raw_should_retry = headers.get("x-should-retry")
+            if isinstance(raw_should_retry, str):
+                lowered = raw_should_retry.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+        error_name = type(e).__name__.lower()
+        error_kind = (
+            "timeout"
+            if "timeout" in error_name
+            else "connection"
+            if "connection" in error_name
+            else None
+        )
+        return LLMResponse(
+            content=msg,
+            finish_reason="error",
+            retry_after=retry_after,
+            error_status_code=int(status_code) if status_code is not None else None,
+            error_kind=error_kind,
+            error_type=error_type,
+            error_code=error_code,
+            error_retry_after_s=retry_after,
+            error_should_retry=should_retry,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -267,12 +337,20 @@ class AzureOpenAIProvider(LLMProvider):
             context_window_tokens,
         )
         try:
-            response = cast(Any, await self._client.responses.create(**body))
+            response = await self._create_response_with_compaction_fallback(body)
             return parse_response_output(
                 response,
-                state_provider=self._responses_state_provider(),
-                state_model=str(body["model"]),
-                state_input_items=cast(list[dict[str, Any]], body["input"]),
+                state_provider=(
+                    self._responses_state_provider()
+                    if self._responses_state_enabled
+                    else None
+                ),
+                state_model=str(body["model"]) if self._responses_state_enabled else None,
+                state_input_items=(
+                    cast(list[dict[str, Any]], body["input"])
+                    if self._responses_state_enabled
+                    else None
+                ),
             )
         except Exception as e:
             return self._handle_error(e)
@@ -303,8 +381,12 @@ class AzureOpenAIProvider(LLMProvider):
         body["stream"] = True
 
         try:
-            stream = cast(Any, await self._client.responses.create(**body))
-            capture = ResponsesStreamCapture()
+            stream = await self._create_response_with_compaction_fallback(body)
+            capture = (
+                ResponsesStreamCapture()
+                if self._responses_state_enabled
+                else None
+            )
             content, tool_calls, finish_reason, usage, reasoning_content = (
                 await consume_sdk_stream(
                     stream,
@@ -320,7 +402,7 @@ class AzureOpenAIProvider(LLMProvider):
                 usage=usage,
                 reasoning_content=reasoning_content,
             )
-            if capture.completed:
+            if capture is not None and capture.completed:
                 result.provider_state = build_responses_state(
                     provider=self._responses_state_provider(),
                     model=str(body["model"]),

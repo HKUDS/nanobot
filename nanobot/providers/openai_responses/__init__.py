@@ -1,4 +1,4 @@
-"""Shared helpers for OpenAI Responses API providers (Codex, Azure OpenAI)."""
+"""Shared helpers for provider backends that implement the OpenAI Responses protocol."""
 
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
@@ -19,6 +19,7 @@ from nanobot.providers.openai_responses.parsing import (
 from nanobot.providers.openai_responses.state import (
     build_compacted_responses_state,
     build_responses_state,
+    is_compaction_compatibility_error,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -40,6 +41,7 @@ __all__ = [
     "parse_response_output",
     "build_compacted_responses_state",
     "build_responses_state",
+    "is_compaction_compatibility_error",
     "prepare_responses_input",
     "resolve_compact_threshold",
     "responses_state_context_tokens",

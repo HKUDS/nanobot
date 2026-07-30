@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, cast
 
+from loguru import logger
+
 from nanobot.providers.base import ProviderConversationState
 from nanobot.providers.openai_responses.converters import convert_messages
 
@@ -63,6 +65,11 @@ def prepare_responses_input(
 
     pending = [*state.pending_messages, *(state_messages or [])]
     _, delta_items = convert_messages(pending)
+    logger.debug(
+        "Replaying Responses state: prior_items={} pending_messages={}",
+        len(prior_items),
+        len(pending),
+    )
     return instructions, [*deepcopy(prior_items), *delta_items], True
 
 
@@ -75,7 +82,14 @@ def build_responses_state(
     usage: dict[str, int] | None = None,
 ) -> ProviderConversationState:
     """Create the canonical next state from request input and every output item."""
-    items = _prune_before_latest_compaction([*input_items, *output_items])
+    unpruned_items = [*input_items, *output_items]
+    items = _prune_before_latest_output_compaction(input_items, output_items)
+    if len(items) < len(unpruned_items):
+        logger.info(
+            "Installed Responses compaction: dropped_items={} retained_items={}",
+            len(unpruned_items) - len(items),
+            len(items),
+        )
     payload: dict[str, Any] = {_ITEMS_KEY: deepcopy(items)}
     context_tokens = _context_tokens_from_usage(usage)
     if context_tokens > 0:
@@ -133,24 +147,56 @@ def resolve_compact_threshold(
     configured_threshold: int | None = None,
 ) -> int | None:
     """Derive Codex-compatible 90% compaction headroom for a model window."""
-    if configured_threshold is not None:
-        return max(1, configured_threshold)
     if context_window_tokens is None or context_window_tokens <= 0:
-        return None
+        return max(1, configured_threshold) if configured_threshold is not None else None
     ninety_percent = max(1, context_window_tokens * 9 // 10)
     output_headroom = max(1, context_window_tokens - max(1, max_output_tokens))
-    return min(ninety_percent, output_headroom)
+    safe_limit = min(ninety_percent, output_headroom)
+    if configured_threshold is None:
+        return safe_limit
+    return min(max(1, configured_threshold), safe_limit)
 
 
-def _prune_before_latest_compaction(
-    items: list[dict[str, Any]],
+def is_compaction_compatibility_error(exc: Exception) -> bool:
+    """Recognize endpoints that reject native Responses compaction fields."""
+    if getattr(exc, "compaction_unsupported", False) is True:
+        return True
+    response = getattr(exc, "response", None)
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    body = (
+        getattr(exc, "body", None)
+        or getattr(exc, "doc", None)
+        or getattr(response, "text", None)
+        or str(exc)
+    )
+    text = str(body).lower()
+    has_compaction_marker = any(
+        marker in text
+        for marker in ("context_management", "compact_threshold", "compaction_trigger")
+    )
+    if not has_compaction_marker:
+        return False
+    return isinstance(exc, TypeError) or status_code in {400, 404, 422}
+
+
+def _prune_before_latest_output_compaction(
+    input_items: list[dict[str, Any]],
+    output_items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Drop the replay prefix superseded by the latest server compaction item."""
+    """Drop old input only when this response emits a new compaction item.
+
+    A canonical compacted input may intentionally retain messages before its
+    compaction item. Those messages must survive ordinary subsequent responses.
+    """
     latest = None
-    for index, item in enumerate(items):
+    for index, item in enumerate(output_items):
         if item.get("type") in _COMPACTION_ITEM_TYPES:
             latest = index
-    return items[latest:] if latest is not None else items
+    if latest is None:
+        return [*input_items, *output_items]
+    return output_items[latest:]
 
 
 def _context_tokens_from_usage(usage: dict[str, int] | None) -> int:
@@ -160,7 +206,7 @@ def _context_tokens_from_usage(usage: dict[str, int] | None) -> int:
     completion_tokens = usage.get("completion_tokens", 0)
     total_tokens = usage.get("total_tokens", 0)
     values = (prompt_tokens, completion_tokens, total_tokens)
-    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+    if any(isinstance(value, bool) for value in values):
         return 0
     return max(0, total_tokens or prompt_tokens + completion_tokens)
 

@@ -117,6 +117,48 @@ async def test_codex_request_non_200_populates_http_metadata(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_codex_request_marks_rejected_compaction_without_retaining_raw_body(
+    monkeypatch,
+) -> None:
+    original_client = httpx.AsyncClient
+    secret = "PRIVATE PROMPT MUST NOT BE RETAINED"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": f"Unknown input type compaction_trigger; {secret}",
+                },
+            },
+            request=request,
+        )
+
+    def fake_client(
+        *,
+        timeout: int,
+        verify: bool,
+        **_kwargs: object,
+    ) -> httpx.AsyncClient:
+        return original_client(transport=httpx.MockTransport(handler), timeout=timeout)
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.httpx.AsyncClient", fake_client)
+
+    with pytest.raises(_CodexHTTPError) as caught:
+        await _request_codex(
+            "https://codex.example/responses",
+            {},
+            {"input": [{"type": "compaction_trigger"}]},
+            verify=True,
+        )
+
+    error = caught.value
+    assert error.compaction_unsupported is True
+    assert secret not in str(error)
+    assert not hasattr(error, "body")
+
+
+@pytest.mark.asyncio
 async def test_codex_request_honors_stream_idle_timeout_env(monkeypatch) -> None:
     """NANOBOT_STREAM_IDLE_TIMEOUT_S overrides the default Codex stream timeout."""
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "5")
@@ -634,6 +676,70 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
         and "new question" in str(item.get("content"))
         for item in bodies[1]["input"]
     )
+
+
+@pytest.mark.asyncio
+async def test_codex_disables_unsupported_native_compaction_and_continues(
+    monkeypatch,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider,
+        model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old"}],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
+        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+    )
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        proxy=None,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        _ = (
+            url,
+            headers,
+            verify,
+            proxy,
+            on_content_delta,
+            on_thinking_delta,
+            on_tool_call_delta,
+        )
+        bodies.append(body)
+        if body["input"][-1].get("type") == "compaction_trigger":
+            raise _CodexHTTPError(
+                "HTTP 400: Codex API request failed",
+                status_code=400,
+                compaction_unsupported=True,
+            )
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex",
+        fake_request,
+    )
+
+    response = await provider.chat(
+        [{"role": "user", "content": "new"}],
+        max_tokens=5,
+        provider_state=state,
+        provider_state_messages=[{"role": "user", "content": "new"}],
+        context_window_tokens=100,
+    )
+
+    assert response.content == "done"
+    assert len(bodies) == 2
+    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
+    assert bodies[1]["input"][-1] != {"type": "compaction_trigger"}
+    assert provider.supports_native_compaction() is False
 
 
 @pytest.mark.asyncio

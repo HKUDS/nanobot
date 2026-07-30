@@ -255,7 +255,7 @@ class ContextBuilder:
             current_meta = current.get("_meta")
             if current_role == "user" and isinstance(current_meta, dict):
                 internal_meta = dict(last.get("_meta") or {})
-                internal_meta.update(current_meta)
+                internal_meta.update(cast(dict[str, Any], current_meta))
                 last["_meta"] = internal_meta
             messages[-1] = last
             return messages

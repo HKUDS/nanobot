@@ -140,6 +140,9 @@ def _make_provider_core(
     p = setup.provider_config
     spec = setup.spec
     backend = setup.backend
+    responses_state_enabled = p.responses_state_enabled if p else True
+    responses_compaction_enabled = p.responses_compaction_enabled if p else True
+    responses_compact_threshold = p.responses_compact_threshold if p else None
 
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -148,6 +151,9 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            responses_state_enabled=responses_state_enabled,
+            responses_compaction_enabled=responses_compaction_enabled,
+            responses_compact_threshold=responses_compact_threshold,
         )
     elif backend == "xai_grok":
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
@@ -166,11 +172,19 @@ def _make_provider_core(
             api_key=p.api_key or "",
             api_base=p.api_base,
             default_model=model,
+            responses_state_enabled=responses_state_enabled,
+            responses_compaction_enabled=responses_compaction_enabled,
+            responses_compact_threshold=responses_compact_threshold,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model)
+        provider = GitHubCopilotProvider(
+            default_model=model,
+            responses_state_enabled=responses_state_enabled,
+            responses_compaction_enabled=responses_compaction_enabled,
+            responses_compact_threshold=responses_compact_threshold,
+        )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
@@ -204,6 +218,9 @@ def _make_provider_core(
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
+            responses_state_enabled=responses_state_enabled,
+            responses_compaction_enabled=responses_compaction_enabled,
+            responses_compact_threshold=responses_compact_threshold,
         )
 
     provider.generation = preset.to_generation_settings()
@@ -314,6 +331,9 @@ def provider_signature(
             fallback.context_window_tokens,
             getattr(fp, "proxy", None) if fp else None,
             fp.thinking_style if fp else None,
+            fp.responses_state_enabled if fp else True,
+            fp.responses_compaction_enabled if fp else True,
+            fp.responses_compact_threshold if fp else None,
         )
 
     provider_name = config.get_provider_name(resolved.model, preset=resolved)
@@ -335,6 +355,9 @@ def provider_signature(
         resolved.context_window_tokens,
         getattr(p, "proxy", None) if p else None,
         p.thinking_style if p else None,
+        p.responses_state_enabled if p else True,
+        p.responses_compaction_enabled if p else True,
+        p.responses_compact_threshold if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 

@@ -155,14 +155,37 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     data = config.model_dump(mode="json", by_alias=True)
     # OAuth credentials live in dedicated token stores. Persist only the
     # non-credential request settings consumed by these provider backends.
-    for alias, provider in (
-        ("openaiCodex", config.providers.openai_codex),
-        ("xaiGrok", config.providers.xai_grok),
+    for alias, provider, included_fields in (
+        (
+            "openaiCodex",
+            config.providers.openai_codex,
+            {
+                "proxy",
+                "extra_body",
+                "responses_state_enabled",
+                "responses_compaction_enabled",
+                "responses_compact_threshold",
+            },
+        ),
+        (
+            "githubCopilot",
+            config.providers.github_copilot,
+            {
+                "responses_state_enabled",
+                "responses_compaction_enabled",
+                "responses_compact_threshold",
+            },
+        ),
+        (
+            "xaiGrok",
+            config.providers.xai_grok,
+            {"proxy", "extra_body"},
+        ),
     ):
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include={"proxy", "extra_body"},
+            include=included_fields,
             exclude_none=True,
         )
         if settings:

@@ -33,10 +33,11 @@ class ResponsesStreamCapture:
         item_object = _response_object(item)
         if item_object is None:
             return
-        try:
-            output_index = int(index)
-        except (TypeError, ValueError):
-            output_index = len(self._items_by_index)
+        output_index = (
+            index
+            if isinstance(index, int) and not isinstance(index, bool)
+            else len(self._items_by_index)
+        )
         self._items_by_index[output_index] = item_object
 
     def record_completed(self, response: object) -> None:

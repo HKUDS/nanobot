@@ -174,7 +174,14 @@ def login_github_copilot(
 class GitHubCopilotProvider(OpenAICompatProvider):
     """Provider that exchanges a stored GitHub OAuth token for Copilot access tokens."""
 
-    def __init__(self, default_model: str = "github-copilot/gpt-4.1"):
+    def __init__(
+        self,
+        default_model: str = "github-copilot/gpt-4.1",
+        *,
+        responses_state_enabled: bool = True,
+        responses_compaction_enabled: bool = True,
+        responses_compact_threshold: int | None = None,
+    ):
         from nanobot.providers.registry import find_by_name
 
         self._copilot_access_token: str | None = None
@@ -190,6 +197,9 @@ class GitHubCopilotProvider(OpenAICompatProvider):
                 "User-Agent": USER_AGENT,
             },
             spec=find_by_name("github_copilot"),
+            responses_state_enabled=responses_state_enabled,
+            responses_compaction_enabled=responses_compaction_enabled,
+            responses_compact_threshold=responses_compact_threshold,
         )
 
     async def _get_copilot_access_token(self) -> str:
@@ -250,6 +260,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         tool_choice: str | dict[str, Any] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat(
@@ -262,6 +273,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             tool_choice=tool_choice,
             provider_state=provider_state,
             provider_state_messages=provider_state_messages,
+            context_window_tokens=context_window_tokens,
         )
 
     async def chat_stream(
@@ -278,6 +290,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_state: ProviderConversationState | None = None,
         provider_state_messages: list[dict[str, Any]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat_stream(
@@ -293,4 +306,5 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             on_tool_call_delta=on_tool_call_delta,
             provider_state=provider_state,
             provider_state_messages=provider_state_messages,
+            context_window_tokens=context_window_tokens,
         )

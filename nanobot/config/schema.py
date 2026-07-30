@@ -198,6 +198,19 @@ class ProviderConfig(Base):
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
     proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+    responses_state_enabled: bool = Field(
+        default=True,
+        exclude_if=lambda value: value is True,
+    )  # Preserve opaque Responses output items across turns
+    responses_compaction_enabled: bool = Field(
+        default=True,
+        exclude_if=lambda value: value is True,
+    )  # Use native Responses context compaction
+    responses_compact_threshold: int | None = Field(
+        default=None,
+        gt=0,
+        exclude_if=lambda value: value is None,
+    )
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
     # nanobot/providers/openai_compat_provider.py. Kept duplicated here to

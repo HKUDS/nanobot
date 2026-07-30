@@ -222,7 +222,10 @@ class ProviderConversationState:
             or not isinstance(version, int)
             or not isinstance(payload, dict)
             or not isinstance(pending, list)
-            or any(not isinstance(message, dict) for message in pending)
+            or any(
+                not isinstance(message, dict)
+                for message in cast(list[object], pending)
+            )
         ):
             return None
         return cls(
@@ -517,7 +520,7 @@ class LLMProvider(ABC):
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
 
     @classmethod
-    def _is_transient_response(cls, response: LLMResponse) -> bool:
+    def is_transient_response(cls, response: LLMResponse) -> bool:
         """Prefer structured error metadata, fallback to text markers for legacy providers."""
         if response.error_should_retry is not None:
             return bool(response.error_should_retry)
@@ -1062,7 +1065,7 @@ class LLMProvider(ABC):
                 last_error_key = error_key
                 identical_error_count = 1 if error_key else 0
 
-            if not self._is_transient_response(response):
+            if not self.is_transient_response(response):
                 stripped = self._strip_image_content(original_messages)
                 if stripped is not None and stripped != kw["messages"]:
                     logger.warning(

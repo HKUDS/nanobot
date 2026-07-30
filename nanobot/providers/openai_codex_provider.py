@@ -26,6 +26,7 @@ from nanobot.providers.openai_responses import (
     build_responses_state,
     consume_sse_with_reasoning,
     convert_tools,
+    is_compaction_compatibility_error,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -48,11 +49,20 @@ class OpenAICodexProvider(LLMProvider):
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        responses_state_enabled: bool = True,
+        responses_compaction_enabled: bool = True,
+        responses_compact_threshold: int | None = None,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
+        self._responses_state_enabled = bool(responses_state_enabled)
+        self._responses_compaction_enabled = (
+            self._responses_state_enabled and bool(responses_compaction_enabled)
+        )
+        self._responses_compact_threshold = responses_compact_threshold
+        self._native_compaction_available = True
 
     async def _call_codex(
         self,
@@ -72,14 +82,14 @@ class OpenAICodexProvider(LLMProvider):
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
-        sanitized_state = provider_state
-        if provider_state is not None:
-            sanitized_state = provider_state.with_pending_messages(
-                self._sanitize_empty_content(provider_state.pending_messages)
+        sanitized_state = provider_state if self._responses_state_enabled else None
+        if sanitized_state is not None:
+            sanitized_state = sanitized_state.with_pending_messages(
+                self._sanitize_empty_content(sanitized_state.pending_messages)
             )
         sanitized_state_messages = (
             self._sanitize_empty_content(provider_state_messages)
-            if provider_state_messages is not None
+            if self._responses_state_enabled and provider_state_messages is not None
             else None
         )
         system_prompt, input_items, replayed = prepare_responses_input(
@@ -97,11 +107,12 @@ class OpenAICodexProvider(LLMProvider):
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
-            "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages[:2]),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
+        if self._responses_state_enabled:
+            body["include"] = ["reasoning.encrypted_content"]
         reasoning_options = _build_reasoning_options(reasoning_effort)
         if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
             reasoning_options = dict(reasoning_options or {})
@@ -155,9 +166,11 @@ class OpenAICodexProvider(LLMProvider):
             compact_threshold = resolve_compact_threshold(
                 context_window_tokens,
                 max_tokens,
+                configured_threshold=self._responses_compact_threshold,
             )
             if (
-                replayed
+                self.supports_native_compaction(model)
+                and replayed
                 and sanitized_state is not None
                 and compact_threshold is not None
                 and responses_state_context_tokens(sanitized_state) >= compact_threshold
@@ -185,14 +198,22 @@ class OpenAICodexProvider(LLMProvider):
                         *compact_items,
                     ]
                 except Exception as compact_error:
+                    if is_compaction_compatibility_error(compact_error):
+                        self._native_compaction_available = False
                     logger.warning(
-                        "Codex native compaction unavailable; continuing without it: {}",
+                        "Codex native compaction unavailable; continuing without it "
+                        "(type={} status={} disabled={})",
                         type(compact_error).__name__,
+                        getattr(compact_error, "status_code", None),
+                        not self._native_compaction_available,
                     )
 
             stage = "codex_request"
             request_result = await _send(body, emit_deltas=True)
-            return _codex_result_to_response(request_result)
+            result = _codex_result_to_response(request_result)
+            if not self._responses_state_enabled:
+                result.provider_state = None
+            return result
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
@@ -271,7 +292,7 @@ class OpenAICodexProvider(LLMProvider):
         state: ProviderConversationState,
         model: str | None = None,
     ) -> bool:
-        return responses_state_matches(
+        return self._responses_state_enabled and responses_state_matches(
             state,
             provider=self._responses_state_provider(),
             model=_strip_model_prefix(model or self.default_model),
@@ -280,7 +301,7 @@ class OpenAICodexProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Use the Codex backend's inline compaction trigger when needed."""
         _ = model
-        return True
+        return self._responses_compaction_enabled and self._native_compaction_available
 
 
 def _strip_model_prefix(model: str) -> str:
@@ -345,6 +366,7 @@ class _CodexHTTPError(RuntimeError):
         error_type: str | None = None,
         error_code: str | None = None,
         should_retry: bool | None = None,
+        compaction_unsupported: bool = False,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -352,6 +374,7 @@ class _CodexHTTPError(RuntimeError):
         self.error_type = error_type
         self.error_code = error_code
         self.should_retry = should_retry
+        self.compaction_unsupported = compaction_unsupported
 
 
 async def _request_codex(
@@ -376,6 +399,17 @@ async def _request_codex(
                 raw = text.decode("utf-8", "ignore")
                 retry_after = LLMProvider._extract_retry_after_from_headers(response.headers)
                 error_type, error_code = LLMProvider._extract_error_type_code(raw)
+                compaction_unsupported = (
+                    response.status_code in {400, 404, 422}
+                    and any(
+                        marker in raw.lower()
+                        for marker in (
+                            "context_management",
+                            "compact_threshold",
+                            "compaction_trigger",
+                        )
+                    )
+                )
                 raise _CodexHTTPError(
                     _friendly_error(response.status_code, raw),
                     status_code=response.status_code,
@@ -383,6 +417,7 @@ async def _request_codex(
                     error_type=error_type,
                     error_code=error_code,
                     should_retry=_should_retry_status(response.status_code, error_type, error_code, raw),
+                    compaction_unsupported=compaction_unsupported,
                 )
             capture = ResponsesStreamCapture()
             (
