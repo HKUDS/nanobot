@@ -65,7 +65,7 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
         model_presets=presets,
         preset_snapshot_loader=load_preset,
     )
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     loop.set_session_model_preset("sdk:fast", "fast")
     loop.set_session_model_preset("sdk:deep", "deep")
 
@@ -116,7 +116,7 @@ async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_p
         model="base-model",
         context_window_tokens=8_000,
     )
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     session_key = "sdk:removed-preset"
     session = loop.sessions.get_or_create(session_key)
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "removed"
@@ -161,7 +161,7 @@ async def test_streamed_sdk_resolves_session_runtime_after_lock_admission(tmp_pa
         model_presets=presets,
         preset_snapshot_loader=load_preset,
     )
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     session_key = "sdk:queued"
     loop.set_session_model_preset(session_key, "fast")
 
@@ -198,7 +198,7 @@ async def test_sdk_custom_model_preset_metadata_does_not_select_runtime(
         model="base-model",
         context_window_tokens=8_000,
     )
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     bot = Nanobot(loop)
 
     await bot.sessions.ingest(
@@ -239,7 +239,7 @@ async def test_sdk_invalid_internal_model_preset_metadata_fails_explicitly(
         model="base-model",
         context_window_tokens=8_000,
     )
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     bot = Nanobot(loop)
 
     await bot.sessions.ingest(

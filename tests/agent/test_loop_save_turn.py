@@ -78,7 +78,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     WebuiTurnCoordinator(
         bus=loop.bus,
         sessions=loop.sessions,
-        schedule_background=lambda coro: loop._schedule_background(coro),
+        schedule_background=lambda coro: loop.schedule_background(coro),
     ).subscribe(loop.runtime_events)
     return loop
 

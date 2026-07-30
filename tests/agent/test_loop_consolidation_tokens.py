@@ -215,7 +215,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
         return_value=(session, "Previous conversation summary: earlier context")
     )  # type: ignore[method-assign]
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
 
     runtime = loop.llm_runtime()
     await loop.process_direct("hello", session_key="cli:test", runtime=runtime)
@@ -252,7 +252,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
     loop.provider.chat_stream_with_retry = track_llm
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [

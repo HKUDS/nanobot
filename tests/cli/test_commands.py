@@ -3021,7 +3021,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
             self.runtime_resolver = MagicMock()
             seen["agent"] = self
 
-        def _schedule_background(self, _coro) -> None:
+        def schedule_background(self, _coro) -> None:
             return None
 
         async def run(self) -> None:

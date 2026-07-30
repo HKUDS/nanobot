@@ -33,7 +33,7 @@ def _make_loop(tmp_path):
     WebuiTurnCoordinator(
         bus=bus,
         sessions=loop.sessions,
-        schedule_background=lambda coro: loop._schedule_background(coro),
+        schedule_background=lambda coro: loop.schedule_background(coro),
     ).subscribe(loop.runtime_events)
     loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
     loop.tools.get_definitions = MagicMock(return_value=[])
