@@ -1841,6 +1841,7 @@ class OpenAICompatProvider(LLMProvider):
                         _timed_stream(),
                         on_content_delta,
                         on_tool_call_delta=on_tool_call_delta,
+                        on_reasoning_delta=on_thinking_delta,
                         capture=capture,
                     )
                     self._record_responses_success(model, reasoning_effort)

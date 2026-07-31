@@ -87,23 +87,6 @@ class TestConvertUserMessage:
         assert result["content"][0]["type"] == "input_text"
         assert result["content"][1]["type"] == "input_image"
 
-
-def test_convert_messages_preserves_deepseek_reasoning_content():
-    _, items = convert_messages([
-        {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
-    ], preserve_reasoning=True)
-
-    assert items == [
-        {"type": "reasoning", "content": "think first"},
-        {
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "output_text", "text": "answer"}],
-            "status": "completed",
-            "id": "msg_0",
-        },
-    ]
-
     def test_empty_list_falls_back(self):
         result = convert_user_message([])
         assert result["content"] == [{"type": "input_text", "text": ""}]
@@ -166,6 +149,22 @@ class TestConvertMessages:
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
         assert items[0]["content"][0]["text"] == "I'll help"
+
+    def test_preserves_deepseek_reasoning_content(self):
+        _, items = convert_messages([
+            {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
+        ], preserve_reasoning=True)
+
+        assert items == [
+            {"type": "reasoning", "content": "think first"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}],
+                "status": "completed",
+                "id": "msg_0",
+            },
+        ]
 
     def test_assistant_empty_content_skipped(self):
         _, items = convert_messages([{"role": "assistant", "content": ""}])
@@ -1665,6 +1664,30 @@ class TestConsumeSdkStream:
 
         _, _, _, _, reasoning = await consume_sdk_stream(stream())
         assert reasoning == "thinking..."
+
+    @pytest.mark.asyncio
+    async def test_deepseek_reasoning_text_streamed(self):
+        events = [
+            MagicMock(type="response.reasoning_text.delta", delta="step 1 "),
+            MagicMock(type="response.reasoning_text.delta", delta="step 2"),
+            MagicMock(type="response.reasoning_text.done", text="step 1 step 2"),
+        ]
+        emitted: list[str] = []
+
+        async def stream():
+            for event in events:
+                yield event
+
+        async def on_reasoning_delta(delta: str) -> None:
+            emitted.append(delta)
+
+        _, _, _, _, reasoning = await consume_sdk_stream(
+            stream(),
+            on_reasoning_delta=on_reasoning_delta,
+        )
+
+        assert reasoning == "step 1 step 2"
+        assert emitted == ["step 1 ", "step 2"]
 
     @pytest.mark.asyncio
     async def test_error_event_raises(self):
