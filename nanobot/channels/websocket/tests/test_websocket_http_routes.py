@@ -24,6 +24,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -2201,7 +2202,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
 @pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Seed a realistic multi-channel disk state: CLI, Slack, Lark and
     # websocket sessions all live in the same ``sessions/`` directory.
@@ -2215,7 +2216,20 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "websocket:beta",
         ],
     )
-    channel = _ch(bus, session_manager=sm, port=29906)
+    project = tmp_path / "project"
+    project.mkdir()
+    scoped = sm.get_or_create("websocket:beta")
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "restricted",
+    }
+    sm.save(scoped)
+
+    def fail_metadata_read(_key: str) -> None:
+        raise AssertionError("the session list must use its own index metadata")
+
+    monkeypatch.setattr(sm, "read_session_metadata", fail_metadata_read)
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=29906)
     server_task = asyncio.create_task(channel.start())
     try:
         token = channel.gateway.tokens.issue_api_token(300)
@@ -2225,10 +2239,17 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "http://127.0.0.1:29906/api/sessions", headers=auth
         )
         assert listing.status_code == 200
-        keys = {s["key"] for s in listing.json()["sessions"]}
+        sessions = listing.json()["sessions"]
+        keys = {s["key"] for s in sessions}
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+        rows = {row["key"]: row for row in sessions}
+        assert rows["websocket:beta"]["workspace_scope"]["project_path"] == str(
+            project.resolve()
+        )
+        assert rows["websocket:beta"]["workspace_scope"]["access_mode"] == "restricted"
+        assert all(not any(key.startswith("_") for key in row) for row in sessions)
     finally:
         await channel.stop()
         await server_task

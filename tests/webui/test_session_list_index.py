@@ -9,6 +9,7 @@ import pytest
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.providers.base import ProviderConversationState
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
@@ -38,6 +39,44 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    scoped = manager.get_or_create("websocket:scoped")
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "full",
+        "future_extension": "x" * 5000,
+    }
+    manager.save(scoped)
+    explicit_null = manager.get_or_create("websocket:null")
+    explicit_null.metadata[WORKSPACE_SCOPE_METADATA_KEY] = None
+    manager.save(explicit_null)
+    manager.save(manager.get_or_create("websocket:missing"))
+
+    rows = {row["key"]: row for row in list_webui_sessions(manager)}
+
+    assert session_list_index.indexed_workspace_scope(rows["websocket:scoped"]) == (
+        True,
+        {"project_path": str(project), "access_mode": "full"},
+    )
+    assert session_list_index.indexed_workspace_scope(rows["websocket:null"]) == (True, None)
+    assert session_list_index.indexed_workspace_scope(rows["websocket:missing"]) == (False, None)
+
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY]["access_mode"] = "restricted"
+    manager.save(scoped)
+
+    refreshed = {row["key"]: row for row in list_webui_sessions(manager)}
+    assert session_list_index.indexed_workspace_scope(refreshed["websocket:scoped"])[1] == {
+        "project_path": str(project),
+        "access_mode": "restricted",
+    }
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(

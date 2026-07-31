@@ -83,7 +83,11 @@ from nanobot.webui.session_automations import (
     session_automation_jobs,
     session_automations_payload,
 )
-from nanobot.webui.session_list_index import list_webui_sessions
+from nanobot.webui.session_list_index import (
+    WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
+    indexed_workspace_scope,
+    list_webui_sessions,
+)
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
@@ -436,15 +440,21 @@ class GatewayHTTPHandler:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
                 continue
-            row = {k: v for k, v in s.items() if k != "path"}
+            row = {
+                k: v
+                for k, v in s.items()
+                if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
+            }
             chat_id = key.split(":", 1)[1]
             started_at = websocket_turn_wall_started_at(chat_id)
             if started_at is not None:
                 row["run_started_at"] = started_at
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
-            scope = self.workspaces.scope_for_session_key(
-                key,
+            scope_present, raw_scope = indexed_workspace_scope(s)
+            scope = self.workspaces.scope_for_indexed_metadata(
+                raw_scope,
+                scope_present=scope_present,
                 default_scope=default_scope,
             )
             row["workspace_scope"] = scope.payload()
