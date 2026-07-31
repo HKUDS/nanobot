@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 from datetime import datetime
 from pathlib import Path
@@ -77,6 +78,51 @@ def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
         "project_path": str(project),
         "access_mode": "restricted",
     }
+
+
+def test_webui_session_list_does_not_cache_old_snapshot_with_new_signature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SessionManager(tmp_path)
+    session_key = "websocket:scope-race"
+    session = manager.get_or_create(session_key)
+    session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(tmp_path),
+        "access_mode": "full",
+    }
+    session.add_message("user", "hello")
+    manager.save(session)
+    session_path = manager._get_session_path(session_key)
+    original_open = open
+    scope_changed = False
+
+    class RacingReader(io.StringIO):
+        def __next__(self) -> str:
+            nonlocal scope_changed
+            if not scope_changed:
+                scope_changed = True
+                current = manager.get_or_create(session_key)
+                current.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+                    "project_path": str(tmp_path),
+                    "access_mode": "restricted",
+                }
+                manager.save(current)
+            return super().__next__()
+
+    def racing_open(path, *args, **kwargs):
+        if Path(path) == session_path:
+            with original_open(path, *args, **kwargs) as source:
+                return RacingReader(source.read())
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(session_list_index, "open", racing_open, raising=False)
+
+    first = list_webui_sessions(manager)[0]
+    second = list_webui_sessions(manager)[0]
+
+    assert session_list_index.indexed_workspace_scope(first)[1]["access_mode"] == "full"
+    assert session_list_index.indexed_workspace_scope(second)[1]["access_mode"] == "restricted"
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(

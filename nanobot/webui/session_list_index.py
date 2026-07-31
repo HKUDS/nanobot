@@ -31,7 +31,7 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import model_preset_from_metadata
 
-_INDEX_VERSION = 5
+_INDEX_VERSION = 6
 _INDEX_FILENAME = ".webui_session_index.json"
 _MODEL_PRESET_FIELD = "model_preset"
 _WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
@@ -358,6 +358,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
     if storage_key is None:
         return None
     try:
+        signature = _file_signature(path)
         with open(path, encoding="utf-8") as f:
             first_line = f.readline().strip()
             if not first_line:
@@ -404,7 +405,6 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                         continue
                     if not fallback_preview and item.get("role") == "assistant":
                         fallback_preview = text
-            signature = _file_signature(path)
             created_at_s = data.get("created_at")
             updated_at_s = data.get("updated_at")
             if not created_at_s or not updated_at_s:
