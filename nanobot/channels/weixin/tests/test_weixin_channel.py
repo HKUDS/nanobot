@@ -159,6 +159,19 @@ def test_save_state_persists_explicit_config_token_over_stale_state(tmp_path) ->
     assert saved["get_updates_buf"] == "current-cursor"
 
 
+def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    persisted = {"token": "persisted-token", "get_updates_buf": "persisted-cursor"}
+    (tmp_path / "account.json").write_text(json.dumps(persisted), encoding="utf-8")
+
+    channel._save_state()
+
+    assert json.loads((tmp_path / "account.json").read_text()) == persisted
+
+
 @pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()
