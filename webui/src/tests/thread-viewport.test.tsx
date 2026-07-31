@@ -763,6 +763,77 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("does not reacquire the camera during a shallow upward wheel scroll", async () => {
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
+    ];
+    const answer: UIMessage = {
+      id: "a2",
+      role: "assistant",
+      content: "streaming answer",
+      turnId: "turn-2",
+      isStreaming: true,
+      createdAt: 4,
+    };
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={threaded}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1_904 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 1_404 },
+    });
+    const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
+    expect(prompt).not.toBeNull();
+    Object.defineProperty(prompt, "offsetTop", {
+      configurable: true,
+      value: 1_420,
+    });
+
+    rerender(
+      <ThreadViewport
+        messages={[...threaded, answer]}
+        isStreaming
+        composer={<div>composer</div>}
+        activeTurnId="turn-2"
+        activeTurnStartedHere
+      />,
+    );
+    await flushAnimationFrame();
+    followTo.mockClear();
+
+    act(() => {
+      fireEvent.wheel(scroller, { deltaY: -24 });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(1_380);
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.wheel(scroller, { deltaY: 24 });
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(scroller.scrollTop).toBe(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 

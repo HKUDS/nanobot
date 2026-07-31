@@ -542,7 +542,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       const owner = threadMotionRef.current?.observeScroll(near) ?? "automatic";
-      const logicallyAtBottom = owner === "automatic" || near;
+      const logicallyAtBottom = owner === "automatic" || (owner === "navigation" && near);
       setAtBottom((current) =>
         current === logicallyAtBottom ? current : logicallyAtBottom,
       );
@@ -557,6 +557,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       if (!direction) return;
       threadMotionRef.current?.handleUserScrollIntent(
         canScrollInDirection(el, direction),
+        direction === "forward",
       );
     };
     const handleWheel = (event: WheelEvent) => {
