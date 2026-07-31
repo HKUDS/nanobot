@@ -234,15 +234,15 @@ class WeixinChannel(BaseChannel):
         state_file = self._get_state_dir() / "account.json"
         with suppress(Exception):
             if not force and state_file.exists():
+                persisted: object = None
                 try:
                     persisted = json.loads(state_file.read_text())
                 except Exception:
                     persisted = None
-                persisted_token = (
-                    str(persisted.get("token", "") or "")
-                    if isinstance(persisted, dict)
-                    else ""
-                )
+                persisted_token = ""
+                if isinstance(persisted, dict):
+                    persisted_mapping = cast(dict[str, object], persisted)
+                    persisted_token = str(persisted_mapping.get("token", "") or "")
                 if persisted_token and persisted_token != self._token:
                     # A concurrent QR login may have committed a newer token.
                     # Never let an older runtime snapshot overwrite it.
