@@ -135,6 +135,30 @@ def test_save_state_force_overwrites_replaced_token(tmp_path) -> None:
     assert saved["base_url"] == "https://new.example"
 
 
+def test_save_state_persists_explicit_config_token_over_stale_state(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    channel._token = "configured-token"
+    channel._get_updates_buf = "current-cursor"
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "stale-token", "get_updates_buf": "stale-cursor"}),
+        encoding="utf-8",
+    )
+
+    channel._save_state()
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "configured-token"
+    assert saved["get_updates_buf"] == "current-cursor"
+
+
 @pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()

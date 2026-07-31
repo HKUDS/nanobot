@@ -243,7 +243,11 @@ class WeixinChannel(BaseChannel):
                 if isinstance(persisted, dict):
                     persisted_mapping = cast(dict[str, object], persisted)
                     persisted_token = str(persisted_mapping.get("token", "") or "")
-                if persisted_token and persisted_token != self._token:
+                if (
+                    persisted_token
+                    and persisted_token != self._token
+                    and self._token != self.config.token
+                ):
                     # A concurrent QR login may have committed a newer token.
                     # Never let an older runtime snapshot overwrite it.
                     return
