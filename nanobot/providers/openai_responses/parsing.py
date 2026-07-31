@@ -324,20 +324,14 @@ async def consume_sse_with_reasoning(
                 emitted_refusal_text += remaining_text
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
-        elif event_type in {
-            "response.reasoning_summary_text.delta",
-            "response.reasoning_text.delta",
-        }:
+        elif event_type == "response.reasoning_summary_text.delta":
             delta_text = event.get("delta") or ""
             if delta_text:
                 reasoning_content = (reasoning_content or "") + delta_text
                 streamed_reasoning = True
                 if on_reasoning_delta:
                     await on_reasoning_delta(delta_text)
-        elif event_type in {
-            "response.reasoning_summary_text.done",
-            "response.reasoning_text.done",
-        }:
+        elif event_type == "response.reasoning_summary_text.done":
             text = event.get("text") or ""
             if text and not streamed_reasoning and not reasoning_content:
                 reasoning_content = text
