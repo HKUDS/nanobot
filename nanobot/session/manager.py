@@ -50,7 +50,7 @@ _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
 _PROVIDER_STATE_RECORD_TYPE = "provider_state"
 _SQLITE_DB_NAME = "sessions.db"
-_SQLITE_SCHEMA_VERSION = 2
+_SQLITE_SCHEMA_VERSION = 1
 _SQLITE_BUSY_TIMEOUT_SECONDS = 5.0
 _SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS = 60.0
 # TODO(0.3.2): Remove JSONL migration; v0.3.1 is the upgrade window.
@@ -820,7 +820,7 @@ class SQLiteSessionStore:
                 if len(version_row) != 1 or not isinstance(version_row[0], int):
                     raise RuntimeError("Failed to read SQLite session schema version")
                 version = version_row[0]
-                if version not in (0, 1, _SQLITE_SCHEMA_VERSION):
+                if version not in (0, _SQLITE_SCHEMA_VERSION):
                     raise RuntimeError(
                         f"Unsupported SQLite session schema version {version}; "
                         f"expected {_SQLITE_SCHEMA_VERSION}"
@@ -853,23 +853,6 @@ class SQLiteSessionStore:
                     connection.execute(
                         "CREATE INDEX sessions_updated_at ON sessions(updated_at DESC)"
                     )
-                elif version == 1:
-                    columns: set[str] = set()
-                    for raw_column in connection.execute("PRAGMA table_info(sessions)"):
-                        column: object = raw_column
-                        if not isinstance(column, tuple):
-                            continue
-                        values = cast(tuple[object, ...], column)
-                        if len(values) > 1 and isinstance(values[1], str):
-                            columns.add(values[1])
-                    if "private_metadata" not in columns:
-                        connection.execute(
-                            """
-                            ALTER TABLE sessions
-                            ADD COLUMN private_metadata TEXT NOT NULL DEFAULT '{}'
-                            """
-                        )
-
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS store_metadata (
@@ -935,10 +918,7 @@ class SQLiteSessionStore:
     @staticmethod
     def _decode_migration_manifest(
         value: str,
-    ) -> dict[str, _JsonlFileSignature] | None:
-        # The original PR marker only stored the imported file count.
-        if value.isdecimal():
-            return None
+    ) -> dict[str, _JsonlFileSignature]:
         try:
             data = _json_object(json.loads(value))
             version = cast(object, data.get("version"))
@@ -1024,78 +1004,6 @@ class SQLiteSessionStore:
             signatures[key] = after
         return prepared, signatures
 
-    @classmethod
-    def _validate_legacy_migration_marker(
-        cls,
-        connection: sqlite3.Connection,
-        prepared: list[_PreparedSession],
-        expected_count: int,
-    ) -> None:
-        changed: list[str] = []
-        prepared_keys = {session.key for session in prepared}
-        stored_keys = {
-            row[0]
-            for row in connection.execute("SELECT key FROM sessions")
-            if isinstance(row[0], str)
-        }
-        if expected_count != len(prepared) or stored_keys != prepared_keys:
-            raise RuntimeError(
-                "JSONL session backups may have changed after SQLite migration. "
-                "Refusing to start to avoid losing rollback writes; preserve "
-                "sessions.db and the JSONL files before recovery."
-            )
-        for session in prepared:
-            row: object = connection.execute(
-                """
-                SELECT
-                    key,
-                    created_at,
-                    updated_at,
-                    metadata,
-                    private_metadata,
-                    last_consolidated
-                FROM sessions
-                WHERE key = ?
-                """,
-                (session.key,),
-            ).fetchone()
-            try:
-                (
-                    _,
-                    stored_created_at,
-                    stored_updated_at,
-                    stored_metadata,
-                    stored_last_consolidated,
-                    stored_provider_state,
-                ) = cls._decode_loaded_session_row(row)
-                source_metadata = cls._decode_json_object(session.metadata_json)
-                source_private = cls._decode_json_object(session.private_metadata_json)
-                source_provider_state = ProviderConversationState.from_private_record(
-                    source_private.get(_PROVIDER_STATE_RECORD_TYPE)
-                )
-                source_messages = [
-                    cls._decode_json_object(payload)
-                    for _, _, payload in session.message_rows
-                ]
-                stored_messages = cls._read_messages(connection, session.key)
-                if (
-                    session.created_at != stored_created_at
-                    or session.updated_at != stored_updated_at
-                    or source_metadata != stored_metadata
-                    or session.last_consolidated != stored_last_consolidated
-                    or source_provider_state != stored_provider_state
-                    or stored_messages != source_messages
-                ):
-                    changed.append(session.key)
-            except _SESSION_DATA_ERRORS:
-                changed.append(session.key)
-        if changed:
-            raise RuntimeError(
-                "JSONL session backups may have changed after SQLite migration for "
-                f"{len(changed)} session(s). Refusing to start to avoid losing "
-                "rollback writes; preserve sessions.db and the JSONL files before recovery."
-            )
-
     def migrate_from_jsonl(self, source: JsonlSessionFiles) -> int:
         with self._connection(
             timeout=_SQLITE_STARTUP_BUSY_TIMEOUT_SECONDS,
@@ -1103,10 +1011,9 @@ class SQLiteSessionStore:
             marker = self._read_migration_marker(connection)
             if marker is not None:
                 manifest = self._decode_migration_manifest(marker)
-                if manifest is not None:
-                    current = self._current_jsonl_signatures(source)
-                    self._assert_backups_unchanged(connection, current, manifest)
-                    return 0
+                current = self._current_jsonl_signatures(source)
+                self._assert_backups_unchanged(connection, current, manifest)
+                return 0
 
         prepared, signatures = self._prepare_jsonl_sessions(source)
         self._assert_prepared_sources_unchanged(source, signatures)
@@ -1119,22 +1026,7 @@ class SQLiteSessionStore:
             marker = self._read_migration_marker(connection)
             if marker is not None:
                 manifest = self._decode_migration_manifest(marker)
-                if manifest is not None:
-                    self._assert_backups_unchanged(connection, signatures, manifest)
-                    return 0
-
-                self._validate_legacy_migration_marker(
-                    connection,
-                    prepared,
-                    int(marker),
-                )
-                connection.execute(
-                    "UPDATE store_metadata SET value = ? WHERE key = ?",
-                    (
-                        self._encode_migration_manifest(signatures),
-                        _SQLITE_JSONL_MIGRATION_KEY,
-                    ),
-                )
+                self._assert_backups_unchanged(connection, signatures, manifest)
                 return 0
 
             existing_keys = {
@@ -1424,7 +1316,7 @@ class SQLiteSessionStore:
             marker = self._read_migration_marker(connection)
             if marker is not None:
                 manifest = self._decode_migration_manifest(marker)
-                if manifest is not None and key in manifest:
+                if key in manifest:
                     updated_manifest = dict(manifest)
                     updated_manifest.pop(key)
                     connection.execute(

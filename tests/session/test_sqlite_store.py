@@ -75,65 +75,6 @@ def _write_jsonl(source: JsonlSessionFiles, session: Session) -> None:
     )
 
 
-def _create_v1_database(
-    workspace: Path,
-    session: Session,
-    *,
-    migration_marker: str | None = None,
-) -> None:
-    with sqlite3.connect(workspace / "sessions.db") as connection:
-        connection.executescript(
-            """
-            CREATE TABLE sessions (
-                key TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                metadata TEXT NOT NULL,
-                last_consolidated INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE messages (
-                session_key TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                payload TEXT NOT NULL,
-                PRIMARY KEY (session_key, position),
-                FOREIGN KEY (session_key) REFERENCES sessions(key) ON DELETE CASCADE
-            );
-            CREATE TABLE store_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            PRAGMA user_version = 1;
-            """
-        )
-        connection.execute(
-            """
-            INSERT INTO sessions (
-                key, created_at, updated_at, metadata, last_consolidated
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                session.key,
-                session.created_at.isoformat(),
-                session.updated_at.isoformat(),
-                json.dumps(session.metadata),
-                session.last_consolidated,
-            ),
-        )
-        connection.executemany(
-            "INSERT INTO messages (session_key, position, payload) VALUES (?, ?, ?)",
-            [
-                (session.key, position, json.dumps(message))
-                for position, message in enumerate(session.messages)
-            ],
-        )
-        if migration_marker is not None:
-            connection.execute(
-                "INSERT INTO store_metadata (key, value) VALUES (?, ?)",
-                ("jsonl_import_v1", migration_marker),
-            )
-
-
 def test_sqlite_store_round_trips_through_manager(tmp_path) -> None:
     key = "websocket:quote'和中文"
     stored = _session(
@@ -457,129 +398,30 @@ def test_jsonl_backup_touch_with_same_content_does_not_block_startup(tmp_path) -
     assert SessionManager(tmp_path).get_or_create(stored.key) == stored
 
 
-def test_legacy_count_marker_is_upgraded_without_reimporting_jsonl(tmp_path) -> None:
+def test_non_manifest_migration_marker_fails_closed(tmp_path) -> None:
     source = JsonlSessionFiles(tmp_path)
     stored = _session(
-        "cli:legacy-marker",
+        "cli:invalid-marker",
         updated_at=datetime(2026, 7, 30, 10, 0),
         messages=[{"role": "user", "content": "already imported"}],
-        title="Legacy marker",
+        title="Invalid marker",
     )
     _write_jsonl(source, stored)
-    _create_v1_database(tmp_path, stored, migration_marker="1")
+    SessionManager(tmp_path)
+    with sqlite3.connect(tmp_path / "sessions.db") as connection:
+        connection.execute(
+            "UPDATE store_metadata SET value = '1' WHERE key = 'jsonl_import_v1'"
+        )
 
-    manager = SessionManager(tmp_path)
+    with pytest.raises(RuntimeError, match="Invalid JSONL migration marker"):
+        SessionManager(tmp_path)
 
-    assert manager.get_or_create(stored.key) == stored
+    assert SQLiteSessionStore(tmp_path).load(stored.key) == stored
     with sqlite3.connect(tmp_path / "sessions.db") as connection:
         marker = connection.execute(
             "SELECT value FROM store_metadata WHERE key = 'jsonl_import_v1'"
         ).fetchone()
-        version = connection.execute("PRAGMA user_version").fetchone()
-        private_metadata = connection.execute(
-            "SELECT private_metadata FROM sessions WHERE key = ?",
-            (stored.key,),
-        ).fetchone()
-    assert marker is not None
-    assert json.loads(marker[0])["version"] == 1
-    assert version == (2,)
-    assert private_metadata == ("{}",)
-
-
-def test_legacy_count_marker_rejects_newer_jsonl_backup(tmp_path) -> None:
-    stored = _session(
-        "cli:legacy-marker-rollback",
-        updated_at=datetime(2026, 7, 30, 10, 0),
-        messages=[{"role": "user", "content": "already imported"}],
-        title="Legacy marker",
-    )
-    rollback = _session(
-        stored.key,
-        updated_at=stored.updated_at,
-        messages=[
-            *stored.messages,
-            {"role": "assistant", "content": "written during rollback"},
-        ],
-        title="Legacy marker",
-    )
-    _write_jsonl(JsonlSessionFiles(tmp_path), rollback)
-    _create_v1_database(tmp_path, stored, migration_marker="1")
-
-    with pytest.raises(RuntimeError, match="may have changed after SQLite migration"):
-        SessionManager(tmp_path)
-
-    assert SQLiteSessionStore(tmp_path).load(stored.key) == stored
-
-
-def test_legacy_count_marker_rejects_truncated_jsonl_backup(tmp_path) -> None:
-    stored = _session(
-        "cli:legacy-marker-truncated",
-        updated_at=datetime(2026, 7, 30, 10, 0),
-        messages=[
-            {"role": "user", "content": "first"},
-            {"role": "assistant", "content": "second"},
-        ],
-        title="Legacy marker",
-    )
-    truncated = _session(
-        stored.key,
-        updated_at=stored.updated_at,
-        messages=stored.messages[:1],
-        title="Legacy marker",
-    )
-    truncated.last_consolidated = stored.last_consolidated
-    _write_jsonl(JsonlSessionFiles(tmp_path), truncated)
-    _create_v1_database(tmp_path, stored, migration_marker="1")
-
-    with pytest.raises(RuntimeError, match="may have changed after SQLite migration"):
-        SessionManager(tmp_path)
-
-    assert SQLiteSessionStore(tmp_path).load(stored.key) == stored
-
-
-def test_legacy_count_marker_rejects_missing_jsonl_backup(tmp_path) -> None:
-    keep = _session(
-        "cli:legacy-marker-keep",
-        updated_at=datetime(2026, 7, 30, 10, 0),
-        messages=[{"role": "user", "content": "keep"}],
-        title="Keep",
-    )
-    deleted = _session(
-        "cli:legacy-marker-deleted",
-        updated_at=datetime(2026, 7, 30, 10, 0),
-        messages=[{"role": "user", "content": "deleted during rollback"}],
-        title="Deleted",
-    )
-    _write_jsonl(JsonlSessionFiles(tmp_path), keep)
-    _create_v1_database(tmp_path, keep, migration_marker="2")
-    with sqlite3.connect(tmp_path / "sessions.db") as connection:
-        connection.execute(
-            """
-            INSERT INTO sessions (
-                key, created_at, updated_at, metadata, last_consolidated
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                deleted.key,
-                deleted.created_at.isoformat(),
-                deleted.updated_at.isoformat(),
-                json.dumps(deleted.metadata),
-                deleted.last_consolidated,
-            ),
-        )
-        connection.executemany(
-            "INSERT INTO messages (session_key, position, payload) VALUES (?, ?, ?)",
-            [
-                (deleted.key, position, json.dumps(message))
-                for position, message in enumerate(deleted.messages)
-            ],
-        )
-
-    with pytest.raises(RuntimeError, match="may have changed after SQLite migration"):
-        SessionManager(tmp_path)
-
-    assert SQLiteSessionStore(tmp_path).load(deleted.key) == deleted
+    assert marker == ("1",)
 
 
 def test_jsonl_migration_rolls_back_on_invalid_session(tmp_path) -> None:
@@ -985,34 +827,12 @@ def test_concurrent_deletes_do_not_restore_manifest_entries(tmp_path) -> None:
     assert SessionManager(tmp_path).get_or_create(sessions[1].key) == sessions[1]
 
 
-def test_sqlite_store_migrates_v1_schema_in_place(tmp_path) -> None:
-    stored = _session(
-        "cli:schema-v1",
-        updated_at=datetime(2026, 7, 30, 10, 0),
-        messages=[{"role": "user", "content": "keep v1 data"}],
-        title="Schema v1",
-    )
-    _create_v1_database(tmp_path, stored)
-
-    store = SQLiteSessionStore(tmp_path)
-
-    assert store.load(stored.key) == stored
-    with sqlite3.connect(store.db_path) as connection:
-        version = connection.execute("PRAGMA user_version").fetchone()
-        columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(sessions)").fetchall()
-        }
-    assert version == (2,)
-    assert "private_metadata" in columns
-
-
 def test_sqlite_store_rejects_unknown_schema_version(tmp_path) -> None:
     db_path = tmp_path / "sessions.db"
     with sqlite3.connect(db_path) as connection:
-        connection.execute("PRAGMA user_version = 3")
+        connection.execute("PRAGMA user_version = 2")
 
-    with pytest.raises(RuntimeError, match="Unsupported SQLite session schema version 3"):
+    with pytest.raises(RuntimeError, match="Unsupported SQLite session schema version 2"):
         SQLiteSessionStore(tmp_path)
 
 
@@ -1024,7 +844,7 @@ def test_sqlite_store_initializes_concurrently(tmp_path) -> None:
     with sqlite3.connect(stores[0].db_path) as connection:
         version = connection.execute("PRAGMA user_version").fetchone()
         journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
-    assert version == (2,)
+    assert version == (1,)
     assert journal_mode == ("wal",)
 
 
