@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
@@ -28,6 +30,8 @@ _MAX_STATE_FILE_BYTES = 128 * 1024
 _DEFAULT_ACCESS_MODES = {"default", "full"}
 _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
 _WEBUI_SCOPE_CHANNEL = "websocket"
+_NO_SESSION_SCOPE = object()
+_SESSION_SCOPE_CACHE_MAX = 2048
 
 
 def _scope_change_is_non_escalating(current: WorkspaceScope, requested: WorkspaceScope) -> bool:
@@ -36,6 +40,22 @@ def _scope_change_is_non_escalating(current: WorkspaceScope, requested: Workspac
         requested.project_path == current.project_path
         and (not current.restrict_to_workspace or requested.restrict_to_workspace)
     )
+
+
+def _cacheable_session_scope(raw_scope: object) -> bool:
+    if raw_scope is _NO_SESSION_SCOPE:
+        return True
+    if not isinstance(raw_scope, dict):
+        return False
+    scope_data = cast(dict[object, object], raw_scope)
+    if len(scope_data) > 16:
+        return False
+    total_size = 0
+    for key, value in scope_data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return False
+        total_size += len(key) + len(value)
+    return total_size <= 4096
 
 
 def webui_workspace_state_path() -> Path:
@@ -184,6 +204,8 @@ class WebUIWorkspaceController:
         self._sessions = session_manager
         self._default_workspace = default_workspace
         self._default_restrict_to_workspace = default_restrict_to_workspace
+        self._session_scope_cache: OrderedDict[str, tuple[int, int, int, int, object]] = OrderedDict()
+        self._session_scope_cache_lock = Lock()
 
     def default_scope(self) -> WorkspaceScope:
         return default_scope_for_webui(
@@ -191,24 +213,75 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
-    def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
+    def _session_scope_metadata(self, session_key: str) -> object:
         if self._sessions is None:
-            return self.default_scope()
+            return _NO_SESSION_SCOPE
+        try:
+            path = self._sessions._get_session_path(session_key)  # pyright: ignore[reportPrivateUsage]
+            signature = path.stat()
+        except OSError:
+            with self._session_scope_cache_lock:
+                self._session_scope_cache.pop(session_key, None)
+            data = self._sessions.read_session_metadata(session_key)
+            if not isinstance(data, dict):
+                return _NO_SESSION_SCOPE
+            metadata = data.get("metadata", {})
+            if not isinstance(metadata, dict):
+                return _NO_SESSION_SCOPE
+            metadata_data = cast(dict[str, Any], metadata)
+            return cast(
+                object,
+                metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY, _NO_SESSION_SCOPE),
+            )
+
+        cache_signature = (
+            signature.st_mtime_ns,
+            signature.st_size,
+            signature.st_ctime_ns,
+            signature.st_ino,
+        )
+        with self._session_scope_cache_lock:
+            cached = self._session_scope_cache.get(session_key)
+            if cached is not None and cached[:4] == cache_signature:
+                self._session_scope_cache.move_to_end(session_key)
+                return cached[4]
+
         data = self._sessions.read_session_metadata(session_key)
-        session_data = data if data is not None else {}
-        metadata = session_data.get("metadata", {})
-        if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
-            return self.default_scope()
-        metadata = cast(dict[str, Any], metadata)
+        raw_scope: object = _NO_SESSION_SCOPE
+        if isinstance(data, dict):
+            metadata = data.get("metadata", {})
+            if isinstance(metadata, dict):
+                metadata_data = cast(dict[str, Any], metadata)
+                raw_scope = cast(
+                    object,
+                    metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY, _NO_SESSION_SCOPE),
+                )
+        if _cacheable_session_scope(raw_scope):
+            with self._session_scope_cache_lock:
+                self._session_scope_cache[session_key] = (*cache_signature, raw_scope)
+                self._session_scope_cache.move_to_end(session_key)
+                if len(self._session_scope_cache) > _SESSION_SCOPE_CACHE_MAX:
+                    self._session_scope_cache.popitem(last=False)
+        return raw_scope
+
+    def scope_for_session_key(
+        self,
+        session_key: str,
+        *,
+        default_scope: WorkspaceScope | None = None,
+    ) -> WorkspaceScope:
+        raw_scope = self._session_scope_metadata(session_key)
+        if raw_scope is _NO_SESSION_SCOPE:
+            return default_scope if default_scope is not None else self.default_scope()
         try:
             return validate_workspace_scope_payload(
-                metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
+                raw_scope,
                 default_workspace=self._default_workspace,
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
         except WorkspaceScopeError:
-            return self.default_scope()
+            return default_scope if default_scope is not None else self.default_scope()
 
     def payload(self, *, controls_available: bool) -> dict[str, Any]:
         return workspaces_payload(
@@ -294,3 +367,5 @@ class WebUIWorkspaceController:
             session.metadata["webui"] = True
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)
+            with self._session_scope_cache_lock:
+                self._session_scope_cache.pop(session.key, None)

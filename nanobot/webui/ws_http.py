@@ -27,6 +27,7 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
+from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import (
@@ -430,6 +431,7 @@ class GatewayHTTPHandler:
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
         cleaned: list[dict[str, Any]] = []
+        default_scope: WorkspaceScope | None = None
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
@@ -439,7 +441,12 @@ class GatewayHTTPHandler:
             started_at = websocket_turn_wall_started_at(chat_id)
             if started_at is not None:
                 row["run_started_at"] = started_at
-            scope = self.workspaces.scope_for_session_key(key)
+            if default_scope is None:
+                default_scope = self.workspaces.default_scope()
+            scope = self.workspaces.scope_for_session_key(
+                key,
+                default_scope=default_scope,
+            )
             row["workspace_scope"] = scope.payload()
             cleaned.append(row)
         return {"sessions": cleaned}

@@ -185,6 +185,45 @@ def test_scope_for_session_key_reads_metadata_without_full_history(
     assert scope.access_mode == "full"
 
 
+def test_scope_for_session_key_reuses_and_invalidates_metadata_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    controller = WebUIWorkspaceController(
+        session_manager=sessions,
+        default_workspace=default,
+        default_restrict_to_workspace=True,
+    )
+    sessions.save(sessions.get_or_create("websocket:cached"))
+
+    original_read_metadata = sessions.read_session_metadata
+    read_count = 0
+
+    def read_metadata(key: str):
+        nonlocal read_count
+        read_count += 1
+        return original_read_metadata(key)
+
+    monkeypatch.setattr(sessions, "read_session_metadata", read_metadata)
+
+    first = controller.scope_for_session_key("websocket:cached")
+    second = controller.scope_for_session_key("websocket:cached")
+
+    assert first.project_path == default.resolve()
+    assert second.project_path == default.resolve()
+    assert read_count == 1
+
+    controller.persist_scope("cached", default_workspace_scope(project, restrict_to_workspace=False))
+    refreshed = controller.scope_for_session_key("websocket:cached")
+
+    assert refreshed.project_path == project.resolve()
+    assert refreshed.access_mode == "full"
+    assert read_count == 2
+
+
 def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"

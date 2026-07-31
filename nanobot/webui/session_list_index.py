@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -35,18 +36,29 @@ _MODEL_PRESET_FIELD = "model_preset"
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
+_WEBUI_DIR_CONTEXT: ContextVar[Path | None] = ContextVar("_WEBUI_DIR_CONTEXT", default=None)
+_WEBUI_DIR_CACHE_ENABLED: ContextVar[bool] = ContextVar(
+    "_WEBUI_DIR_CACHE_ENABLED",
+    default=False,
+)
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    rows, changed = _reconcile_index(session_manager)
-    if changed:
-        try:
-            _write_index_rows(session_manager.sessions_dir, rows)
-        except Exception as e:
-            logger.debug("Failed to write WebUI session list index: {}", e)
-    sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
-    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+    token = _WEBUI_DIR_CONTEXT.set(None)
+    cache_token = _WEBUI_DIR_CACHE_ENABLED.set(True)
+    try:
+        rows, changed = _reconcile_index(session_manager)
+        if changed:
+            try:
+                _write_index_rows(session_manager.sessions_dir, rows)
+            except Exception as e:
+                logger.debug("Failed to write WebUI session list index: {}", e)
+        sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
+        return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+    finally:
+        _WEBUI_DIR_CACHE_ENABLED.reset(cache_token)
+        _WEBUI_DIR_CONTEXT.reset(token)
 
 
 def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
@@ -183,7 +195,11 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
 
 def _webui_activity_paths(session_key: str) -> list[Path]:
     stem = SessionManager.safe_key(session_key)
-    webui_dir = get_webui_dir()
+    webui_dir = _WEBUI_DIR_CONTEXT.get()
+    if webui_dir is None:
+        webui_dir = get_webui_dir()
+        if _WEBUI_DIR_CACHE_ENABLED.get():
+            _WEBUI_DIR_CONTEXT.set(webui_dir)
     return [
         webui_dir / f"{stem}.jsonl",
         webui_dir / f"{stem}.json",
@@ -231,9 +247,9 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
 
 
 def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
-    if is_hidden_history_message(item):
-        return None
     if item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
+        return None
+    if is_hidden_history_message(item):
         return None
     timestamp = item.get("timestamp")
     return timestamp if isinstance(timestamp, str) else None
