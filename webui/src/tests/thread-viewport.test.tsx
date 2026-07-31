@@ -763,7 +763,7 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("does not reacquire the camera during a shallow upward wheel scroll", async () => {
+  it("keeps shallow wheel and touch scrolling user-owned until intent reverses", async () => {
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
     const threaded: UIMessage[] = [
       { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
@@ -830,6 +830,30 @@ describe("ThreadViewport", () => {
 
     expect(followTo).toHaveBeenCalledWith(1_404);
     expect(scroller.scrollTop).toBe(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+
+    followTo.mockClear();
+    act(() => {
+      fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.touchEnd(scroller);
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
     expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
       .not.toBeInTheDocument();
   });

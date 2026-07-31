@@ -573,20 +573,21 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button === 0 && event.target === el) yieldCameraToUser();
     };
-    let touchStartY: number | null = null;
+    let lastTouchY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
-      touchStartY = event.touches[0]?.clientY ?? null;
+      lastTouchY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const currentY = event.touches[0]?.clientY;
       const scrollDeltaY =
-        touchStartY !== null && currentY !== undefined
-          ? touchStartY - currentY
+        lastTouchY !== null && currentY !== undefined
+          ? lastTouchY - currentY
           : 0;
+      lastTouchY = currentY ?? null;
       handleDirectionalInput(directionFromDelta(scrollDeltaY));
     };
     const handleTouchEnd = () => {
-      touchStartY = null;
+      lastTouchY = null;
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
