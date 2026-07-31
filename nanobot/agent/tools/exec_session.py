@@ -660,7 +660,7 @@ class WriteStdinTool(Tool):
                 close_stdin=close_stdin if first else False,
                 terminate=terminate if first else False,
                 yield_time_ms=step_ms,
-                max_output_chars=max_output_chars,
+                max_output_chars=MAX_OUTPUT_CHARS,
                 owner_session_key=current_request_session_key(),
             )
             first = False

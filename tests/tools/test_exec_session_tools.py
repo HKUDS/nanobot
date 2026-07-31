@@ -16,11 +16,13 @@ from nanobot.agent import context as agent_context
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import (
+    MAX_OUTPUT_CHARS,
     ExecSessionManager,
     ListExecSessionsTool,
     WriteStdinTool,
     _BoundedOutputBuffer,
     _SessionPoll,
+    _truncate_output,
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
@@ -224,6 +226,52 @@ def test_write_stdin_wait_for_keeps_aggregate_within_output_budget():
     assert result.startswith("HEAD")
     assert "TARGET" in result
     assert "(796 chars truncated from output)" in result
+    assert len(result) < 1100
+
+
+def test_write_stdin_wait_for_searches_before_response_truncation():
+    async def run() -> tuple[str, list[int]]:
+        output = "A" * 1500 + "TARGET" + "B" * 1500
+        observed_limits: list[int] = []
+
+        async def write(
+            *,
+            session_id: str,
+            chars: str | None,
+            close_stdin: bool,
+            terminate: bool,
+            yield_time_ms: int,
+            max_output_chars: int,
+            owner_session_key: str | None,
+        ) -> _SessionPoll:
+            del session_id, chars, close_stdin, terminate, yield_time_ms, owner_session_key
+            observed_limits.append(max_output_chars)
+            visible, truncated = _truncate_output(output, max_output_chars)
+            return _SessionPoll(
+                output=visible,
+                done=True,
+                exit_code=0,
+                truncated_chars=truncated,
+            )
+
+        manager = SimpleNamespace(write=AsyncMock(side_effect=write))
+        tool = WriteStdinTool(manager=manager)
+        result = await tool._wait_for_output(
+            session_id="session",
+            chars=None,
+            close_stdin=False,
+            terminate=False,
+            wait_for="TARGET",
+            wait_timeout_ms=1000,
+            max_output_chars=1000,
+        )
+        return result, observed_limits
+
+    result, observed_limits = asyncio.run(run())
+
+    assert observed_limits == [MAX_OUTPUT_CHARS]
+    assert "Wait target not observed" not in result
+    assert "(2,006 chars truncated from output)" in result
     assert len(result) < 1100
 
 
