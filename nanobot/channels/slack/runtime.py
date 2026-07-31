@@ -493,12 +493,11 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("reactions_add failed: {}", e)
 
-        # Thread-scoped session key whenever the user is in a real thread
-        # (raw_thread_ts is set). DM threads get their own session, separate
-        # from the DM root, so context doesn't bleed across thread boundaries.
-        session_key = (
-            f"slack:{chat_id}:{thread_ts}" if thread_ts and raw_thread_ts else None
-        )
+        # Thread-scoped session key whenever the turn lives in a thread: either the
+        # message arrived inside one (raw_thread_ts) or reply_in_thread opens a new
+        # thread for this channel message. DM roots have no thread_ts and keep the
+        # default per-chat session, so context doesn't bleed across thread boundaries.
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
         media_paths: list[str] = []
         file_markers: list[str] = []
         for file_info in _as_json_list(event.get("files")) or []:
