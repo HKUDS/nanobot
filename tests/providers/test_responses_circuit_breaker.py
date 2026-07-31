@@ -29,6 +29,32 @@ def test_responses_api_available_by_default(provider):
     assert provider._should_use_responses_api("gpt-5", None) is True
 
 
+def test_deepseek_v4_flash_uses_responses_by_model(provider):
+    provider._spec = type("Spec", (), {
+        "name": "deepseek",
+        "responses_models": ("deepseek-v4-flash",),
+        "strip_model_prefix": False,
+        "strip_model_prefixes": (),
+    })()
+    provider._effective_base = "https://api.deepseek.com"
+    provider.default_model = "deepseek-v4-flash"
+
+    assert provider._should_use_responses_api("deepseek-v4-flash", None) is True
+    assert provider._should_use_responses_api("deepseek-v4-pro", None) is False
+
+
+def test_deepseek_v4_flash_matches_provider_prefixed_model(provider):
+    provider._spec = type("Spec", (), {
+        "name": "deepseek",
+        "responses_models": ("deepseek-v4-flash",),
+        "strip_model_prefix": False,
+        "strip_model_prefixes": (),
+    })()
+    provider._effective_base = "https://api.deepseek.com"
+
+    assert provider._should_use_responses_api("deepseek/deepseek-v4-flash", None) is True
+
+
 def test_direct_openai_enables_server_compaction(provider):
     provider._extra_body = {}
 

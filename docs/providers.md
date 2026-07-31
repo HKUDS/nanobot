@@ -231,6 +231,11 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 
 `providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it.
 
+DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash`
+automatically uses DeepSeek's native Responses API, while `deepseek-v4-pro` remains on Chat
+Completions until DeepSeek enables Responses support for it. See the [DeepSeek configuration
+notes](./configuration.md) for the stateless replay and unsupported-feature details.
+
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.

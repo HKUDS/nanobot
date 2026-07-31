@@ -958,22 +958,34 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None,
         reasoning_effort: str | None,
     ) -> bool:
-        """Use Responses API only for direct OpenAI requests that benefit from it."""
+        """Choose Responses for providers/models that explicitly support it."""
         if self._api_type == "chat_completions":
             return False
-        if self._spec and self._spec.name not in ("openai", "github_copilot"):
+        spec_name = self._spec.name if self._spec is not None else None
+        model_name = self._request_model_name(model or self.default_model).lower()
+        supported_models = {
+            supported.lower()
+            for supported in getattr(self._spec, "responses_models", ())
+        }
+        model_responses = any(
+            model_name == supported or model_name.endswith(f"/{supported}")
+            for supported in supported_models
+        )
+        provider_responses = spec_name in ("openai", "github_copilot")
+        if not provider_responses and not model_responses:
             return False
         if self._api_type == "responses":
             # Explicit configuration means Responses is mandatory; do not
             # consult the circuit breaker or fall back to Chat Completions.
             return True
-        if self._spec is None or self._spec.name != "github_copilot":
+        if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
             if not _is_direct_openai_base(self._effective_base):
                 return False
 
-        model_name = (model or self.default_model).lower()
         wants = False
-        if reasoning_effort and reasoning_effort.lower() != "none":
+        if model_responses:
+            wants = True
+        elif reasoning_effort and reasoning_effort.lower() != "none":
             wants = True
         elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
             wants = True
@@ -1099,11 +1111,13 @@ class OpenAICompatProvider(LLMProvider):
                     self._sanitize_empty_content(sanitized_state.pending_messages)
                 )
             )
+        preserve_reasoning = bool(self._spec and self._spec.name == "deepseek")
         instructions, input_items, replayed = prepare_responses_input(
             sanitized_messages,
             state=sanitized_state,
             provider=self._responses_state_provider(),
             model=model_name,
+            preserve_reasoning=preserve_reasoning,
         )
 
         body: dict[str, Any] = {
@@ -1131,7 +1145,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             body["temperature"] = temperature
 
-        if not self._supports_temperature(model_name, reasoning_effort):
+        if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}

@@ -43,6 +43,7 @@ def prepare_responses_input(
     state: ProviderConversationState | None,
     provider: str,
     model: str,
+    preserve_reasoning: bool = False,
 ) -> tuple[str, list[dict[str, Any]], bool]:
     """Build a request from exact prior items plus only newly appended messages.
 
@@ -50,7 +51,10 @@ def prepare_responses_input(
     When no compatible state exists, it is converted normally as a safe
     fallback.
     """
-    instructions, fallback_items = convert_messages(messages)
+    instructions, fallback_items = convert_messages(
+        messages,
+        preserve_reasoning=preserve_reasoning,
+    )
     if state is None or not responses_state_matches(
         state,
         provider=provider,
@@ -62,7 +66,10 @@ def prepare_responses_input(
     if prior_items is None:
         return instructions, fallback_items, False
 
-    _, delta_items = convert_messages(state.pending_messages)
+    _, delta_items = convert_messages(
+        state.pending_messages,
+        preserve_reasoning=preserve_reasoning,
+    )
     logger.debug(
         "Replaying Responses state: prior_items={} pending_messages={}",
         len(prior_items),

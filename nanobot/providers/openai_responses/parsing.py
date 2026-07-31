@@ -335,6 +335,19 @@ async def consume_sse_with_reasoning(
                 reasoning_content = text
                 if on_reasoning_delta:
                     await on_reasoning_delta(text)
+        elif event_type == "response.reasoning_text.delta":
+            delta_text = event.get("delta") or ""
+            if delta_text:
+                reasoning_content = (reasoning_content or "") + delta_text
+                streamed_reasoning = True
+                if on_reasoning_delta:
+                    await on_reasoning_delta(delta_text)
+        elif event_type == "response.reasoning_text.done":
+            text = event.get("text") or ""
+            if text and not streamed_reasoning and not reasoning_content:
+                reasoning_content = text
+                if on_reasoning_delta:
+                    await on_reasoning_delta(text)
         elif event_type == "response.reasoning_summary_part.done":
             part = _as_json_object(event.get("part")) or {}
             text = part.get("text") if part.get("type") == "summary_text" else None
@@ -444,6 +457,14 @@ def _extract_reasoning_summary_from_output(output: object) -> str | None:
     for item in _response_object_list(output):
         if item.get("type") != "reasoning":
             continue
+        content = item.get("content")
+        if isinstance(content, str) and content:
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in _response_object_list(cast(list[object], content)):
+                text = block.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
         for summary in _response_object_list(item.get("summary")):
             if summary.get("type") == "summary_text" and summary.get("text"):
                 text = summary.get("text")
@@ -483,11 +504,9 @@ def parse_response_output(
                     if isinstance(refusal, str):
                         content_parts.append(refusal)
         elif item_type == "reasoning":
-            for s in _response_object_list(item.get("summary")):
-                if s.get("type") == "summary_text" and s.get("text"):
-                    text = s.get("text")
-                    if isinstance(text, str):
-                        reasoning_content = (reasoning_content or "") + text
+            text = _extract_reasoning_summary_from_output([item])
+            if text:
+                reasoning_content = (reasoning_content or "") + text
         elif item_type == "function_call":
             call_id = item.get("call_id") or ""
             item_id = item.get("id") or "fc_0"

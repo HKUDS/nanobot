@@ -87,6 +87,23 @@ class TestConvertUserMessage:
         assert result["content"][0]["type"] == "input_text"
         assert result["content"][1]["type"] == "input_image"
 
+
+def test_convert_messages_preserves_deepseek_reasoning_content():
+    _, items = convert_messages([
+        {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
+    ], preserve_reasoning=True)
+
+    assert items == [
+        {"type": "reasoning", "content": "think first"},
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "answer"}],
+            "status": "completed",
+            "id": "msg_0",
+        },
+    ]
+
     def test_empty_list_falls_back(self):
         result = convert_user_message([])
         assert result["content"] == [{"type": "input_text", "text": ""}]
@@ -538,6 +555,22 @@ class TestParseResponseOutput:
         result = parse_response_output(resp)
         assert result.content == "42"
         assert result.reasoning_content == "I think therefore I am."
+
+    def test_deepseek_reasoning_content_extracted(self):
+        resp = {
+            "output": [
+                {"type": "reasoning", "content": "think first"},
+                {"type": "message", "content": [
+                    {"type": "output_text", "text": "answer"},
+                ]},
+            ],
+            "status": "completed", "usage": {},
+        }
+
+        result = parse_response_output(resp)
+
+        assert result.content == "answer"
+        assert result.reasoning_content == "think first"
 
     def test_empty_output(self):
         resp = {"output": [], "status": "completed", "usage": {}}
