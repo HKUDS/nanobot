@@ -348,31 +348,6 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
 </details>
 
-<details>
-<summary><b>DeepSeek</b></summary>
-
-DeepSeek uses Chat Completions for most models. `deepseek-v4-flash` automatically uses DeepSeek's native Responses API when selected as the active model; no `apiType` setting is required. The Responses API is currently not available for `deepseek-v4-pro`.
-
-```json
-{
-  "providers": {
-    "deepseek": {
-      "apiKey": "${DEEPSEEK_API_KEY}"
-    }
-  },
-  "modelPresets": {
-    "primary": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash"
-    }
-  }
-}
-```
-
-DeepSeek's Responses API is stateless: nanobot replays its local conversation state instead of using `previous_response_id` or server-side conversations. It supports function tools and streamed reasoning/text events, while unsupported OpenAI-specific features such as server compaction and `include` are not enabled by nanobot for this model. DeepSeek does not support image or file input on this API surface.
-
-</details>
-
 <a id="responses-state-and-compaction"></a>
 
 ### Responses conversation state and compaction
