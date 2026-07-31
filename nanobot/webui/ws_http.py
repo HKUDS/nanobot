@@ -108,13 +108,36 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 
+# Fix for #5190: On Windows, mimetypes.guess_type() reads the registry key
+# HKEY_CLASSES_ROOT\.js\Content Type, which is commonly set to 'text/plain'
+# because .js is associated with Windows Script Host rather than web JavaScript.
+# That registry value overrides Python's built-in mapping and causes browsers to
+# reject ES module scripts with:
+#   Failed to load module script: Expected a JavaScript-or-Wasm module script
+#   but the server responded with a MIME type of "text/plain".
+# We explicitly register correct MIME types for common web static assets here
+# (module-import time) so all callers of mimetypes.guess_type() in this process
+# benefit, regardless of host registry configuration.
+_MIME_FIXES: dict[str, str] = {
+    ".js":    "application/javascript",
+    ".mjs":   "application/javascript",
+    ".css":   "text/css",
+    ".html":  "text/html",
+    ".json":  "application/json",
+    ".svg":   "image/svg+xml",
+    ".wasm":  "application/wasm",
+}
+
+for _ext, _ctype in _MIME_FIXES.items():
+    mimetypes.add_type(_ctype, _ext, strict=True)
+
+
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
-
 
 def _decode_api_key(raw_key: str) -> str | None:
     key = unquote(raw_key)
