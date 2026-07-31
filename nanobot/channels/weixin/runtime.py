@@ -627,6 +627,8 @@ class WeixinChannel(BaseChannel):
         remaining = self._session_pause_remaining_s()
         if remaining > 0:
             await asyncio.sleep(remaining)
+            if not self.config.token:
+                self._load_state()
             return
 
         body: dict[str, Any] = {

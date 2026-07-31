@@ -500,6 +500,56 @@ async def test_poll_once_pauses_session_on_expired_errcode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_poll_once_reloads_refreshed_state_after_session_pause(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel._token = "old-token"
+    channel._save_state()
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "new-token", "base_url": "https://new.example"}),
+        encoding="utf-8",
+    )
+    channel._session_pause_until = time.time() + 10
+    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+
+    await channel._poll_once()
+
+    assert channel._token == "new-token"
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_keeps_explicit_token_after_session_pause(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    channel._token = "configured-token"
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "stale-token", "base_url": "https://stale.example"}),
+        encoding="utf-8",
+    )
+    channel._session_pause_until = time.time() + 10
+    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+
+    await channel._poll_once()
+
+    assert channel._token == "configured-token"
+    assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+
+
+@pytest.mark.asyncio
 async def test_qr_login_refreshes_expired_qr_and_then_succeeds(
     no_qr_poll_delay,
 ) -> None:
