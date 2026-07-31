@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -44,29 +43,18 @@ _MAX_INDEXED_WORKSPACE_SCOPE_BYTES = 4096
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
-_WEBUI_DIR_CONTEXT: ContextVar[Path | None] = ContextVar("_WEBUI_DIR_CONTEXT", default=None)
-_WEBUI_DIR_CACHE_ENABLED: ContextVar[bool] = ContextVar(
-    "_WEBUI_DIR_CACHE_ENABLED",
-    default=False,
-)
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    token = _WEBUI_DIR_CONTEXT.set(None)
-    cache_token = _WEBUI_DIR_CACHE_ENABLED.set(True)
-    try:
-        rows, changed = _reconcile_index(session_manager)
-        if changed:
-            try:
-                _write_index_rows(session_manager.sessions_dir, rows)
-            except Exception as e:
-                logger.debug("Failed to write WebUI session list index: {}", e)
-        sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
-        return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
-    finally:
-        _WEBUI_DIR_CACHE_ENABLED.reset(cache_token)
-        _WEBUI_DIR_CONTEXT.reset(token)
+    rows, changed = _reconcile_index(session_manager)
+    if changed:
+        try:
+            _write_index_rows(session_manager.sessions_dir, rows)
+        except Exception as e:
+            logger.debug("Failed to write WebUI session list index: {}", e)
+    sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
+    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
 
 
 def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
@@ -81,17 +69,21 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
         for path in session_manager.sessions_dir.glob("*.jsonl")
         if SessionManager._session_key_from_path(path) is not None  # pyright: ignore[reportPrivateUsage]
     )
+    if not paths:
+        return [], existing_rows != []
+
+    webui_dir = get_webui_dir()
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
 
     for path in paths:
         row = existing_by_file.get(path.name)
-        if row is not None and _indexed_row_matches_file(row, path):
+        if row is not None and _indexed_row_matches_file(row, path, webui_dir):
             rows.append(row)
             continue
 
         changed = True
-        scanned = _scan_session_row(session_manager, path)
+        scanned = _scan_session_row(session_manager, path, webui_dir)
         if scanned is not None:
             rows.append(scanned)
 
@@ -145,7 +137,7 @@ def _file_signature(path: Path) -> dict[str, int]:
     return {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
 
 
-def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
+def _indexed_row_matches_file(row: dict[str, Any], path: Path, webui_dir: Path) -> bool:
     if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
         return False
     if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
@@ -158,7 +150,7 @@ def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
         signature = _file_signature(path)
     except OSError:
         return False
-    activity_signature = _webui_activity_signature(str(row.get("key")))
+    activity_signature = _webui_activity_signature(str(row.get("key")), webui_dir)
     return (
         row.get("mtime_ns") == signature["mtime_ns"]
         and row.get("size") == signature["size"]
@@ -250,23 +242,18 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
     return fallback_preview
 
 
-def _webui_activity_paths(session_key: str) -> list[Path]:
+def _webui_activity_paths(session_key: str, webui_dir: Path) -> list[Path]:
     stem = SessionManager.safe_key(session_key)
-    webui_dir = _WEBUI_DIR_CONTEXT.get()
-    if webui_dir is None:
-        webui_dir = get_webui_dir()
-        if _WEBUI_DIR_CACHE_ENABLED.get():
-            _WEBUI_DIR_CONTEXT.set(webui_dir)
     return [
         webui_dir / f"{stem}.jsonl",
         webui_dir / f"{stem}.json",
     ]
 
 
-def _webui_activity_signature(session_key: str) -> dict[str, int]:
+def _webui_activity_signature(session_key: str, webui_dir: Path) -> dict[str, int]:
     latest_mtime_ns = 0
     total_size = 0
-    for path in _webui_activity_paths(session_key):
+    for path in _webui_activity_paths(session_key, webui_dir):
         try:
             stat = path.stat()
         except OSError:
@@ -329,9 +316,9 @@ def _visible_activity_updated_at(
     return _latest_updated_at(visible_message_at, webui_activity) or stored
 
 
-def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
+def _indexed_row_for_session(session: Session, path: Path, webui_dir: Path) -> dict[str, Any]:
     signature = _file_signature(path)
-    activity_signature = _webui_activity_signature(session.key)
+    activity_signature = _webui_activity_signature(session.key, webui_dir)
     activity_updated_at = _webui_activity_updated_at(activity_signature)
     visible_message_at = _last_visible_message_at(session.messages)
     return {
@@ -353,7 +340,11 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     }
 
 
-def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
+def _scan_session_row(
+    session_manager: SessionManager,
+    path: Path,
+    webui_dir: Path,
+) -> dict[str, Any] | None:
     storage_key = SessionManager._session_key_from_path(path)  # pyright: ignore[reportPrivateUsage]
     if storage_key is None:
         return None
@@ -413,7 +404,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 updated_at_s = updated_at_s or fallback_time
             key = data.get("key") or storage_key
             metadata = data.get("metadata", {})
-            activity_signature = _webui_activity_signature(key)
+            activity_signature = _webui_activity_signature(key, webui_dir)
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
                 "key": key,
@@ -436,4 +427,4 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
         repaired = session_manager._repair(storage_key)  # pyright: ignore[reportPrivateUsage]
         if repaired is None:
             return None
-        return _indexed_row_for_session(repaired, path)
+        return _indexed_row_for_session(repaired, path, webui_dir)

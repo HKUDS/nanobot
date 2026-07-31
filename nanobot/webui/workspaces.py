@@ -191,9 +191,6 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
-    def _fallback_scope(self, default_scope: WorkspaceScope | None) -> WorkspaceScope:
-        return default_scope if default_scope is not None else self.default_scope()
-
     def _scope_from_metadata_value(
         self,
         raw_scope: object,
@@ -208,7 +205,7 @@ class WebUIWorkspaceController:
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
         except WorkspaceScopeError:
-            return self._fallback_scope(default_scope)
+            return default_scope if default_scope is not None else self.default_scope()
 
     def scope_for_indexed_metadata(
         self,
@@ -222,24 +219,18 @@ class WebUIWorkspaceController:
             return default_scope
         return self._scope_from_metadata_value(raw_scope, default_scope=default_scope)
 
-    def scope_for_session_key(
-        self,
-        session_key: str,
-        *,
-        default_scope: WorkspaceScope | None = None,
-    ) -> WorkspaceScope:
+    def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         if self._sessions is None:
-            return self._fallback_scope(default_scope)
+            return self.default_scope()
         data = self._sessions.read_session_metadata(session_key)
         if not isinstance(data, dict):
-            return self._fallback_scope(default_scope)
+            return self.default_scope()
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
-            return self._fallback_scope(default_scope)
+            return self.default_scope()
         metadata_data = cast(dict[str, Any], metadata)
         return self._scope_from_metadata_value(
-            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)),
-            default_scope=default_scope,
+            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY))
         )
 
     def payload(self, *, controls_available: bool) -> dict[str, Any]:
