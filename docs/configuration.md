@@ -351,9 +351,7 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 <details>
 <summary><b>DeepSeek</b></summary>
 
-DeepSeek uses Chat Completions for most models. `deepseek-v4-flash` automatically uses
-DeepSeek's native Responses API when selected as the active model; no `apiType` setting
-is required. The Responses API is currently not available for `deepseek-v4-pro`.
+DeepSeek uses Chat Completions for most models. `deepseek-v4-flash` automatically uses DeepSeek's native Responses API when selected as the active model; no `apiType` setting is required. The Responses API is currently not available for `deepseek-v4-pro`.
 
 ```json
 {
@@ -371,11 +369,7 @@ is required. The Responses API is currently not available for `deepseek-v4-pro`.
 }
 ```
 
-DeepSeek's Responses API is stateless: nanobot replays its local conversation state
-instead of using `previous_response_id` or server-side conversations. It supports
-function tools and streamed reasoning/text events, while unsupported OpenAI-specific
-features such as server compaction and `include` are not enabled by nanobot for this
-model. DeepSeek does not support image or file input on this API surface.
+DeepSeek's Responses API is stateless: nanobot replays its local conversation state instead of using `previous_response_id` or server-side conversations. It supports function tools and streamed reasoning/text events, while unsupported OpenAI-specific features such as server compaction and `include` are not enabled by nanobot for this model. DeepSeek does not support image or file input on this API surface.
 
 </details>
 
@@ -387,9 +381,7 @@ Providers that use the Responses API can keep reasoning context across a
 conversation, which helps with multi-step tasks. Supported providers can also
 compact long conversations automatically.
 
-nanobot preserves Responses conversation state automatically for OpenAI
-Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4 Flash, and compatible GitHub
-Copilot models.
+nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4 Flash, and compatible GitHub Copilot models.
 Native compaction is also automatic when the provider supports it. The
 threshold is derived from the active model's context window and reserved output
 headroom; no provider configuration is required.
