@@ -51,7 +51,7 @@ dependencies = [
     "filelock>=3.25.2",
     "watchfiles>=1.1.1,<2.0.0",
     "packaging>=24.0",
-    "tzdata>=2025.2; sys_platform == 'win32'",
+    "tzdata>=2025.2",
     "defusedxml>=0.7.1,<1.0.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
