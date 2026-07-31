@@ -98,6 +98,43 @@ def test_save_and_load_state_persists_context_tokens(tmp_path) -> None:
     assert restored._context_tokens == {"wx-user": "ctx-1"}
 
 
+def test_save_state_preserves_token_committed_by_another_instance(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel._token = "old-token"
+    channel._save_state()
+
+    replacement = {
+        "token": "new-token",
+        "base_url": "https://new.example",
+        "get_updates_buf": "",
+        "context_tokens": {},
+        "typing_tickets": {},
+    }
+    (tmp_path / "account.json").write_text(json.dumps(replacement), encoding="utf-8")
+
+    channel._get_updates_buf = "stale-cursor"
+    channel._save_state()
+
+    assert json.loads((tmp_path / "account.json").read_text()) == replacement
+
+
+def test_save_state_force_overwrites_replaced_token(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(json.dumps({"token": "old-token"}), encoding="utf-8")
+
+    channel.connect_commit_account(token="new-token", base_url="https://new.example")
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "new-token"
+    assert saved["base_url"] == "https://new.example"
+
+
 @pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()

@@ -230,9 +230,23 @@ class WeixinChannel(BaseChannel):
             self.logger.error("Failed to load Weixin account state", exc_info=True)
             return False
 
-    def _save_state(self) -> None:
+    def _save_state(self, *, force: bool = False) -> None:
         state_file = self._get_state_dir() / "account.json"
         with suppress(Exception):
+            if not force and state_file.exists():
+                try:
+                    persisted = json.loads(state_file.read_text())
+                except Exception:
+                    persisted = None
+                persisted_token = (
+                    str(persisted.get("token", "") or "")
+                    if isinstance(persisted, dict)
+                    else ""
+                )
+                if persisted_token and persisted_token != self._token:
+                    # A concurrent QR login may have committed a newer token.
+                    # Never let an older runtime snapshot overwrite it.
+                    return
             data = {
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
@@ -489,7 +503,7 @@ class WeixinChannel(BaseChannel):
         self._token = token
         if base_url:
             self.config.base_url = base_url
-        self._save_state()
+        self._save_state(force=True)
 
     async def connect_close_client(self) -> None:
         self._running = False
