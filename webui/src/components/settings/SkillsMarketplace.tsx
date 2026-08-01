@@ -58,7 +58,12 @@ export function SkillsMarketplace({
   const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
   const installedNames = useMemo(
-    () => new Set(installedSkills.map((skill) => skill.name)),
+    () =>
+      new Set(
+        installedSkills
+          .filter((skill) => skill.source === "workspace")
+          .map((skill) => skill.name),
+      ),
     [installedSkills],
   );
   const visibleTrending = useMemo(
