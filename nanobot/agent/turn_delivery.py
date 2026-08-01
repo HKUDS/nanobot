@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from loguru import logger
+
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
@@ -16,7 +18,6 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
     outbound_message_for_event,
 )
-from loguru import logger
 
 from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
