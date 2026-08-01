@@ -10,6 +10,11 @@ from nanobot.providers.openai_compat_provider import (
     _RESPONSES_PROBE_INTERVAL_S,
     OpenAICompatProvider,
 )
+from nanobot.providers.registry import (
+    ProviderSpec,
+    ResponsesCapabilities,
+    find_by_name,
+)
 
 
 @pytest.fixture()
@@ -17,7 +22,7 @@ def provider():
     """A direct-OpenAI provider with Responses API support."""
     p = OpenAICompatProvider.__new__(OpenAICompatProvider)
     p.default_model = "gpt-5"
-    p._spec = type("Spec", (), {"name": "openai"})()
+    p._spec = find_by_name("openai")
     p._effective_base = "https://api.openai.com/v1"
     p._api_type = "auto"
     p._responses_failures = {}
@@ -30,12 +35,7 @@ def test_responses_api_available_by_default(provider):
 
 
 def test_deepseek_v4_flash_uses_responses_by_model(provider):
-    provider._spec = type("Spec", (), {
-        "name": "deepseek",
-        "responses_models": ("deepseek-v4-flash",),
-        "strip_model_prefix": False,
-        "strip_model_prefixes": (),
-    })()
+    provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
     provider.default_model = "deepseek-v4-flash"
 
@@ -44,15 +44,46 @@ def test_deepseek_v4_flash_uses_responses_by_model(provider):
 
 
 def test_deepseek_v4_flash_matches_provider_prefixed_model(provider):
-    provider._spec = type("Spec", (), {
-        "name": "deepseek",
-        "responses_models": ("deepseek-v4-flash",),
-        "strip_model_prefix": False,
-        "strip_model_prefixes": (),
-    })()
+    provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
 
     assert provider._should_use_responses_api("deepseek/deepseek-v4-flash", None) is True
+
+
+def test_responses_behavior_is_declared_by_capabilities(provider):
+    provider._spec = ProviderSpec(
+        name="example",
+        keywords=("example",),
+        env_key="EXAMPLE_API_KEY",
+        responses=ResponsesCapabilities(
+            models=("example-o3",),
+            reasoning_replay="plaintext",
+        ),
+    )
+    provider._effective_base = "https://example.test"
+
+    assert provider._should_use_responses_api("example-o3", None) is True
+
+    body = provider._build_responses_body(
+        messages=[
+            {"role": "user", "content": "question"},
+            {
+                "role": "assistant",
+                "reasoning_content": "think first",
+                "content": "answer",
+            },
+            {"role": "user", "content": "follow-up"},
+        ],
+        tools=None,
+        model="example-o3",
+        max_tokens=100,
+        temperature=0.1,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert {"type": "reasoning", "content": "think first"} in body["input"]
+    assert "include" not in body
 
 
 def test_direct_openai_enables_server_compaction(provider):
@@ -73,6 +104,7 @@ def test_direct_openai_enables_server_compaction(provider):
         "type": "compaction",
         "compact_threshold": 70_000,
     }]
+    assert body["include"] == ["reasoning.encrypted_content"]
 
 
 def test_api_type_chat_completions_disables_responses(provider):
@@ -96,7 +128,7 @@ def test_api_type_responses_ignores_circuit_breaker(provider):
 
 
 def test_api_type_responses_does_not_force_non_openai(provider):
-    provider._spec = type("Spec", (), {"name": "custom"})()
+    provider._spec = find_by_name("custom")
     provider._api_type = "responses"
 
     assert provider._should_use_responses_api("gpt-4o", None) is False

@@ -49,7 +49,7 @@ from nanobot.providers.openai_responses import (
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
 
-    from nanobot.providers.registry import ProviderSpec
+    from nanobot.providers.registry import ProviderSpec, ResponsesCapabilities
 
 # Module-level placeholder — set lazily by _ensure_client on first real
 # use, or replaced by tests via ``patch(...)``.  Kept as a plain name so
@@ -470,7 +470,12 @@ class OpenAICompatProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._extra_body = extra_body or {}
-        self._api_type = api_type if spec and spec.name == "openai" else "auto"
+        responses = spec.responses if spec is not None else None
+        self._api_type = (
+            api_type
+            if responses is not None and responses.allows_api_type_override
+            else "auto"
+        )
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
         self._native_compaction_available = True
@@ -961,38 +966,32 @@ class OpenAICompatProvider(LLMProvider):
         """Choose Responses for providers/models that explicitly support it."""
         if self._api_type == "chat_completions":
             return False
-        spec_name = self._spec.name if self._spec is not None else None
-        model_name = self._request_model_name(model or self.default_model).lower()
-        supported_models = {
-            supported.lower()
-            for supported in getattr(self._spec, "responses_models", ())
-        }
-        model_responses = any(
-            model_name == supported or model_name.endswith(f"/{supported}")
-            for supported in supported_models
-        )
-        provider_responses = spec_name in ("openai", "github_copilot")
-        if not provider_responses and not model_responses:
+        capabilities = self._responses_capabilities()
+        if capabilities is None:
             return False
+        model_name = self._request_model_name(model or self.default_model).lower()
         if self._api_type == "responses":
             # Explicit configuration means Responses is mandatory; do not
             # consult the circuit breaker or fall back to Chat Completions.
             return True
-        if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
-            if not _is_direct_openai_base(self._effective_base):
-                return False
+        if (
+            capabilities.requires_direct_openai_base
+            and not _is_direct_openai_base(self._effective_base)
+        ):
+            return False
 
-        wants = False
-        if model_responses:
-            wants = True
-        elif reasoning_effort and reasoning_effort.lower() != "none":
-            wants = True
-        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
-            wants = True
-        if not wants:
+        explicitly_supported = capabilities.matches_model(model_name)
+        wants_auto_route = capabilities.auto_route and (
+            (reasoning_effort is not None and reasoning_effort.lower() != "none")
+            or any(token in model_name for token in ("gpt-5", "o1", "o3", "o4"))
+        )
+        if not explicitly_supported and not wants_auto_route:
             return False
 
         return self._responses_circuit_allows_probe(model, reasoning_effort)
+
+    def _responses_capabilities(self) -> ResponsesCapabilities | None:
+        return self._spec.responses if self._spec is not None else None
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
@@ -1016,14 +1015,20 @@ class OpenAICompatProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Enable server compaction only on direct OpenAI Responses endpoints."""
         _ = model
+        capabilities = self._responses_capabilities()
         if (
             not self._native_compaction_available
             or self._api_type == "chat_completions"
+            or capabilities is None
+            or not capabilities.supports_native_compaction
         ):
             return False
-        if self._spec is not None and self._spec.name != "openai":
+        if (
+            capabilities.requires_direct_openai_base
+            and not _is_direct_openai_base(self._effective_base)
+        ):
             return False
-        return _is_direct_openai_base(self._effective_base)
+        return True
 
     def _responses_circuit_allows_probe(
         self,
@@ -1111,7 +1116,10 @@ class OpenAICompatProvider(LLMProvider):
                     self._sanitize_empty_content(sanitized_state.pending_messages)
                 )
             )
-        preserve_reasoning = bool(self._spec and self._spec.name == "deepseek")
+        capabilities = self._responses_capabilities()
+        preserve_reasoning = (
+            capabilities is not None and capabilities.reasoning_replay == "plaintext"
+        )
         instructions, input_items, replayed = prepare_responses_input(
             sanitized_messages,
             state=sanitized_state,
@@ -1142,10 +1150,15 @@ class OpenAICompatProvider(LLMProvider):
                 "compact_threshold": compact_threshold,
             }]
 
-        if self._supports_temperature(model_name, reasoning_effort):
+        supports_temperature = self._supports_temperature(model_name, reasoning_effort)
+        if supports_temperature:
             body["temperature"] = temperature
 
-        if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
+        if (
+            not supports_temperature
+            and capabilities is not None
+            and capabilities.reasoning_replay == "encrypted"
+        ):
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
@@ -1766,10 +1779,8 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
-                    if self._spec and self._spec.name == "github_copilot":
-                        # Copilot gateway exposes GPT-5/o-series only via /responses;
-                        # falling back to /chat/completions cannot succeed and would
-                        # hide the real error.
+                    capabilities = self._responses_capabilities()
+                    if capabilities is not None and not capabilities.allows_chat_fallback:
                         raise
                     if self._api_type == "responses":
                         raise
@@ -1862,10 +1873,8 @@ class OpenAICompatProvider(LLMProvider):
                         )
                     return result
                 except Exception as responses_error:
-                    if self._spec and self._spec.name == "github_copilot":
-                        # Copilot gateway exposes GPT-5/o-series only via /responses;
-                        # falling back to /chat/completions cannot succeed and would
-                        # hide the real error.
+                    capabilities = self._responses_capabilities()
+                    if capabilities is not None and not capabilities.allows_chat_fallback:
                         raise
                     if self._api_type == "responses":
                         raise
