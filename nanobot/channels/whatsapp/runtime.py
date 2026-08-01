@@ -55,6 +55,10 @@ _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
 _LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
 # OGG is intentionally excluded: WhatsApp accepts only mono Opus, which MIME sniffing cannot prove.
 _DIRECT_AUDIO_MIMETYPES = {"audio/aac", "audio/amr", "audio/mp4", "audio/mpeg"}
+_MIMETYPE_ALIASES = {
+    "audio/x-hx-aac-adts": "audio/aac",
+    "audio/x-m4a": "audio/mp4",
+}
 
 
 def _default_database_path() -> Path:
@@ -450,7 +454,8 @@ class WhatsAppChannel(BaseChannel):
             detected = None
 
         if isinstance(detected, str) and "/" in detected:
-            return detected.partition(";")[0].strip().lower()
+            mimetype = detected.partition(";")[0].strip().lower()
+            return _MIMETYPE_ALIASES.get(mimetype, mimetype)
 
         guessed, _ = mimetypes.guess_type(path)
         return guessed or "application/octet-stream"

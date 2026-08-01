@@ -286,6 +286,39 @@ async def test_send_unsupported_ogg_audio_as_document(monkeypatch) -> None:
     client.send_audio.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("detected_mimetype", "filename"),
+    [
+        ("audio/x-m4a", "recording.m4a"),
+        ("audio/x-hx-aac-adts", "recording.aac"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_send_supported_audio_magic_aliases_inline(
+    monkeypatch, detected_mimetype: str, filename: str
+) -> None:
+    _patch_neonize_api(
+        monkeypatch,
+        detect_mime=lambda path, *, mime: detected_mimetype,
+    )
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[filename],
+        )
+    )
+
+    client.send_audio.assert_awaited_once_with(("12345", "s.whatsapp.net"), filename)
+    client.send_document.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_send_when_disconnected_raises() -> None:
     ch = _make_channel()
