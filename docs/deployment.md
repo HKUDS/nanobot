@@ -82,7 +82,7 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 > }
 > ```
 >
-> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
+> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token`, `tokenIssueSecret`, or a fully configured `trustedProxyAuth` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
 > The gateway health route itself is intentionally minimal and unauthenticated. When the
 > container binds it to `0.0.0.0`, publish port `18790` to host loopback only; place any
 > remotely monitored health endpoint behind a firewall or reverse proxy. If another host
@@ -93,7 +93,7 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 
 For a local `cloudflared` process in front of nanobot, Cloudflare Access can
 authenticate the user before forwarding the request and add
-`Cf-Access-Jwt-Assertion`. Opt in to trusted-proxy bootstrap only when the
+`Cf-Access-Jwt-Assertion`. Opt in to trusted-proxy no-token mode only when the
 direct TCP peer is the tunnel process and the assertion is non-empty:
 
 ```json
@@ -113,11 +113,14 @@ direct TCP peer is the tunnel process and the assertion is non-empty:
 ```
 
 This is two-part authorization: a trusted direct loopback peer **and** a
-non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bootstrap
-bypass. Nanobot trusts the assertion but does not cryptographically validate
-the JWT, so configure the tunnel and Access policy carefully and do not expose
-the nanobot listener directly to untrusted clients. Forwarded client headers
-such as `X-Forwarded-For` do not establish proxy trust.
+non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bypass.
+For this flow `/webui/bootstrap` returns connection metadata without a
+bootstrap token or REST API token; the proxy assertion authorizes the WebSocket
+handshake and REST requests directly. Nanobot trusts the assertion but does
+not cryptographically validate the JWT, so configure the tunnel and Access
+policy carefully and do not expose the nanobot listener directly to untrusted
+clients. Forwarded client headers such as `X-Forwarded-For` do not establish
+proxy trust.
 
 ### Docker Compose
 

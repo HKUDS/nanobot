@@ -62,6 +62,9 @@ from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
+    is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
+)
+from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
 from nanobot.webui.http_utils import (
@@ -220,11 +223,11 @@ class WebSocketConfig(Base):
     def wildcard_host_requires_auth(self) -> Self:
         if self.host not in ("0.0.0.0", "::"):
             return self
-        if self.token.strip() or self.token_issue_secret.strip():
+        if self.token.strip() or self.token_issue_secret.strip() or self.trusted_proxy_auth is not None:
             return self
         raise ValueError(
-            "host is 0.0.0.0 (all interfaces) but neither token nor "
-            "token_issue_secret is set — set one to prevent unauthenticated access"
+            "host is 0.0.0.0 (all interfaces) but neither token, token_issue_secret, "
+            "nor trusted_proxy_auth is set — set one to prevent unauthenticated access"
         )
 
 
@@ -480,16 +483,16 @@ class WebSocketChannel(BaseChannel):
     async def _dispatch_http(self, connection: ServerConnection, request: WsRequest) -> Any:
         """Route an inbound HTTP request to the HTTP handler or WS upgrade."""
         got, query = _parse_request_path(request.path)
+        expected_ws = self._expected_path()
 
         # WebSocket upgrade — channel handles this itself
-        expected_ws = self._expected_path()
         if got == expected_ws and _is_websocket_upgrade(request):
             client_id = _query_first(query, "client_id") or ""
             if len(client_id) > 128:
                 client_id = client_id[:128]
             if not self.is_allowed(client_id):
                 return connection.respond(403, "Forbidden")
-            return self._authorize_websocket_handshake(connection, query)
+            return self._authorize_websocket_handshake(connection, query, request.headers)
 
         # Everything else goes to the HTTP handler
         return await self._http_router.dispatch(connection, request)
@@ -498,7 +501,12 @@ class WebSocketChannel(BaseChannel):
         self,
         connection: ServerConnection,
         query: dict[str, list[str]],
+        headers: Any = None,
     ) -> Any:
+        if _is_trusted_proxy_authenticated_request(connection, headers or {}, self.config):
+            self._webui_connections.add(connection)
+            return None
+
         supplied = _query_first(query, "token")
         static_token = self.config.token.strip()
 

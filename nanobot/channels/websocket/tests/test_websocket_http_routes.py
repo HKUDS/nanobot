@@ -3351,7 +3351,7 @@ def test_trusted_proxy_rejects_untrusted_peer_spoof(bus: MagicMock) -> None:
     assert resp.status_code == 403
 
 
-def test_trusted_proxy_accepts_assertion_without_forwarded_header_trust(
+def test_trusted_proxy_bootstrap_has_no_tokens(
     bus: MagicMock,
 ) -> None:
     assertion = "opaque-upstream-assertion"
@@ -3376,9 +3376,36 @@ def test_trusted_proxy_accepts_assertion_without_forwarded_header_trust(
     assert assertion not in body
     assert assertion not in repr(log.mock_calls)
     payload = json.loads(body)
-    assert payload["token"].startswith("nbwt_")
-    assert payload["api_token"].startswith("nbwt_")
-    assert payload["api_token"] != payload["token"]
+    assert "token" not in payload
+    assert "api_token" not in payload
+    assert payload["ws_path"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_trusted_proxy_authorizes_rest_without_api_token(bus: MagicMock) -> None:
+    channel = _ch(bus, **_trusted_proxy_config())
+    response = await channel.gateway.http.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Host": "nanobot.example",
+                "Cf-Access-Jwt-Assertion": "present",
+            },
+            path="/api/sessions",
+        ),
+    )
+    assert response.status_code == 503
+
+
+def test_trusted_proxy_authorizes_websocket_without_token(bus: MagicMock) -> None:
+    channel = _ch(bus, **_trusted_proxy_config())
+    response = channel._authorize_websocket_handshake(
+        _LOCAL,
+        {},
+        {"Cf-Access-Jwt-Assertion": "present"},
+    )
+    assert response is None
+    assert _LOCAL in channel._webui_connections
 
 
 def test_forwarding_headers_alone_never_authorize_bootstrap(bus: MagicMock) -> None:
@@ -3397,7 +3424,7 @@ def test_forwarding_headers_alone_never_authorize_bootstrap(bus: MagicMock) -> N
     assert resp.status_code == 403
 
 
-def test_trusted_proxy_does_not_override_bootstrap_secret(bus: MagicMock) -> None:
+def test_trusted_proxy_bypasses_bootstrap_secret_and_tokens(bus: MagicMock) -> None:
     channel = _ch(
         bus,
         tokenIssueSecret="route-secret",
@@ -3407,7 +3434,10 @@ def test_trusted_proxy_does_not_override_bootstrap_secret(bus: MagicMock) -> Non
         _LOCAL,
         _FakeReq({"Cf-Access-Jwt-Assertion": "present"}),
     )
-    assert resp.status_code == 401
+    assert resp.status_code == 200
+    payload = json.loads(resp.body)
+    assert "token" not in payload
+    assert "api_token" not in payload
 
 
 @pytest.mark.parametrize(
@@ -3458,6 +3488,11 @@ def test_wildcard_host_with_token_is_valid(bus: MagicMock) -> None:
 
 def test_wildcard_host_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    assert channel.config.host == "0.0.0.0"
+
+
+def test_wildcard_host_with_trusted_proxy_auth_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", **_trusted_proxy_config())
     assert channel.config.host == "0.0.0.0"
 
 
