@@ -220,7 +220,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("floats a borderless highlight in, then slides it between selected topics", () => {
+  it("positions one background highlight, then slides it between selected topics", () => {
     let revealFrame: FrameRequestCallback | null = null;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       revealFrame = callback;
@@ -259,14 +259,15 @@ describe("ChatList", () => {
       />,
     );
 
-    const highlight = screen.getByTestId("active-chat-highlight");
-    const surface = screen.getByTestId("active-chat-highlight-surface");
-    expect(surface).toHaveClass(
+    const highlight = screen.getByTestId("sessions-selection-highlight");
+    expect(highlight).toHaveClass(
       "bg-sidebar-foreground/[0.055]",
-      "transition-[opacity,transform]",
+      "transition-[transform,width,height]",
       "motion-reduce:transition-none",
     );
-    expect(surface).toHaveStyle("opacity: 0; transform: scale(0.97)");
+    expect(highlight).toHaveStyle("opacity: 0");
+    expect(screen.queryByTestId("sessions-selection-highlight-surface"))
+      .not.toBeInTheDocument();
 
     rerender(
       <ChatList
@@ -277,6 +278,8 @@ describe("ChatList", () => {
 
     const activeButton = screen.getByTitle("Active topic");
     expect(activeButton).toHaveAttribute("aria-current", "page");
+    expect(activeButton.parentElement).toHaveClass("transition-[color]");
+    expect(activeButton.parentElement).not.toHaveClass("transition-colors");
     expect(activeButton.parentElement).not.toHaveClass(
       "bg-sidebar-accent",
       "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
@@ -286,9 +289,8 @@ describe("ChatList", () => {
       "motion-reduce:transition-none",
     );
     expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); transition-property: none",
+      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
     );
-    expect(surface).toHaveStyle("opacity: 1; transform: scale(1)");
 
     revealFrame?.(0);
     expect(highlight.style.transitionProperty).toBe("");

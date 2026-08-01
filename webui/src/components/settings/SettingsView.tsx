@@ -65,6 +65,10 @@ import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import {
+  SIDEBAR_SELECTION_ITEM_CLASS,
+  SidebarSelectionHighlight,
+} from "@/components/SidebarSelectionHighlight";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { ToggleButton } from "@/components/settings/ToggleButton";
@@ -2497,6 +2501,8 @@ function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
+  const desktopNavRef = useRef<HTMLDivElement>(null);
+  const activeNavItemRef = useRef<HTMLButtonElement>(null);
   const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
     ?? SETTINGS_NAV_ITEMS[0];
   const ActiveIcon = activeItem.icon;
@@ -2569,19 +2575,21 @@ function SettingsSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="hidden space-y-1 lg:block">
+        <div ref={desktopNavRef} className="relative hidden space-y-1 lg:block">
           {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
             const active = key === activeSection;
             return (
               <button
+                ref={active ? activeNavItemRef : undefined}
                 key={key}
                 type="button"
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSection(key)}
                 className={cn(
-                  "touch-target flex h-9 w-full items-center gap-2 rounded-[10px] px-2.5 text-left text-[13px] font-medium transition-colors",
+                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[13px] font-medium",
+                  SIDEBAR_SELECTION_ITEM_CLASS,
                   active
-                    ? "bg-sidebar-accent text-foreground"
+                    ? "text-sidebar-accent-foreground"
                     : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
                 )}
               >
@@ -2592,6 +2600,12 @@ function SettingsSidebar({
               </button>
             );
           })}
+          <SidebarSelectionHighlight
+            containerRef={desktopNavRef}
+            targetRef={activeNavItemRef}
+            activeId={activeSection}
+            scope="settings"
+          />
         </div>
       </nav>
 

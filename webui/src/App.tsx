@@ -1901,8 +1901,9 @@ function Shell({
 
   const sidebarProps = {
     sessions,
-    activeKey,
+    activeKey: view === "chat" ? activeKey : null,
     loading,
+    newChatActive: view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectChat,
     onRequestDelete,
