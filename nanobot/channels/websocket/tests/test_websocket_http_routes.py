@@ -3473,6 +3473,16 @@ def test_trusted_proxy_rejects_invalid_or_universal_cidrs(
     with pytest.raises(ValidationError):
         WebSocketConfig.model_validate(_trusted_proxy_config([cidr]))
 
+@pytest.mark.parametrize(
+    "assertion_header",
+    ["Host", "Forwarded", "X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP"],
+)
+def test_trusted_proxy_rejects_routing_headers(assertion_header: str) -> None:
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="proxy-generated"):
+        WebSocketConfig.model_validate(_trusted_proxy_config(assertion_header=assertion_header))
+
 def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:
     import pytest
     from pydantic_core import ValidationError

@@ -116,11 +116,13 @@ This is two-part authorization: a trusted direct loopback peer **and** a
 non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bypass.
 For this flow `/webui/bootstrap` returns connection metadata without a
 bootstrap token or REST API token; the proxy assertion authorizes the WebSocket
-handshake and REST requests directly. Nanobot trusts the assertion but does
+handshake and REST requests directly. The assertion header must be generated
+by Cloudflare Access after authentication; routing/client metadata headers such
+as `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP`
+are rejected as `assertionHeader` values. Nanobot trusts the assertion but does
 not cryptographically validate the JWT, so configure the tunnel and Access
 policy carefully and do not expose the nanobot listener directly to untrusted
-clients. Forwarded client headers such as `X-Forwarded-For` do not establish
-proxy trust.
+clients. Forwarded client headers do not establish proxy trust.
 
 ### Docker Compose
 

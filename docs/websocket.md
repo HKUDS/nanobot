@@ -228,7 +228,7 @@ All fields go under `channels.websocket` in `config.json`.
 | `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` issues tokens for local/secret-authenticated requests; trusted-proxy requests intentionally receive no bootstrap or API token. |
 | `trustedProxyAuth` | object or `null` | `null` | Optional two-part no-token authorization for a directly connected upstream proxy. Both `trustedPeerCidrs` and a non-empty `assertionHeader` value must match; a CIDR alone never authorizes bootstrap or WebSocket/API access. |
 | `trustedProxyAuth.trustedPeerCidrs` | list of CIDR strings | — | Direct TCP peer networks that may present the assertion. IPv4, IPv6, and IPv4-mapped IPv6 peers are supported; universal CIDRs (`0.0.0.0/0`, `::/0`) are rejected. |
-| `trustedProxyAuth.assertionHeader` | string | — | HTTP header whose non-empty value proves the upstream proxy authenticated the request. Nanobot trusts this value but does not cryptographically validate it. |
+| `trustedProxyAuth.assertionHeader` | string | — | Header injected by the identity-aware proxy after successful authentication. Routing/client metadata headers (`Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `CF-Connecting-IP`) are rejected; nanobot trusts the remaining header's non-empty value but does not cryptographically validate it. |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
 
 ### Access Control
@@ -295,6 +295,12 @@ or `X-Forwarded-Host` to decide whether the proxy is trusted. Nanobot trusts the
 assertion supplied by the explicitly trusted peer, but does not cryptographically
 validate or interpret the JWT/assertion contents. Do not enable this option if
 untrusted clients can connect directly to the nanobot listener.
+
+The configured assertion header must be a proxy-generated authentication
+assertion, not a routing or client metadata header. Headers such as `Host`,
+`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP` are rejected
+by configuration; use the identity provider's post-authentication assertion
+header instead (for example, `Cf-Access-Jwt-Assertion`).
 
 For example, a local Cloudflare Tunnel with Cloudflare Access can validate the
 user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:

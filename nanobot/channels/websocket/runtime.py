@@ -93,6 +93,24 @@ from nanobot.webui.websocket_logging import websockets_server_logger
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
 
 
+_ROUTING_ASSERTION_HEADERS = frozenset(
+    {
+        "host",
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-real-ip",
+        "cf-connecting-ip",
+    }
+)
+
+
+def _is_routing_assertion_header(value: str) -> bool:
+    normalized = value.casefold()
+    return normalized in _ROUTING_ASSERTION_HEADERS or normalized.startswith("x-forwarded-")
+
+
 class TrustedProxyAuthConfig(Base):
     """Authentication assertions accepted from explicitly trusted proxy peers."""
 
@@ -128,6 +146,11 @@ class TrustedProxyAuthConfig(Base):
         value = value.strip()
         if not value or any(char.isspace() or ord(char) < 0x21 for char in value):
             raise ValueError("assertion_header must be a valid HTTP header name")
+        if _is_routing_assertion_header(value):
+            raise ValueError(
+                "assertion_header must identify a proxy-generated authentication assertion, "
+                "not a routing or client metadata header"
+            )
         return value
 
     @model_validator(mode="after")
