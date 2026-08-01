@@ -79,6 +79,16 @@ def _make_channel(config: dict | None = None) -> WhatsAppChannel:
     return ch
 
 
+def _make_send_client() -> SimpleNamespace:
+    return SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+
+
 def _patch_neonize_api(monkeypatch, detect_mime=None) -> None:
     detect_mime = detect_mime or (
         lambda path, *, mime: mimetypes.guess_type(path)[0] or "application/octet-stream"
@@ -183,13 +193,7 @@ async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
@@ -202,13 +206,7 @@ async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
@@ -237,13 +235,7 @@ async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_mislabeled_audio_as_document(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch, detect_mime=lambda path, *, mime: "audio/x-wav")
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
@@ -270,13 +262,7 @@ async def test_send_mislabeled_audio_as_document(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_unsupported_ogg_audio_as_document(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch, detect_mime=lambda path, *, mime: "audio/ogg")
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
