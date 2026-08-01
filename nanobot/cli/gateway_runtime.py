@@ -443,17 +443,29 @@ def _run_gateway(
                     resp,
                     had_tool_errors=progress.had_tool_errors,
                 )
-                if completed:
+                # Advance the cursor when the Dream either reported clean
+                # completion OR actually made durable changes (diff_body). The
+                # _stop_reason check alone is unreliable for ephemeral agent
+                # runs: the agent loop may set a different stop reason even
+                # when the run itself succeeded and produced edits.
+                if completed or diff_body:
                     store.set_last_dream_cursor(last_cursor)
-                    if diff_body:
-                        logger.info(
-                            "Dream cron job completed, cursor advanced to {}",
-                            last_cursor,
-                        )
+                    if completed:
+                        if diff_body:
+                            logger.info(
+                                "Dream cron job completed, cursor advanced to {}",
+                                last_cursor,
+                            )
+                        else:
+                            logger.info(
+                                "Dream cron job completed with no memory changes; "
+                                "cursor advanced to {}",
+                                last_cursor,
+                            )
                     else:
-                        logger.info(
-                            "Dream cron job completed with no memory changes; "
-                            "cursor advanced to {}",
+                        logger.warning(
+                            "Dream cron job advanced cursor to {} despite "
+                            "non-complete stop reason (diff_body present)",
                             last_cursor,
                         )
                 else:
