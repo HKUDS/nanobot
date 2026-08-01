@@ -42,6 +42,8 @@ from nanobot.utils.workspace_prompts import (
     workspace_prompt_file,
 )
 
+from nanobot.utils.helpers import content_with_media_breadcrumbs
+
 if TYPE_CHECKING:
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -698,27 +700,24 @@ class MemoryStore:
 
     @staticmethod
     def _format_messages(messages: list[dict[str, Any]]) -> str:
-        lines: list[str] = []
-        for message in messages:
-            content = content_with_media_breadcrumbs(
-                message.get("role"),
-                message.get("content", ""),
-                message.get("media"),
-            )
-            if not content:
-                continue
-            tools_used = message.get("tools_used")
-            tools = (
-                f" [tools: {', '.join(cast(list[str], tools_used))}]"
-                if tools_used
-                else ""
-            )
-            timestamp = cast(str, message.get("timestamp", "?"))
-            role = cast(str, message["role"])
-            lines.append(
-                f"[{timestamp[:16]}] {role.upper()}{tools}: {content}"
-            )
-        return "\n".join(lines)
+    lines: list[str] = []
+    for message in messages:
+        # 将 media 合并到 content 中
+        content = content_with_media_breadcrumbs(
+            message.get("role"),
+            message.get("content", ""),
+            message.get("media"),
+        )
+        if not content:
+            continue
+        tools_used = message.get("tools_used")
+        tools = f" [tools: {', '.join(cast(list[str], tools_used))}]" if tools_used else ""
+        timestamp = cast(str, message.get("timestamp", "?"))
+        role = cast(str, message["role"])
+        lines.append(
+            f"[{timestamp[:16]}] {role.upper()}{tools}: {content}"
+        )
+    return "\n".join(lines)
 
     def raw_archive(
         self,

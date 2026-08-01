@@ -380,6 +380,19 @@ def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     """Build an image placeholder string."""
     return f"[image: {path}]" if path else empty
 
+def content_with_media_breadcrumbs(role: str, content: str, media: list) -> str:
+    """
+    Append media breadcrumbs to content for user messages.
+    Used by both get_history (replay) and _format_messages (consolidation)
+    to ensure media paths are not lost.
+    """
+    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
+        return content
+    crumbs = "\n".join(image_placeholder_text(p) for p in media if isinstance(p, str) and p)
+    if not crumbs:
+        return content
+    return f"{content}\n{crumbs}" if content else crumbs
+
 
 def content_with_media_breadcrumbs(
     role: str | None,
