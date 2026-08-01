@@ -302,20 +302,14 @@ def _write_segment_manifest(session_key: str, entries: list[dict[str, Any]]) -> 
         raise
 
 
-def _rebuild_segment_manifest(session_key: str) -> list[str]:
+def _rebuild_segment_manifest(session_key: str) -> list[dict[str, Any]]:
     segment_ids = _segment_ids_on_disk(session_key)
-    if segment_ids:
-        _write_segment_manifest(
-            session_key,
-            [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids],
-        )
+    entries = [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids]
+    if entries:
+        _write_segment_manifest(session_key, entries)
     else:
         _webui_transcript_manifest_path(session_key).unlink(missing_ok=True)
-    return segment_ids
-
-
-def _rebuilt_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
-    return [_segment_manifest_entry(session_key, segment_id) for segment_id in _rebuild_segment_manifest(session_key)]
+    return entries
 
 
 def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
@@ -324,7 +318,7 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
         return []
     path = _webui_transcript_manifest_path(session_key)
     if not path.is_file():
-        return _rebuilt_segment_manifest_entries(session_key)
+        return _rebuild_segment_manifest(session_key)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         manifest = cast(dict[str, Any], data) if isinstance(data, dict) else None
@@ -334,18 +328,18 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
             or manifest.get("version") != _TRANSCRIPT_SEGMENT_MANIFEST_VERSION
             or not isinstance(raw_segments, list)
         ):
-            return _rebuilt_segment_manifest_entries(session_key)
+            return _rebuild_segment_manifest(session_key)
         entries: list[dict[str, Any]] = []
         for entry in cast(list[Any], raw_segments):
             normalized = _normalize_manifest_entry(session_key, entry)
             if normalized is None:
-                return _rebuilt_segment_manifest_entries(session_key)
+                return _rebuild_segment_manifest(session_key)
             entries.append(normalized)
         if [entry["id"] for entry in entries] != _segment_ids_on_disk(session_key):
-            return _rebuilt_segment_manifest_entries(session_key)
+            return _rebuild_segment_manifest(session_key)
         return entries
     except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-        return _rebuilt_segment_manifest_entries(session_key)
+        return _rebuild_segment_manifest(session_key)
 
 
 def _read_segment_ids(session_key: str) -> list[str]:
@@ -1222,10 +1216,9 @@ def _is_recoverable_answer_record(record: dict[str, Any]) -> bool:
 
 def _needs_incomplete_turn_recovery(lines: list[dict[str, Any]]) -> bool:
     return any(
-        turn
-        and turn[-1].get("event") == "turn_end"
-        and turn[-1].get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
-        for turn in _split_transcript_turns(lines)
+        record.get("event") == "turn_end"
+        and record.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
+        for record in lines
     )
 
 

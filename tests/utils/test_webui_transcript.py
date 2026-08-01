@@ -172,8 +172,25 @@ def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monke
     key = "websocket:manifest"
     _write_segmented_turns(tmp_path, monkeypatch, key, "manifest", 4)
 
-    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    segment_dir = webui_transcript_segments_dir(key)
+    segment_names = sorted(path.name for path in segment_dir.glob("*.jsonl"))
+    assert segment_names
+    original = transcript_module._read_transcript_file
+    segment_reads: list[str] = []
+
+    def track_read(path):
+        if path.parent == segment_dir and path.suffix == ".jsonl":
+            segment_reads.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(transcript_module, "_read_transcript_file", track_read)
+    manifest = segment_dir / "manifest.json"
     manifest.write_text("{not json", encoding="utf-8")
+
+    entries = transcript_module._read_segment_manifest_entries(key)
+
+    assert [entry["id"] for entry in entries] == [path.removesuffix(".jsonl") for path in segment_names]
+    assert segment_reads == segment_names
 
     lines = read_transcript_lines(key)
 
