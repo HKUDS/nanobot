@@ -17,8 +17,10 @@ from nanobot.agent.tools.schema import (
 from nanobot.security.workspace_access import current_workspace_scope
 
 if TYPE_CHECKING:
+    from nanobot.agent.model_runtime import ModelRuntimeResolver
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import ToolContext
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @tool_parameters(
@@ -56,7 +58,11 @@ if TYPE_CHECKING:
 class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
-    def __init__(self, manager: "SubagentManager", resolver=None):
+    def __init__(
+        self,
+        manager: "SubagentManager",
+        resolver: "ModelRuntimeResolver | None" = None,
+    ):
         self._manager = manager
         self._resolver = resolver
 
@@ -114,7 +120,7 @@ class SpawnTool(Tool):
                     "Error: preset resolution unavailable (no runtime resolver)."
                 )
             try:
-                runtime = self._resolver.resolve_preset(preset)
+                runtime: "LLMRuntime" = self._resolver.resolve_preset(preset)
             except Exception as e:  # noqa: BLE001
                 return ToolResult.error(f"Error: cannot resolve preset {preset!r}: {e}")
         else:
