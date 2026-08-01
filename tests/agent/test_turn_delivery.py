@@ -198,3 +198,51 @@ def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> Non
         "injected_event": "subagent_result",
         "subagent_task_id": "sub-1",
     }
+
+
+def test_streamed_response_logged_exactly_once() -> None:
+    """A finalized streamed response is logged exactly once with full content."""
+    import asyncio
+
+    from loguru import logger as loguru_logger
+
+    from nanobot.agent.turn_delivery import TurnDelivery, TurnRoute
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.bus.runtime_events import RuntimeEventBus
+
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="telegram",
+        sender_id="user",
+        chat_id="c1",
+        content="hi",
+    )
+    delivery = TurnDelivery(
+        bus=bus,
+        runtime_event_publisher=RuntimeEventBus(),
+        input_message=msg,
+        session_key="telegram:c1",
+        route=TurnRoute(
+            channel="telegram",
+            chat_id="c1",
+            metadata={"_wants_stream": True},
+        ),
+        enable_stream=True,
+    )
+
+    records: list[str] = []
+    sink_id = loguru_logger.add(lambda m: records.append(str(m)))
+    try:
+        async def run() -> None:
+            await delivery._publish_stream("hello ")
+            await delivery._publish_stream("world")
+            await delivery._publish_stream_end()
+
+        asyncio.run(run())
+    finally:
+        loguru_logger.remove(sink_id)
+
+    delivered = [r for r in records if "Delivered streamed response" in r]
+    assert len(delivered) == 1
+    assert "hello world" in delivered[0]
