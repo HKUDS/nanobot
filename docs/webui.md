@@ -147,12 +147,11 @@ transcription is configured, slash commands, and `@` mentions for installed Apps
 or MCP presets. The model badge shows the current model or preset and links back
 to model settings when setup is incomplete.
 
-When two or more named model presets are configured, the badge also acts as a
-vertical preset selector. Press and hold the badge for about 0.4 seconds, drag up
-or down, and release on the preset you want. A plain click does not open a menu.
-For keyboard access, focus the badge and use <kbd>Up</kbd> / <kbd>Down</kbd> to
-move between presets or <kbd>Home</kbd> / <kbd>End</kbd> to jump to the first or
-last preset.
+When two or more named model presets are configured, the badge shows a dropdown
+indicator and acts as a preset selector. Click or tap it, then choose the preset
+you want from the menu. For keyboard access, focus the badge and press
+<kbd>Enter</kbd> or <kbd>Space</kbd> to open the menu, use the arrow keys to move,
+and press <kbd>Enter</kbd> to select.
 
 The selection applies to future turns in the current session and persists with
 that session; it does not change the default for other sessions. Only named

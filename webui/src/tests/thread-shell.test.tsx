@@ -586,19 +586,18 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view("default"));
 
-    const badge = await screen.findByRole("spinbutton", { name: "Default" });
+    const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    fireEvent.pointerDown(badge);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Fast/ }));
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
       "/model fast",
     );
     expect(await screen.findByText("Fast")).toBeInTheDocument();
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
-      { key: "End" },
-    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Extra/ }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
@@ -972,10 +971,8 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view(null));
 
-    fireEvent.keyDown(
-      await screen.findByRole("spinbutton", { name: "Default" }),
-      { key: "ArrowDown" },
-    );
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Fast/ }));
     expect(await screen.findByText("Fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
