@@ -49,6 +49,13 @@ Use `/model` to inspect the current runtime model:
 
 The response shows the current session's model and preset, plus the available preset names. Named presets come from the top-level `modelPresets` config and are the recommended way to configure model choices. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
 
+`/model <preset>` expects one of those preset names, not a provider model ID or
+the preset's display label. For example, if `modelPresets.local` uses the Ollama
+model `llama3.2`, run `/model local`, not `/model llama3.2`. If a model is currently
+configured only as an inline fallback, save it as a named preset before selecting
+it manually. Fallback order controls automatic failover; it is not a list of raw
+model IDs accepted by `/model`.
+
 To switch presets for future turns:
 
 ```text

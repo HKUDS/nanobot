@@ -147,6 +147,20 @@ transcription is configured, slash commands, and `@` mentions for installed Apps
 or MCP presets. The model badge shows the current model or preset and links back
 to model settings when setup is incomplete.
 
+When two or more named model presets are configured, the badge also acts as a
+vertical preset selector. Press and hold the badge for about 0.4 seconds, drag up
+or down, and release on the preset you want. A plain click does not open a menu.
+For keyboard access, focus the badge and use <kbd>Up</kbd> / <kbd>Down</kbd> to
+move between presets or <kbd>Home</kbd> / <kbd>End</kbd> to jump to the first or
+last preset.
+
+The selection applies to future turns in the current session and persists with
+that session; it does not change the default for other sessions. Only named
+presets from **Settings → Models** are selectable. An inline fallback model that
+has not been saved as a named preset is not a separate manual choice. Save it as
+a named preset to make it selectable. The same switch is available in chat with
+`/model <preset>`; see [Chat Commands: Model Presets](./chat-commands.md#model-presets).
+
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
 for provider setup and output behavior.
