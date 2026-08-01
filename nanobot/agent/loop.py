@@ -1533,7 +1533,10 @@ class AgentLoop:
                 return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        # Streamed responses are already logged at stream finalization in
+        # TurnDelivery._publish_stream_end; skip here to avoid double-logging.
+        if not streamed_content:
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         event = None
         meta = dict(msg.metadata or {})
