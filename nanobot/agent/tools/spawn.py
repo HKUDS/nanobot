@@ -42,21 +42,30 @@ if TYPE_CHECKING:
             ),
             default=False,
         ),
+        preset=StringSchema(
+            description=(
+                "Optional named model preset whose runtime (model + temperature) the "
+                "subagent should use. When set, the subagent runs with that preset's "
+                "generation settings regardless of the calling session's preset. "
+                "Overrides the session runtime; mutually exclusive with temperature."
+            ),
+        ),
         required=["task"],
     )
 )
 class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
-    def __init__(self, manager: "SubagentManager"):
+    def __init__(self, manager: "SubagentManager", resolver=None):
         self._manager = manager
+        self._resolver = resolver
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
         manager = ctx.subagent_manager
         if manager is None:
             raise RuntimeError("SpawnTool requires an initialized subagent manager")
-        return cls(manager=manager)
+        return cls(manager=manager, resolver=ctx.runtime_resolver)
 
     @property
     def name(self) -> str:
@@ -79,6 +88,7 @@ class SpawnTool(Tool):
         label: str | None = None,
         temperature: float | None = None,
         wait: bool = False,
+        preset: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -93,13 +103,29 @@ class SpawnTool(Tool):
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
             return ToolResult.error("Error: spawn requires an active model runtime")
+        if preset is not None and temperature is not None:
+            return ToolResult.error(
+                "Error: 'preset' and 'temperature' are mutually exclusive; "
+                "use one or the other."
+            )
+        if preset is not None:
+            if self._resolver is None:
+                return ToolResult.error(
+                    "Error: preset resolution unavailable (no runtime resolver)."
+                )
+            try:
+                runtime = self._resolver.resolve_preset(preset)
+            except Exception as e:  # noqa: BLE001
+                return ToolResult.error(f"Error: cannot resolve preset {preset!r}: {e}")
+        else:
+            runtime = request_ctx.runtime
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
         method = self._manager.run_inline if wait else self._manager.spawn
         return await method(
             task=task,
-            runtime=request_ctx.runtime,
+            runtime=runtime,
             label=label,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
