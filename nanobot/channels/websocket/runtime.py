@@ -13,6 +13,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Self, TypeGuard, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve, unix_serve
@@ -175,6 +176,8 @@ class WebSocketConfig(Base):
       blocking ``urllib`` or synchronous ``httpx`` from inside a coroutine.
     - ``token_issue_secret``: If non-empty, token requests must send ``Authorization: Bearer <secret>`` or
       ``X-Nanobot-Auth: <secret>``.
+    - ``public_ws_url``: Optional public WebSocket endpoint returned by WebUI bootstrap instead of
+      deriving one from proxy request headers. Its path must match ``path``.
     - ``websocket_requires_token``: If True, the handshake must include a valid token (static or issued and not expired).
     - Each connection has its own session: a unique ``chat_id`` maps to the agent session internally.
     - ``media`` field in outbound messages contains local filesystem paths; remote clients need a
@@ -186,6 +189,7 @@ class WebSocketConfig(Base):
     port: int = 8765
     unix_socket_path: str = ""
     path: str = "/"
+    public_ws_url: str = ""
     token: str = ""
     token_issue_path: str = ""
     token_issue_secret: str = ""
@@ -233,6 +237,32 @@ class WebSocketConfig(Base):
         if not value.startswith("/"):
             raise ValueError('token_issue_path must start with "/"')
         return _normalize_config_path(value)
+
+    @field_validator("public_ws_url")
+    @classmethod
+    def public_ws_url_format(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"ws", "wss"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("public_ws_url must be an absolute ws:// or wss:// URL without credentials")
+        return urlunsplit(
+            (parsed.scheme, parsed.netloc, _normalize_config_path(parsed.path or "/"), "", "")
+        )
+
+    @model_validator(mode="after")
+    def public_ws_url_matches_path(self) -> Self:
+        if self.public_ws_url and urlsplit(self.public_ws_url).path != _normalize_config_path(self.path):
+            raise ValueError("public_ws_url path must match path")
+        return self
 
     @model_validator(mode="after")
     def token_issue_path_differs_from_ws_path(self) -> Self:

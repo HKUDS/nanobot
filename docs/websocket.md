@@ -216,6 +216,7 @@ All fields go under `channels.websocket` in `config.json`.
 | `host` | string | `"127.0.0.1"` | Bind address. Use `"0.0.0.0"` to accept external connections. |
 | `port` | int | `8765` | Listen port. |
 | `path` | string | `"/"` | WebSocket upgrade path. Trailing slashes are normalized (root `/` is preserved). |
+| `publicWsUrl` | string | `""` | Exact public `ws://` or `wss://` endpoint returned by `/webui/bootstrap`. Set this when a reverse proxy forwards requests with an origin `Host` header (for example, `wss://claw.example.com/`); its path must match `path`. |
 | `maxMessageBytes` | int | `37748736` | Maximum inbound message size in bytes (1 KB – 40 MB). Default (36 MB) is sized to accept up to 4 base64-encoded image attachments at 8 MB each; lower it if the channel only carries text. |
 
 ### Authentication
@@ -310,6 +311,7 @@ user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
   "channels": {
     "websocket": {
       "host": "127.0.0.1",
+      "publicWsUrl": "wss://nanobot.example.com/",
       "trustedProxyAuth": {
         "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
         "assertionHeader": "Cf-Access-Jwt-Assertion"

@@ -441,6 +441,8 @@ class GatewayHTTPHandler:
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
+        if self.config.public_ws_url:
+            return self.config.public_ws_url
         host = _safe_host_header(_case_insensitive_header(headers, "Host"))
         if not host:
             host = _host_for_url(self.config.host, self.config.port)

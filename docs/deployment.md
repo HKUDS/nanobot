@@ -103,6 +103,7 @@ direct TCP peer is the tunnel process and the assertion is non-empty:
     "websocket": {
       "host": "127.0.0.1",
       "port": 8765,
+      "publicWsUrl": "wss://nanobot.example.com/",
       "trustedProxyAuth": {
         "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
         "assertionHeader": "Cf-Access-Jwt-Assertion"
@@ -116,7 +117,12 @@ This is two-part authorization: a trusted direct loopback peer **and** a
 non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bypass.
 For this flow `/webui/bootstrap` returns connection metadata without a
 bootstrap token or REST API token; the proxy assertion authorizes the WebSocket
-handshake and REST requests directly. The assertion header must be generated
+handshake and REST requests directly.
+
+Set `publicWsUrl` to the browser-facing `wss://` endpoint when the tunnel sends
+the origin host header (such as `127.0.0.1:8765`); otherwise the WebUI could
+attempt to open its WebSocket directly against the loopback address.
+The assertion header must be generated
 by Cloudflare Access after authentication; routing/client metadata headers such
 as `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP`
 are rejected as `assertionHeader` values. Nanobot trusts the assertion but does

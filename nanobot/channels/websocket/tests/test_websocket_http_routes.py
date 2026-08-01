@@ -3552,6 +3552,40 @@ def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
     assert body["ws_url"] == "wss://nanobot.example/"
 
 
+def test_bootstrap_ws_url_uses_configured_public_url(bus: MagicMock) -> None:
+    channel = _ch(
+        bus,
+        host="127.0.0.1",
+        port=29931,
+        tokenIssueSecret="s3cret",
+        publicWsUrl="wss://claw.wasapi.xyz/",
+    )
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Authorization": "Bearer s3cret",
+                "Host": "127.0.0.1:29931",
+                "X-Forwarded-Proto": "https",
+            }
+        ),
+    )
+    assert resp.status_code == 200
+    assert json.loads(resp.body)["ws_url"] == "wss://claw.wasapi.xyz/"
+
+
+def test_public_ws_url_must_match_configured_path() -> None:
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="public_ws_url path must match path"):
+        WebSocketConfig.model_validate(
+            {
+                "path": "/socket",
+                "publicWsUrl": "wss://claw.wasapi.xyz/",
+            }
+        )
+
+
 def test_bootstrap_without_auth_rejects_remote_requests(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
     resp = channel.gateway.http._handle_bootstrap(_REMOTE, _NO_HEADERS)
