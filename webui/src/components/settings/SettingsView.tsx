@@ -2501,7 +2501,6 @@ function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
-  const desktopNavRef = useRef<HTMLDivElement>(null);
   const activeNavItemRef = useRef<HTMLButtonElement>(null);
   const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
     ?? SETTINGS_NAV_ITEMS[0];
@@ -2575,7 +2574,12 @@ function SettingsSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div ref={desktopNavRef} className="relative hidden space-y-1 lg:block">
+        <SidebarSelectionHighlight
+          targetRef={activeNavItemRef}
+          activeId={activeSection}
+          scope="settings"
+          className="relative hidden space-y-1 lg:block"
+        >
           {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
             const active = key === activeSection;
             return (
@@ -2600,13 +2604,7 @@ function SettingsSidebar({
               </button>
             );
           })}
-          <SidebarSelectionHighlight
-            containerRef={desktopNavRef}
-            targetRef={activeNavItemRef}
-            activeId={activeSection}
-            scope="settings"
-          />
-        </div>
+        </SidebarSelectionHighlight>
       </nav>
 
       <div className="hidden lg:mt-auto lg:block lg:pt-4">

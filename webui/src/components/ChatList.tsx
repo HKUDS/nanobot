@@ -107,7 +107,6 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
-  const listContentRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
@@ -188,8 +187,10 @@ export const ChatList = memo(function ChatList({
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
-      <div
-        ref={listContentRef}
+      <SidebarSelectionHighlight
+        targetRef={activeRowRef}
+        activeId={activeKey}
+        scope="sessions"
         data-chat-list-content
         className="relative min-w-0 space-y-3 px-2 py-1.5"
       >
@@ -408,13 +409,7 @@ export const ChatList = memo(function ChatList({
             </button>
           </div>
         ) : null}
-        <SidebarSelectionHighlight
-          containerRef={listContentRef}
-          targetRef={activeRowRef}
-          activeId={activeKey}
-          scope="sessions"
-        />
-      </div>
+      </SidebarSelectionHighlight>
     </div>
   );
 });

@@ -92,7 +92,6 @@ export function Sidebar(props: SidebarProps) {
   const collapsed = Boolean(props.collapsed);
   const toggleLabel = t("thread.header.toggleSidebar");
   const newChatShortcut = newChatShortcutLabel();
-  const actionListRef = useRef<HTMLDivElement>(null);
   const activeActionRef = useRef<HTMLButtonElement>(null);
   const activeActionId = props.newChatActive
     ? "new-chat"
@@ -150,8 +149,10 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
 
-      <div
-        ref={actionListRef}
+      <SidebarSelectionHighlight
+        targetRef={activeActionRef}
+        activeId={activeActionId}
+        scope="actions"
         className={cn(
           "relative space-y-1.5 px-2 pb-2",
           collapsed && "flex w-14 flex-col items-center px-0",
@@ -208,13 +209,7 @@ export function Sidebar(props: SidebarProps) {
             icon={<Archive className="h-4 w-4" />}
           />
         ) : null}
-        <SidebarSelectionHighlight
-          containerRef={actionListRef}
-          targetRef={activeActionRef}
-          activeId={activeActionId}
-          scope="actions"
-        />
-      </div>
+      </SidebarSelectionHighlight>
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
