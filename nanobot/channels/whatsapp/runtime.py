@@ -39,6 +39,7 @@ class _NeonizeAPI(NamedTuple):
     MessageEv: Any
     PairStatusEv: Any
     build_jid: Any
+    detect_mime: Any
 
 
 class _MediaInfo(NamedTuple):
@@ -52,6 +53,8 @@ class _MediaInfo(NamedTuple):
 _NEONIZE_API: _NeonizeAPI | None = None
 _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
 _LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
+# OGG is intentionally excluded: WhatsApp accepts only mono Opus, which MIME sniffing cannot prove.
+_DIRECT_AUDIO_MIMETYPES = {"audio/aac", "audio/amr", "audio/mp4", "audio/mpeg"}
 
 
 def _default_database_path() -> Path:
@@ -68,9 +71,14 @@ def _load_neonize() -> _NeonizeAPI:
         return _NEONIZE_API
 
     try:
+        import magic
         from neonize.aioze.client import NewAClient
         from neonize.aioze.events import ConnectedEv, DisconnectedEv, MessageEv, PairStatusEv
         from neonize.utils.jid import build_jid
+
+        detect_mime = getattr(magic, "from_file", None)
+        if not callable(detect_mime):
+            raise ImportError("python-magic does not expose from_file")
     except ImportError as exc:
         raise RuntimeError(
             "WhatsApp dependencies not installed. Run: nanobot plugins enable whatsapp"
@@ -83,6 +91,7 @@ def _load_neonize() -> _NeonizeAPI:
         MessageEv=MessageEv,
         PairStatusEv=PairStatusEv,
         build_jid=build_jid,
+        detect_mime=detect_mime,
     )
     return _NEONIZE_API
 
@@ -418,13 +427,12 @@ class WhatsAppChannel(BaseChannel):
 
     async def _send_media(self, client: Any, to: Any, media_path: str) -> None:
         path = str(Path(media_path).expanduser())
-        mime, _ = mimetypes.guess_type(path)
-        mimetype = mime or "application/octet-stream"
+        mimetype = self._detect_mimetype(path)
         if mimetype.startswith("image/"):
             await client.send_image(to, path)
         elif mimetype.startswith("video/"):
             await client.send_video(to, path)
-        elif mimetype.startswith("audio/"):
+        elif mimetype in _DIRECT_AUDIO_MIMETYPES:
             await client.send_audio(to, path)
         else:
             await client.send_document(
@@ -433,6 +441,19 @@ class WhatsAppChannel(BaseChannel):
                 filename=Path(path).name,
                 mimetype=mimetype,
             )
+
+    def _detect_mimetype(self, path: str) -> str:
+        try:
+            detected = _load_neonize().detect_mime(path, mime=True)
+        except Exception as exc:
+            self.logger.debug("Failed to inspect WhatsApp media {}: {}", path, exc)
+            detected = None
+
+        if isinstance(detected, str) and "/" in detected:
+            return detected.partition(";")[0].strip().lower()
+
+        guessed, _ = mimetypes.guess_type(path)
+        return guessed or "application/octet-stream"
 
     def _register_handlers(
         self,
