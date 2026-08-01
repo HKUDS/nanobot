@@ -18,7 +18,7 @@ from urllib.parse import quote, urlparse
 import httpx
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.security.network import PinnedDNSAsyncTransport
+from nanobot.security.network import PinnedDNSAsyncTransport, validate_url_target
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
 
 _PROVIDER_ALL = "all"
@@ -384,6 +384,14 @@ async def _install_skills_sh_skill(
             "Node.js with npx is required to install skills",
             status=503,
         )
+
+    # GitHub shorthand is resolved by the CLI against a fixed public host. A
+    # well-known source is an arbitrary catalog-provided hostname, so reject
+    # private or otherwise unsafe DNS targets before delegating to the CLI.
+    if install_source.startswith("https://"):
+        allowed, _ = await asyncio.to_thread(validate_url_target, install_source)
+        if not allowed:
+            raise SkillsMarketplaceError("skill source is not publicly reachable")
 
     env = os.environ.copy()
     env["DISABLE_TELEMETRY"] = "1"

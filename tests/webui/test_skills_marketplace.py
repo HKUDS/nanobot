@@ -1,8 +1,10 @@
+import asyncio
 import hashlib
 import io
 import zipfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -365,6 +367,10 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
         lambda executable: "/usr/local/bin/npx" if executable == "npx" else None,
     )
     monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.validate_url_target",
+        lambda _url: (True, ""),
+    )
+    monkeypatch.setattr(
         "nanobot.webui.skills_marketplace.asyncio.create_subprocess_exec",
         create_subprocess_exec,
     )
@@ -415,6 +421,28 @@ async def test_install_marketplace_skill_rejects_malformed_well_known_sources(
 ) -> None:
     with pytest.raises(SkillsMarketplaceError, match="invalid skill source"):
         await install_marketplace_skill(source, "react-testing", tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_install_marketplace_skill_rejects_private_well_known_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.shutil.which",
+        lambda executable: "/usr/local/bin/npx" if executable == "npx" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.validate_url_target",
+        lambda _url: (False, "private network target"),
+    )
+    create_process = AsyncMock()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    with pytest.raises(SkillsMarketplaceError, match="not publicly reachable"):
+        await install_marketplace_skill("internal.example.com", "react-testing", tmp_path)
+
+    create_process.assert_not_awaited()
 
 
 @pytest.mark.asyncio
