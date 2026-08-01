@@ -225,7 +225,10 @@ All fields go under `channels.websocket` in `config.json`.
 | `token` | string | `""` | Static shared secret. When set, clients must provide `?token=<value>` matching this secret (timing-safe comparison). Issued tokens are also accepted as a fallback. |
 | `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
-| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` still issues WebUI REST API tokens for same-machine localhost browser requests; remote or forwarded bootstrap requires `tokenIssueSecret` or `token`. |
+| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` still issues WebUI REST API tokens for same-machine localhost browser requests; remote or forwarded bootstrap requires `tokenIssueSecret`, `token`, or a fully configured `trustedProxyAuth`. |
+| `trustedProxyAuth` | object or `null` | `null` | Optional two-part bootstrap authorization for a directly connected upstream proxy. Both `trustedPeerCidrs` and a non-empty `assertionHeader` value must match; a CIDR alone never authorizes bootstrap. |
+| `trustedProxyAuth.trustedPeerCidrs` | list of CIDR strings | — | Direct TCP peer networks that may present the assertion. IPv4, IPv6, and IPv4-mapped IPv6 peers are supported; universal CIDRs (`0.0.0.0/0`, `::/0`) are rejected. |
+| `trustedProxyAuth.assertionHeader` | string | — | HTTP header whose non-empty value proves the upstream proxy authenticated the request. Nanobot trusts this value but does not cryptographically validate it. |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
 
 ### Access Control
@@ -271,9 +274,47 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 4. The token is consumed (single use) and cannot be reused.
 
 The embedded WebUI's `/webui/bootstrap` route also returns a WebSocket token.
+
 It returns a separate `api_token` for REST routes to same-machine localhost
-browser requests, or after the request proves knowledge of `tokenIssueSecret`
-or the static `token`.
+browser requests, or after the request proves knowledge of `tokenIssueSecret`,
+the static `token`, or the configured trusted proxy assertion.
+
+### Trusted proxy bootstrap
+
+`trustedProxyAuth` is an opt-in alternative for deployments where an
+identity-aware reverse proxy authenticates the user before connecting to nanobot.
+Bootstrap is accepted only when **both** the direct TCP peer matches one of
+`trustedPeerCidrs` and the configured assertion header is present and non-empty.
+A trusted address by itself is never sufficient.
+
+Nanobot deliberately uses only `connection.remote_address` for the peer check.
+It never uses `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `CF-Connecting-IP`,
+or `X-Forwarded-Host` to decide whether the proxy is trusted. Nanobot trusts the
+assertion supplied by the explicitly trusted peer, but does not cryptographically
+validate or interpret the JWT/assertion contents. Do not enable this option if
+untrusted clients can connect directly to the nanobot listener.
+
+For example, a local Cloudflare Tunnel with Cloudflare Access can validate the
+user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "host": "127.0.0.1",
+      "trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
+        "assertionHeader": "Cf-Access-Jwt-Assertion"
+      }
+    }
+  }
+}
+```
+
+This works only when the directly connected `cloudflared` process reaches
+nanobot over the configured loopback address and supplies a non-empty assertion.
+Keep nanobot firewalled from untrusted clients; this configuration is not a
+CIDR-based bootstrap bypass.
 
 ### Example setup
 

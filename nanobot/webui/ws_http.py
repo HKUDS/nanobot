@@ -61,6 +61,9 @@ from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
 )
 from nanobot.webui.http_utils import (
+    is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
+)
+from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
 from nanobot.webui.http_utils import (
@@ -372,13 +375,18 @@ class GatewayHTTPHandler:
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
+        is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
+            connection,
+            request.headers,
+            self.config,
+        )
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not is_local_browser:
+        elif not (is_local_browser or is_proxy_authenticated):
             return _http_error(403, "bootstrap is localhost-only")
 
-        api_token_allowed = bool(secret) or is_local_browser
+        api_token_allowed = bool(secret) or is_local_browser or is_proxy_authenticated
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),

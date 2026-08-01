@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import re
 import ssl
@@ -13,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Self, TypeGuard, cast
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
@@ -89,6 +90,51 @@ from nanobot.webui.websocket_logging import websockets_server_logger
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
 
 
+class TrustedProxyAuthConfig(Base):
+    """Authentication assertions accepted from explicitly trusted proxy peers."""
+
+    trusted_peer_cidrs: list[str] = Field(min_length=1)
+    assertion_header: str = Field(min_length=1)
+    _trusted_peer_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = PrivateAttr(
+        default=()
+    )
+
+    @field_validator("trusted_peer_cidrs")
+    @classmethod
+    def validate_trusted_peer_cidrs(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            value = value.strip()
+            try:
+                network = ipaddress.ip_network(value, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"invalid trusted proxy CIDR: {value!r}") from exc
+            if network.prefixlen == 0:
+                raise ValueError("universal trusted proxy CIDRs are not allowed")
+            if isinstance(network, ipaddress.IPv6Network):
+                mapped_start = ipaddress.IPv6Address("::ffff:0:0")
+                mapped_end = ipaddress.IPv6Address("::ffff:ffff:ffff")
+                if mapped_start in network and mapped_end in network:
+                    raise ValueError("trusted proxy CIDRs must not cover all IPv4-mapped addresses")
+            normalized.append(network.with_prefixlen)
+        return normalized
+
+    @field_validator("assertion_header")
+    @classmethod
+    def validate_assertion_header(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(char.isspace() or ord(char) < 0x21 for char in value):
+            raise ValueError("assertion_header must be a valid HTTP header name")
+        return value
+
+    @model_validator(mode="after")
+    def compile_trusted_peer_networks(self) -> Self:
+        self._trusted_peer_networks = tuple(
+            ipaddress.ip_network(value, strict=False) for value in self.trusted_peer_cidrs
+        )
+        return self
+
+
 class WebSocketConfig(Base):
     """WebSocket server channel configuration.
 
@@ -117,6 +163,7 @@ class WebSocketConfig(Base):
     token: str = ""
     token_issue_path: str = ""
     token_issue_secret: str = ""
+    trusted_proxy_auth: TrustedProxyAuthConfig | None = None
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])

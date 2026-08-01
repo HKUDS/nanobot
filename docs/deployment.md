@@ -67,7 +67,7 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 > Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/nanobot; do not mount API keys or bot tokens into them unless you trust the publisher.
 
 > [!IMPORTANT]
-> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, bind the WebSocket channel externally and protect bootstrap with a secret:
+> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, bind the WebSocket channel externally and protect bootstrap with `tokenIssueSecret`:
 >
 > ```json
 > {
@@ -88,6 +88,36 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 > remotely monitored health endpoint behind a firewall or reverse proxy. If another host
 > must probe it directly, replace `127.0.0.1` in the port mapping with a trusted host
 > interface and restrict inbound traffic to the monitoring system.
+
+### Cloudflare Tunnel + Cloudflare Access
+
+For a local `cloudflared` process in front of nanobot, Cloudflare Access can
+authenticate the user before forwarding the request and add
+`Cf-Access-Jwt-Assertion`. Opt in to trusted-proxy bootstrap only when the
+direct TCP peer is the tunnel process and the assertion is non-empty:
+
+```json
+{
+  "gateway": { "host": "127.0.0.1" },
+  "channels": {
+    "websocket": {
+      "host": "127.0.0.1",
+      "port": 8765,
+      "trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
+        "assertionHeader": "Cf-Access-Jwt-Assertion"
+      }
+    }
+  }
+}
+```
+
+This is two-part authorization: a trusted direct loopback peer **and** a
+non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bootstrap
+bypass. Nanobot trusts the assertion but does not cryptographically validate
+the JWT, so configure the tunnel and Access policy carefully and do not expose
+the nanobot listener directly to untrusted clients. Forwarded client headers
+such as `X-Forwarded-For` do not establish proxy trust.
 
 ### Docker Compose
 

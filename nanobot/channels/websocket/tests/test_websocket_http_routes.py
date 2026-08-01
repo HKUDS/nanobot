@@ -3321,6 +3321,128 @@ def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> 
     )
 
 
+def _trusted_proxy_config(
+    cidrs: list[str] | None = None,
+    *,
+    assertion_header: str = "Cf-Access-Jwt-Assertion",
+) -> dict[str, Any]:
+    return {
+        "trustedProxyAuth": {
+            "trustedPeerCidrs": cidrs or ["127.0.0.1/32"],
+            "assertionHeader": assertion_header,
+        }
+    }
+
+
+def test_trusted_proxy_requires_non_empty_assertion(bus: MagicMock) -> None:
+    channel = _ch(bus, **_trusted_proxy_config())
+    for assertion in (None, "", "   "):
+        headers = {"Cf-Access-Jwt-Assertion": assertion} if assertion is not None else {}
+        resp = channel.gateway.http._handle_bootstrap(_LOCAL, _FakeReq(headers))
+        assert resp.status_code == 403
+
+
+def test_trusted_proxy_rejects_untrusted_peer_spoof(bus: MagicMock) -> None:
+    channel = _ch(bus, **_trusted_proxy_config())
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE,
+        _FakeReq({"Cf-Access-Jwt-Assertion": "spoofed"}),
+    )
+    assert resp.status_code == 403
+
+
+def test_trusted_proxy_accepts_assertion_without_forwarded_header_trust(
+    bus: MagicMock,
+) -> None:
+    assertion = "opaque-upstream-assertion"
+    channel = _ch(bus, **_trusted_proxy_config())
+    log = MagicMock()
+    channel.gateway.http._log = log
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Host": "nanobot.example",
+                "X-Forwarded-For": "203.0.113.42",
+                "Forwarded": "for=203.0.113.42;host=nanobot.example",
+                "X-Real-IP": "203.0.113.42",
+                "X-Forwarded-Host": "nanobot.example",
+                "Cf-Access-Jwt-Assertion": assertion,
+            }
+        ),
+    )
+    assert resp.status_code == 200
+    body = resp.body.decode()
+    assert assertion not in body
+    assert assertion not in repr(log.mock_calls)
+    payload = json.loads(body)
+    assert payload["token"].startswith("nbwt_")
+    assert payload["api_token"].startswith("nbwt_")
+    assert payload["api_token"] != payload["token"]
+
+
+def test_forwarding_headers_alone_never_authorize_bootstrap(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE,
+        _FakeReq(
+            {
+                "Host": "nanobot.example",
+                "X-Forwarded-For": "127.0.0.1",
+                "Forwarded": "for=127.0.0.1",
+                "X-Real-IP": "127.0.0.1",
+            }
+        ),
+    )
+    assert resp.status_code == 403
+
+
+def test_trusted_proxy_does_not_override_bootstrap_secret(bus: MagicMock) -> None:
+    channel = _ch(
+        bus,
+        tokenIssueSecret="route-secret",
+        **_trusted_proxy_config(),
+    )
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL,
+        _FakeReq({"Cf-Access-Jwt-Assertion": "present"}),
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("peer", "cidr"),
+    [
+        ("127.0.0.1", "127.0.0.1/32"),
+        ("::1", "::1/128"),
+        ("::ffff:127.0.0.1", "127.0.0.0/24"),
+        ("127.0.0.1", "::ffff:127.0.0.0/120"),
+    ],
+)
+def test_trusted_proxy_matches_ip_versions_and_mapped_peers(
+    bus: MagicMock,
+    peer: str,
+    cidr: str,
+) -> None:
+    from nanobot.webui.http_utils import is_trusted_proxy_authenticated_request
+
+    config = WebSocketConfig.model_validate(_trusted_proxy_config([cidr]))
+    request = _FakeReq({"Cf-Access-Jwt-Assertion": "present"})
+    assert is_trusted_proxy_authenticated_request(_FakeConn((peer, 12345)), request.headers, config)
+
+
+@pytest.mark.parametrize(
+    "cidr",
+    ["not-a-cidr", "0.0.0.0/0", "::/0", "::/1", "::ffff:0:0/96"],
+)
+def test_trusted_proxy_rejects_invalid_or_universal_cidrs(
+    cidr: str,
+) -> None:
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError):
+        WebSocketConfig.model_validate(_trusted_proxy_config([cidr]))
+
 def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:
     import pytest
     from pydantic_core import ValidationError

@@ -169,6 +169,50 @@ def is_localhost(connection: Any) -> bool:
     return host in {"127.0.0.1", "::1", "localhost"}
 
 
+def _connection_ip(connection: Any) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    addr = getattr(connection, "remote_address", None)
+    host = cast(Any, addr[0] if isinstance(addr, tuple) else addr)
+    if not isinstance(host, str):
+        return None
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def _address_matches_network(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    if isinstance(address, ipaddress.IPv4Address):
+        if isinstance(network, ipaddress.IPv4Network):
+            return address in network
+        return ipaddress.IPv6Address(f"::ffff:{address}") in network
+    if isinstance(network, ipaddress.IPv6Network):
+        return address in network
+    mapped = address.ipv4_mapped
+    return mapped is not None and mapped in network
+
+
+def is_trusted_proxy_authenticated_request(
+    connection: Any,
+    headers: Any,
+    config: Any,
+) -> bool:
+    """Return True when a configured proxy peer presents a non-empty assertion."""
+    trusted_proxy_auth = getattr(config, "trusted_proxy_auth", None)
+    if trusted_proxy_auth is None:
+        return False
+    address = _connection_ip(connection)
+    if address is None:
+        return False
+    networks = getattr(trusted_proxy_auth, "_trusted_peer_networks", ())
+    if not any(_address_matches_network(address, network) for network in networks):
+        return False
+    assertion_header = getattr(trusted_proxy_auth, "assertion_header", "")
+    return bool(case_insensitive_header(headers, assertion_header))
+
+
 def _host_without_port(value: str) -> str:
     value = value.strip().strip('"').strip("'")
     if not value:
