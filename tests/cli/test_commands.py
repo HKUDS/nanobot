@@ -1196,6 +1196,27 @@ def test_config_bare_nemotron_still_auto_routes_to_configured_ollama():
     assert config.get_api_base() == "http://localhost:11434/v1"
 
 
+def test_config_cloud_nemotron_is_not_hijacked_by_configured_ollama():
+    """An explicit cloud namespace takes precedence over local keywords."""
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "auto",
+                    "model": "nvidia/nemotron-3-super-120b-a12b",
+                }
+            },
+            "providers": {
+                "ollama": {"apiBase": "http://localhost:11434/v1"},
+                "openrouter": {"apiKey": "sk-or-test"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "openrouter"
+    assert config.get_api_base() == "https://openrouter.ai/api/v1"
+
+
 def test_openai_compat_provider_passes_model_through():
     from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
