@@ -678,6 +678,40 @@ async def test_overlapping_manual_runs_preserve_stopped_service_state(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_manual_run_does_not_restart_service_stopped_during_execution(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def on_job(_job) -> None:
+        entered.set()
+        await release.wait()
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual-stop",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    await service.start()
+
+    run = asyncio.create_task(service.run_job(job.id))
+    try:
+        await entered.wait()
+        service.stop()
+        release.set()
+
+        assert await run is True
+        assert service._running is False
+        assert service._timer_task is None
+    finally:
+        release.set()
+        await asyncio.gather(run, return_exceptions=True)
+        service.stop()
+
+
+@pytest.mark.asyncio
 async def test_running_service_honors_external_disable(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     called: list[str] = []
