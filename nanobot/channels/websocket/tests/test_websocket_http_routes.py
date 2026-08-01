@@ -2978,6 +2978,53 @@ async def test_webui_thread_resigns_assistant_media_urls(
 
 
 @pytest.mark.asyncio
+async def test_webui_thread_complete_transcript_skips_session_history_read(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:fast-thread"
+    sm = _seed_session(tmp_path, key=key)
+    for event in (
+        {"event": "user", "chat_id": "fast-thread", "text": "hi"},
+        {"event": "message", "chat_id": "fast-thread", "text": "hello back"},
+        {"event": "turn_end", "chat_id": "fast-thread"},
+    ):
+        append_transcript_object(key, event)
+
+    read_session_file = MagicMock(
+        side_effect=AssertionError("complete transcripts must not read canonical history")
+    )
+    monkeypatch.setattr(sm, "read_session_file", read_session_file)
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Afast-thread/webui-thread?limit=160&direction=latest",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert [message["content"] for message in response.json()["messages"]] == [
+            "hi",
+            "hello back",
+        ]
+        read_session_file.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_routes_reject_non_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:

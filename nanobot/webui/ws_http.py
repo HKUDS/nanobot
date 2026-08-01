@@ -498,17 +498,21 @@ class GatewayHTTPHandler:
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         scope = self.workspaces.scope_for_session_key(decoded_key)
-        session_messages: list[dict[str, Any]] | None = None
-        if self.session_manager is not None:
+
+        def load_session_messages() -> list[dict[str, Any]] | None:
+            if self.session_manager is None:
+                return None
             session_data = self.session_manager.read_session_file(decoded_key)
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
-            if isinstance(raw_messages, list):
-                raw_session_messages = cast(list[Any], raw_messages)
-                session_messages = [
-                    cast(dict[str, Any], raw_message)
-                    for raw_message in raw_session_messages
-                    if isinstance(raw_message, dict)
-                ]
+            if not isinstance(raw_messages, list):
+                return None
+            raw_session_messages = cast(list[Any], raw_messages)
+            return [
+                cast(dict[str, Any], raw_message)
+                for raw_message in raw_session_messages
+                if isinstance(raw_message, dict)
+            ]
+
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -541,7 +545,7 @@ class GatewayHTTPHandler:
                 text,
                 workspace_path=scope.project_path,
             ),
-            session_messages=session_messages,
+            session_messages_loader=load_session_messages,
             active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
             active_turn_transcript_persistence_failed=(
