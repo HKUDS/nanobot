@@ -48,6 +48,7 @@ def test_build_responses_body_strips_github_copilot_prefix():
         provider_context=ProviderCallContext(context_window_tokens=128_000),
     )
     assert body["model"] == "gpt-5.4-mini"
+    assert body["include"] == ["reasoning.encrypted_content"]
     assert "context_management" not in body
 
 

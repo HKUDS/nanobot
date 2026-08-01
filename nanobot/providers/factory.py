@@ -230,7 +230,7 @@ def _make_provider_core(
             extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
-            api_type=p.api_type if p and provider_name == "openai" else "auto",
+            api_type=p.api_type if p else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
             provider_name=provider_name,

@@ -13,7 +13,7 @@ Every entry writes out all fields so you can copy-paste as a template.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic.alias_generators import to_snake
 
@@ -29,6 +29,32 @@ class ProviderModelSpec:
     context_window: int | None = None
     reasoning_efforts: tuple[str, ...] = ()
     supports_backend_search: bool = False
+
+
+@dataclass(frozen=True)
+class ResponsesCapabilities:
+    """Provider capabilities for the shared OpenAI Responses execution path.
+
+    ``reasoning_replay`` selects whether multi-turn reasoning is retained as
+    encrypted server content, plaintext local history, or not requested.
+    """
+
+    models: tuple[str, ...] = ()
+    auto_route: bool = False
+    requires_direct_openai_base: bool = False
+    allows_api_type_override: bool = False
+    reasoning_replay: Literal["none", "encrypted", "plaintext"] = "none"
+    supports_native_compaction: bool = False
+    allows_chat_fallback: bool = True
+
+    def matches_model(self, model: str) -> bool:
+        """Return whether *model* is explicitly routed through Responses."""
+        model_name = model.lower()
+        return any(
+            model_name == supported.lower()
+            or model_name.endswith(f"/{supported.lower()}")
+            for supported in self.models
+        )
 
 
 @dataclass(frozen=True)
@@ -114,9 +140,8 @@ class ProviderSpec:
     # Substring match against the wire model name (lowercased).
     implicit_reasoning_models: tuple[str, ...] = ()
 
-    # Models that expose the OpenAI Responses wire format.  This is model-level
-    # because providers may add Responses support incrementally.
-    responses_models: tuple[str, ...] = ()
+    # Capabilities for providers/models served through the shared Responses path.
+    responses: ResponsesCapabilities | None = None
 
     # Provider-hosted Responses tools sent unless extraBody.tools explicitly
     # supplies the hosted-tool selection. Values are raw Responses tool types.
@@ -403,6 +428,13 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
+        responses=ResponsesCapabilities(
+            auto_route=True,
+            requires_direct_openai_base=True,
+            allows_api_type_override=True,
+            reasoning_replay="encrypted",
+            supports_native_compaction=True,
+        ),
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
@@ -516,6 +548,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
         is_oauth=True,
         supports_max_completion_tokens=True,
+        responses=ResponsesCapabilities(
+            auto_route=True,
+            reasoning_replay="encrypted",
+            allows_chat_fallback=False,
+        ),
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com
     ProviderSpec(
@@ -526,10 +563,13 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
-        responses_models=(
-            "deepseek-v4-flash",
-            "deepseek-v4-pro",
-            "deepseek-v4-flash-vision-exp",
+        responses=ResponsesCapabilities(
+            models=(
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp",
+            ),
+            reasoning_replay="plaintext",
         ),
         responses_default_tools=("web_search",),
     ),
