@@ -150,3 +150,55 @@ def test_reasoning_effort_key_is_case_insensitive(provider):
     for _ in range(_RESPONSES_FAILURE_THRESHOLD):
         provider._record_responses_failure("o3", "High")
     assert provider._should_use_responses_api("o3", "high") is False
+
+
+# ======================================================================
+# _should_fallback_from_responses_error
+# ======================================================================
+
+
+class _FakeAPIError(Exception):
+    def __init__(self, status_code, body):
+        super().__init__(str(body))
+        self.status_code = status_code
+        self.body = body
+        self.response = None
+
+
+def test_serde_deserialize_error_triggers_fallback():
+    # DeepSeek Responses gateway rejecting the wire body (observed Aug 2026).
+    err = _FakeAPIError(400, {
+        "message": (
+            "Failed to deserialize the JSON body into the target type: "
+            "input: invalid type: string \"Michael topped up DeepSeek ...\", "
+            "expected a sequence at line 1 column 268612"
+        ),
+        "type": "invalid_request_error",
+        "param": None,
+    })
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+
+
+def test_invalid_type_error_triggers_fallback():
+    err = _FakeAPIError(422, "input[0]: invalid type: map, expected a string")
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+
+
+def test_unknown_field_error_triggers_fallback():
+    err = _FakeAPIError(400, "unknown field `foo`, expected one of `input`, `instructions`")
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+
+
+def test_legacy_compatibility_markers_still_trigger_fallback():
+    err = _FakeAPIError(400, "parameter `instructions` is unsupported")
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+
+
+def test_unrelated_400_does_not_trigger_fallback():
+    err = _FakeAPIError(400, {"message": "rate limit exceeded", "type": "rate_limit_error"})
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
+
+
+def test_server_error_does_not_trigger_fallback():
+    err = _FakeAPIError(500, {"message": "internal server error"})
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
