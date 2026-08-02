@@ -40,6 +40,9 @@ from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
 from nanobot.webui.http_utils import (
+    combined_list_header as _combined_list_header,
+)
+from nanobot.webui.http_utils import (
     host_for_url as _host_for_url,
 )
 from nanobot.webui.http_utils import (
@@ -427,7 +430,10 @@ class GatewayHTTPHandler:
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
         payload = await asyncio.to_thread(self._sessions_list_payload)
-        return _http_json_response(payload)
+        return _http_json_response(
+            payload,
+            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+        )
 
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
@@ -558,7 +564,10 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
-        return _http_json_response(data)
+        return _http_json_response(
+            data,
+            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+        )
 
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):

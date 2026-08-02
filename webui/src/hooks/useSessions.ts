@@ -20,7 +20,7 @@ import type {
 } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-const INITIAL_HISTORY_PAGE_LIMIT = 160;
+const INITIAL_HISTORY_PAGE_LIMIT = 80;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 

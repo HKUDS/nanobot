@@ -2978,6 +2978,34 @@ async def test_webui_thread_resigns_assistant_media_urls(
 
 
 @pytest.mark.asyncio
+async def test_sessions_list_negotiates_gzip_across_repeated_headers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = _seed_many(tmp_path, [f"websocket:gzip-{index:03d}" for index in range(80)])
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions",
+            headers=[
+                ("Authorization", f"Bearer {token}"),
+                ("Accept-Encoding", "identity;q=0"),
+                ("Accept-Encoding", "gzip"),
+            ],
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Content-Encoding"] == "gzip"
+        assert response.headers["Vary"] == "Accept-Encoding"
+        assert len(response.json()["sessions"]) == 80
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_thread_complete_transcript_skips_session_history_read(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3019,6 +3047,64 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
             "hello back",
         ]
         read_session_file.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_negotiates_gzip_for_large_payloads(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = SessionManager(tmp_path)
+    append_transcript_object(
+        "websocket:gzip-thread",
+        {
+            "event": "user",
+            "chat_id": "gzip-thread",
+            "text": "compress me " * 1_000,
+        },
+    )
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        url = (
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Agzip-thread/webui-thread?limit=80&direction=latest"
+        )
+        compressed = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "br, gzip",
+            },
+        )
+
+        assert compressed.status_code == 200
+        assert compressed.headers["Content-Encoding"] == "gzip"
+        assert compressed.headers["Vary"] == "Accept-Encoding"
+        assert int(compressed.headers["Content-Length"]) < len(compressed.content)
+        assert compressed.json()["messages"][0]["content"].startswith("compress me")
+
+        identity = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "gzip;q=0, br",
+            },
+        )
+        assert identity.status_code == 200
+        assert "Content-Encoding" not in identity.headers
+        assert identity.json() == compressed.json()
+
+        unauthorized = await _http_get(url, headers={"Accept-Encoding": "gzip"})
+        assert unauthorized.status_code == 401
+        assert "Content-Encoding" not in unauthorized.headers
     finally:
         await channel.stop()
         await server_task
