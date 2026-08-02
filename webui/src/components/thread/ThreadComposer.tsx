@@ -233,6 +233,7 @@ const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
+const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
   ariaLabel,
@@ -285,6 +286,7 @@ interface QueuedPrompt {
   text: string;
   images?: QueuedPromptImage[];
   quotedContext?: string;
+  sessionMentions?: SessionMention[];
 }
 
 interface QueuedPromptImage {
@@ -396,6 +398,26 @@ function queuedPromptsStorageKey(key?: string | null): string | null {
   return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
 }
 
+function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<SessionMention>;
+    const name = candidate.name?.trim().slice(0, 80);
+    const sessionKey = candidate.session_key?.trim().slice(0, 512);
+    if (
+      !name
+      || !sessionKey?.startsWith("websocket:")
+      || !/^[\p{L}\p{N}_-]+$/u.test(name)
+    ) return [];
+    return [{
+      name,
+      session_key: sessionKey,
+      title: candidate.title?.trim().slice(0, 160) ?? "",
+    }];
+  }).slice(0, SESSION_MENTIONS_LIMIT);
+}
+
 function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
   if (!item || typeof item !== "object") return null;
   const record = item as Partial<QueuedPrompt>;
@@ -425,6 +447,7 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
   const quotedContext = typeof record.quotedContext === "string"
     ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
     : "";
+  const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
     ? record.id
@@ -434,6 +457,7 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     text,
     ...(images.length > 0 ? { images } : {}),
     ...(quotedContext ? { quotedContext } : {}),
+    ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
   };
 }
 
@@ -467,6 +491,9 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
           text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
           ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
           ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+          ...(prompt.sessionMentions?.length
+            ? { sessionMentions: prompt.sessionMentions.slice(0, SESSION_MENTIONS_LIMIT) }
+            : {}),
         })),
       ),
     );
@@ -897,6 +924,7 @@ export function ThreadComposer({
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
@@ -1220,6 +1248,17 @@ export function ThreadComposer({
     ),
     [cliApps, mcpPresets, sessions],
   );
+  const sessionMentionsForText = useMemo(() => {
+    const selectedNames = new Set(
+      selectedSessionMentions.map((mention) => mention.name.toLowerCase()),
+    );
+    return [
+      ...selectedSessionMentions,
+      ...availableSessionMentions.filter(
+        (mention) => !selectedNames.has(mention.name.toLowerCase()),
+      ),
+    ];
+  }, [availableSessionMentions, selectedSessionMentions]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
     const sessionCandidates: MentionCandidate[] = availableSessionMentions
@@ -1276,9 +1315,9 @@ export function ThreadComposer({
       value,
       cliApps,
       mcpPresets,
-      availableSessionMentions,
+      sessionMentionsForText,
     ),
-    [availableSessionMentions, cliApps, mcpPresets, value],
+    [cliApps, mcpPresets, sessionMentionsForText, value],
   );
   const hasMentionDecorations = mentionSegments.some(
     (segment) => segment.kind !== "text",
@@ -1307,6 +1346,20 @@ export function ThreadComposer({
       return [segment.mention];
     });
   }, [mentionSegments]);
+  useEffect(() => {
+    setSelectedSessionMentions((current) => {
+      if (
+        current.length === activeSessionMentions.length
+        && current.every((mention, index) => {
+          const active = activeSessionMentions[index];
+          return mention.name === active.name
+            && mention.session_key === active.session_key
+            && mention.title === active.title;
+        })
+      ) return current;
+      return activeSessionMentions;
+    });
+  }, [activeSessionMentions]);
   const [slashPaletteLayout, setSlashPaletteLayout] = useState<SlashPaletteLayout>({
     placement: "above",
     maxHeight: SLASH_PALETTE_MAX_HEIGHT_PX,
@@ -1404,6 +1457,7 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
     setValue("");
+    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1545,6 +1599,13 @@ export function ThreadComposer({
   const chooseMentionCandidate = useCallback(
     (candidate: MentionCandidate) => {
       if (!cliAppMention) return;
+      if (candidate.kind === "session") {
+        const name = candidate.name.toLowerCase();
+        setSelectedSessionMentions((current) => [
+          ...current.filter((mention) => mention.name.toLowerCase() !== name),
+          candidate.mention,
+        ]);
+      }
       const suffix = value.slice(cliAppMention.end);
       const mention = `@${candidate.name}${suffix.startsWith(" ") ? "" : " "}`;
       const next = `${value.slice(0, cliAppMention.start)}${mention}${suffix}`;
@@ -1567,6 +1628,7 @@ export function ThreadComposer({
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
+    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1592,12 +1654,16 @@ export function ThreadComposer({
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
         ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+        ...(activeSessionMentions.length > 0
+          ? { sessionMentions: activeSessionMentions }
+          : {}),
       },
     ]);
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
   }, [
+    activeSessionMentions,
     canQueueGuidance,
     clear,
     clearComposerText,
@@ -1619,6 +1685,7 @@ export function ThreadComposer({
     secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
     setValue(prompt.text);
+    setSelectedSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1659,9 +1726,16 @@ export function ThreadComposer({
       const queuedImages = queuedImagesToSendImages(prompt.images);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
       if (text || queuedImages?.length) {
-        const options: SendOptions | undefined = prompt.quotedContext || isStreaming
+        const options: SendOptions | undefined = (
+          prompt.quotedContext
+          || prompt.sessionMentions?.length
+          || isStreaming
+        )
           ? {
               ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+              ...(prompt.sessionMentions?.length
+                ? { sessionMentions: prompt.sessionMentions }
+                : {}),
               ...(isStreaming ? { continueActiveTurn: true } : {}),
             }
           : undefined;
@@ -1681,8 +1755,15 @@ export function ThreadComposer({
     }
     setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
     const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    const options = nextPrompt.quotedContext
-      ? { quotedContext: nextPrompt.quotedContext }
+    const options: SendOptions | undefined = (
+      nextPrompt.quotedContext || nextPrompt.sessionMentions?.length
+    )
+      ? {
+          ...(nextPrompt.quotedContext ? { quotedContext: nextPrompt.quotedContext } : {}),
+          ...(nextPrompt.sessionMentions?.length
+            ? { sessionMentions: nextPrompt.sessionMentions }
+            : {}),
+        }
       : undefined;
     if (queuedImages?.length && options) onSend(nextPrompt.text.trim(), queuedImages, options);
     else if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);

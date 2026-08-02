@@ -46,7 +46,7 @@ def normalize_session_mentions(
         item = cast(Mapping[str, Any], raw_item)
         key = _clipped_string(item.get("session_key"), 512)
         name = _clipped_string(item.get("name"), 80)
-        folded_name = name.casefold() if name else ""
+        folded_name = name.lower() if name else ""
         if (
             not key
             or key == current_session_key

@@ -1579,6 +1579,63 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("keeps a selected session stable across refreshes and queued guidance", () => {
+    const onSend = vi.fn();
+    const target = {
+      key: "websocket:z-target",
+      channel: "websocket",
+      chatId: "z-target",
+      createdAt: null,
+      updatedAt: null,
+      title: "Plan",
+      preview: "Original plan",
+    };
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+        sessions={[target]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+        sessions={[
+          { ...target, title: "Renamed plan" },
+          {
+            ...target,
+            key: "websocket:a-new",
+            chatId: "a-new",
+            title: "Plan",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("composer-session-mention-Plan")).toHaveTextContent("@Plan");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+
+    expect(onSend).toHaveBeenCalledWith("@Plan", undefined, {
+      sessionMentions: [{
+        name: "Plan",
+        session_key: "websocket:z-target",
+        title: "Plan",
+      }],
+      continueActiveTurn: true,
+    });
+  });
+
   it("disambiguates a session mention that shares a capability name", () => {
     render(
       <ThreadComposer
