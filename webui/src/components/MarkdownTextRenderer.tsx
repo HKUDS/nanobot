@@ -17,6 +17,10 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
 import {
+  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  InlineTokenHighlight,
+} from "@/components/InlineTokenHighlight";
+import {
   useFilePreviewAvailabilityResolver,
   type FilePreviewAvailabilityResolver,
 } from "@/components/FilePreviewAvailabilityContext";
@@ -348,6 +352,17 @@ function fileReferenceFromLink(href: string | undefined): string | null {
   return isPreviewableFileTarget(target) ? target : null;
 }
 
+function sessionReferenceHref(href: string): string | null {
+  if (!href.startsWith("#/chat/")) return null;
+  try {
+    const sessionKey = decodeURIComponent(href.slice("#/chat/".length)).trim();
+    if (!sessionKey.startsWith("websocket:") || sessionKey === "websocket:") return null;
+    return `#/chat/${encodeURIComponent(sessionKey)}`;
+  } catch {
+    return null;
+  }
+}
+
 function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
   let text = "";
   let href: string | undefined;
@@ -592,6 +607,20 @@ export default function MarkdownTextRenderer({
         if (href === "streamdown:incomplete-link") {
           return <>{markdownChildren}</>;
         }
+        const sessionHref = sessionReferenceHref(href);
+        if (sessionHref) {
+          return (
+            <a
+              href={sessionHref}
+              className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
+                {markdownChildren}
+              </InlineTokenHighlight>
+            </a>
+          );
+        }
+        if (href.startsWith("#/chat/")) return <>{markdownChildren}</>;
         const filePath = fileReferenceFromLink(href);
         if (filePath) {
           const label = nodeText(markdownChildren).trim();

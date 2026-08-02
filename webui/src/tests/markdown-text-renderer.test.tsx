@@ -13,6 +13,29 @@ describe("MarkdownTextRenderer", () => {
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
   });
 
+  it("renders canonical session references as same-tab links", () => {
+    render(
+      <MarkdownTextRenderer>
+        {"We discussed this in [收费设计](#/chat/websocket%3Apricing)."}
+      </MarkdownTextRenderer>,
+    );
+
+    const link = screen.getByRole("link", { name: "收费设计" });
+    expect(link).toHaveAttribute("href", "#/chat/websocket%3Apricing");
+    expect(link).not.toHaveAttribute("target");
+  });
+
+  it("does not link non-WebUI session references", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {"[private channel](#/chat/telegram%3Aprivate)"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container).toHaveTextContent("private channel");
+    expect(container.querySelector("a")).toBeNull();
+  });
+
   it("does not render active URL protocols from untrusted markdown", () => {
     const { container } = render(
       <MarkdownTextRenderer>
