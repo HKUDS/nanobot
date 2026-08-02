@@ -464,7 +464,7 @@ async def test_gemini_flash_forwards_aspect_ratio_and_image_size() -> None:
         image_size="2K",
     )
 
-    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
     assert image_config == {"aspectRatio": "16:9", "imageSize": "2K"}
 
 
@@ -480,7 +480,7 @@ async def test_gemini_flash_2_5_drops_image_size() -> None:
         image_size="1K",
     )
 
-    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
     assert image_config == {"aspectRatio": "4:3"}
 
 
@@ -496,7 +496,7 @@ async def test_gemini_flash_2_0_drops_image_size() -> None:
         image_size="1K",
     )
 
-    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
     assert image_config == {"aspectRatio": "16:9"}
 
 
@@ -524,8 +524,8 @@ async def test_gemini_flash_scopes_extreme_aspect_ratios_by_model(
         aspect_ratio=aspect_ratio,
     )
 
-    response_format = fake.calls[0]["json"]["generationConfig"].get("responseFormat")
-    assert response_format == ({"image": expected} if expected else None)
+    image_config = fake.calls[0]["json"]["generationConfig"].get("imageConfig")
+    assert image_config == expected
 
 
 @pytest.mark.parametrize(
@@ -553,8 +553,8 @@ async def test_gemini_flash_scopes_image_size_by_model(
         image_size=image_size,
     )
 
-    response_format = fake.calls[0]["json"]["generationConfig"].get("responseFormat")
-    assert response_format == ({"image": expected} if expected else None)
+    image_config = fake.calls[0]["json"]["generationConfig"].get("imageConfig")
+    assert image_config == expected
 
 
 @pytest.mark.asyncio
@@ -571,7 +571,7 @@ async def test_gemini_flash_ignores_unsupported_hints() -> None:
         image_size="1024x1024",
     )
 
-    assert "responseFormat" not in fake.calls[0]["json"]["generationConfig"]
+    assert "imageConfig" not in fake.calls[0]["json"]["generationConfig"]
 
 
 @pytest.mark.asyncio
