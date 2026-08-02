@@ -530,6 +530,7 @@ describe("MessageBubble", () => {
     const token = screen.getByTestId("message-session-mention-收费设计");
     expect(token).toHaveTextContent("@收费设计");
     expect(token).toHaveAttribute("title", "Session: 收费设计");
+    expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Apricing");
   });
 
   it("copies completed assistant replies from the action row", async () => {

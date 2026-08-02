@@ -1564,9 +1564,9 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Tab" });
 
     expect(input).toHaveValue("参考 @收费设计 ");
-    expect(screen.getByTestId("composer-session-mention-收费设计")).toHaveTextContent(
-      "@收费设计",
-    );
+    const mention = screen.getByTestId("composer-session-mention-收费设计");
+    expect(mention).toHaveTextContent("@收费设计");
+    expect(mention.closest("a")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 

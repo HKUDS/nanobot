@@ -162,7 +162,7 @@ export function SessionMentionToken({
   variant: "composer" | "message";
 }) {
   const testIdPrefix = variant === "composer" ? "composer" : "message";
-  return (
+  const token = (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-session-mention-${mention.name}`}
       title={`Session: ${mention.title || mention.name}`}
@@ -170,6 +170,15 @@ export function SessionMentionToken({
     >
       {label}
     </InlineTokenHighlight>
+  );
+  if (variant === "composer") return token;
+  return (
+    <a
+      href={`#/chat/${encodeURIComponent(mention.session_key)}`}
+      className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      {token}
+    </a>
   );
 }
 
