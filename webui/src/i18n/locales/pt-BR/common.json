@@ -1219,12 +1219,15 @@
         "label": "Aplicativos",
         "cliGroup": "Aplicativos CLI",
         "mcpGroup": "Serviços MCP",
+        "sessionGroup": "Conversas do Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Usar @{{name}} como aplicativo CLI local",
         "mcpDescription": "Usar @{{name}} como servidor MCP",
         "cliTitle": "Aplicativo CLI: {{name}}",
-        "mcpTitle": "Servidor MCP: {{name}}"
+        "mcpTitle": "Servidor MCP: {{name}}",
+        "sessionBadge": "Conversa do Nanobot",
+        "sessionDescription": "Referenciar @{{name}} como chat anterior"
       },
       "encoding": "Codificando…",
       "remove": "Remover anexo",

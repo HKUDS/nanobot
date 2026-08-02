@@ -2088,6 +2088,7 @@ function Shell({
             >
               <ThreadShell
                 session={activeSession}
+                sessions={sessions}
                 title={headerTitle}
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}

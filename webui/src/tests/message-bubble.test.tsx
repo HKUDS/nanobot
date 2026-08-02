@@ -512,6 +512,26 @@ describe("MessageBubble", () => {
     expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
   });
 
+  it("renders persisted session mentions inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-session",
+      role: "user",
+      content: "Use @收费设计 as context",
+      createdAt: Date.now(),
+      sessionMentions: [{
+        name: "收费设计",
+        session_key: "websocket:pricing",
+        title: "收费设计",
+      }],
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const token = screen.getByTestId("message-session-mention-收费设计");
+    expect(token).toHaveTextContent("@收费设计");
+    expect(token).toHaveAttribute("title", "Session: 收费设计");
+  });
+
   it("copies completed assistant replies from the action row", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

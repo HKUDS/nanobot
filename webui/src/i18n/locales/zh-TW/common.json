@@ -1217,16 +1217,19 @@
         "io": "無法讀取這個檔案"
       },
       "mentions": {
-        "ariaLabel": "應用程式",
+        "ariaLabel": "提及",
         "label": "應用程式",
         "cliGroup": "CLI 應用程式",
         "mcpGroup": "MCP 伺服器",
+        "sessionGroup": "Nanobot 對話",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "將 @{{name}} 作為本機 CLI 應用程式使用",
         "mcpDescription": "將 @{{name}} 作為 MCP 伺服器使用",
         "cliTitle": "CLI 應用程式：{{name}}",
-        "mcpTitle": "MCP 伺服器：{{name}}"
+        "mcpTitle": "MCP 伺服器：{{name}}",
+        "sessionBadge": "Nanobot 對話",
+        "sessionDescription": "引用先前的對話 @{{name}}"
       },
       "workspace": {
         "accessAria": "工作區存取模式",

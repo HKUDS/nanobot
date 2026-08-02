@@ -1222,12 +1222,15 @@
         "label": "Aplicaciones",
         "cliGroup": "Aplicaciones CLI",
         "mcpGroup": "Servicios MCP",
+        "sessionGroup": "Conversaciones de Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Usar @{{name}} como aplicación CLI local",
         "mcpDescription": "Usar @{{name}} como servidor MCP",
         "cliTitle": "Aplicación CLI: {{name}}",
-        "mcpTitle": "Servidor MCP: {{name}}"
+        "mcpTitle": "Servidor MCP: {{name}}",
+        "sessionBadge": "Conversación de Nanobot",
+        "sessionDescription": "Referenciar @{{name}} como chat anterior"
       },
       "workspace": {
         "accessAria": "Modo de acceso al espacio de trabajo",

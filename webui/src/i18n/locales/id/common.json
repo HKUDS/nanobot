@@ -1217,16 +1217,19 @@
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
-        "ariaLabel": "Aplikasi",
+        "ariaLabel": "Sebutan",
         "label": "Aplikasi",
         "cliGroup": "Aplikasi CLI",
         "mcpGroup": "Layanan MCP",
+        "sessionGroup": "Percakapan Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP",
         "cliTitle": "Aplikasi CLI: {{name}}",
-        "mcpTitle": "Server MCP: {{name}}"
+        "mcpTitle": "Server MCP: {{name}}",
+        "sessionBadge": "Percakapan Nanobot",
+        "sessionDescription": "Referensikan @{{name}} sebagai chat sebelumnya"
       },
       "workspace": {
         "accessAria": "Mode akses ruang kerja",

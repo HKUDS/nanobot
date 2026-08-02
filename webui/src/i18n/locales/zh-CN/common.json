@@ -1214,16 +1214,19 @@
         }
       },
       "mentions": {
-        "ariaLabel": "应用",
+        "ariaLabel": "提及",
         "label": "应用",
         "cliGroup": "CLI 应用",
         "mcpGroup": "MCP 服务",
+        "sessionGroup": "Nanobot 对话",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "使用 @{{name}} 调用本地 CLI",
         "mcpDescription": "使用 @{{name}} 调用 MCP 服务",
         "cliTitle": "CLI 应用：{{name}}",
-        "mcpTitle": "MCP 服务：{{name}}"
+        "mcpTitle": "MCP 服务：{{name}}",
+        "sessionBadge": "Nanobot 对话",
+        "sessionDescription": "引用历史会话 @{{name}}"
       },
       "encoding": "处理中…",
       "remove": "移除附件",

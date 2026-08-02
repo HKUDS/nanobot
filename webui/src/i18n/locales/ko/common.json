@@ -1217,16 +1217,19 @@
         "io": "이 파일을 읽을 수 없습니다"
       },
       "mentions": {
-        "ariaLabel": "앱",
+        "ariaLabel": "멘션",
         "label": "앱",
         "cliGroup": "CLI 앱",
         "mcpGroup": "MCP 서비스",
+        "sessionGroup": "Nanobot 대화",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}}을 로컬 CLI 앱으로 사용",
         "mcpDescription": "@{{name}}을 MCP 서버로 사용",
         "cliTitle": "CLI 앱: {{name}}",
-        "mcpTitle": "MCP 서버: {{name}}"
+        "mcpTitle": "MCP 서버: {{name}}",
+        "sessionBadge": "Nanobot 대화",
+        "sessionDescription": "@{{name}}을 이전 채팅으로 참조"
       },
       "workspace": {
         "accessAria": "작업공간 접근 모드",

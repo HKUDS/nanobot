@@ -1619,6 +1619,36 @@ describe("NanobotClient", () => {
     );
   });
 
+  it("includes session mentions in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage("chat-current", "Use @pricing", undefined, {
+      sessionMentions: [{
+        name: "pricing",
+        session_key: "websocket:pricing",
+        title: "Pricing",
+      }],
+    });
+
+    expect(lastSocket().sent).toContain(JSON.stringify({
+      type: "message",
+      chat_id: "chat-current",
+      content: "Use @pricing",
+      session_mentions: [{
+        name: "pricing",
+        session_key: "websocket:pricing",
+        title: "Pricing",
+      }],
+      webui: true,
+    }));
+  });
+
   it("re-attaches known chats after a reconnect", async () => {
     const client = new NanobotClient({
       url: "ws://test",

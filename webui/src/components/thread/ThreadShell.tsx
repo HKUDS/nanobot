@@ -293,6 +293,7 @@ function maxFilePreviewWidth(containerWidth: number): number {
 
 interface ThreadShellProps {
   session: ChatSummary | null;
+  sessions?: ChatSummary[];
   title: string;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
@@ -577,6 +578,7 @@ function useInstalledSettingItems<Payload, Item>({
 
 export function ThreadShell({
   session,
+  sessions = [],
   title,
   onToggleSidebar,
   onCreateChat,
@@ -601,6 +603,10 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
+  const mentionSessions = useMemo(
+    () => sessions.filter((candidate) => candidate.key !== historyKey),
+    [historyKey, sessions],
+  );
   const {
     messages: historical,
     loading,
@@ -1377,6 +1383,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          sessions={mentionSessions}
           skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
@@ -1419,6 +1426,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          sessions={mentionSessions}
           skills={skills}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}

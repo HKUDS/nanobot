@@ -1221,12 +1221,15 @@
         "label": "Applications",
         "cliGroup": "Applications CLI",
         "mcpGroup": "Services MCP",
+        "sessionGroup": "Conversations Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Utiliser @{{name}} comme application CLI locale",
         "mcpDescription": "Utiliser @{{name}} comme serveur MCP",
         "cliTitle": "Application CLI : {{name}}",
-        "mcpTitle": "Serveur MCP : {{name}}"
+        "mcpTitle": "Serveur MCP : {{name}}",
+        "sessionBadge": "Conversation Nanobot",
+        "sessionDescription": "Référencer @{{name}} comme discussion précédente"
       },
       "workspace": {
         "accessAria": "Mode d’accès à l’espace de travail",

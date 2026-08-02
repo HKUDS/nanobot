@@ -10,6 +10,7 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import image_generation as image_generation_tools
 from nanobot.agent.tools import mcp as mcp_tools
+from nanobot.agent.tools import sessions as session_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
@@ -30,7 +31,11 @@ from nanobot.utils.prompt_templates import render_template
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return persisted kwargs for turn-attached capabilities."""
-    return cli_app_utils.session_extra(metadata) | mcp_tools.session_extra(metadata)
+    return (
+        cli_app_utils.session_extra(metadata)
+        | mcp_tools.session_extra(metadata)
+        | session_tools.session_extra(metadata)
+    )
 
 
 async def connect_mcp(state: Any, tools: ToolRegistry) -> None:

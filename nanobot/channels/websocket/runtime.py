@@ -37,6 +37,7 @@ from nanobot.config.schema import Base
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
+    RuntimeContextBlock,
     webui_quote_runtime_context,
 )
 from nanobot.security.workspace_access import (
@@ -69,6 +70,11 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
+)
+from nanobot.webui.session_mentions import (
+    SessionMention,
+    normalize_session_mentions,
+    session_mentions_runtime_context,
 )
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.transcription_ws import webui_transcription_event
@@ -802,6 +808,19 @@ class WebSocketChannel(BaseChannel):
             mcp_presets = normalize_mcp_preset_mentions(envelope.get("mcp_presets"))
             if mcp_presets:
                 metadata["mcp_presets"] = mcp_presets
+            session_mentions: list[SessionMention] = []
+            if (
+                metadata.get("webui") is True
+                and connection in self._webui_connections
+                and self.gateway.session_manager is not None
+            ):
+                session_mentions = normalize_session_mentions(
+                    envelope.get("session_mentions"),
+                    self.gateway.session_manager,
+                    current_session_key=f"websocket:{cid}",
+                )
+                if session_mentions:
+                    metadata["session_mentions"] = session_mentions
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._workspaces.persist_scope(cid, scope)
             is_webui = metadata.get("webui") is True
@@ -820,13 +839,20 @@ class WebSocketChannel(BaseChannel):
                         media_paths=media_paths or None,
                         cli_apps=cli_apps or None,
                         mcp_presets=mcp_presets or None,
+                        session_mentions=session_mentions or None,
                     )
                 if is_webui and connection in self._webui_connections:
+                    context_blocks: list[RuntimeContextBlock] = []
                     quote = webui_quote_runtime_context({
                         WEBUI_QUOTE_METADATA: envelope.get("quoted_context"),
                     })
                     if quote is not None:
-                        metadata[RUNTIME_CONTEXT_INPUT_META] = [quote]
+                        context_blocks.append(quote)
+                    session_context = session_mentions_runtime_context(session_mentions)
+                    if session_context is not None:
+                        context_blocks.append(session_context)
+                    if context_blocks:
+                        metadata[RUNTIME_CONTEXT_INPUT_META] = context_blocks
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=cid,

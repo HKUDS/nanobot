@@ -1217,16 +1217,19 @@
         "io": "Không thể đọc tệp này"
       },
       "mentions": {
-        "ariaLabel": "Ứng dụng",
+        "ariaLabel": "Đề cập",
         "label": "Ứng dụng",
         "cliGroup": "Ứng dụng CLI",
         "mcpGroup": "Dịch vụ MCP",
+        "sessionGroup": "Cuộc trò chuyện Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP",
         "cliTitle": "Ứng dụng CLI: {{name}}",
-        "mcpTitle": "Máy chủ MCP: {{name}}"
+        "mcpTitle": "Máy chủ MCP: {{name}}",
+        "sessionBadge": "Cuộc trò chuyện Nanobot",
+        "sessionDescription": "Tham chiếu @{{name}} như cuộc trò chuyện trước"
       },
       "workspace": {
         "accessAria": "Chế độ truy cập không gian làm việc",

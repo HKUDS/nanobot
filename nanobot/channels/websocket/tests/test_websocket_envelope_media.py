@@ -20,6 +20,7 @@ from nanobot.channels.websocket.runtime import (
     WebSocketConfig,
 )
 from nanobot.session import webui_turns as wth
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -39,7 +40,7 @@ def _data_url(mime: str, payload: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
 
 
-def _make_channel() -> WebSocketChannel:
+def _make_channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -47,7 +48,7 @@ def _make_channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=parsed,
         bus=bus,
-        session_manager=None,
+        session_manager=session_manager,
         static_dist_path=None,
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
@@ -189,6 +190,42 @@ async def test_message_forwards_normalized_cli_app_attachments() -> None:
         "logo_url": "https://example.invalid/drawio.svg",
         "brand_color": "#F08705",
     }]
+
+
+@pytest.mark.asyncio
+async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    target = manager.get_or_create("websocket:pricing")
+    target.metadata.update({"title": "Pricing", "title_user_edited": True})
+    target.add_message("user", "Discuss cloud storage")
+    manager.save(target)
+    channel = _make_channel(manager)
+    mock_conn = AsyncMock()
+    channel._webui_connections.add(mock_conn)
+    envelope = {
+        "type": "message",
+        "chat_id": "current",
+        "content": "Use @pricing",
+        "webui": True,
+        "session_mentions": [{
+            "name": "pricing",
+            "session_key": "websocket:pricing",
+            "title": "Untrusted title",
+        }],
+    }
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    metadata = channel._handle_message.call_args.kwargs["metadata"]
+    assert metadata["session_mentions"] == [{
+        "name": "pricing",
+        "session_key": "websocket:pricing",
+        "title": "Pricing",
+    }]
+    [block] = metadata["_runtime_context_blocks"]
+    assert block.source == "session_mentions"
+    assert "websocket:pricing" in block.content
 
 
 @pytest.mark.asyncio
