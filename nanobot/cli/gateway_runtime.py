@@ -201,6 +201,49 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
     )
 
 
+async def _close_gateway_runtime(
+    agent: AgentLoop,
+    channels: Any,
+    tasks: list[asyncio.Task[Any]],
+    runtime_tasks: asyncio.Future[list[Any]] | None,
+    runtime_tasks_drained: bool,
+    *,
+    task_wait_timeout: float = 15.0,
+    close_timeout: float = 15.0,
+) -> None:
+    """Cancel runtime tasks, then deterministically close agent resources.
+
+    Order matters: runtime tasks (including the agent loop and any in-flight
+    turn) are cancelled and awaited -- bounded -- before exec sessions,
+    subagents, and MCP servers are torn down, so no active turn is using a
+    shared resource when it closes. The final close is bounded and idempotent:
+    the agent loop's own finally also calls ``close_mcp()``, so this runs again
+    as a no-op when that path already completed, and as the guaranteed final
+    close when it was skipped or cut short (which previously left asyncio
+    subprocess transports alive past ``loop.close()``, producing
+    "RuntimeError: Event loop is closed" noise and potentially orphaned
+    processes at interpreter exit).
+    """
+    # Some SDKs swallow task cancellation while attempting to reconnect.
+    # Close channel transports before waiting for their runners to exit.
+    await channels.stop_all()
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        # Bounded: a coroutine that swallows cancellation (e.g. an SDK reconnect
+        # loop) must not hold the stop open until systemd's timeout kills the
+        # cgroup. Anything still pending is abandoned and closed underneath.
+        await asyncio.wait(tasks, timeout=task_wait_timeout)
+    try:
+        await asyncio.wait_for(agent.close_mcp(), timeout=close_timeout)
+    except BaseException as exc:  # noqa: BLE001 - shutdown must proceed
+        logger.warning("Gateway shutdown: agent resource cleanup incomplete: {}", exc)
+    if runtime_tasks is not None and not runtime_tasks_drained:
+        with suppress(asyncio.CancelledError, Exception):
+            await runtime_tasks
+
+
 def _run_gateway(
     config: Config,
     *,
@@ -805,17 +848,11 @@ def _run_gateway(
                         await shutdown_task
                 cron.stop()
                 agent.stop()
-                # Some SDKs swallow task cancellation while attempting to reconnect.
-                # Close channel transports before waiting for their runners to exit.
-                await channels.stop_all()
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                if runtime_tasks is not None and not runtime_tasks_drained:
-                    with suppress(asyncio.CancelledError, Exception):
-                        await runtime_tasks
+                # Cancel runtime tasks first, then deterministically close
+                # exec/MCP resources while the event loop is still alive.
+                await _close_gateway_runtime(
+                    agent, channels, tasks, runtime_tasks, runtime_tasks_drained
+                )
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
