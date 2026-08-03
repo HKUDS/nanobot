@@ -141,6 +141,33 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+@pytest.mark.parametrize("expr", [None, "", "   "])
+def test_add_job_rejects_missing_cron_expression(tmp_path, expr: str | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a non-empty 'expr'"):
+        service.add_job(
+            name="missing expression",
+            schedule=CronSchedule(kind="cron", expr=expr),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_add_job_rejects_invalid_cron_expression_before_persisting(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="invalid cron expression"):
+        service.add_job(
+            name="bad expression",
+            schedule=CronSchedule(kind="cron", expr="not a cron expression"),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
 def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

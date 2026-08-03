@@ -336,6 +336,41 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("dismisses the touch keyboard after a successful send", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(hover: none) and (pointer: coarse)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(input).not.toHaveFocus();
+    input.focus();
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "hello from mobile" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(onSend).toHaveBeenCalledWith("hello from mobile", undefined, undefined);
+    expect(input).toHaveValue("");
+    expect(input).not.toHaveFocus();
+  });
+
   it("focuses and sends a removable quoted answer excerpt", async () => {
     const onSend = vi.fn();
     const onQuotedContextChange = vi.fn();
@@ -404,6 +439,33 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
+  });
+
+  it("defers textarea autosizing until IME composition commits", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      value: 120,
+    });
+    input.style.height = "50px";
+
+    fireEvent.input(input, {
+      target: { value: "zhongwen" },
+      isComposing: true,
+    });
+    expect(input.style.height).toBe("50px");
+
+    fireEvent.input(input, {
+      target: { value: "中文" },
+      isComposing: false,
+    });
+    expect(input.style.height).toBe("120px");
   });
 
   it("lets long model preset labels use their intrinsic width", () => {

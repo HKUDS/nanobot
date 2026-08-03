@@ -399,6 +399,7 @@ class AgentLoop:
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._close_mcp_lock = asyncio.Lock()
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -1338,11 +1339,42 @@ class AgentLoop:
                 await self._publish_next_deferred_automation_turn(session_key)
 
     async def close_mcp(self) -> None:
-        """Drain background work, stop exec sessions, then close MCP connections."""
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
+        """Stop active work, then close exec, subagent, and MCP resources.
+
+        Resource teardown must still run if cancellation interrupts task draining.
+        Gateway shutdown deliberately bounds this coroutine, so keeping the cleanup
+        phase in ``finally`` prevents a timed-out background task from leaving
+        subprocess transports alive after the event loop closes.
+        """
+        # The agent loop closes itself from ``run()`` while gateway shutdown also
+        # performs a guaranteed final close. Serialize those owners so they cannot
+        # tear down the same subprocess transports concurrently.
+        close_lock = getattr(self, "_close_mcp_lock", None)
+        if close_lock is None:
+            close_lock = self._close_mcp_lock = asyncio.Lock()
+        async with close_lock:
+            await self._close_mcp_unlocked()
+
+    async def _close_mcp_unlocked(self) -> None:
         errors: list[BaseException] = []
+        active_task_groups = getattr(self, "_active_tasks", {})
+        active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
+        active_task_groups.clear()
+        current_task = asyncio.current_task()
+        active_tasks = tuple(task for task in active_tasks if task is not current_task)
+        for task in active_tasks:
+            if not task.done():
+                task.cancel()
+        try:
+            if active_tasks:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+            if self._background_tasks:
+                await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            self._background_tasks.clear()
+
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,

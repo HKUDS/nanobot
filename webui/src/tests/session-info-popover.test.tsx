@@ -113,6 +113,43 @@ describe("SessionInfoPopover", () => {
     expect(screen.queryByText(/ago/i)).not.toBeInTheDocument();
   });
 
+  it("shows the actual message received by a local trigger", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        automationsResponse([
+          {
+            id: "trg_123",
+            name: "PR monitor",
+            enabled: true,
+            kind: "local_trigger",
+            schedule: { kind: "local" },
+            payload: {
+              kind: "local_trigger",
+              message: "Review PR #4591",
+              command: 'nanobot trigger trg_123 "message"',
+            },
+            state: { pending: false },
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <SessionInfoPopover
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+
+    expect(await screen.findByText("Review PR #4591")).toBeInTheDocument();
+    expect(screen.queryByText('nanobot trigger trg_123 "message"')).not.toBeInTheDocument();
+  });
+
   it("refreshes while open so completed one-shot automations disappear", async () => {
     vi.stubGlobal(
       "fetch",

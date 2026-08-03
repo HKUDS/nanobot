@@ -209,7 +209,7 @@ def _serialize_trigger(
         },
         "payload": {
             "kind": "local_trigger",
-            "message": command,
+            "message": trigger.last_message or command,
             "command": command,
         },
         "state": {

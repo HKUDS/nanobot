@@ -86,6 +86,26 @@ def test_settings_payload_includes_versioned_docs(
     }
 
 
+def test_settings_payload_exposes_edenai_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.edenai.api_key = "eden-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    edenai = next(row for row in payload["providers"] if row["name"] == "edenai")
+
+    assert edenai["label"] == "Eden AI"
+    assert edenai["configured"] is True
+    assert edenai["default_api_base"] == "https://api.edenai.run/v3"
+    assert edenai["model_catalog"] == "catalog"
+    assert edenai["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

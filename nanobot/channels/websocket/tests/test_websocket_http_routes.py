@@ -428,6 +428,7 @@ async def test_session_automations_route_lists_local_triggers(
         chat_id="abc",
         session_key="websocket:abc",
     )
+    trigger_store.enqueue(trigger.id, "Review PR #4591")
     channel = _ch(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
@@ -454,6 +455,7 @@ async def test_session_automations_route_lists_local_triggers(
         assert job["kind"] == "local_trigger"
         assert job["schedule"]["kind"] == "local"
         assert job["payload"]["kind"] == "local_trigger"
+        assert job["payload"]["message"] == "Review PR #4591"
         assert job["payload"]["command"] == f'nanobot trigger {trigger.id} "message"'
         assert job["state"]["pending"] is True
     finally:
@@ -2615,6 +2617,7 @@ async def test_webui_automations_route_manages_local_triggers(
         by_id = {job["id"]: job for job in listed.json()["jobs"]}
         assert by_id[trigger.id]["kind"] == "local_trigger"
         assert by_id[trigger.id]["state"]["pending"] is True
+        assert by_id[trigger.id]["payload"]["message"] == "Review queued PR"
         assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
 
         disabled = await _http_get(
