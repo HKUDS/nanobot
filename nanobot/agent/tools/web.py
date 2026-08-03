@@ -55,7 +55,7 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
-    {"name": "mst", "label": "Meta-Search Tool (mst)", "credential": "none"},
+    {"name": "mst", "label": "Meta-Search (mst) [requires mst-python]", "credential": "none"},
 )
 
 
@@ -626,7 +626,9 @@ class WebSearchTool(Tool):
         """Search via the Meta-Search Tool (mst) Python package.
 
         mst aggregates results from multiple search engines using RRF ranking,
-        providing richer coverage than any single provider. Engines like ddg and
+        providing richer coverage than any single provider.
+        Inspired by [SearXNG](https://github.com/searxng/searxng); package at
+        https://github.com/openmtx/meta-search-tool. Engines like ddg and
         google work out-of-the-box; others require API keys.
 
         Configure engines via ``mst_engines`` (list of engine names) or the
@@ -653,6 +655,8 @@ class WebSearchTool(Tool):
                 env_engines = os.environ.get("MST_ENGINES", "").strip()
                 if env_engines:
                     engines = [e.strip() for e in env_engines.split(",") if e.strip()]
+            if engines:
+                logger.info("mst search using engines: {}", engines)
 
             # Resolve weights: config > env var > None
             weights = self.config.mst_weights if self.config.mst_weights else None
@@ -679,9 +683,9 @@ class WebSearchTool(Tool):
             # Format mst results into shared output
             items: list[dict[str, Any]] = [
                 {
-                    "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "content": r.get("snippet", "") or r.get("description", ""),
+                    "title": r.get("title") or "",
+                    "url": r.get("url") or "",
+                    "content": r.get("snippet") or r.get("description") or "",
                 }
                 for r in result.get("results", [])
             ]

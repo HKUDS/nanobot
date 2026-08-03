@@ -58,7 +58,6 @@ dependencies = [
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
-    "mst-python>=0.4.0",
 ]
 
 [project.optional-dependencies]
@@ -85,6 +84,9 @@ langfuse = [
 pdf = [
     # Compatibility extra: PDF reading is bundled since v0.2.3.
     "pypdf>=5.0.0,<6.0.0",
+]
+mst = [
+    "mst-python>=0.4.0",
 ]
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
