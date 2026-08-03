@@ -1082,16 +1082,6 @@ class OpenAICompatProvider(LLMProvider):
             "not supported",
             "unknown parameter",
             "unrecognized request argument",
-            # Serde-style body rejection: the endpoint could not parse the
-            # Responses wire format (e.g. DeepSeek's Responses gateway
-            # rejecting an input item shape with "Failed to deserialize the
-            # JSON body ... expected a sequence"). These are compatibility
-            # failures: fall back to Chat Completions for the same model.
-            "failed to deserialize",
-            "invalid type",
-            "expected a sequence",
-            "expected a struct",
-            "unknown field",
         )
         return any(marker in body_text for marker in compatibility_markers)
 

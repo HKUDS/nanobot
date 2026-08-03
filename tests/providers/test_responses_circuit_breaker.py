@@ -166,8 +166,9 @@ class _FakeAPIError(Exception):
         self.response = None
 
 
-def test_serde_deserialize_error_triggers_fallback():
-    # DeepSeek Responses gateway rejecting the wire body (observed Aug 2026).
+def test_serde_deserialize_error_does_not_trigger_fallback():
+    # Serde errors can also identify malformed user-provided request fields.
+    # The known DeepSeek wire-shape bug is fixed at serialization time instead.
     err = _FakeAPIError(400, {
         "message": (
             "Failed to deserialize the JSON body into the target type: "
@@ -177,32 +178,12 @@ def test_serde_deserialize_error_triggers_fallback():
         "type": "invalid_request_error",
         "param": None,
     })
-    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
-
-
-def test_invalid_type_error_triggers_fallback():
-    err = _FakeAPIError(422, "input[0]: invalid type: map, expected a string")
-    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
-
-
-def test_unknown_field_error_triggers_fallback():
-    err = _FakeAPIError(400, "unknown field `foo`, expected one of `input`, `instructions`")
-    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
 
 
 def test_legacy_compatibility_markers_still_trigger_fallback():
     err = _FakeAPIError(400, "parameter `instructions` is unsupported")
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
-
-
-def test_unrelated_400_does_not_trigger_fallback():
-    err = _FakeAPIError(400, {"message": "rate limit exceeded", "type": "rate_limit_error"})
-    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
-
-
-def test_server_error_does_not_trigger_fallback():
-    err = _FakeAPIError(500, {"message": "internal server error"})
-    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
 
 
 # ======================================================================
