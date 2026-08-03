@@ -85,3 +85,39 @@ def test_openai_compat_marks_only_tail_without_mcp() -> None:
         _openai_tools("read_file", "write_file"),
     )
     assert _marked_openai_tool_names(marked_tools) == ["write_file"]
+
+def test_openai_compat_cache_control_with_list_content_strings() -> None:
+    messages = [
+        {"role": "system", "content": ["system prompt line 1", "system prompt line 2"]},
+        {"role": "assistant", "content": "assistant"},
+        {"role": "user", "content": ["user line 1", "user line 2"]},
+    ]
+    new_messages, _ = OpenAICompatProvider._apply_cache_control(messages, None)
+    assert new_messages[0]["content"][-1] == {
+        "type": "text",
+        "text": "system prompt line 2",
+        "cache_control": {"type": "ephemeral"},
+    }
+
+
+def test_anthropic_cache_control_with_list_content_strings() -> None:
+    messages = [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": ["assistant line 1", "assistant line 2"]},
+        {"role": "user", "content": "u2"},
+    ]
+    system, new_messages, _ = AnthropicProvider._apply_cache_control(
+        ["system line 1", "system line 2"],
+        messages,
+        None,
+    )
+    assert system[-1] == {
+        "type": "text",
+        "text": "system line 2",
+        "cache_control": {"type": "ephemeral"},
+    }
+    assert new_messages[-2]["content"][-1] == {
+        "type": "text",
+        "text": "assistant line 2",
+        "cache_control": {"type": "ephemeral"},
+    }

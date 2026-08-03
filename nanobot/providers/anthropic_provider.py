@@ -516,7 +516,10 @@ class AnthropicProvider(LLMProvider):
             system = [{"type": "text", "text": system, "cache_control": marker}]
         elif isinstance(system, list) and system:
             system = list(system)
-            system[-1] = {**system[-1], "cache_control": marker}
+            if isinstance(system[-1], dict):
+                system[-1] = {**system[-1], "cache_control": marker}
+            elif isinstance(system[-1], str):
+                system[-1] = {"type": "text", "text": system[-1], "cache_control": marker}
 
         new_msgs = list(messages)
         if len(new_msgs) >= 3:
@@ -526,7 +529,10 @@ class AnthropicProvider(LLMProvider):
                 new_msgs[-2] = {**m, "content": [{"type": "text", "text": c, "cache_control": marker}]}
             elif isinstance(c, list) and c:
                 nc = list(cast(list[dict[str, Any]], c))
-                nc[-1] = {**nc[-1], "cache_control": marker}
+                if isinstance(nc[-1], dict):
+                    nc[-1] = {**nc[-1], "cache_control": marker}
+                elif isinstance(nc[-1], str):
+                    nc[-1] = {"type": "text", "text": nc[-1], "cache_control": marker}
                 new_msgs[-2] = {**m, "content": nc}
 
         new_tools = tools
