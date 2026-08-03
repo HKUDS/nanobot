@@ -441,6 +441,33 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
   });
 
+  it("defers textarea autosizing until IME composition commits", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      value: 120,
+    });
+    input.style.height = "50px";
+
+    fireEvent.input(input, {
+      target: { value: "zhongwen" },
+      isComposing: true,
+    });
+    expect(input.style.height).toBe("50px");
+
+    fireEvent.input(input, {
+      target: { value: "中文" },
+      isComposing: false,
+    });
+    expect(input.style.height).toBe("120px");
+  });
+
   it("lets long model preset labels use their intrinsic width", () => {
     render(
       <ThreadComposer

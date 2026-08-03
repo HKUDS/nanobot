@@ -1799,6 +1799,7 @@ export function ThreadComposer({
   };
 
   const onInput: React.FormEventHandler<HTMLTextAreaElement> = (e) => {
+    if ((e.nativeEvent as InputEvent).isComposing) return;
     const el = e.currentTarget;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 260)}px`;

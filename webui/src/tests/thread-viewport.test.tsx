@@ -1116,6 +1116,36 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("restores thread scroll after the textarea autosize measurement collapses it", () => {
+    let scroller: HTMLElement | null = null;
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={(
+          <textarea
+            aria-label="Message input"
+            onInput={() => {
+              if (scroller) scroller.scrollTop = 692;
+            }}
+          />
+        )}
+      />,
+    );
+    scroller = getScroller(container);
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+
+    fireEvent.input(screen.getByLabelText("Message input"), {
+      target: { value: "中文" },
+    });
+
+    expect(scroller.scrollTop).toBe(700);
+  });
+
   it("keeps the thread scrollport above a mobile soft keyboard", async () => {
     const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
     try {
