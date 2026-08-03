@@ -5,28 +5,28 @@ import errno
 import json
 import os
 import re
-import shutil
 from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
 from nanobot.utils.helpers import (
+    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     recent_message_start_index,
     safe_filename,
     strip_think,
@@ -44,6 +44,10 @@ _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
+_PROVIDER_STATE_RECORD_TYPE = "provider_state"
+_PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
+    r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
+)
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -52,6 +56,18 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "title",
     "title_user_edited",
 }
+
+
+def _json_object(value: object) -> dict[str, Any]:
+    """Narrow a decoded JSON object while preserving its original values."""
+    if not isinstance(value, dict):
+        raise ValueError("session records must be JSON objects")
+    return cast(dict[str, Any], value)
+
+
+def _is_provider_state_record_line(line: str) -> bool:
+    """Recognize the canonical private record without decoding its opaque payload."""
+    return _PROVIDER_STATE_RECORD_PREFIX_RE.match(line) is not None
 
 
 def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
@@ -79,15 +95,18 @@ def _sanitize_assistant_replay_text(content: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _text_preview(content: Any) -> str:
+def _text_preview(content: object) -> str:
     """Return compact display text for session lists."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
         parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                value = block.get("text")
+        for block in cast(list[object], content):
+            if isinstance(block, dict):
+                block_data = cast(dict[object, object], block)
+                if block_data.get("type") != "text":
+                    continue
+                value = block_data.get("text")
                 if isinstance(value, str):
                     parts.append(value)
         text = " ".join(parts)
@@ -103,26 +122,27 @@ def _text_preview(content: Any) -> str:
 def _message_preview_text(message: dict[str, Any]) -> str:
     """Session list preview text; subagent inject blobs are shortened for display."""
     message = public_history_message(message)
-    content: Any = message.get("content")
+    content = cast(object, message.get("content"))
     if message.get("injected_event") == "subagent_result" and isinstance(content, str):
         content = scrub_subagent_announce_body(content)
     return _text_preview(content)
 
 
-def _metadata_title(metadata: Any) -> str:
+def _metadata_title(metadata: object) -> str:
     if not isinstance(metadata, dict):
         return ""
-    title = metadata.get("title")
+    metadata_data = cast(dict[object, object], metadata)
+    title = metadata_data.get("title")
     if not isinstance(title, str):
         return ""
-    if metadata.get("title_user_edited") is True:
+    if metadata_data.get("title_user_edited") is True:
         return title
     return strip_think(title)
 
 
 @dataclass
 class RetentionResult:
-    dropped: list[dict]
+    dropped: list[dict[str, Any]]
     already_consolidated_count: int
 
 
@@ -136,13 +156,19 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.metadata), dict):
+            self.metadata = {}
+        if not isinstance(cast(object, self.provider_state), ProviderConversationState):
+            self.provider_state = None
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
+        last_consolidated = cast(object, self.last_consolidated)
         if (
-            isinstance(self.last_consolidated, bool)
-            or not isinstance(self.last_consolidated, int)
-            or not 0 <= self.last_consolidated <= len(self.messages)
+            isinstance(last_consolidated, bool)
+            or not isinstance(last_consolidated, int)
+            or not 0 <= last_consolidated <= len(self.messages)
         ):
             self.last_consolidated = 0
 
@@ -213,13 +239,12 @@ class Session:
             # image used to be. Without this, an image-only user turn
             # replays as an empty user message — the assistant's reply then
             # looks like it's responding to nothing.
-            media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
-            cli_apps = message.get("cli_apps")
+            content = content_with_media_breadcrumbs(
+                role,
+                content,
+                message.get("media"),
+            )
+            cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
                 and not has_persisted_runtime_context
@@ -229,15 +254,18 @@ class Session:
                 and isinstance(content, str)
             ):
                 cli_lines: list[str] = []
-                for item in cli_apps[:8]:
+                for item in cast(list[object], cli_apps[:8]):
                     if not isinstance(item, dict):
                         continue
-                    name = str(item.get("name") or "").strip().lower()
+                    item_data = cast(dict[object, object], item)
+                    name = str(item_data.get("name") or "").strip().lower()
                     if not name:
                         continue
-                    entry = str(item.get("entry_point") or "unknown").strip() or "unknown"
+                    entry_point = (
+                        str(item_data.get("entry_point") or "unknown").strip() or "unknown"
+                    )
                     cli_lines.append(
-                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry}; "
+                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry_point}; "
                         f"skill=skills/cli-app-{name}/SKILL.md]"
                     )
                 if cli_lines:
@@ -289,6 +317,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
@@ -381,6 +410,8 @@ class Session:
 
         self.messages = retained
         self.last_consolidated = new_lc
+        if dropped:
+            self.provider_state = None
         self.updated_at = datetime.now()
         return RetentionResult(
             dropped=dropped,
@@ -389,7 +420,7 @@ class Session:
 
     def enforce_file_cap(
         self,
-        on_archive: Any = None,
+        on_archive: Callable[[list[dict[str, Any]]], None] | None = None,
         limit: int = FILE_MAX_MESSAGES,
     ) -> None:
         """Bound session message growth by archiving and trimming old prefixes."""
@@ -412,17 +443,524 @@ class Session:
         )
 
 
-class SessionManager:
-    """
-    Manages conversation sessions.
+class SessionPayload(TypedDict):
+    key: str
+    created_at: str | None
+    updated_at: str | None
+    metadata: dict[str, Any]
+    messages: list[dict[str, Any]]
 
-    Sessions are stored as JSONL files in the sessions directory.
-    """
+
+class SessionMetadataPayload(TypedDict):
+    key: str
+    created_at: str | None
+    updated_at: str | None
+    metadata: dict[str, Any]
+
+
+class SessionInfo(TypedDict):
+    key: str
+    created_at: str
+    updated_at: str
+    title: str
+    preview: str
+    path: str
+
+
+class SessionStore(Protocol):
+    def load(self, key: str) -> Session | None: ...
+
+    def save(self, session: Session, *, fsync: bool = False) -> None: ...
+
+    def delete(self, key: str) -> bool: ...
+
+    def read(self, key: str) -> SessionPayload | None: ...
+
+    def read_metadata(self, key: str) -> SessionMetadataPayload | None: ...
+
+    def list_sessions(self) -> list[SessionInfo]: ...
+
+
+class JsonlSessionStore:
+    """JSONL implementation of session persistence."""
 
     def __init__(self, workspace: Path):
-        self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.sessions_dir = ensure_dir(workspace / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
+
+    @staticmethod
+    def safe_key(key: str) -> str:
+        return safe_filename(key.replace(":", "_"))
+
+    @staticmethod
+    def storage_key(key: str) -> str:
+        return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
+
+    @staticmethod
+    def decode_storage_key(stem: str) -> str | None:
+        try:
+            padding = 4 - len(stem) % 4
+            if padding != 4:
+                stem += "=" * padding
+            return base64.urlsafe_b64decode(stem).decode("utf-8")
+        except _SESSION_DATA_ERRORS:
+            return None
+
+    @classmethod
+    def session_key_from_path(cls, path: Path) -> str | None:
+        key = cls.decode_storage_key(path.stem)
+        if key is None or cls.storage_key(key) != path.stem:
+            return None
+        return key
+
+    def get_session_path(self, key: str) -> Path:
+        return self.sessions_dir / f"{self.storage_key(key)}.jsonl"
+
+    def get_legacy_lossy_path(self, key: str) -> Path:
+        return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
+
+    def get_legacy_session_path(self, key: str) -> Path:
+        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def load(self, key: str) -> Session | None:
+        path = self.get_session_path(key)
+        if not path.exists():
+            return None
+
+        try:
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
+            created_at: datetime | None = None
+            updated_at: datetime | None = None
+            last_consolidated = 0
+            provider_state: ProviderConversationState | None = None
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
+
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
+                        metadata_value = cast(object, data.get("metadata", {}))
+                        metadata = (
+                            cast(dict[str, Any], metadata_value)
+                            if isinstance(metadata_value, dict)
+                            else {}
+                        )
+                        created_at_value = cast(object, data.get("created_at"))
+                        updated_at_value = cast(object, data.get("updated_at"))
+                        created_at = (
+                            datetime.fromisoformat(created_at_value)
+                            if isinstance(created_at_value, str) and created_at_value
+                            else None
+                        )
+                        updated_at = (
+                            datetime.fromisoformat(updated_at_value)
+                            if isinstance(updated_at_value, str) and updated_at_value
+                            else None
+                        )
+                        offset = cast(object, data.get("last_consolidated", 0))
+                        last_consolidated = (
+                            offset
+                            if isinstance(offset, int) and not isinstance(offset, bool)
+                            else 0
+                        )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        provider_state = ProviderConversationState.from_private_record(
+                            data.get("state")
+                        )
+                    else:
+                        messages.append(data)
+
+            return Session(
+                key=key,
+                messages=messages,
+                created_at=created_at or datetime.now(),
+                updated_at=updated_at or datetime.now(),
+                metadata=metadata,
+                last_consolidated=last_consolidated,
+                provider_state=provider_state,
+            )
+        except _SESSION_DATA_ERRORS as e:
+            logger.warning("Failed to load session {}: {}", key, e)
+            repaired = self.repair(key)
+            if repaired is not None:
+                logger.info(
+                    "Recovered session {} from corrupt file ({} messages)",
+                    key,
+                    len(repaired.messages),
+                )
+            return repaired
+
+    def repair(self, key: str, *, path: Path | None = None) -> Session | None:
+        if path is None:
+            path = self.get_session_path(key)
+        if not path.exists():
+            return None
+
+        try:
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
+            created_at: datetime | None = None
+            updated_at: datetime | None = None
+            last_consolidated = 0
+            provider_state: ProviderConversationState | None = None
+            skipped = 0
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        raw_data: object = json.loads(line)
+                    except json.JSONDecodeError:
+                        skipped += 1
+                        continue
+                    if not isinstance(raw_data, dict):
+                        skipped += 1
+                        continue
+                    data = cast(dict[str, Any], raw_data)
+
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
+                        metadata_value = cast(object, data.get("metadata", {}))
+                        metadata = (
+                            cast(dict[str, Any], metadata_value)
+                            if isinstance(metadata_value, dict)
+                            else {}
+                        )
+                        created_at_value = cast(object, data.get("created_at"))
+                        if isinstance(created_at_value, str) and created_at_value:
+                            with suppress(ValueError):
+                                created_at = datetime.fromisoformat(created_at_value)
+                        updated_at_value = cast(object, data.get("updated_at"))
+                        if isinstance(updated_at_value, str) and updated_at_value:
+                            with suppress(ValueError):
+                                updated_at = datetime.fromisoformat(updated_at_value)
+                        offset = cast(object, data.get("last_consolidated", 0))
+                        last_consolidated = (
+                            offset
+                            if isinstance(offset, int) and not isinstance(offset, bool)
+                            else 0
+                        )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        candidate = ProviderConversationState.from_private_record(
+                            data.get("state")
+                        )
+                        if candidate is None:
+                            skipped += 1
+                        else:
+                            provider_state = candidate
+                    else:
+                        messages.append(data)
+
+            if skipped:
+                logger.warning("Skipped {} corrupt lines in session {}", skipped, key)
+
+            if not messages and not metadata and provider_state is None:
+                return None
+
+            return Session(
+                key=key,
+                messages=messages,
+                created_at=created_at or datetime.now(),
+                updated_at=updated_at or datetime.now(),
+                metadata=metadata,
+                last_consolidated=last_consolidated,
+                provider_state=provider_state,
+            )
+        except _SESSION_DATA_ERRORS as e:
+            logger.warning("Repair failed for session {}: {}", key, e)
+            return None
+
+    @staticmethod
+    def session_payload(session: Session) -> SessionPayload:
+        return {
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "messages": session.messages,
+        }
+
+    def save(self, session: Session, *, fsync: bool = False) -> None:
+        path = self.get_session_path(session.key)
+        tmp_path = path.with_suffix(".jsonl.tmp")
+
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                metadata_line = {
+                    "_type": "metadata",
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata,
+                    "last_consolidated": session.last_consolidated,
+                }
+                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+                if session.provider_state is not None:
+                    provider_state_line = {
+                        "_type": _PROVIDER_STATE_RECORD_TYPE,
+                        "state": session.provider_state.to_private_record(),
+                    }
+                    f.write(json.dumps(provider_state_line, ensure_ascii=False) + "\n")
+                for msg in session.messages:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                if fsync:
+                    f.flush()
+                    os.fsync(f.fileno())
+
+            os.replace(tmp_path, path)
+
+            if fsync:
+                with suppress(PermissionError):
+                    fd = os.open(str(path.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    except OSError as exc:
+                        if exc.errno != errno.EINVAL:
+                            raise
+                    finally:
+                        os.close(fd)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    def delete(self, key: str) -> bool:
+        paths = [
+            self.get_session_path(key),
+            self.get_legacy_lossy_path(key),
+            self.get_legacy_session_path(key),
+        ]
+        deleted = False
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                path.unlink()
+                deleted = True
+            except OSError as e:
+                logger.warning("Failed to delete session file {}: {}", path, e)
+        return deleted
+
+    def read(self, key: str) -> SessionPayload | None:
+        path = self.get_session_path(key)
+        if not path.exists():
+            return None
+        try:
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
+            created_at: str | None = None
+            updated_at: str | None = None
+            stored_key: str | None = None
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
+                    record_type = data.get("_type")
+                    if record_type == "metadata":
+                        metadata_value = cast(object, data.get("metadata", {}))
+                        metadata = (
+                            cast(dict[str, Any], metadata_value)
+                            if isinstance(metadata_value, dict)
+                            else {}
+                        )
+                        created_at_value = cast(object, data.get("created_at"))
+                        updated_at_value = cast(object, data.get("updated_at"))
+                        stored_key_value = cast(object, data.get("key"))
+                        created_at = (
+                            created_at_value if isinstance(created_at_value, str) else None
+                        )
+                        updated_at = (
+                            updated_at_value if isinstance(updated_at_value, str) else None
+                        )
+                        stored_key = (
+                            stored_key_value if isinstance(stored_key_value, str) else None
+                        )
+                    elif record_type == _PROVIDER_STATE_RECORD_TYPE:
+                        continue
+                    else:
+                        messages.append(data)
+            return {
+                "key": stored_key or key,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "metadata": metadata,
+                "messages": messages,
+            }
+        except _SESSION_DATA_ERRORS as e:
+            logger.warning("Failed to read session {}: {}", key, e)
+            repaired = self.repair(key, path=path)
+            if repaired is not None:
+                logger.info("Recovered read-only session view {} from corrupt file", key)
+                return self.session_payload(repaired)
+            return None
+
+    def read_metadata(self, key: str) -> SessionMetadataPayload | None:
+        path = self.get_session_path(key)
+        if not path.exists():
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    raw_data: object = json.loads(line)
+                    data = _json_object(raw_data)
+                    if data.get("_type") != "metadata":
+                        return None
+                    metadata_value = cast(object, data.get("metadata", {}))
+                    key_value = cast(object, data.get("key"))
+                    created_at_value = cast(object, data.get("created_at"))
+                    updated_at_value = cast(object, data.get("updated_at"))
+                    return {
+                        "key": key_value if isinstance(key_value, str) and key_value else key,
+                        "created_at": (
+                            created_at_value if isinstance(created_at_value, str) else None
+                        ),
+                        "updated_at": (
+                            updated_at_value if isinstance(updated_at_value, str) else None
+                        ),
+                        "metadata": (
+                            cast(dict[str, Any], metadata_value)
+                            if isinstance(metadata_value, dict)
+                            else {}
+                        ),
+                    }
+            return None
+        except _SESSION_DATA_ERRORS as e:
+            logger.warning("Failed to read session metadata {}: {}", key, e)
+            repaired = self.repair(key, path=path)
+            if repaired is not None:
+                logger.info("Recovered read-only session metadata {} from corrupt file", key)
+                return {
+                    "key": repaired.key,
+                    "created_at": repaired.created_at.isoformat(),
+                    "updated_at": repaired.updated_at.isoformat(),
+                    "metadata": repaired.metadata,
+                }
+            return None
+
+    def list_sessions(self) -> list[SessionInfo]:
+        sessions: list[SessionInfo] = []
+
+        for path in self.sessions_dir.glob("*.jsonl"):
+            storage_key = self.session_key_from_path(path)
+            if storage_key is None:
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        raw_data: object = json.loads(first_line)
+                        data = _json_object(raw_data)
+                        if data.get("_type") == "metadata":
+                            key_value = cast(object, data.get("key"))
+                            key = (
+                                key_value
+                                if isinstance(key_value, str) and key_value
+                                else storage_key
+                            )
+                            metadata = cast(object, data.get("metadata", {}))
+                            title = _metadata_title(metadata)
+                            preview = ""
+                            fallback_preview = ""
+                            scanned_records = 0
+                            scanned_chars = 0
+                            for line in f:
+                                if not line.strip():
+                                    continue
+                                if _is_provider_state_record_line(line):
+                                    continue
+                                scanned_records += 1
+                                scanned_chars += len(line)
+                                if (
+                                    scanned_records > _SESSION_LIST_PREVIEW_MAX_RECORDS
+                                    or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
+                                ):
+                                    break
+                                raw_item: object = json.loads(line)
+                                item = _json_object(raw_item)
+                                if item.get("_type") in {
+                                    "metadata",
+                                    _PROVIDER_STATE_RECORD_TYPE,
+                                }:
+                                    continue
+                                text = _message_preview_text(item)
+                                if not text:
+                                    continue
+                                if item.get("role") == "user":
+                                    preview = text
+                                    break
+                                if not fallback_preview and item.get("role") == "assistant":
+                                    fallback_preview = text
+                            preview = preview or fallback_preview
+                            fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+                            created_at = cast(object, data.get("created_at"))
+                            updated_at = cast(object, data.get("updated_at"))
+                            sessions.append(
+                                {
+                                    "key": key,
+                                    "created_at": (
+                                        created_at
+                                        if isinstance(created_at, str) and created_at
+                                        else fallback_time
+                                    ),
+                                    "updated_at": (
+                                        updated_at
+                                        if isinstance(updated_at, str) and updated_at
+                                        else fallback_time
+                                    ),
+                                    "title": title,
+                                    "preview": preview,
+                                    "path": str(path),
+                                }
+                            )
+            except FileNotFoundError:
+                continue
+            except _SESSION_DATA_ERRORS:
+                repaired = self.repair(storage_key, path=path)
+                if repaired is not None:
+                    sessions.append(
+                        {
+                            "key": repaired.key,
+                            "created_at": repaired.created_at.isoformat(),
+                            "updated_at": repaired.updated_at.isoformat(),
+                            "title": _metadata_title(repaired.metadata),
+                            "preview": next(
+                                (
+                                    text
+                                    for msg in repaired.messages
+                                    if (text := _message_preview_text(msg))
+                                ),
+                                "",
+                            ),
+                            "path": str(path),
+                        }
+                    )
+                continue
+        return sorted(sessions, key=lambda item: item["updated_at"], reverse=True)
+
+
+class SessionManager:
+    """Manage session identity, caching, retention, and persistence."""
+
+    def __init__(self, workspace: Path, *, store: SessionStore | None = None):
+        self.workspace = workspace
+        self._jsonl_store = JsonlSessionStore(workspace)
+        self._store: SessionStore = store if store is not None else self._jsonl_store
+        self.sessions_dir = self._jsonl_store.sessions_dir
+        self.legacy_sessions_dir = self._jsonl_store.legacy_sessions_dir
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
@@ -449,6 +987,10 @@ class SessionManager:
             self._remember(session)
         return session
 
+    def get_cached(self, key: str) -> Session | None:
+        """Return a cached session without creating or loading one from disk."""
+        return self._cached(key)
+
     def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
         """Archive unconsolidated overflow whenever a session is persisted."""
         self._file_cap_archiver = archiver
@@ -456,56 +998,39 @@ class SessionManager:
     @staticmethod
     def safe_key(key: str) -> str:
         """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
-        return safe_filename(key.replace(":", "_"))
+        return JsonlSessionStore.safe_key(key)
 
     @staticmethod
     def _storage_key(key: str) -> str:
         """Collision-resistant encoding for internal session storage filenames."""
-        return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
+        return JsonlSessionStore.storage_key(key)
 
     @staticmethod
     def _decode_storage_key(stem: str) -> str | None:
         """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
-        try:
-            # Restore padding stripped by rstrip("=")
-            padding = 4 - len(stem) % 4
-            if padding != 4:
-                stem += "=" * padding
-            return base64.urlsafe_b64decode(stem).decode("utf-8")
-        except _SESSION_DATA_ERRORS:
-            return None
+        return JsonlSessionStore.decode_storage_key(stem)
+
+    @staticmethod
+    def decode_storage_key(stem: str) -> str | None:
+        """Public decoder for components that inspect canonical session filenames."""
+        return SessionManager._decode_storage_key(stem)
+
+    @classmethod
+    def _session_key_from_path(cls, path: Path) -> str | None:
+        """Decode a session key only from a canonical collision-resistant filename."""
+        return JsonlSessionStore.session_key_from_path(path)
 
     def _get_session_path(self, key: str) -> Path:
         """Get the collision-resistant workspace path for a session."""
-        return self.sessions_dir / f"{self._storage_key(key)}.jsonl"
+        return self._jsonl_store.get_session_path(key)
 
     def _get_legacy_lossy_path(self, key: str) -> Path:
         """Previous workspace session path using lossy ':' to '_' replacement."""
-        return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
+        return self._jsonl_store.get_legacy_lossy_path(key)
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
-        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
-
-    @staticmethod
-    def _stored_key_for_path(path: Path) -> str | None:
-        """Read the stored session key from a JSONL metadata row, if present."""
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
-                    if data.get("_type") == "metadata":
-                        stored_key = data.get("key")
-                        return stored_key if isinstance(stored_key, str) else None
-                    return None
-        except _SESSION_DATA_ERRORS:
-            return None
-        return None
+        return self._jsonl_store.get_legacy_session_path(key)
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -529,199 +1054,28 @@ class SessionManager:
         return session
 
     def _load(self, key: str) -> Session | None:
-        """Load a session from disk."""
-        path = self._get_session_path(key)
-        if not path.exists():
-            fallback_paths = [
-                (self._get_legacy_lossy_path(key), "legacy lossy path"),
-                (self._get_legacy_session_path(key), "legacy path"),
-            ]
-            for fallback_path, description in fallback_paths:
-                if not fallback_path.exists():
-                    continue
-                stored_key = self._stored_key_for_path(fallback_path)
-                if stored_key and stored_key != key:
-                    logger.info(
-                        "Skipping migration for {} from {} because it belongs to {}",
-                        key,
-                        description,
-                        stored_key,
-                    )
-                    continue
-                shutil.move(str(fallback_path), str(path))
-                logger.info("Migrated session {} from {}", key, description)
-                break
-
-        if not path.exists():
-            return None
-
-        try:
-            messages = []
-            metadata = {}
-            created_at = None
-            updated_at = None
-            last_consolidated = 0
-
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
-
-                    if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
-                        last_consolidated = data.get("last_consolidated", 0)
-                    else:
-                        messages.append(data)
-
-            return Session(
-                key=key,
-                messages=messages,
-                created_at=created_at or datetime.now(),
-                updated_at=updated_at or datetime.now(),
-                metadata=metadata,
-                last_consolidated=last_consolidated
-            )
-        except _SESSION_DATA_ERRORS as e:
-            logger.warning("Failed to load session {}: {}", key, e)
-            repaired = self._repair(key)
-            if repaired is not None:
-                logger.info("Recovered session {} from corrupt file ({} messages)", key, len(repaired.messages))
-            return repaired
+        return self._store.load(key)
 
     def _repair(self, key: str, *, path: Path | None = None) -> Session | None:
         """Attempt to recover a session from a corrupt JSONL file."""
-        if path is None:
-            path = self._get_session_path(key)
-        if not path.exists():
-            return None
-
-        try:
-            messages: list[dict[str, Any]] = []
-            metadata: dict[str, Any] = {}
-            created_at: datetime | None = None
-            updated_at: datetime | None = None
-            last_consolidated = 0
-            skipped = 0
-
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        skipped += 1
-                        continue
-                    if not isinstance(data, dict):
-                        skipped += 1
-                        continue
-
-                    if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        if data.get("created_at"):
-                            with suppress(ValueError, TypeError):
-                                created_at = datetime.fromisoformat(data["created_at"])
-                        if data.get("updated_at"):
-                            with suppress(ValueError, TypeError):
-                                updated_at = datetime.fromisoformat(data["updated_at"])
-                        last_consolidated = data.get("last_consolidated", 0)
-                    else:
-                        messages.append(data)
-
-            if skipped:
-                logger.warning("Skipped {} corrupt lines in session {}", skipped, key)
-
-            if not messages and not metadata:
-                return None
-
-            return Session(
-                key=key,
-                messages=messages,
-                created_at=created_at or datetime.now(),
-                updated_at=updated_at or datetime.now(),
-                metadata=metadata,
-                last_consolidated=last_consolidated
-            )
-        except _SESSION_DATA_ERRORS as e:
-            logger.warning("Repair failed for session {}: {}", key, e)
-            return None
+        return self._jsonl_store.repair(key, path=path)
 
     @staticmethod
-    def _session_payload(session: Session) -> dict[str, Any]:
-        return {
-            "key": session.key,
-            "created_at": session.created_at.isoformat(),
-            "updated_at": session.updated_at.isoformat(),
-            "metadata": session.metadata,
-            "messages": session.messages,
-        }
+    def _session_payload(session: Session) -> SessionPayload:
+        return JsonlSessionStore.session_payload(session)
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
-        """Save a session to disk atomically.
-
-        When *fsync* is ``True`` the final file and its parent directory are
-        explicitly flushed to durable storage.  This is intentionally off by
-        default (the OS page-cache is sufficient for normal operation) but
-        should be enabled during graceful shutdown so that filesystems with
-        write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
-        the most recent writes.
-        """
-        if self._file_cap_archiver is not None:
+        """Persist a session and retain it in the cache."""
+        archiver = self._file_cap_archiver
+        if archiver is not None:
             session.enforce_file_cap(
-                on_archive=lambda messages: self._file_cap_archiver(
+                on_archive=lambda messages: archiver(
                     messages,
                     session_key=session.key,
                 )
             )
 
-        path = self._get_session_path(session.key)
-        tmp_path = path.with_suffix(".jsonl.tmp")
-
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                metadata_line = {
-                    "_type": "metadata",
-                    "key": session.key,
-                    "created_at": session.created_at.isoformat(),
-                    "updated_at": session.updated_at.isoformat(),
-                    "metadata": session.metadata,
-                    "last_consolidated": session.last_consolidated
-                }
-                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                if fsync:
-                    f.flush()
-                    os.fsync(f.fileno())
-
-            os.replace(tmp_path, path)
-
-            if fsync:
-                # fsync the directory so the rename is durable.
-                # On Windows, opening a directory with O_RDONLY raises
-                # PermissionError; some shared filesystems allow the open but
-                # reject directory fsync with EINVAL.
-                with suppress(PermissionError):
-                    fd = os.open(str(path.parent), os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                    finally:
-                        os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
+        self._store.save(session, fsync=fsync)
         self._remember(session)
 
     def flush_all(self) -> int:
@@ -748,26 +1102,9 @@ class SessionManager:
         self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
-        """Remove a session from disk (both workspace and legacy locations) and cache.
-
-        Returns True if at least one JSONL file was found and unlinked.
-        """
-        paths = [
-            self._get_session_path(key),
-            self._get_legacy_lossy_path(key),
-            self._get_legacy_session_path(key),
-        ]
+        """Delete a persisted session and invalidate its cache entry."""
         self.invalidate(key)
-        deleted = False
-        for path in paths:
-            if not path.exists():
-                continue
-            try:
-                path.unlink()
-                deleted = True
-            except OSError as e:
-                logger.warning("Failed to delete session file {}: {}", path, e)
-        return deleted
+        return self._store.delete(key)
 
     def fork_session_before_user_index(
         self,
@@ -826,171 +1163,12 @@ class SessionManager:
         return target
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
-        """Load a session from disk without caching; intended for read-only HTTP endpoints.
-
-        Returns ``{"key", "created_at", "updated_at", "metadata", "messages"}`` or
-        ``None`` when the session file does not exist or fails to parse.
-        """
-        path = self._get_session_path(key)
-        if not path.exists():
-            return None
-        try:
-            messages: list[dict[str, Any]] = []
-            metadata: dict[str, Any] = {}
-            created_at: str | None = None
-            updated_at: str | None = None
-            stored_key: str | None = None
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
-                        created_at = data.get("created_at")
-                        updated_at = data.get("updated_at")
-                        stored_key = data.get("key")
-                    else:
-                        messages.append(data)
-            return {
-                "key": stored_key or key,
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "metadata": metadata,
-                "messages": messages,
-            }
-        except _SESSION_DATA_ERRORS as e:
-            logger.warning("Failed to read session {}: {}", key, e)
-            repaired = self._repair(key)
-            if repaired is not None:
-                logger.info("Recovered read-only session view {} from corrupt file", key)
-                return self._session_payload(repaired)
-            return None
+        """Read a session without populating the cache."""
+        return cast(dict[str, Any] | None, self._store.read(key))
 
     def read_session_metadata(self, key: str) -> dict[str, Any] | None:
-        """Load only the metadata record from a session file.
-
-        This is used by WebUI routes that need session-level metadata but not the
-        full conversation transcript.
-        """
-        path = self._get_session_path(key)
-        if not path.exists():
-            return None
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise ValueError("session records must be JSON objects")
-                    if data.get("_type") != "metadata":
-                        return None
-                    metadata = data.get("metadata", {})
-                    return {
-                        "key": data.get("key") or key,
-                        "created_at": data.get("created_at"),
-                        "updated_at": data.get("updated_at"),
-                        "metadata": metadata if isinstance(metadata, dict) else {},
-                    }
-            return None
-        except _SESSION_DATA_ERRORS as e:
-            logger.warning("Failed to read session metadata {}: {}", key, e)
-            repaired = self._repair(key)
-            if repaired is not None:
-                logger.info("Recovered read-only session metadata {} from corrupt file", key)
-                return {
-                    "key": repaired.key,
-                    "created_at": repaired.created_at.isoformat(),
-                    "updated_at": repaired.updated_at.isoformat(),
-                    "metadata": repaired.metadata,
-                }
-            return None
+        """Read session metadata without loading the transcript."""
+        return cast(dict[str, Any] | None, self._store.read_metadata(key))
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        """
-        List all sessions.
-
-        Returns:
-            List of session info dicts.
-        """
-        sessions = []
-
-        for path in self.sessions_dir.glob("*.jsonl"):
-            decoded = self._decode_storage_key(path.stem)
-            fallback_key = decoded or path.stem.replace("_", ":", 1)
-            try:
-                # Read the metadata line and a small preview for session lists.
-                with open(path, encoding="utf-8") as f:
-                    first_line = f.readline().strip()
-                    if first_line:
-                        data = json.loads(first_line)
-                        if not isinstance(data, dict):
-                            raise ValueError("session records must be JSON objects")
-                        if data.get("_type") == "metadata":
-                            key = data.get("key") or fallback_key
-                            metadata = data.get("metadata", {})
-                            title = _metadata_title(metadata)
-                            preview = ""
-                            fallback_preview = ""
-                            scanned_records = 0
-                            scanned_chars = 0
-                            for line in f:
-                                if not line.strip():
-                                    continue
-                                scanned_records += 1
-                                scanned_chars += len(line)
-                                if (
-                                    scanned_records > _SESSION_LIST_PREVIEW_MAX_RECORDS
-                                    or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
-                                ):
-                                    break
-                                item = json.loads(line)
-                                if not isinstance(item, dict):
-                                    raise ValueError("session records must be JSON objects")
-                                if item.get("_type") == "metadata":
-                                    continue
-                                text = _message_preview_text(item)
-                                if not text:
-                                    continue
-                                if item.get("role") == "user":
-                                    preview = text
-                                    break
-                                if not fallback_preview and item.get("role") == "assistant":
-                                    fallback_preview = text
-                            preview = preview or fallback_preview
-                            fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
-                            sessions.append(
-                                {
-                                    "key": key,
-                                    "created_at": data.get("created_at") or fallback_time,
-                                    "updated_at": data.get("updated_at") or fallback_time,
-                                    "title": title,
-                                    "preview": preview,
-                                    "path": str(path),
-                                }
-                            )
-            except _SESSION_DATA_ERRORS:
-                repaired = self._repair(fallback_key, path=path)
-                if repaired is not None:
-                    sessions.append(
-                        {
-                            "key": repaired.key,
-                            "created_at": repaired.created_at.isoformat(),
-                            "updated_at": repaired.updated_at.isoformat(),
-                            "title": _metadata_title(repaired.metadata),
-                            "preview": next(
-                                (
-                                    text
-                                    for msg in repaired.messages
-                                    if (text := _message_preview_text(msg))
-                                ),
-                                "",
-                            ),
-                            "path": str(path),
-                        }
-                    )
-                continue
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        return cast(list[dict[str, Any]], self._store.list_sessions())

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
@@ -84,7 +85,13 @@ class AgentProgressHook(AgentHook):
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self.emit_reasoning_end()
         if self._on_stream_end:
-            await self._on_stream_end(resuming=resuming)
+            kwargs: dict[str, bool] = {"resuming": resuming}
+            if (
+                context.stream_continues_current_message
+                and self._on_progress_accepts(self._on_stream_end, "merge_next")
+            ):
+                kwargs["merge_next"] = True
+            await self._on_stream_end(**kwargs)
         self._stream_buf = ""
         self._think_extractor.reset()
 
@@ -97,6 +104,61 @@ class AgentProgressHook(AgentHook):
             self._session_key,
         )
 
+    async def on_provider_tool_event(
+        self,
+        context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        if not self._on_progress:
+            return
+        phase = event.get("phase")
+        name = event.get("name")
+        call_id = event.get("call_id")
+        if (
+            phase not in {"start", "end", "error"}
+            or not isinstance(name, str)
+            or not name
+            or not call_id
+        ):
+            return
+        arguments = event.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        payload: dict[str, Any] = {
+            "version": 1,
+            "phase": phase,
+            "call_id": str(call_id),
+            "name": name,
+            "arguments": arguments,
+            "result": event.get("result") if phase == "end" else None,
+            "error": event.get("error") if phase == "error" else None,
+            "files": [],
+            "embeds": [],
+        }
+        if phase == "start":
+            await self.emit_reasoning_end()
+            tool_call = ToolCallRequest(id=str(call_id), name=name, arguments=arguments)
+            tool_hint = self._strip_think(self._tool_hint([tool_call])) or name
+            await invoke_on_progress(
+                self._on_progress,
+                tool_hint,
+                tool_hint=True,
+                tool_events=[payload],
+            )
+            logger.info(
+                "Provider-hosted tool call: {}({})",
+                name,
+                json.dumps(arguments, ensure_ascii=False)[:200],
+            )
+            return
+        if on_progress_accepts_tool_events(self._on_progress):
+            await invoke_on_progress(
+                self._on_progress,
+                "",
+                tool_hint=False,
+                tool_events=[payload],
+            )
+
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
             if not self._on_stream and not context.streamed_content:
@@ -107,13 +169,14 @@ class AgentProgressHook(AgentHook):
             tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
             await invoke_on_progress(
                 self._on_progress,
-                tool_hint,
+                cast(str, tool_hint),
                 tool_hint=True,
                 tool_events=tool_events,
             )
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
+
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""
         if (

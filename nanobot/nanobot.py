@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ from nanobot.sdk.types import (
     StreamEventType,
     result_from_response,
 )
+from nanobot.utils.llm_runtime import LLMRuntime
 
 __all__ = [
     "Nanobot",
@@ -104,7 +105,10 @@ class Nanobot:
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
 
-        config: Config = resolve_config_env_vars(load_config(resolved))
+        config: Config = resolve_config_env_vars(
+            load_config(resolved),
+            config_path=resolved,
+        )
         if workspace is not None:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()
@@ -133,6 +137,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -148,6 +153,9 @@ class Nanobot:
             sender_id: Logical sender identifier for runtime context.
             media: Optional local media paths attached to the message.
             ephemeral: If true, do not persist the turn or compact session history.
+            attributes: Optional caller-owned request data exposed to context
+                providers and turn-hook factories. Attributes are kept separate
+                from nanobot's trusted internal message metadata.
             hooks: Optional lifecycle hooks for this run.
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
@@ -166,6 +174,7 @@ class Nanobot:
             sender_id=sender_id,
             media=media,
             ephemeral=ephemeral,
+            attributes=attributes,
         )
         if runtime is not None:
             kwargs["runtime"] = runtime
@@ -187,21 +196,46 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
-        runtime = self._loop.runtime_resolver.resolve_override(
+        override_runtime = self._loop.runtime_resolver.resolve_override(
             model=model,
             model_preset=model_preset,
             config=self._config,
-        ) or self._loop.llm_runtime()
+        )
         queue: asyncio.Queue[StreamEvent | object] = asyncio.Queue(maxsize=256)
         emitter = SDKStreamEmitter(queue)
         stream_hook = SDKStreamingHook(emitter)
         capture = SDKCaptureHook()
         per_run_hooks = [capture, stream_hook, *(hooks or [])]
+        run_started = False
+
+        async def _emit_run_started(runtime: LLMRuntime | None = None) -> None:
+            nonlocal run_started
+            if run_started:
+                return
+            if runtime is None:
+                runtime = override_runtime
+            metadata: dict[str, Any] = {
+                "session_key": session_key,
+                "channel": channel,
+                "chat_id": chat_id,
+                "sender_id": sender_id,
+            }
+            if runtime is not None:
+                metadata.update({
+                    "model": runtime.model,
+                    "model_preset": runtime.model_preset,
+                })
+            await emitter.emit(StreamEvent(
+                type=STREAM_EVENT_RUN_STARTED,
+                metadata=metadata,
+            ))
+            run_started = True
 
         async def _on_stream(delta: str) -> None:
             await emitter.text_delta(delta)
@@ -217,27 +251,20 @@ class Nanobot:
                 sender_id=sender_id,
                 media=media,
                 ephemeral=ephemeral,
+                attributes=attributes,
                 on_stream=_on_stream,
                 on_stream_end=_on_stream_end,
             )
-            kwargs["runtime"] = runtime
-            await emitter.emit(StreamEvent(
-                type=STREAM_EVENT_RUN_STARTED,
-                metadata={
-                    "session_key": session_key,
-                    "channel": channel,
-                    "chat_id": chat_id,
-                    "sender_id": sender_id,
-                    "model": runtime.model,
-                    "model_preset": runtime.model_preset,
-                },
-            ))
+            kwargs["on_runtime_admitted"] = _emit_run_started
+            if override_runtime is not None:
+                kwargs["runtime"] = override_runtime
             try:
                 response = await self._loop.process_direct(
                     message,
                     **kwargs,
                     hooks=per_run_hooks,
                 )
+                await _emit_run_started()
                 await emitter.text_completed(resuming=False, force=False)
                 result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
@@ -249,6 +276,7 @@ class Nanobot:
                 ))
                 return result
             except Exception as exc:
+                await _emit_run_started()
                 await emitter.emit(StreamEvent(
                     type=STREAM_EVENT_RUN_FAILED,
                     error=str(exc),
@@ -271,6 +299,7 @@ class Nanobot:
         sender_id: str = "user",
         media: list[str] | None = None,
         ephemeral: bool = False,
+        attributes: Mapping[str, Any] | None = None,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
         model_preset: str | None = None,
@@ -284,6 +313,7 @@ class Nanobot:
             sender_id=sender_id,
             media=media,
             ephemeral=ephemeral,
+            attributes=attributes,
             hooks=hooks,
             model=model,
             model_preset=model_preset,

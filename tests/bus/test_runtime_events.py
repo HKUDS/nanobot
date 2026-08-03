@@ -6,6 +6,7 @@ from nanobot.bus.runtime_events import (
     RuntimeEventContext,
     RuntimeEventPublisher,
     RuntimeModelChanged,
+    SessionTurnPersisted,
     SessionTurnStarted,
     TurnCompleted,
     TurnRunStatusChanged,
@@ -120,3 +121,33 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_publisher_emits_persisted_turn_attributes() -> None:
+    bus = RuntimeEventBus()
+    seen: list[object] = []
+    publisher = RuntimeEventPublisher(bus)
+    msg = InboundMessage(
+        channel="sdk",
+        sender_id="alice",
+        chat_id="chat-a",
+        content="hello",
+        metadata={"internal": "routing"},
+    )
+
+    bus.subscribe(seen.append, SessionTurnPersisted)
+    await publisher.session_turn_persisted(
+        msg,
+        "sdk:chat-a",
+        turn_id="turn-1",
+        attributes={"tenant": "acme"},
+    )
+
+    event = seen[0]
+    assert isinstance(event, SessionTurnPersisted)
+    assert event.context.session_key == "sdk:chat-a"
+    assert event.context.metadata == {"internal": "routing"}
+    assert event.context.attributes == {"tenant": "acme"}
+    assert event.turn_id == "turn-1"
+    assert event.sender_id == "alice"

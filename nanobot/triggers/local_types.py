@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from nanobot.utils.dict_keys import get_camel_snake as _get
 
@@ -14,6 +14,13 @@ TriggerStatus = Literal["ok", "error"]
 def _int_or_zero(value: Any) -> int:
     """Coerce a stored JSON numeric, using zero for null or empty values."""
     return 0 if value is None or value == "" else int(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    """Coerce a stored JSON numeric; null/blank stays None."""
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 @dataclass
@@ -61,9 +68,15 @@ class LocalTrigger:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LocalTrigger":
-        history = [
-            record if isinstance(record, TriggerRunRecord) else TriggerRunRecord.from_dict(record)
-            for record in data.get("runHistory", data.get("run_history", []))
+        raw_history = cast(
+            list[Any],
+            data.get("runHistory", data.get("run_history", [])) or [],
+        )
+        history: list[TriggerRunRecord] = [
+            record
+            if isinstance(record, TriggerRunRecord)
+            else TriggerRunRecord.from_dict(cast(dict[str, Any], record))
+            for record in raw_history
             if isinstance(record, (dict, TriggerRunRecord))
         ]
         return cls(
@@ -77,7 +90,7 @@ class LocalTrigger:
             origin_metadata=dict(_get(data, "originMetadata", "origin_metadata", {}) or {}),
             created_at_ms=_int_or_zero(_get(data, "createdAtMs", "created_at_ms", 0)),
             updated_at_ms=_int_or_zero(_get(data, "updatedAtMs", "updated_at_ms", 0)),
-            last_run_at_ms=_get(data, "lastRunAtMs", "last_run_at_ms"),
+            last_run_at_ms=_optional_int(_get(data, "lastRunAtMs", "last_run_at_ms")),
             last_status=_get(data, "lastStatus", "last_status"),  # type: ignore[arg-type]
             last_error=_get(data, "lastError", "last_error"),
             run_history=history,

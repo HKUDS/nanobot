@@ -610,7 +610,9 @@ In chat:
 /model fast
 ```
 
-`/model` switching is runtime-only. It does not rewrite `config.json`, and an in-progress turn keeps using the model it started with.
+`/model` stores the selection in the current session without rewriting `config.json`.
+The selection survives restarts, does not affect other sessions, and an in-progress
+turn keeps using the model it started with.
 
 ## Quick Failure Map
 

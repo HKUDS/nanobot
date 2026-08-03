@@ -3,6 +3,7 @@
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -126,15 +127,15 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "memory consolidation engine" in prompt
 
-    def test_truncates_long_entries(self, store):
+    def test_truncates_long_entries_at_1000_chars(self, store):
         long_content = "x" * 2000
         store.append_history(long_content)
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
-        # The full 2000 chars should not appear — truncated to 500
         assert long_content not in prompt
-        assert "x" * 500 in prompt
+        assert "x" * 1000 in prompt
+        assert "x" * 1001 not in prompt
 
     def test_batches_oldest_unprocessed_entries_first(self, store):
         for i in range(25):
@@ -221,11 +222,20 @@ class TestDreamTools:
                 "new_text": "Precise",
             },
         )
+        user_result = await tools.execute(
+            "write_file",
+            {
+                "path": "USER.md",
+                "content": "# User Profile\n\n- **Name**: Ada\n",
+            },
+        )
 
         assert "Patch applied" in memory_result
         assert "Successfully edited" in soul_result
+        assert "Successfully wrote" in user_result
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")
+        assert "**Name**: Ada" in store.user_file.read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_dream_can_write_workspace_skills(self, store):
@@ -305,9 +315,17 @@ class TestDreamTools:
                 "new_text": "2",
             },
         )
+        history_write_result = await tools.execute(
+            "write_file",
+            {
+                "path": "memory/history.jsonl",
+                "content": "after\n",
+            },
+        )
 
         assert "outside allowed directory" in history_result
         assert "outside allowed directory" in cursor_result
+        assert "outside allowed directory" in history_write_result
         assert store.history_file.read_text(encoding="utf-8") == "before\n"
         assert store._dream_cursor_file.read_text(encoding="utf-8") == "1"
 
@@ -330,11 +348,10 @@ class TestDreamTools:
             },
         )
         user_result = await tools.execute(
-            "edit_file",
+            "write_file",
             {
                 "path": "USER.md/evil.txt",
-                "old_text": "",
-                "new_text": "owned",
+                "content": "owned",
             },
         )
 
@@ -385,6 +402,21 @@ class TestEphemeralDirect:
 
         return loop, store
 
+    def test_dream_runtime_uses_preset_without_changing_default(self, _make_loop):
+        loop, _ = _make_loop
+        loop.runtime_resolver._model_presets = {
+            "dream": ModelPresetConfig(model="dream-model"),
+        }
+        loop.dream_model_preset = "dream"
+
+        runtime = loop.dream_runtime()
+
+        assert runtime is not None
+        assert runtime.model == "dream-model"
+        assert runtime.model_preset == "dream"
+        assert loop.model == "test-model"
+        assert loop.model_preset is None
+
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
         """When ephemeral=True, raw_archive must not be called."""
         from unittest.mock import patch
@@ -414,13 +446,13 @@ class TestEphemeralDirect:
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct(
                 "test", session_key="dream:check", ephemeral=True,
             )
@@ -435,13 +467,13 @@ class TestEphemeralDirect:
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct("test", session_key="cli:normal")
 
         assert captured.get("ephemeral") is False

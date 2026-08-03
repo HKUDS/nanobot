@@ -585,3 +585,53 @@ def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
     )
     assert delivery.created_at_ms == 0
     assert delivery.attempts == 0
+
+
+def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
+    """String lastRunAtMs must coerce to int like cron store ms fields."""
+    trigger = LocalTrigger.from_dict(
+        {
+            "id": "t1",
+            "name": "n",
+            "enabled": True,
+            "channel": "websocket",
+            "chatId": "c1",
+            "sessionKey": "websocket:c1",
+            "lastRunAtMs": "1710000000000",
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+        }
+    )
+    assert trigger.last_run_at_ms == 1710000000000
+    assert trigger.last_run_at_ms < 1710000000001
+
+    trigger_null = LocalTrigger.from_dict(
+        {
+            "id": "t2",
+            "name": "n",
+            "enabled": True,
+            "sessionKey": "websocket:c1",
+            "lastRunAtMs": None,
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+        }
+    )
+    assert trigger_null.last_run_at_ms is None
+
+
+def test_local_trigger_from_dict_accepts_null_run_history() -> None:
+    """Null runHistory must load as empty, matching CronJobState.from_store_dict."""
+    trigger = LocalTrigger.from_dict(
+        {
+            "id": "t1",
+            "name": "n",
+            "enabled": True,
+            "channel": "websocket",
+            "chatId": "c1",
+            "sessionKey": "websocket:c1",
+            "runHistory": None,
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+        }
+    )
+    assert trigger.run_history == []

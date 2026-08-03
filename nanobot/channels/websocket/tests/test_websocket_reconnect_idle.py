@@ -14,6 +14,7 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel._turn_models = {}
 
     sent_events = []
 
@@ -39,6 +40,7 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel._turn_models = {}
 
     sent_events = []
 
@@ -51,9 +53,19 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel.send_goal_state = mock_send_goal_state
     channel.send_goal_status = mock_send_goal_status
 
-    with patch("nanobot.channels.websocket.runtime.websocket_turn_wall_started_at", return_value=1234567890.0):
+    with (
+        patch(
+            "nanobot.channels.websocket.runtime.websocket_turn_wall_started_at",
+            return_value=1234567890.0,
+        ),
+        patch(
+            "nanobot.channels.websocket.runtime.websocket_turn_id",
+            return_value="turn-active",
+        ),
+    ):
         await channel._hydrate_after_subscribe("test-chat")
 
     running_events = [e for e in sent_events if e[0] == "goal_status" and e[2] == "running"]
     assert len(running_events) == 1
     assert running_events[0][3]["started_at"] == 1234567890.0
+    assert running_events[0][3]["turn_id"] == "turn-active"

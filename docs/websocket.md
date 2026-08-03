@@ -152,7 +152,8 @@ All frames are JSON text. Each message has an `event` field.
 
 Reasoning frames only flow when the channel's `showReasoning` is `true` (default) and the model returns reasoning content (DeepSeek-R1 / Kimi / MiMo / OpenAI reasoning models, Anthropic extended thinking, or inline `<think>` / `<thought>` tags). Models without reasoning produce zero `reasoning_delta` frames.
 
-**`runtime_model_updated`** — broadcast when the gateway runtime model changes, for example after `/model <preset>`:
+**`runtime_model_updated`** — broadcast when the gateway default runtime changes or
+when a config reload requires clients to refresh their model catalog:
 
 ```json
 {
@@ -162,7 +163,10 @@ Reasoning frames only flow when the channel's `showReasoning` is `true` (default
 }
 ```
 
-`model_preset` is omitted when no named preset is active. WebUI clients use this event to keep the displayed model badge in sync across slash commands, config reloads, and settings changes.
+`model_preset` is omitted when no named preset is active. WebUI clients use this event
+to refresh model settings after default-runtime and config changes. `/model <preset>`
+is session-scoped; its selection is reflected through `session_updated` and the
+session row's `model_preset` field instead of this global event.
 
 **`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 

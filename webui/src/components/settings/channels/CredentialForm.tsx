@@ -159,7 +159,7 @@ export function CredentialForm({
               <span
                 role="radiogroup"
                 aria-label={field.label}
-                className="mt-1 grid rounded-[10px] bg-muted/75 p-0.5 text-[12px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]"
+                className="mt-1 grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
                 style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
               >
                 {field.options.map((option) => (
@@ -172,7 +172,7 @@ export function CredentialForm({
                     className={cn(
                       "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
                       selectedOption === option.value
-                        && "bg-background text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.10),inset_0_0_0_1px_rgba(15,23,42,0.055)]",
+                        && "bg-background text-foreground ring-1 ring-inset ring-border/45",
                     )}
                   >
                     {option.label}

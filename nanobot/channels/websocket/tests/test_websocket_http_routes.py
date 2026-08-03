@@ -24,6 +24,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -229,6 +230,7 @@ async def test_bootstrap_returns_token_for_localhost(
         assert resp.status_code == 200
         body = resp.json()
         assert body["token"].startswith("nbwt_")
+        assert channel.gateway.tokens.issued_token_audiences[body["token"]] == "webui"
         assert body["api_token"].startswith("nbwt_")
         assert body["api_token"] != body["token"]
         assert body["ws_path"] == "/"
@@ -518,6 +520,8 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "name": "workspace-skill",
             "description": "Workspace skill.",
             "source": "workspace",
+            "enabled": True,
+            "deletable": True,
             "available": True,
             "unavailable_reason": "",
         }
@@ -545,6 +549,366 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_management_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_dir = tmp_path / "skills" / "custom-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: custom-skill\ndescription: Custom skill.\n---\n",
+        encoding="utf-8",
+    )
+
+    def set_enabled(
+        workspace: Path,
+        name: str,
+        *,
+        enabled: bool,
+        disabled_skills: set[str],
+    ) -> dict[str, Any]:
+        assert workspace == tmp_path
+        assert name == "custom-skill"
+        assert enabled is False
+        disabled_skills.add(name)
+        return {"name": name, "enabled": enabled, "deleted": False}
+
+    def delete(
+        workspace: Path,
+        name: str,
+        *,
+        disabled_skills: set[str],
+    ) -> dict[str, Any]:
+        assert workspace == tmp_path
+        assert name == "custom-skill"
+        disabled_skills.discard(name)
+        for child in skill_dir.iterdir():
+            child.unlink()
+        skill_dir.rmdir()
+        return {"name": name, "enabled": False, "deleted": True}
+
+    monkeypatch.setattr("nanobot.webui.ws_http.set_webui_skill_enabled", set_enabled)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        headers = {"Authorization": f"Bearer {token}"}
+        update_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/update"
+            "?name=custom-skill&enabled=false",
+            headers=headers,
+        )
+        assert update_response.status_code == 200
+        assert update_response.json()["last_action"]["enabled"] is False
+        custom = next(
+            item
+            for item in update_response.json()["skills"]
+            if item["name"] == "custom-skill"
+        )
+        assert custom["enabled"] is False
+
+        delete_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/delete"
+            "?name=custom-skill",
+            headers=headers,
+        )
+        assert delete_response.status_code == 200
+        assert delete_response.json()["last_action"]["deleted"] is True
+        assert all(
+            item["name"] != "custom-skill"
+            for item in delete_response.json()["skills"]
+        )
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skills_marketplace_routes_search_and_install(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = AsyncMock(return_value={
+        "query": "react",
+        "install_supported": True,
+        "skills": [{
+            "id": "acme/agent-skills/react-testing",
+            "skill_id": "react-testing",
+            "name": "React Testing",
+            "source": "acme/agent-skills",
+            "installs": 42,
+            "url": "https://skills.sh/acme/agent-skills/react-testing",
+            "installed": False,
+        }],
+    })
+    trending = AsyncMock(return_value={
+        "period": "24h",
+        "install_supported": True,
+        "skills": [{
+            "id": "acme/agent-skills/react-testing",
+            "skill_id": "react-testing",
+            "name": "React Testing",
+            "source": "acme/agent-skills",
+            "installs": 12,
+            "url": "https://skills.sh/acme/agent-skills/react-testing",
+            "installed": False,
+            "rank": 1,
+        }],
+    })
+    trends = AsyncMock(return_value={
+        "trends": {"acme/agent-skills/react-testing": [2, 4, 3, 8]},
+    })
+
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
+        assert source == "acme/agent-skills"
+        assert skill_id == "react-testing"
+        assert workspace == tmp_path
+        assert provider == "skills_sh"
+        assert version == ""
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    install_mock = AsyncMock(side_effect=install)
+    monkeypatch.setattr("nanobot.webui.ws_http.search_marketplace_skills", search)
+    monkeypatch.setattr("nanobot.webui.ws_http.trending_marketplace_skills", trending)
+    monkeypatch.setattr("nanobot.webui.ws_http.marketplace_skill_trends", trends)
+    monkeypatch.setattr("nanobot.webui.ws_http.install_marketplace_skill", install_mock)
+
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        denied = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/search?q=react"
+        )
+        assert denied.status_code == 401
+
+        token = channel.gateway.tokens.issue_api_token(300)
+        headers = {"Authorization": f"Bearer {token}"}
+        search_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/search?q=react",
+            headers=headers,
+        )
+        assert search_response.status_code == 200
+        assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
+        search.assert_awaited_once_with("react", tmp_path, provider="all")
+
+        trending_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/trending",
+            headers=headers,
+        )
+        assert trending_response.status_code == 200
+        assert trending_response.json()["period"] == "24h"
+        trending.assert_awaited_once_with(tmp_path, provider="all")
+
+        trends_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/trends"
+            "?id=acme%2Fagent-skills%2Freact-testing",
+            headers=headers,
+        )
+        assert trends_response.status_code == 200
+        assert trends_response.json()["trends"] == {
+            "acme/agent-skills/react-testing": [2, 4, 3, 8],
+        }
+        trends.assert_awaited_once_with(["acme/agent-skills/react-testing"])
+
+        params = urlencode({
+            "source": "acme/agent-skills",
+            "skill": "react-testing",
+        })
+        install_response = await _http_get(
+            f"http://127.0.0.1:{port}/api/webui/skills/install?{params}",
+            headers=headers,
+        )
+        assert install_response.status_code == 200
+        body = install_response.json()
+        assert body["last_action"] == {
+            "installed": True,
+            "already_installed": False,
+            "name": "react-testing",
+        }
+        assert next(
+            skill for skill in body["skills"] if skill["name"] == "react-testing"
+        )["source"] == "workspace"
+        install_mock.assert_awaited_once()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_install_rejects_overlapping_requests(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
+        started.set()
+        await finish.wait()
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    install_mock = AsyncMock(side_effect=install)
+    monkeypatch.setattr("nanobot.webui.ws_http.install_marketplace_skill", install_mock)
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    path = (
+        "/api/webui/skills/install"
+        "?source=acme%2Fagent-skills&skill=react-testing"
+    )
+    request = _FakeReq(
+        {
+            "Authorization": f"Bearer {token}",
+            "Host": "127.0.0.1:8765",
+        },
+        path=path,
+    )
+
+    first = asyncio.create_task(channel.gateway.http.dispatch(_LOCAL, request))
+    await started.wait()
+    overlapping = await channel.gateway.http.dispatch(_LOCAL, request)
+
+    assert overlapping.status_code == 409
+    assert "already in progress" in overlapping.body.decode()
+    assert install_mock.await_count == 1
+
+    finish.set()
+    completed = await first
+    assert completed.status_code == 200
+    assert install_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_delete_remains_local_only(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delete = MagicMock()
+    policy = MagicMock()
+    policy.tools.webui_allow_remote_package_install = True
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: policy)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.dispatch(
+        _REMOTE,
+        _FakeReq(
+            {"Authorization": f"Bearer {token}"},
+            path="/api/webui/skills/delete?name=custom-skill",
+        ),
+    )
+
+    assert response.status_code == 403
+    assert "remote skill deletion is disabled" in response.body.decode()
+    delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_install_honors_remote_install_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = MagicMock()
+    policy.tools.webui_allow_remote_package_install = True
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: policy)
+
+    async def install(
+        source: str,
+        skill_id: str,
+        workspace: Path,
+        *,
+        provider: str,
+        version: str,
+    ) -> dict[str, Any]:
+        skill_dir = workspace / "skills" / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: react-testing\ndescription: Test React apps.\n---\n",
+            encoding="utf-8",
+        )
+        return {"installed": True, "already_installed": False, "name": skill_id}
+
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.install_marketplace_skill",
+        AsyncMock(side_effect=install),
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.dispatch(
+        _REMOTE,
+        _FakeReq(
+            {"Authorization": f"Bearer {token}"},
+            path=(
+                "/api/webui/skills/install"
+                "?source=acme%2Fagent-skills&skill=react-testing"
+            ),
+        ),
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.body.decode())["last_action"]["name"] == "react-testing"
 
 
 @pytest.mark.asyncio
@@ -1838,7 +2202,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
 @pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Seed a realistic multi-channel disk state: CLI, Slack, Lark and
     # websocket sessions all live in the same ``sessions/`` directory.
@@ -1852,7 +2216,20 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "websocket:beta",
         ],
     )
-    channel = _ch(bus, session_manager=sm, port=29906)
+    project = tmp_path / "project"
+    project.mkdir()
+    scoped = sm.get_or_create("websocket:beta")
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "restricted",
+    }
+    sm.save(scoped)
+
+    def fail_metadata_read(_key: str) -> None:
+        raise AssertionError("the session list must use its own index metadata")
+
+    monkeypatch.setattr(sm, "read_session_metadata", fail_metadata_read)
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=29906)
     server_task = asyncio.create_task(channel.start())
     try:
         token = channel.gateway.tokens.issue_api_token(300)
@@ -1862,10 +2239,17 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "http://127.0.0.1:29906/api/sessions", headers=auth
         )
         assert listing.status_code == 200
-        keys = {s["key"] for s in listing.json()["sessions"]}
+        sessions = listing.json()["sessions"]
+        keys = {s["key"] for s in sessions}
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+        rows = {row["key"]: row for row in sessions}
+        assert rows["websocket:beta"]["workspace_scope"]["project_path"] == str(
+            project.resolve()
+        )
+        assert rows["websocket:beta"]["workspace_scope"]["access_mode"] == "restricted"
+        assert all(not any(key.startswith("_") for key in row) for row in sessions)
     finally:
         await channel.stop()
         await server_task
@@ -2574,9 +2958,153 @@ async def test_webui_thread_resigns_assistant_media_urls(
         assert media[0]["url"].startswith("/api/media/")
         assert media[0]["url"] != "/api/media/old-sig/old-payload"
 
+        repeated = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket:video-replay/webui-thread",
+            headers=auth,
+        )
+        repeated_assistant = next(
+            m for m in repeated.json()["messages"] if m["role"] == "assistant"
+        )
+        assert repeated_assistant["id"] == assistant["id"]
+        assert repeated_assistant["media"][0]["url"] == media[0]["url"]
+        assert len(list(websocket_media.iterdir())) == 1
+
         fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
         assert fetched.status_code == 200
         assert fetched.content == b"video"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_negotiates_gzip_across_repeated_headers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = _seed_many(tmp_path, [f"websocket:gzip-{index:03d}" for index in range(80)])
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions",
+            headers=[
+                ("Authorization", f"Bearer {token}"),
+                ("Accept-Encoding", "identity;q=0"),
+                ("Accept-Encoding", "gzip"),
+            ],
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Content-Encoding"] == "gzip"
+        assert response.headers["Vary"] == "Accept-Encoding"
+        assert len(response.json()["sessions"]) == 80
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_complete_transcript_skips_session_history_read(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:fast-thread"
+    sm = _seed_session(tmp_path, key=key)
+    for event in (
+        {"event": "user", "chat_id": "fast-thread", "text": "hi"},
+        {"event": "message", "chat_id": "fast-thread", "text": "hello back"},
+        {"event": "turn_end", "chat_id": "fast-thread"},
+    ):
+        append_transcript_object(key, event)
+
+    read_session_file = MagicMock(
+        side_effect=AssertionError("complete transcripts must not read canonical history")
+    )
+    monkeypatch.setattr(sm, "read_session_file", read_session_file)
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Afast-thread/webui-thread?limit=160&direction=latest",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert [message["content"] for message in response.json()["messages"]] == [
+            "hi",
+            "hello back",
+        ]
+        read_session_file.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_negotiates_gzip_for_large_payloads(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = SessionManager(tmp_path)
+    append_transcript_object(
+        "websocket:gzip-thread",
+        {
+            "event": "user",
+            "chat_id": "gzip-thread",
+            "text": "compress me " * 1_000,
+        },
+    )
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        url = (
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Agzip-thread/webui-thread?limit=80&direction=latest"
+        )
+        compressed = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "br, gzip",
+            },
+        )
+
+        assert compressed.status_code == 200
+        assert compressed.headers["Content-Encoding"] == "gzip"
+        assert compressed.headers["Vary"] == "Accept-Encoding"
+        assert int(compressed.headers["Content-Length"]) < len(compressed.content)
+        assert compressed.json()["messages"][0]["content"].startswith("compress me")
+
+        identity = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "gzip;q=0, br",
+            },
+        )
+        assert identity.status_code == 200
+        assert "Content-Encoding" not in identity.headers
+        assert identity.json() == compressed.json()
+
+        unauthorized = await _http_get(url, headers={"Accept-Encoding": "gzip"})
+        assert unauthorized.status_code == 401
+        assert "Content-Encoding" not in unauthorized.headers
     finally:
         await channel.stop()
         await server_task

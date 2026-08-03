@@ -11,7 +11,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
-| Check config without calling a model | `nanobot status` | Summarizes the selected config, workspace, active model, and providers |
+| Check readiness without calling a model | `nanobot status` | Summarizes config/workspace and validates the active provider/model configuration |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
@@ -20,7 +20,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
-| Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OAuth providers such as OpenAI Codex and GitHub Copilot |
+| Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OpenAI Codex, xAI subscription, and GitHub Copilot providers |
 
 ## Global
 
@@ -70,6 +70,18 @@ Default paths:
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
 
+## Status
+
+| Command | Description |
+|---|---|
+| `nanobot status` | Summarize the default config/workspace and check Agent provider/model readiness |
+| `nanobot status --config <path>` | Check a specific config file |
+| `nanobot status --workspace <path>` | Show status with a workspace override |
+
+Status does not send a model request. On success, run the printed
+`nanobot agent -m "Hello!"` command to verify network access and credentials. On failure,
+follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` route.
+
 ## Agent CLI
 
 | Command | Description |
@@ -95,7 +107,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
 | `nanobot webui --gateway-port <port>` | Override the gateway health port |
-| `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; provider credentials still require interactive setup |
+| `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; configure provider credentials in **Settings → Models** |
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
@@ -287,8 +299,10 @@ remain accepted as no-op compatibility aliases.
 | Command | Description |
 |---|---|
 | `nanobot provider login openai-codex --set-main` | Authenticate Codex and select its current default model |
+| `nanobot provider login xai-grok --set-main` | Authenticate an eligible X Premium / Grok subscription and select Grok 4.5; hosted X Search is enabled for models that advertise support |
 | `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
+| `nanobot provider logout xai-grok --config <path>` | Remove the selected nanobot instance's xAI OAuth state |
 | `nanobot provider logout github-copilot` | Remove GitHub Copilot OAuth state |
 
 See [`providers.md`](./providers.md#oauth-providers) for when OAuth providers need explicit provider/model selection.

@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -234,10 +235,22 @@ class TestHistoryWithCursor:
         store.append_history("event 3")
         store.append_history("event 4")
         store.append_history("event 5")
+        store.set_last_dream_cursor(5)
         store.compact_history()
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
+
+    def test_compact_history_preserves_entries_after_dream_cursor(self, tmp_path):
+        store = MemoryStore(tmp_path, max_history_entries=50)
+        for index in range(1, 101):
+            store.append_history(f"event {index}")
+        store.set_last_dream_cursor(20)
+
+        store.compact_history()
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
     def test_write_entries_uses_atomic_write(self, tmp_path):
         """_write_entries uses temp file + os.replace for atomicity."""
@@ -295,19 +308,17 @@ class TestAppendHistoryHardCap:
         entry = store.read_unprocessed_history(since_cursor=0)[0]
         assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
 
-    def test_oversize_warning_is_emitted_once(self, store, caplog):
+    def test_oversize_warning_is_emitted_once(self, store, monkeypatch):
         """Repeated oversized writes should warn only on the first occurrence."""
-        from loguru import logger as loguru_logger
-
         records: list[str] = []
-        handler_id = loguru_logger.add(lambda m: records.append(m), level="WARNING")
-        try:
-            huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
-            store.append_history(huge)
-            store.append_history(huge)
-            store.append_history(huge)
-        finally:
-            loguru_logger.remove(handler_id)
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
+        store.append_history(huge)
+        store.append_history(huge)
+        store.append_history(huge)
 
         oversize_warnings = [r for r in records if "exceeds" in r and "chars" in r]
         assert len(oversize_warnings) == 1
@@ -538,3 +549,51 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+def test_history_skips_non_dict_jsonl_lines(tmp_path: Path) -> None:
+    """Null/list/bool history lines must not crash reads or appends."""
+    memory = MemoryStore(tmp_path)
+    memory.history_file.parent.mkdir(parents=True, exist_ok=True)
+    memory.history_file.write_text(
+        "\n".join([
+            "null",
+            "[1, 2]",
+            "true",
+            json.dumps({
+                "cursor": 1,
+                "timestamp": "2026-01-01T00:00:00",
+                "content": "kept",
+                "session_key": "cli:t",
+            }),
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    entries = memory.read_unprocessed_history(since_cursor=0)
+    assert entries == [{
+        "cursor": 1,
+        "timestamp": "2026-01-01T00:00:00",
+        "content": "kept",
+        "session_key": "cli:t",
+    }]
+    next_cursor = memory.append_history("next", session_key="cli:t")
+    assert next_cursor == 2
+
+def test_raw_archive_handles_none_timestamp_and_missing_role(tmp_path: Path) -> None:
+    """raw_archive and _format_messages must safely format messages with None timestamp or missing role.
+
+    Prevents TypeError on NoneType[:16] slicing and KeyError on missing 'role'
+    when raw-dumping unconsolidated history entries without timestamps or role fields.
+    """
+    memory = MemoryStore(tmp_path)
+    messages = [
+        {"content": "message with none timestamp", "timestamp": None, "role": "user"},
+        {"content": "message with int timestamp", "timestamp": 1720000000, "role": "assistant"},
+        {"content": "message with missing role", "timestamp": "2026-07-28T12:00:00"},
+    ]
+    memory.raw_archive(messages, session_key="cli:test")
+    raw_history = memory.history_file.read_text(encoding="utf-8")
+    assert "[?] USER: message with none timestamp" in raw_history
+    assert "[1720000000] ASSISTANT: message with int timestamp" in raw_history
+    assert "[2026-07-28T12:00] UNKNOWN: message with missing role" in raw_history

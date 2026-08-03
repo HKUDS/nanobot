@@ -1,3 +1,4 @@
+# pyright: reportMissingTypeStubs=false, reportPrivateUsage=false
 """Shared Feishu/Lark WebSocket runtime.
 
 The official lark_oapi websocket client stores an asyncio loop in a module-level
@@ -148,7 +149,7 @@ class FeishuWsRunner:
     async def _client_main(
         self, key: str, client: _LarkWsClient, stop_event: asyncio.Event
     ) -> None:
-        ping_task: asyncio.Task | None = None
+        ping_task: asyncio.Task[None] | None = None
         while not stop_event.is_set():
             try:
                 await client._connect()
@@ -171,12 +172,12 @@ class FeishuWsRunner:
                     await client._disconnect()
 
 
-_RUNNER: FeishuWsRunner | None = None
+_runner: FeishuWsRunner | None = None
 
 
 def get_feishu_ws_runner() -> FeishuWsRunner:
     """Return the process-wide Feishu WebSocket runner."""
-    global _RUNNER
-    if _RUNNER is None:
-        _RUNNER = FeishuWsRunner()
-    return _RUNNER
+    global _runner
+    if _runner is None:
+        _runner = FeishuWsRunner()
+    return _runner

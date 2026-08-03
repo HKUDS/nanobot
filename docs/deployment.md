@@ -4,7 +4,7 @@ Use this page after `nanobot agent -m "Hello!"` works locally. Deployment keeps 
 
 ## Before You Deploy
 
-Check these once before Docker, systemd, or LaunchAgent:
+Check these once before Render, Docker, systemd, or LaunchAgent:
 
 | Check | Why it matters |
 |---|---|
@@ -22,10 +22,39 @@ Restart the deployed process after editing `config.json`. Long-running processes
 
 | Runtime | Use it for | State location | Useful first command |
 |---|---|---|---|
+| Render | One-click hosted gateway and WebUI | Persistent disk at `/home/nanobot/.nanobot` | [Deploy to Render](#render) |
 | Docker Compose | Repeatable container runs on Linux servers or workstations | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker compose run --rm nanobot-cli agent -m "Hello!"` |
 | Docker CLI | Manual container testing or small one-off hosts | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status` |
 | systemd user service | Linux user-level gateway that restarts automatically | Host user's `~/.nanobot` unless you pass explicit paths | `systemctl --user status nanobot-gateway` |
 | macOS LaunchAgent | macOS gateway that starts after login | Host user's `~/.nanobot` unless the plist passes explicit paths | `launchctl list | grep ai.nanobot.gateway` |
+
+## Render
+
+Run nanobot online without managing a server. The blueprint deploys the gateway and bundled WebUI together, with a persistent disk so sessions, memory, and chat history survive restarts.
+
+> [!IMPORTANT]
+> This setup requires a paid Render service because persistent disks are not available on the free tier. During setup, provide `ANTHROPIC_API_KEY` and set `NANOBOT_WEB_TOKEN` to a strong private password (for example, generate one with `openssl rand -hex 32`).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
+
+[Review the deployment blueprint](../render.yaml)
+
+### First Deployment
+
+1. Click **Deploy to Render**, sign in, and review the Blueprint. It creates one Starter web service and a 1 GB persistent disk.
+2. Enter your `ANTHROPIC_API_KEY`. Set `NANOBOT_WEB_TOKEN` to a new random value and save it in your password manager; this is the password for the public WebUI.
+3. Create the Blueprint and wait for the service status to become **Live**. The first build can take several minutes.
+4. Open the generated `onrender.com` URL. The **Authentication required** page means the gateway is running: enter the same `NANOBOT_WEB_TOKEN` value to open the WebUI.
+
+The model API key is used by nanobot to call Anthropic. The Web token only protects access to this deployment; do not share it in issues, screenshots, or chat.
+
+### Updates and Data
+
+The Blueprint disables automatic deploys so upstream repository changes do not unexpectedly restart your agent. To update, open the service in the Render Dashboard and choose **Manual Deploy → Deploy latest commit**.
+
+The persistent disk keeps `config.json`, sessions, memory, WebUI history, cron state, media, and logs across restarts and updates. The deployment initializes `config.json` only when it does not already exist, so settings changed later in the WebUI are not replaced on every boot.
+
+If deployment fails, open the service **Logs** page first. A missing model key fails provider requests after startup, while an incorrect Web token leaves you on the authentication page.
 
 ## Docker
 

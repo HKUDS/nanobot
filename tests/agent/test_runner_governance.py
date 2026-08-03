@@ -10,13 +10,16 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
-    MICROCOMPACT_KEEP_RECENT,
     ContextGovernanceConfig,
     ContextGovernor,
 )
 from nanobot.agent.runner import AgentRunSpec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -495,7 +498,7 @@ def test_microcompact_skips_when_prompt_under_hard_budget(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -529,7 +532,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -617,7 +620,7 @@ def test_context_governor_keeps_compaction_boundary_stable(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -658,7 +661,7 @@ def test_microcompact_preserves_short_results(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     messages = _microcompact_messages(total=total, tool_name="exec", content="short")
     spec = make_run_spec(provider,
         initial_messages=messages,
@@ -690,7 +693,7 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "y" * 1000
     messages = _microcompact_messages(total=total, tool_name="message", content=long_content)
     spec = make_run_spec(provider,
@@ -887,20 +890,30 @@ def test_drop_malformed_tool_calls_trims_response():
     """LLM response tool_calls with a missing/empty name are dropped in place."""
     from nanobot.agent.runner import AgentRunner
 
+    candidate_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "function_call", "name": None}]},
+    )
     response = LLMResponse(
         content=None,
         tool_calls=[
             ToolCallRequest(id="1", name=None, arguments={}),
             ToolCallRequest(id="2", name="", arguments={}),
-            ToolCallRequest(id="3", name="read_file", arguments={}),
+            ToolCallRequest(id="3", name={"unexpected": "object"}, arguments={}),
+            ToolCallRequest(id="4", name="read_file", arguments={}),
         ],
         finish_reason="tool_calls",
+        provider_state=candidate_state,
     )
     dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.provider_state is None
     assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
-    assert dropped == 2
+    assert dropped == 3
     assert all_dropped is False
     assert orig == "tool_calls"
 

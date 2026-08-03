@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
 
 
-def is_tool_error_result(name: str, result: Any) -> bool:
+def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
@@ -77,7 +77,7 @@ class ToolRegistry:
         """Extract a normalized tool name from either OpenAI or flat schemas."""
         fn = schema.get("function")
         if isinstance(fn, dict):
-            name = fn.get("name")
+            name = cast(dict[str, Any], fn).get("name")
             if isinstance(name, str):
                 return name
         name = schema.get("name")
@@ -140,7 +140,7 @@ class ToolRegistry:
                 )
             )
 
-        cast_params = tool.cast_params(params)
+        cast_params = tool.cast_params(cast(dict[str, Any], params))
         errors = tool.validate_params(cast_params)
         if errors:
             return tool, cast_params, (
@@ -176,12 +176,15 @@ class ToolRegistry:
 
     @classmethod
     def _unwrap_arguments_payload(cls, tool: Tool, params: Any) -> Any:
-        if not isinstance(params, dict) or set(params) != {"arguments"}:
+        if not isinstance(params, dict):
             return params
+        arguments_payload = cast(dict[str, Any], params)
+        if set(arguments_payload) != {"arguments"}:
+            return arguments_payload
         properties = (tool.parameters or {}).get("properties", {})
         if isinstance(properties, dict) and "arguments" in properties:
-            return params
-        return cls._coerce_argument_value(params.get("arguments"))
+            return arguments_payload
+        return cls._coerce_argument_value(arguments_payload.get("arguments"))
 
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
@@ -193,7 +196,7 @@ class ToolRegistry:
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
-            if is_tool_error_result(name, result):
+            if is_tool_error_result(result):
                 return ToolResult.error(str(result) + hint)
             return result
         except Exception as e:

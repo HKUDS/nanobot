@@ -47,7 +47,8 @@ class ProviderSpec:
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "xai_grok"
+    # | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars / request headers supplied by the provider integration.
@@ -109,6 +110,11 @@ class ProviderSpec:
     # implicit (Magistral always reasons; sending the kwarg returns HTTP 400).
     # Substring match against the wire model name (lowercased).
     implicit_reasoning_models: tuple[str, ...] = ()
+
+    # Models that expose the OpenAI Responses wire format.  This is model-level
+    # because providers may add Responses support incrementally (DeepSeek V4
+    # Flash is supported before V4 Pro).
+    responses_models: tuple[str, ...] = ()
 
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
@@ -420,6 +426,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
     ),
+    # xAI subscription: OAuth-based, with capability-gated server-hosted X Search.
+    ProviderSpec(
+        name="xai_grok",
+        keywords=("xai-grok", "xai_grok"),
+        env_key="",
+        display_name="xAI Grok",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="xai-grok/grok-4.5",
+                label="Grok 4.5",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500000,
+            ),
+        ),
+        backend="xai_grok",
+        default_api_base="https://cli-chat-proxy.grok.com/v1",
+        is_oauth=True,
+    ),
     # GitHub Copilot: OAuth-based
     ProviderSpec(
         name="github_copilot",
@@ -441,6 +466,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        responses_models=("deepseek-v4-flash",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
@@ -709,7 +735,12 @@ def find_by_name(name: str) -> ProviderSpec | None:
     return None
 
 
-def create_dynamic_spec(name: str, *, thinking_style: str = "") -> ProviderSpec:
+def create_dynamic_spec(
+    name: str,
+    *,
+    display_name: str = "",
+    thinking_style: str = "",
+) -> ProviderSpec:
     """Create a dynamic ProviderSpec for custom user-defined providers."""
     normalized = to_snake(name.replace("-", "_"))
     strip_prefixes = tuple(dict.fromkeys((name, normalized)))
@@ -717,7 +748,7 @@ def create_dynamic_spec(name: str, *, thinking_style: str = "") -> ProviderSpec:
         name=normalized,
         keywords=(),
         env_key="",
-        display_name=name.title(),
+        display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,
         strip_model_prefixes=strip_prefixes,

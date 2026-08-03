@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from nanobot.providers.base import ProviderConversationState
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -100,6 +101,137 @@ class TestAtomicSave:
         assert len(loaded.messages) == 5
         for i in range(5):
             assert loaded.messages[i]["content"] == f"msg{i}"
+
+    def test_provider_state_round_trips_in_private_record_only(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        secret = "encrypted-reasoning-blob"
+        session = Session(
+            key="test:provider-state",
+            provider_state=ProviderConversationState(
+                kind="openai_responses",
+                provider="openai:https://api.openai.com/v1",
+                model="gpt-5.6",
+                version=1,
+                payload={
+                    "items": [
+                        {
+                            "type": "reasoning",
+                            "encrypted_content": secret,
+                        }
+                    ]
+                },
+                pending_messages=[{"role": "user", "content": "continue"}],
+            ),
+        )
+        session.add_message("user", "hello")
+        mgr.save(session)
+
+        records = [
+            json.loads(line)
+            for line in mgr._get_session_path(session.key)
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        assert [record.get("_type") for record in records] == [
+            "metadata",
+            "provider_state",
+            None,
+        ]
+        assert secret in records[1]["state"]["payload"]["items"][0]["encrypted_content"]
+
+        mgr.invalidate(session.key)
+        loaded = mgr.get_or_create(session.key)
+        assert loaded.provider_state is not None
+        assert loaded.provider_state.to_private_record() == session.provider_state.to_private_record()
+
+        public_payload = mgr.read_session_file(session.key)
+        assert public_payload is not None
+        assert public_payload["messages"] == [session.messages[0]]
+        assert secret not in json.dumps(public_payload)
+        assert secret not in json.dumps(mgr.list_sessions())
+
+    def test_provider_state_does_not_consume_list_preview_budget(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        import nanobot.session.manager as session_manager
+
+        monkeypatch.setattr(session_manager, "_SESSION_LIST_PREVIEW_MAX_CHARS", 100)
+        mgr = SessionManager(tmp_path)
+        session = Session(
+            key="test:provider-state-preview",
+            provider_state=ProviderConversationState(
+                kind="openai_responses",
+                provider="openai:test",
+                model="test-model",
+                version=1,
+                payload={"items": [{"encrypted_content": "x" * 200}]},
+            ),
+        )
+        session.add_message("user", "visible preview")
+        mgr.save(session)
+
+        assert mgr.list_sessions()[0]["preview"] == "visible preview"
+
+    def test_clear_and_fork_discard_provider_state(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        state = ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="gpt-5.6",
+            version=1,
+            payload={"items": []},
+        )
+        source = Session(key="test:state-source", provider_state=state)
+        source.add_message("user", "hello")
+        mgr.save(source)
+
+        fork = mgr.fork_session_before_user_index(
+            source.key,
+            "test:state-fork",
+            1,
+        )
+        assert fork is not None
+        assert fork.provider_state is None
+
+        source.clear()
+        assert source.provider_state is None
+
+    def test_invalid_provider_state_record_is_not_public_history(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        path = mgr._get_session_path("test:bad-provider-state")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "_type": "metadata",
+                            "key": "test:bad-provider-state",
+                            "created_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat(),
+                            "metadata": {},
+                            "last_consolidated": 0,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "_type": "provider_state",
+                            "state": {"kind": "openai_responses"},
+                        }
+                    ),
+                    json.dumps({"role": "user", "content": "safe"}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        loaded = mgr._load("test:bad-provider-state")
+        assert loaded is not None
+        assert loaded.provider_state is None
+        assert loaded.messages == [{"role": "user", "content": "safe"}]
 
 
 class TestRepairCorruptFile:

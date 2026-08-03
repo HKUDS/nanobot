@@ -12,11 +12,14 @@ import contextlib
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
+
+if TYPE_CHECKING:
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class RuntimeEventContext:
     chat_id: str
     session_key: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,16 @@ class TurnCompleted:
 
     context: RuntimeEventContext
     latency_ms: int | None = None
-    runtime: Any | None = None
+    runtime: LLMRuntime | None = None
+
+
+@dataclass(frozen=True)
+class SessionTurnPersisted:
+    """A completed turn has been written to local session storage."""
+
+    context: RuntimeEventContext
+    turn_id: str
+    sender_id: str
 
 
 @dataclass(frozen=True)
@@ -72,6 +85,7 @@ class RuntimeModelChanged:
 
 RuntimeEvent = (
     SessionTurnStarted
+    | SessionTurnPersisted
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
@@ -79,6 +93,7 @@ RuntimeEvent = (
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
+    | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
@@ -143,7 +158,7 @@ class RuntimeEventPublisher:
     def __init__(self, bus: RuntimeEventBus | None = None) -> None:
         self.bus = bus or RuntimeEventBus()
         self._turn_latency_ms: dict[str, int] = {}
-        self._turn_runtime: dict[str, Any] = {}
+        self._turn_runtime: dict[str, LLMRuntime] = {}
 
     @staticmethod
     def _context(
@@ -152,15 +167,17 @@ class RuntimeEventPublisher:
         chat_id: str,
         session_key: str,
         metadata: dict[str, Any] | None,
+        attributes: dict[str, Any] | None = None,
     ) -> RuntimeEventContext:
         return RuntimeEventContext(
             channel=channel,
             chat_id=chat_id,
             session_key=session_key,
             metadata=dict(metadata or {}),
+            attributes=dict(attributes or {}),
         )
 
-    def record_turn_runtime(self, session_key: str, runtime: Any) -> None:
+    def record_turn_runtime(self, session_key: str, runtime: LLMRuntime) -> None:
         self._turn_runtime[session_key] = runtime
 
     def record_turn_latency(self, session_key: str, latency_ms: int | None) -> None:
@@ -208,6 +225,28 @@ class RuntimeEventPublisher:
             )
         )
 
+    async def session_turn_persisted(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        *,
+        turn_id: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        await self.bus.publish(
+            SessionTurnPersisted(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                    attributes=attributes,
+                ),
+                turn_id=turn_id,
+                sender_id=msg.sender_id,
+            )
+        )
+
     async def turn_completed(
         self,
         *,
@@ -233,19 +272,3 @@ class RuntimeEventPublisher:
         self.bus.publish_nowait(
             RuntimeModelChanged(model=model, model_preset=model_preset)
         )
-
-
-def ensure_runtime_event_publisher(owner: Any) -> RuntimeEventPublisher:
-    """Return an owner's runtime publisher, creating missing state lazily."""
-    publisher = getattr(owner, "runtime_event_publisher", None)
-    if isinstance(publisher, RuntimeEventPublisher):
-        return publisher
-
-    bus = getattr(owner, "runtime_events", None)
-    if not isinstance(bus, RuntimeEventBus):
-        bus = RuntimeEventBus()
-        owner.runtime_events = bus
-
-    publisher = RuntimeEventPublisher(bus)
-    owner.runtime_event_publisher = publisher
-    return publisher

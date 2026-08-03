@@ -22,6 +22,7 @@ from nanobot.audio.transcription_registry import (
 )
 from nanobot.config.loader import resolve_env_refs
 from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
@@ -73,8 +74,9 @@ def _as_provider(value: Any) -> TranscriptionProviderName | None:
     return spec.name if spec else None
 
 
-def _provider_config(config: Any, provider: str) -> Any:
-    return getattr(getattr(config, "providers", None), provider, None)
+def _provider_config(config: Config, provider: str) -> ProviderConfig | None:
+    value = getattr(config.providers, provider, None)
+    return value if isinstance(value, ProviderConfig) else None
 
 
 def _provider_default_api_base(provider: str) -> str | None:
@@ -82,7 +84,10 @@ def _provider_default_api_base(provider: str) -> str | None:
     return spec.default_api_base if spec else None
 
 
-def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
+def _resolve_transcription_api_key(
+    provider: str,
+    provider_cfg: ProviderConfig | None,
+) -> str:
     api_key = resolve_env_refs(getattr(provider_cfg, "api_key", None) or "") if provider_cfg else ""
     if api_key:
         return api_key
@@ -94,10 +99,13 @@ def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
             return env_key
 
     env_key = spec.env_key if spec else ""
-    return os.environ.get(env_key) if env_key else ""
+    return os.environ.get(env_key, "") if env_key else ""
 
 
-def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:
+def _resolve_transcription_api_base(
+    provider: str,
+    provider_cfg: ProviderConfig | None,
+) -> str:
     api_base = resolve_env_refs(getattr(provider_cfg, "api_base", None) or "") if provider_cfg else ""
     if api_base:
         return api_base
@@ -111,7 +119,7 @@ def _extract_data_url_mime(url: str) -> str | None:
     return header[5:].split(";", 1)[0].strip().lower() or None
 
 
-def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
+def resolve_transcription_config(config: Config) -> EffectiveTranscriptionConfig:
     """Resolve top-level transcription settings with legacy channel fallback."""
     top = getattr(config, "transcription", None)
     channels = getattr(config, "channels", None)

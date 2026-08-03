@@ -186,9 +186,7 @@ Dream is configured under `agents.defaults.dream`:
     "defaults": {
       "dream": {
         "intervalH": 2,
-        "modelOverride": null,
-        "maxBatchSize": 20,
-        "maxIterations": 10
+        "modelOverride": null
       }
     }
   }
@@ -199,16 +197,13 @@ Dream is configured under `agents.defaults.dream`:
 |-------|---------|
 | `intervalH` | How often Dream runs, in hours |
 | `cron` | Cron expression override (takes precedence over `intervalH`) |
-| `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
-| `maxBatchSize` | *(Deprecated — not used)* |
-| `maxIterations` | *(Deprecated — not used)* |
+| `modelOverride` | Optional model preset name used for Dream |
 
 In practical terms:
 
 - `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
 - `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
-- `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
-- `maxBatchSize` and `maxIterations` are preserved for config compatibility but no longer affect behavior.
+- `modelOverride` selects a named entry from `model_presets` for Dream. It accepts preset names only; raw model identifiers are not supported. If omitted, Dream uses the main agent's selected runtime.
 
 ## In Practice
 

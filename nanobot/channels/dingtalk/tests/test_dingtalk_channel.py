@@ -1,4 +1,5 @@
 import asyncio
+import json
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
@@ -9,15 +10,15 @@ import pytest
 
 # Check optional dingtalk dependencies before running tests
 try:
-    from nanobot.channels import dingtalk
-    DINGTALK_AVAILABLE = getattr(dingtalk, "DINGTALK_AVAILABLE", False)
+    import nanobot.channels.dingtalk.runtime as dingtalk_module
+
+    DINGTALK_AVAILABLE = dingtalk_module.DINGTALK_AVAILABLE
 except ImportError:
     DINGTALK_AVAILABLE = False
 
 if not DINGTALK_AVAILABLE:
     pytest.skip("DingTalk dependencies not installed (dingtalk-stream)", allow_module_level=True)
 
-import nanobot.channels.dingtalk.runtime as dingtalk_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.dingtalk.runtime import (
@@ -153,6 +154,92 @@ async def test_group_user_isolation_true_separates_sessions() -> None:
     assert msg1.chat_id == msg2.chat_id == "group:conv123"
 
 
+def test_disable_private_chat_uses_camel_case_config_key() -> None:
+    config = DingTalkConfig.model_validate({"disablePrivateChat": True})
+
+    assert config.disable_private_chat is True
+    assert config.model_dump(mode="json", by_alias=True)["disablePrivateChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_dm_rejected_when_private_chat_disabled(monkeypatch) -> None:
+    """With disable_private_chat=True, a 1:1 DM is rejected: nothing reaches the
+    bus (no session is created) and the bot replies with a notice directing the
+    user to group chat. Even allowlisted senders are blocked in DMs."""
+    config = DingTalkConfig(
+        client_id="app",
+        client_secret="secret",
+        allow_from=["*"],  # even allowlisted senders are blocked in DMs
+        disable_private_chat=True,
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    async def fake_get_token():
+        return "test-token"
+
+    monkeypatch.setattr(channel, "_get_access_token", fake_get_token)
+    channel._http = _FakeHttp()
+
+    await channel._on_message(
+        "hello",
+        sender_id="user1",
+        sender_name="Alice",
+        conversation_type="1",
+    )
+
+    # No inbound message was published -> no session created
+    assert bus.inbound.empty()
+
+    # A notice was sent back to the DM user via the private-chat API
+    assert len(channel._http.calls) == 1
+    call = channel._http.calls[0]
+    assert call["url"] == "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+    assert call["json"]["msgKey"] == "sampleMarkdown"
+    assert call["json"]["userIds"] == ["user1"]
+    assert "该机器人未开启私聊，请在群聊中与我对话。" in call["json"]["msgParam"]
+
+
+@pytest.mark.asyncio
+async def test_dm_allowed_when_private_chat_not_disabled() -> None:
+    """By default (disable_private_chat=False), a 1:1 DM still reaches the bus."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    await channel._on_message(
+        "hello",
+        sender_id="user1",
+        sender_name="Alice",
+        conversation_type="1",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.chat_id == "user1"
+    assert msg.metadata["conversation_type"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_group_message_allowed_when_private_chat_disabled() -> None:
+    """Disabling private chat must not affect group messages."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["*"], disable_private_chat=True
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    await channel._on_message(
+        "hello",
+        sender_id="user1",
+        sender_name="Alice",
+        conversation_type="2",
+        conversation_id="conv123",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.chat_id == "group:conv123"
+
+
 @pytest.mark.asyncio
 async def test_group_send_uses_group_messages_api() -> None:
     config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
@@ -171,6 +258,105 @@ async def test_group_send_uses_group_messages_api() -> None:
     assert call["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
     assert call["json"]["openConversationId"] == "conv123"
     assert call["json"]["msgKey"] == "sampleMarkdown"
+
+
+@pytest.mark.asyncio
+async def test_group_send_prepends_sender_mention(monkeypatch) -> None:
+    """Group replies are prefixed with a markdown header naming the sender."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={"sender_name": "Alice"},
+        )
+    )
+
+    sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
+    assert sent_text == "# @Alice\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_group_send_escapes_untrusted_sender_name(monkeypatch) -> None:
+    """A sender nickname cannot inject extra Markdown blocks into the reply."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={"sender_name": "Alice\n# [click](https://evil) *admin*"},
+        )
+    )
+
+    sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
+    assert sent_text == r"# @Alice \# \[click\]\(https://evil\) \*admin\*" + "\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_private_send_does_not_prepend_mention(monkeypatch) -> None:
+    """Private replies are sent verbatim, without the sender header."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="user1",  # private chat: no "group:" prefix
+            content="hello",
+            metadata={"sender_name": "Alice"},
+        )
+    )
+
+    sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
+    assert sent_text == "hello"
+
+
+@pytest.mark.asyncio
+async def test_message_without_sender_id_is_dropped() -> None:
+    """Malformed inbound events must not publish or attempt an invalid reply."""
+    config = DingTalkConfig(
+        client_id="app",
+        client_secret="secret",
+        allow_from=["*"],
+        disable_private_chat=True,
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+    channel._http = _FakeHttp()
+
+    await channel._on_message(
+        "hello",
+        sender_id=None,
+        sender_name="Unknown",
+        conversation_type="1",
+    )
+
+    assert bus.inbound.empty()
+    assert channel._http.calls == []
 
 
 @pytest.mark.asyncio

@@ -35,7 +35,7 @@ def api_runtime_paths(config_path: Path) -> ProcessRuntimePaths:
     )
 
 
-class ApiRuntime(ManagedProcessRuntime):
+class ApiRuntime(ManagedProcessRuntime[ApiStartOptions]):
     """Manage a WebUI-controlled OpenAI-compatible API process."""
 
     service_name = "api"

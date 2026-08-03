@@ -1,3 +1,4 @@
+# pyright: reportMissingTypeStubs=false
 """WeCom (Enterprise WeChat) channel implementation using wecom_aibot_sdk."""
 
 import asyncio
@@ -7,8 +8,9 @@ import importlib.util
 import os
 import re
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -96,7 +98,7 @@ class WecomChannel(BaseChannel):
         self._client: Any = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._generate_req_id = None
+        self._generate_req_id: Callable[[str], str] | None = None
         # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
 
@@ -117,7 +119,8 @@ class WecomChannel(BaseChannel):
         self._generate_req_id = generate_req_id
 
         # Create WebSocket client
-        self._client = WSClient({
+        ws_client = cast(Any, WSClient)
+        self._client = ws_client({
             "bot_id": self.config.bot_id,
             "secret": self.config.secret,
             "reconnect_interval": 1000,
@@ -195,14 +198,16 @@ class WecomChannel(BaseChannel):
         """Handle enter_chat event (user opens chat with bot)."""
         try:
             # Extract body from WsFrame dataclass or dict
-            if hasattr(frame, 'body'):
-                body = frame.body or {}
+            if hasattr(frame, "body"):
+                body: Any = frame.body or {}
             elif isinstance(frame, dict):
-                body = frame.get("body", frame)
+                frame_dict = cast(dict[str, Any], frame)
+                body = frame_dict.get("body", frame_dict)
             else:
                 body = {}
 
-            chat_id = body.get("chatid", "") if isinstance(body, dict) else ""
+            body_dict = cast(dict[str, Any], body) if isinstance(body, dict) else {}
+            chat_id = cast(str, body_dict.get("chatid", ""))
 
             if chat_id and not self.is_allowed(chat_id):
                 return
@@ -219,26 +224,32 @@ class WecomChannel(BaseChannel):
         """Process incoming message and forward to bus."""
         try:
             # Extract body from WsFrame dataclass or dict
-            if hasattr(frame, 'body'):
-                body = frame.body or {}
+            if hasattr(frame, "body"):
+                body: Any = frame.body or {}
             elif isinstance(frame, dict):
-                body = frame.get("body", frame)
+                frame_dict = cast(dict[str, Any], frame)
+                body = frame_dict.get("body", frame_dict)
             else:
                 body = {}
 
             # Ensure body is a dict
             if not isinstance(body, dict):
-                self.logger.warning("Invalid body type: {}", type(body))
+                self.logger.warning("Invalid body type: {}", type(cast(object, body)))
                 return
+            body = cast(dict[str, Any], body)
 
             # Extract message info
-            msg_id = body.get("msgid", "")
+            msg_id = cast(str, body.get("msgid", ""))
             if not msg_id:
                 msg_id = f"{body.get('chatid', '')}_{body.get('sendertime', '')}"
 
             # Extract sender info from "from" field (SDK format)
             from_info = body.get("from", {})
-            sender_id = from_info.get("userid", "unknown") if isinstance(from_info, dict) else "unknown"
+            sender_id = (
+                cast(str, cast(dict[str, Any], from_info).get("userid", "unknown"))
+                if isinstance(from_info, dict)
+                else "unknown"
+            )
             if not self.is_allowed(sender_id):
                 return
 
@@ -253,21 +264,22 @@ class WecomChannel(BaseChannel):
 
             # For single chat, chatid is the sender's userid
             # For group chat, chatid is provided in body
-            chat_type = body.get("chattype", "single")
-            chat_id = body.get("chatid", sender_id)
+            chat_type = cast(str, body.get("chattype", "single"))
+            chat_id = cast(str, body.get("chatid", sender_id))
 
-            content_parts = []
+            content_parts: list[str] = []
             media_paths: list[str] = []
 
             if msg_type == "text":
-                text = body.get("text", {}).get("content", "")
+                text_info = cast(dict[str, Any], body.get("text", {}))
+                text = cast(str, text_info.get("content", ""))
                 if text:
                     content_parts.append(text)
 
             elif msg_type == "image":
-                image_info = body.get("image", {})
-                file_url = image_info.get("url", "")
-                aes_key = image_info.get("aeskey", "")
+                image_info = cast(dict[str, Any], body.get("image", {}))
+                file_url = cast(str, image_info.get("url", ""))
+                aes_key = cast(str, image_info.get("aeskey", ""))
 
                 if file_url and aes_key:
                     file_path = await self._download_and_save_media(file_url, aes_key, "image")
@@ -281,19 +293,19 @@ class WecomChannel(BaseChannel):
                     content_parts.append("[image: download failed]")
 
             elif msg_type == "voice":
-                voice_info = body.get("voice", {})
+                voice_info = cast(dict[str, Any], body.get("voice", {}))
                 # Voice message already contains transcribed content from WeCom
-                voice_content = voice_info.get("content", "")
+                voice_content = cast(str, voice_info.get("content", ""))
                 if voice_content:
                     content_parts.append(f"[voice] {voice_content}")
                 else:
                     content_parts.append("[voice]")
 
             elif msg_type == "file":
-                file_info = body.get("file", {})
-                file_url = file_info.get("url", "")
-                aes_key = file_info.get("aeskey", "")
-                file_name = file_info.get("name") or None
+                file_info = cast(dict[str, Any], body.get("file", {}))
+                file_url = cast(str, file_info.get("url", ""))
+                aes_key = cast(str, file_info.get("aeskey", ""))
+                file_name = cast(str | None, file_info.get("name") or None)
 
                 if file_url and aes_key:
                     file_path = await self._download_and_save_media(file_url, aes_key, "file", file_name)
@@ -308,16 +320,20 @@ class WecomChannel(BaseChannel):
 
             elif msg_type == "mixed":
                 # Mixed content contains multiple message items
-                msg_items = body.get("mixed", {}).get("msg_item", [])
-                for item in msg_items:
-                    item_type = item.get("msgtype", "")
+                mixed_info = cast(dict[str, Any], body.get("mixed", {}))
+                msg_items = cast(list[Any], mixed_info.get("msg_item", []))
+                for raw_item in msg_items:
+                    item = cast(dict[str, Any], raw_item)
+                    item_type = cast(str, item.get("msgtype", ""))
                     if item_type == "text":
-                        text = item.get("text", {}).get("content", "")
+                        text_info = cast(dict[str, Any], item.get("text", {}))
+                        text = cast(str, text_info.get("content", ""))
                         if text:
                             content_parts.append(text)
                     elif item_type == "image":
-                        file_url = item.get("image", {}).get("url", "")
-                        aes_key = item.get("image", {}).get("aeskey", "")
+                        image_info = cast(dict[str, Any], item.get("image", {}))
+                        file_url = cast(str, image_info.get("url", ""))
+                        aes_key = cast(str, image_info.get("aeskey", ""))
                         if file_url and aes_key:
                             file_path = await self._download_and_save_media(file_url, aes_key, "image")
                             if file_path:
@@ -385,7 +401,7 @@ class WecomChannel(BaseChannel):
             media_dir = get_media_dir("wecom")
             if not filename:
                 filename = fname or f"{media_type}_{hash(file_url) % 100000}"
-            filename = _sanitize_filename(filename)
+            filename = _sanitize_filename(cast(str, filename))
 
             file_path = media_dir / filename
             await asyncio.to_thread(file_path.write_bytes, data)
@@ -397,8 +413,10 @@ class WecomChannel(BaseChannel):
             return None
 
     async def _upload_media_ws(
-        self, client: Any, file_path: str,
-    ) -> "tuple[str, str] | tuple[None, None]":
+        self,
+        client: Any,
+        file_path: str,
+    ) -> tuple[str, str] | tuple[None, None]:
         """Upload a local file to WeCom via WebSocket 3-step protocol (base64).
 
         Uses the WeCom WebSocket upload commands directly via
@@ -417,7 +435,7 @@ class WecomChannel(BaseChannel):
             media_type = _guess_wecom_media_type(fname)
 
             # Read file size and data in a thread to avoid blocking the event loop
-            def _read_file():
+            def _read_file() -> tuple[int, bytes]:
                 file_size = os.path.getsize(file_path)
                 if file_size > WECOM_UPLOAD_MAX_BYTES:
                     raise ValueError(
@@ -530,7 +548,10 @@ class WecomChannel(BaseChannel):
                 # Both progress and final messages must use reply_stream (cmd="aibot_respond_msg").
                 # The plain reply() uses cmd="reply" which does not support "text" msgtype
                 # and causes errcode=40008 from WeCom API.
-                stream_id = self._generate_req_id("stream")
+                generate_req_id = self._generate_req_id
+                if generate_req_id is None:
+                    raise RuntimeError("WeCom request-id generator is not initialized")
+                stream_id = generate_req_id("stream")
                 await self._client.reply_stream(
                     frame,
                     stream_id,

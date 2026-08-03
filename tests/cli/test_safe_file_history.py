@@ -3,7 +3,12 @@
 Surrogate characters in CLI input must not crash history file writes.
 """
 
-from nanobot.cli.commands import SafeFileHistory, _sanitize_surrogates
+from nanobot.cli.commands import SafeFileHistory as LegacySafeFileHistory
+from nanobot.cli.terminal import SafeFileHistory, _sanitize_surrogates
+
+
+def test_commands_keeps_safe_file_history_import_compatible() -> None:
+    assert LegacySafeFileHistory is SafeFileHistory
 
 
 class TestSanitizeSurrogates:

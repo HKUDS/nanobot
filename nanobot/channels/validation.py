@@ -11,7 +11,7 @@ import re
 import socket
 import ssl
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -76,7 +76,7 @@ def validate_channel_config(
             allow_local_service_access=config.tools.webui_allow_local_service_access,
         )
         custom_payload = setup_spec.validator(values, context)
-        if custom_payload is not None:
+        if cast(object, custom_payload) is not None:
             payload = dict(custom_payload)
             payload.setdefault("checks", [])
             payload.setdefault("missing_fields", [])
@@ -116,7 +116,7 @@ def _channel_config(
     if hasattr(section, "model_dump"):
         return dict(section.model_dump(mode="json", by_alias=True))
     if isinstance(section, dict):
-        return dict(section)
+        return dict(cast(dict[str, Any], section))
     return {}
 
 
@@ -130,9 +130,9 @@ def _merge_form_values(
     merged = dict(values)
     prefix = f"channels.{name}."
     spec = setup_spec
-    secrets = spec.secrets if spec is not None else frozenset()
+    secrets: frozenset[str] = spec.secrets if spec is not None else frozenset()
     for raw_key, raw_value in raw_values.items():
-        if not isinstance(raw_key, str) or not raw_key:
+        if not raw_key:
             continue
         field = raw_key[len(prefix):] if raw_key.startswith(prefix) else raw_key
         if field in secrets and not _str(raw_value):
@@ -281,7 +281,7 @@ def _assign(values: dict[str, Any], field: str, value: Any) -> None:
         if not isinstance(current, dict):
             current = {}
             target[part] = current
-        target = current
+        target = cast(dict[str, Any], current)
     target[parts[-1]] = value
 
 
@@ -290,7 +290,7 @@ def _get(values: dict[str, Any], field: str) -> Any:
     for part in field.split("."):
         if not isinstance(target, dict):
             return None
-        target = target.get(part)
+        target = cast(dict[str, Any], target).get(part)
     return target
 
 
@@ -346,7 +346,7 @@ def _http_get(url: str, *, headers: dict[str, str] | None = None) -> dict[str, A
         response = client.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
-    return data if isinstance(data, dict) else {}
+    return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
 
 def _http_post(url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
@@ -354,7 +354,7 @@ def _http_post(url: str, *, headers: dict[str, str] | None = None) -> dict[str, 
         response = client.post(url, headers=headers)
         response.raise_for_status()
         data = response.json()
-    return data if isinstance(data, dict) else {}
+    return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
 
 def _probe_tcp(host: str, port: int, *, allow_loopback: bool = False) -> None:

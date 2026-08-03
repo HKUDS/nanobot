@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger as default_logger
 
@@ -14,6 +14,13 @@ from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
+
+if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+    from nanobot.triggers.local_store import LocalTriggerStore
 
 
 @dataclass(frozen=True)
@@ -26,31 +33,32 @@ class GatewayServices:
     ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
-    session_manager: Any | None
-    cron_service: Any | None
-    local_trigger_store: Any | None
+    session_manager: SessionManager | None
+    cron_service: CronService | None
+    local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
 
 
 def build_gateway_services(
     *,
-    config: Any,
-    bus: Any,
-    session_manager: Any | None,
+    config: WebSocketConfig,
+    bus: MessageBus,
+    session_manager: SessionManager | None,
     static_dist_path: Path | None,
     workspace_path: Path,
     default_restrict_to_workspace: bool,
-    runtime_model_name: Any | None,
+    runtime_model_name: Callable[[], str | None] | None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
     disabled_skills: set[str] | None = None,
-    cron_service: Any | None = None,
-    local_trigger_store: Any | None = None,
+    cron_service: CronService | None = None,
+    local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    skill_state_action: Callable[[set[str]], None] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -94,6 +102,7 @@ def build_gateway_services(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
+        skill_state_action=skill_state_action,
         log=logger,
     )
     return GatewayServices(

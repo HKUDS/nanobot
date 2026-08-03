@@ -1,19 +1,27 @@
 """Provider wrapper that transparently fails over to fallback models on error."""
 
+# pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
+)
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
 _PRIMARY_COOLDOWN_S = 60
-_MISSING = object()
 _FALLBACK_ERROR_KINDS = frozenset({
     "timeout",
     "connection",
@@ -21,10 +29,36 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "rate_limit",
     "overloaded",
 })
-_NON_FALLBACK_ERROR_KINDS = frozenset({
+_AUTHENTICATION_ERROR_KINDS = frozenset({
     "authentication",
     "auth",
     "permission",
+})
+_AUTHENTICATION_ERROR_TOKENS = (
+    "authentication_error",
+    "authentication error",
+    "invalid_api_key",
+    "invalid api key",
+    "incorrect_api_key",
+    "incorrect api key",
+    "expired_api_key",
+    "expired api key",
+    "invalid credential",
+    "expired credential",
+    "credential has expired",
+    "credentials have expired",
+    "invalid_token",
+    "invalid token",
+    "expired_token",
+    "expired token",
+    "unauthorized",
+    "permission_denied",
+    "permission denied",
+    "access_denied",
+    "account_deactivated",
+    "organization_deactivated",
+)
+_NON_FALLBACK_ERROR_KINDS = frozenset({
     "content_filter",
     "refusal",
     "context_length",
@@ -56,6 +90,9 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
+FallbackModelObserver = Callable[[str], Awaitable[None]]
+
+
 class FallbackProvider(LLMProvider):
     """Wrap a primary provider and transparently failover to fallback models.
 
@@ -82,28 +119,63 @@ class FallbackProvider(LLMProvider):
         primary: LLMProvider,
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
+        fallback_model_observer: FallbackModelObserver | None = None,
+        primary_context_window_tokens: int | None = None,
     ):
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
+        self._fallback_model_observer = fallback_model_observer
+        self._primary_context_window_tokens = primary_context_window_tokens
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
 
     @property
-    def generation(self):
+    def generation(self) -> GenerationSettings:
         return self._primary.generation
 
     @generation.setter
-    def generation(self, value):
+    def generation(self, value: GenerationSettings) -> None:
         self._primary.generation = value
 
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
 
+    def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
+        """Attach a process-level observer without changing request call signatures."""
+        self._fallback_model_observer = observer
+
     @property
     def supports_progress_deltas(self) -> bool:
         return bool(getattr(self._primary, "supports_progress_deltas", False))
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return self._primary.can_resume_conversation_state(state, model)
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        return self._primary.supports_native_compaction(model)
+
+    def _primary_call_context(
+        self,
+        provider_context: ProviderCallContext,
+        model: str | None,
+    ) -> ProviderCallContext:
+        context_window_tokens = (
+            self._primary_context_window_tokens
+            if self._primary_context_window_tokens is not None
+            else provider_context.context_window_tokens
+        )
+        if not self._primary.supports_native_compaction(model):
+            context_window_tokens = None
+        return ProviderCallContext(
+            conversation_state=provider_context.conversation_state,
+            context_window_tokens=context_window_tokens,
+        )
 
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
@@ -119,6 +191,25 @@ class FallbackProvider(LLMProvider):
             return await self._primary.chat(**kwargs)
         return await self._try_with_fallback(
             lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
+        )
+
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        call_kwargs: dict[str, Any] = dict(kwargs)
+        call_kwargs["provider_context"] = self._primary_call_context(
+            provider_context,
+            kwargs.get("model"),
+        )
+        if not self._has_fallbacks:
+            return await self._primary.chat_with_context(**call_kwargs)
+        return await self._try_with_fallback(
+            lambda p, kw: p.chat_with_context(**kw),
+            call_kwargs,
+            has_streamed=None,
         )
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
@@ -143,6 +234,38 @@ class FallbackProvider(LLMProvider):
             on_stream_recover=on_stream_recover,
         )
 
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        on_stream_recover = kwargs.pop("on_stream_recover", None)
+        call_kwargs: dict[str, Any] = dict(kwargs)
+        call_kwargs["provider_context"] = self._primary_call_context(
+            provider_context,
+            kwargs.get("model"),
+        )
+        if not self._has_fallbacks:
+            return await self._primary.chat_stream_with_context(**call_kwargs)
+
+        has_streamed: list[bool] = [False]
+        original_delta = call_kwargs.get("on_content_delta")
+
+        async def _tracking_delta(text: str) -> None:
+            if text:
+                has_streamed[0] = True
+            if original_delta:
+                await original_delta(text)
+
+        call_kwargs["on_content_delta"] = _tracking_delta
+        return await self._try_with_fallback(
+            lambda p, kw: p.chat_stream_with_context(**kw),
+            call_kwargs,
+            has_streamed=has_streamed,
+            on_stream_recover=on_stream_recover,
+        )
+
     async def _try_with_fallback(
         self,
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
@@ -153,6 +276,9 @@ class FallbackProvider(LLMProvider):
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
         primary_error = "unknown error"
+        # A primary error eligible for failover did not return a replacement
+        # continuation, so the incoming primary state remains reusable.
+        preserve_primary_state = True
 
         if self._primary_available():
             primary_was_attempted = True
@@ -242,25 +368,36 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
-            original_values = {
-                name: kwargs.get(name, _MISSING)
-                for name in ("model", "max_tokens", "temperature", "reasoning_effort")
+            await self._notify_fallback_model(fallback_model)
+
+            fallback_kwargs = {
+                **kwargs,
+                "model": fallback_model,
+                "max_tokens": fallback.max_tokens,
+                "temperature": fallback.temperature,
             }
-            kwargs["model"] = fallback_model
-            kwargs["max_tokens"] = fallback.max_tokens
-            kwargs["temperature"] = fallback.temperature
+            provider_context = fallback_kwargs.get("provider_context")
+            if isinstance(provider_context, ProviderCallContext):
+                state = provider_context.conversation_state
+                if state is not None and not fallback_provider.can_resume_conversation_state(
+                    state,
+                    fallback_model,
+                ):
+                    state = None
+                context_window_tokens = (
+                    fallback.context_window_tokens
+                    if fallback_provider.supports_native_compaction(fallback_model)
+                    else None
+                )
+                fallback_kwargs["provider_context"] = ProviderCallContext(
+                    conversation_state=state,
+                    context_window_tokens=context_window_tokens,
+                )
             if fallback.reasoning_effort is None:
-                kwargs.pop("reasoning_effort", None)
+                fallback_kwargs.pop("reasoning_effort", None)
             else:
-                kwargs["reasoning_effort"] = fallback.reasoning_effort
-            try:
-                fallback_response = await call(fallback_provider, kwargs)
-            finally:
-                for name, value in original_values.items():
-                    if value is _MISSING:
-                        kwargs.pop(name, None)
-                    else:
-                        kwargs[name] = value
+                fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
+            fallback_response = await call(fallback_provider, fallback_kwargs)
 
             if fallback_response.finish_reason != "error":
                 logger.info(
@@ -282,30 +419,59 @@ class FallbackProvider(LLMProvider):
         )
         # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
-            return last_response
+            return replace(
+                last_response,
+                preserve_provider_state_on_error=preserve_primary_state,
+            )
         # Primary was tripped and we have no fallbacks — synthesize an error.
         return LLMResponse(
             content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
             finish_reason="error",
+            preserve_provider_state_on_error=preserve_primary_state,
         )
+
+    async def _notify_fallback_model(self, model: str) -> None:
+        if self._fallback_model_observer is None:
+            return
+        try:
+            await self._fallback_model_observer(model)
+        except Exception:
+            logger.exception("fallback model observer failed for '{}'", model)
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
         if LLMProvider.is_arrearage_response(response):
             return True
-        if response.error_should_retry is False:
-            return False
         status = response.error_status_code
         kind = (response.error_kind or "").lower()
         error_type = (response.error_type or "").lower()
         code = (response.error_code or "").lower()
         text = (response.content or "").lower()
+        structured_values = (kind, error_type, code)
 
-        if status in {400, 401, 403, 404, 422}:
-            return False
+        if kind in _AUTHENTICATION_ERROR_KINDS:
+            return True
+        if any(
+            token in value
+            for value in structured_values
+            for token in _AUTHENTICATION_ERROR_TOKENS
+        ):
+            return True
         if kind in _NON_FALLBACK_ERROR_KINDS:
             return False
-        if any(token in value for value in (kind, error_type, code) for token in _NON_FALLBACK_ERROR_KINDS):
+        if any(
+            token in value
+            for value in structured_values
+            for token in _NON_FALLBACK_ERROR_KINDS
+        ):
+            return False
+        if status in {401, 403}:
+            return True
+        if any(token in text for token in _AUTHENTICATION_ERROR_TOKENS):
+            return True
+        if response.error_should_retry is False:
+            return False
+        if status in {400, 404, 422}:
             return False
         if response.error_should_retry is True:
             return True

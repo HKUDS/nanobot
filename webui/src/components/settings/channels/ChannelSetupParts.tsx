@@ -57,7 +57,7 @@ export function ChannelGuideLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full items-center gap-2 border border-border/65 bg-background/90 font-semibold text-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/45",
+        "inline-flex max-w-full items-center gap-2 border border-border/45 bg-background/90 font-semibold text-foreground transition-colors hover:bg-muted",
         compact
           ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
           : "mt-3 rounded-[12px] py-1.5 pl-1.5 pr-3 text-[12px]",
@@ -68,7 +68,7 @@ export function ChannelGuideLink({
           "grid shrink-0 place-items-center overflow-hidden border border-border/45 bg-background font-bold",
           compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-[7px] text-[10px]",
         )}
-        style={{ color, boxShadow: `inset 0 0 0 1px ${color}16` }}
+        style={{ color }}
         aria-hidden
       >
         {logoUrl ? (
@@ -135,11 +135,11 @@ export function ChannelOfficialLink({
       href={setup.officialUrl}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full border border-border/65 bg-background/90 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/45"
+      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full border border-border/45 bg-background/90 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors hover:bg-muted"
     >
       <span
         className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background"
-        style={{ color, boxShadow: `inset 0 0 0 1px ${color}16` }}
+        style={{ color }}
         aria-hidden
       >
         {logoUrl ? (
@@ -231,7 +231,7 @@ export function ChannelProviderPresets({
       <div
         role="radiogroup"
         aria-label={t("settings.channels.providerPreset", { defaultValue: "Provider" })}
-        className="grid rounded-[10px] bg-muted/75 p-0.5 text-[12px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]"
+        className="grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
         style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
       >
         {presets.map((preset) => (
@@ -247,7 +247,7 @@ export function ChannelProviderPresets({
             className={cn(
               "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
               selected === preset.id
-                && "bg-background text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.10),inset_0_0_0_1px_rgba(15,23,42,0.055)]",
+                && "bg-background text-foreground ring-1 ring-inset ring-border/45",
             )}
           >
             {preset.label}
@@ -360,7 +360,7 @@ export function ChannelSetupSteps({
       <ol className="space-y-1.5">
         {steps.map((step, index) => (
           <li key={step} className="flex gap-2">
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-semibold text-muted-foreground shadow-sm">
+            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
               {index + 1}
             </span>
             <span>{step}</span>

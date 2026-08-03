@@ -69,7 +69,7 @@ class GatewayRuntimePaths(ProcessRuntimePaths):
         )
 
 
-class GatewayRuntime(ManagedProcessRuntime):
+class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     """Manage a background ``nanobot gateway`` process."""
 
     service_name = "gateway"

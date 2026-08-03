@@ -17,6 +17,10 @@
         "placeholder": "123456:ABC...",
         "help": "BotFather에서 생성하세요."
       },
+      "proxy": {
+        "label": "네트워크 프록시",
+        "placeholder": "http://127.0.0.1:7890"
+      },
       "allowFrom": {
         "label": "허용된 사용자",
         "placeholder": "* 또는 Telegram 사용자 ID",

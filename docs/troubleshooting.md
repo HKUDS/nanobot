@@ -23,15 +23,20 @@ This separates failures into layers:
 | Layer | What it proves |
 |---|---|
 | `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace path, active model, and provider summary |
+| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
 | `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
 | `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
 
 If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
 
+`nanobot status` does not call the model. If provider/model setup is incomplete, it points to
+WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+
 ## How to Read `nanobot status`
 
-`nanobot status` does not call a model. It only checks whether nanobot can find the selected config, selected workspace, active model or preset, and provider setup summary.
+`nanobot status` does not call a model. It checks the selected config and workspace,
+resolves environment references, and validates the local settings required by the active
+provider/model without constructing a provider client.
 
 The output has this shape:
 
@@ -41,6 +46,7 @@ nanobot Status
 Config: /path/to/config.json ✓
 Workspace: /path/to/workspace ✓
 Model: provider/model-name (preset: primary)
+Agent: ✓ provider/model configuration is ready
 Provider A: not set
 Provider B: ✓
 Local Provider: ✓ http://localhost:11434/v1
@@ -54,6 +60,7 @@ Read it like this:
 | `Config` | It points to the config file you meant to use and shows `✓`. | Run `nanobot onboard`, or pass `--config` to `nanobot agent`, `gateway`, or `serve` when testing a non-default instance. |
 | `Workspace` | It points to the workspace you meant to use and shows `✓`. | Run `nanobot onboard`, create the folder, fix permissions, or pass `--workspace` on commands that support it. |
 | `Model` | It shows the active model or the preset name you expect. | Set `agents.defaults.modelPreset` to the intended preset, or check `/model` if you changed models during a chat session. |
+| `Agent` | It says `provider/model configuration is ready`. | Follow the printed WebUI or CLI setup route, then run `nanobot status` again. |
 | Provider rows | The provider used by the active preset shows `✓`, an OAuth marker, or a local URL. | Configure only the active provider first. It is normal for unused providers to say `not set`. |
 
 If `nanobot status` looks right but `nanobot agent -m "Hello!"` fails, the install and config paths are probably fine. Continue with [Provider and Model Problems](#provider-and-model-problems).
@@ -108,6 +115,12 @@ Common config mistakes:
 | Environment variable error | `${VAR_NAME}` references are resolved at startup. Set the variable before running nanobot. |
 | Edited config but behavior did not change | Restart `nanobot gateway`; long-running processes read config at startup. |
 
+After editing config, check the shortest path to an Agent reply:
+
+```bash
+nanobot status
+```
+
 To refresh missing defaults without overwriting existing settings, run:
 
 ```bash
@@ -135,12 +148,17 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Provider cannot be inferred | Pin `modelPresets.<name>.provider` in the active preset instead of using `"auto"`. For legacy direct configs, pin `agents.defaults.provider`. |
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
-| OAuth provider fails | Run `nanobot provider login openai-codex --set-main` or `nanobot provider login github-copilot --set-main`. |
+| OAuth provider fails | Run the matching login command: `openai-codex`, `xai-grok`, or `github-copilot`, normally with `--set-main`. |
 | Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
-| Codex login runs on a remote/headless machine | Open the printed URL in a local browser, then paste the final `http://localhost:1455/auth/callback?...` URL back into the terminal. |
+| Codex login runs on a remote/headless machine | In the WebUI, open ChatGPT in your local browser; when the localhost callback page cannot load, copy the full `http://localhost:1455/auth/callback?...` URL from the address bar and paste it into the WebUI dialog. From the CLI, open the printed URL locally and paste the same callback URL back into the terminal. |
 | Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 | Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
+| xAI OAuth needs a proxy | Set `providers.xaiGrok.proxy` before login. It applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
+| xAI login runs on a remote/headless machine | In the WebUI, finish sign-in in your local browser; if the loopback redirect cannot reach the server, copy the final URL from the address bar into the WebUI dialog. From the CLI, run `nanobot provider login xai-grok` interactively, open the printed URL elsewhere, and paste the final callback URL or authorization code when prompted. |
+| xAI returns 403 or subscription access denied | Confirm the signed-in account has an eligible X Premium / Grok subscription, then run `nanobot provider login xai-grok` again. This provider does not use an xAI API key or X Developer OAuth. |
+| xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
+| xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
 
 ## Langfuse Problems
 
@@ -178,8 +196,49 @@ nanobot gateway --verbose
 | Port already in use | Change `gateway.port`, `channels.websocket.port`, or the `--port` CLI flag for the relevant command. |
 | WebUI opened on `18790` but shows nothing useful | Open `8765`; `18790` is the health endpoint. |
 | Config changes ignored | Restart the gateway. |
+| Startup pauses at `Installing optional feature` | An enabled channel is missing its Python dependencies. See [Slow Optional Channel Dependency Installation](#slow-optional-channel-dependency-installation). |
 | Heartbeat never runs | Keep the gateway running, add tasks under `<workspace>/HEARTBEAT.md` -> `## Active Tasks`, and make sure `gateway.heartbeat.enabled` is true. |
 | Cron jobs disappeared after switching workspaces | Cron jobs are workspace-scoped at `<workspace>/cron/jobs.json`; check you are using the intended workspace. |
+
+### Slow Optional Channel Dependency Installation
+
+Before loading enabled channels, the gateway checks the dependencies declared by their
+channel manifests. The CLI and WebUI normally install these dependencies when a channel is
+enabled. Installation during startup is a recovery path for an enabled config whose Python
+environment no longer has the required packages, for example after manually editing the
+config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The
+gateway waits for the install so an enabled channel is not silently skipped; later starts
+skip the installation once the dependencies are present.
+
+If access to PyPI is slow in your region, configure pip to use a trusted package index. The
+installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot
+itself was installed with `uv tool`:
+
+```bash
+PIP_INDEX_URL=https://your-trusted-mirror.example/simple nanobot gateway
+```
+
+For the systemd user service created by `nanobot gateway install-service`, add a drop-in:
+
+```bash
+systemctl --user edit nanobot-gateway.service
+```
+
+```ini
+[Service]
+Environment="PIP_INDEX_URL=https://your-trusted-mirror.example/simple"
+```
+
+Then reload and restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart nanobot-gateway.service
+```
+
+For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an
+HTTPS index operated by an organization you trust, and do not put index credentials in
+commands or logs.
 
 ## WebUI Problems
 
@@ -229,7 +288,9 @@ Then check:
 |---|---|
 | Bot never replies | Gateway is not running, the channel is not enabled, or the bot/app token is wrong. |
 | Unknown sender ignored | Configure `allowFrom`, pairing, or the channel-specific allow list. |
-| Telegram fails | Confirm the BotFather token and `allowFrom` user ID. |
+| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Settings → Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
+| Telegram rejects the token | Copy the current token from BotFather or regenerate it. |
+| Telegram receives no messages | Confirm the channel is enabled, the gateway is running, and the sender is paired or listed in `allowFrom`. |
 | Discord replies missing | Enable Message Content intent and invite the bot with the required permissions. |
 | WhatsApp or WeChat login expired | Re-run `nanobot channels login whatsapp` or `nanobot channels login weixin`. |
 | Chat app works but WebUI does not | The provider and gateway are likely fine; debug the WebSocket channel separately. |

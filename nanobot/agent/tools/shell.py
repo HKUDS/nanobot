@@ -18,13 +18,14 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
     MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
+    ExecSessionManager,
     clamp_session_int,
     format_session_poll,
 )
@@ -84,6 +85,8 @@ class ExecToolConfig(Base):
     path_prepend: str = ""
     path_append: str = ""
     sandbox: str = ""
+    sandbox_ro_binds: list[str] = Field(default_factory=list)
+    sandbox_rw_binds: list[str] = Field(default_factory=list)
     allowed_env_keys: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
@@ -106,7 +109,6 @@ class _PreparedCommand:
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
         timeout=IntegerSchema(
-            60,
             description=(
                 "Timeout in seconds. Increase for long-running commands "
                 "like compilation or installation (default 60, max 600)."
@@ -173,11 +175,11 @@ class ExecTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
@@ -187,10 +189,12 @@ class ExecTool(Tool):
             sandbox=cfg.sandbox,
             path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
+            sandbox_ro_binds=cfg.sandbox_ro_binds,
+            sandbox_rw_binds=cfg.sandbox_rw_binds,
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
-            session_manager=getattr(ctx, "exec_session_manager", None),
+            session_manager=ctx.exec_session_manager,
         )
 
     def __init__(
@@ -205,8 +209,10 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_prepend: str = "",
         path_append: str = "",
+        sandbox_ro_binds: list[str] | None = None,
+        sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
-        session_manager: Any | None = None,
+        session_manager: ExecSessionManager | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -237,6 +243,8 @@ class ExecTool(Tool):
         self.webui_allow_local_service_access = webui_allow_local_service_access
         self.path_prepend = path_prepend
         self.path_append = path_append
+        self.sandbox_ro_binds = self._normalize_bind_roots(sandbox_ro_binds)
+        self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
@@ -337,7 +345,7 @@ class ExecTool(Tool):
             # misses it, leaving a zombie.
             _reap_pid(process.pid)
 
-            output_parts = []
+            output_parts: list[str] = []
 
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
@@ -464,7 +472,14 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = workspace_root or cwd
-                command = wrap_command(self.sandbox, command, workspace, cwd)
+                command = wrap_command(
+                    self.sandbox,
+                    command,
+                    workspace,
+                    cwd,
+                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                )
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)
@@ -490,7 +505,7 @@ class ExecTool(Tool):
         )
 
     def _compose_path(self, current_path: str) -> str:
-        parts = []
+        parts: list[str] = []
         if self.path_prepend:
             parts.append(self.path_prepend)
         if current_path:
@@ -500,7 +515,7 @@ class ExecTool(Tool):
         return os.pathsep.join(parts)
 
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
-        segments = []
+        segments: list[str] = []
         if self.path_prepend:
             env["NANOBOT_PATH_PREPEND"] = self.path_prepend
             segments.append("$NANOBOT_PATH_PREPEND")
@@ -541,6 +556,7 @@ class ExecTool(Tool):
             command = ExecTool._normalize_powershell_command(command)
             command = (
                 "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
                 "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
                 f"{command}\n"
                 "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
@@ -554,11 +570,21 @@ class ExecTool(Tool):
                 env=env,
             )
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args = [shell_program]
+        args: list[str] = [shell_program]
         shell_name = Path(shell_program).name.lower()
         if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
             args.append("-l")
         args.extend(["-c", command])
+        if process_tree:
+            return await asyncio.create_subprocess_exec(
+                *args,
+                stdin=stdin,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=env,
+                start_new_session=True,
+            )
         return await asyncio.create_subprocess_exec(
             *args,
             stdin=stdin,
@@ -566,7 +592,6 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
-            **({"start_new_session": True} if process_tree else {}),
         )
 
     @staticmethod
@@ -794,6 +819,9 @@ class ExecTool(Tool):
                 if workspace_root
                 else None
             )
+            sandbox_bind_roots = self._active_sandbox_bind_roots(
+                resolved_workspace or cwd_path
+            )
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -817,6 +845,8 @@ class ExecTool(Tool):
                 )
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)
+                if not allowed and sandbox_bind_roots:
+                    allowed = any(is_path_within(p, root) for root in sandbox_bind_roots)
                 if p.is_absolute() and not allowed:
                     return ToolResult.error(
                         "Error: Command blocked by safety guard (path outside working dir)"
@@ -918,6 +948,41 @@ class ExecTool(Tool):
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
-        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
+        posix_paths = re.findall(r"(?:^|[\s|>='\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
+        home_paths = re.findall(r"(?:^|[\s>='\"])(~[/+][^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~/ or ~+
         return win_paths + posix_paths + home_paths
+
+    @staticmethod
+    def _normalize_bind_roots(paths: list[str] | None) -> list[Path]:
+        roots: list[Path] = []
+        seen: set[str] = set()
+        for raw in paths or []:
+            value = str(raw).strip()
+            if not value:
+                continue
+            path = Path(os.path.expandvars(value)).expanduser()
+            if not path.is_absolute():
+                continue
+            with suppress(OSError, RuntimeError, ValueError):
+                resolved = path.resolve(strict=False)
+                key = os.path.normcase(os.fspath(resolved))
+                if key in seen:
+                    continue
+                seen.add(key)
+                roots.append(resolved)
+        return roots
+
+    def _active_sandbox_bind_roots(
+        self,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
+        if self.sandbox != "bwrap" or _IS_WINDOWS:
+            return []
+        roots = [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
+        if workspace_root is None:
+            return roots
+        return [
+            root
+            for root in roots
+            if not is_path_within(workspace_root, root)
+        ]

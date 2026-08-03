@@ -15,7 +15,6 @@ from nanobot.api.server import (
     _save_base64_data_url,
     create_app,
 )
-from nanobot.utils.document import extract_documents
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -154,6 +153,28 @@ def test_parse_json_content_validates_user_role() -> None:
     """Non-user role raises ValueError."""
     body = {"messages": [{"role": "system", "content": "you are a bot"}]}
     with pytest.raises(ValueError, match="single user message"):
+        _parse_json_content(body)
+
+
+@pytest.mark.parametrize(
+    ("part", "field"),
+    [
+        ({"type": "text", "text": 1}, r"content\[\]\.text"),
+        (
+            {"type": "image_url", "image_url": "not-an-object"},
+            r"content\[\]\.image_url",
+        ),
+        (
+            {"type": "image_url", "image_url": {"url": 1}},
+            r"image_url\.url",
+        ),
+    ],
+)
+def test_parse_json_content_validates_typed_block_fields(part, field) -> None:
+    """Dynamic content blocks are checked before their values reach typed code."""
+    body = {"messages": [{"role": "user", "content": [part]}]}
+
+    with pytest.raises(TypeError, match=field):
         _parse_json_content(body)
 
 
@@ -383,98 +404,13 @@ async def test_json_base64_image_upload(aiohttp_client, mock_agent, tmp_path) ->
 
 
 # ---------------------------------------------------------------------------
-# extract_documents tests (now in nanobot.utils.document)
-# ---------------------------------------------------------------------------
-
-def test_extract_documents_separates_images_from_docs(tmp_path) -> None:
-    """Images stay in media; document text is appended to content."""
-    from docx import Document
-
-    png = tmp_path / "chart.png"
-    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-
-    doc = Document()
-    doc.add_paragraph("Quarterly revenue is $5M")
-    docx_path = tmp_path / "report.docx"
-    doc.save(docx_path)
-
-    text, image_paths = extract_documents("summarize", [str(png), str(docx_path)])
-    assert len(image_paths) == 1
-    assert image_paths[0] == str(png)
-    assert "Quarterly revenue" in text
-    assert "summarize" in text
-
-
-def test_extract_documents_skips_extraction_errors(tmp_path, monkeypatch) -> None:
-    """Document extraction errors should not leak into user text."""
-    bad_file = tmp_path / "broken.docx"
-    bad_file.write_text("not a docx", encoding="utf-8")
-
-    import nanobot.utils.document as _doc
-    monkeypatch.setattr(
-        _doc, "extract_text",
-        lambda _path: "[error: failed to extract DOCX: boom]",
-    )
-
-    text, image_paths = extract_documents("hello", [str(bad_file)])
-    assert text == "hello"
-    assert image_paths == []
-
-
-def test_extract_documents_images_only(tmp_path) -> None:
-    """When all files are images, text is unchanged and all paths kept."""
-    png = tmp_path / "a.png"
-    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-    text, image_paths = extract_documents("describe", [str(png)])
-    assert text == "describe"
-    assert len(image_paths) == 1
-
-
-def test_extract_documents_skips_oversized_files(tmp_path) -> None:
-    """Files exceeding the size limit should be silently skipped."""
-    big = tmp_path / "huge.txt"
-    big.write_bytes(b"x" * 200)
-
-    text, image_paths = extract_documents("hello", [str(big)], max_file_size=100)
-    assert text == "hello"
-    assert image_paths == []
-
-
-def test_extract_documents_does_not_read_full_file_for_mime(tmp_path) -> None:
-    """MIME detection should only read header bytes, not the entire file."""
-    from pathlib import Path as _Path
-
-    big_txt = tmp_path / "big.txt"
-    big_txt.write_bytes(b"hello world " * 100_000)  # ~1.2 MB
-
-    original_read_bytes = _Path.read_bytes
-    read_sizes: list[int] = []
-
-    def _tracking_read_bytes(self):
-        data = original_read_bytes(self)
-        read_sizes.append(len(data))
-        return data
-
-    import unittest.mock
-    with unittest.mock.patch.object(_Path, "read_bytes", _tracking_read_bytes):
-        extract_documents("test", [str(big_txt)])
-
-    # If the full file was read for MIME detection, read_sizes would
-    # contain a >1MB entry.  After the fix, only a small header is read.
-    assert all(size <= 4096 for size in read_sizes), (
-        f"extract_documents read full file for MIME detection: sizes={read_sizes}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# DOCX upload test — API saves file, loop layer extracts text
+# DOCX upload test — API saves file for on-demand reading
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_docx_upload_passes_media_path(aiohttp_client, tmp_path) -> None:
-    """Uploaded DOCX is saved to disk and its path passed as media.
-    (Text extraction happens later in AgentLoop._process_message.)"""
+    """Uploaded DOCX is saved to disk and its path is passed through unchanged."""
     agent = _make_mock_agent("report summary")
     import os
     original_cwd = os.getcwd()

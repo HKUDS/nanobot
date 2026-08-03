@@ -27,17 +27,17 @@ export function ToggleButton({
         "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-[2px]",
         "transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         checked
-          ? "bg-[#2997FF] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)]"
-          : "bg-muted shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)] hover:bg-muted/80",
+          ? "bg-[#2997FF]"
+          : "bg-muted-foreground/20 hover:bg-muted-foreground/25",
         disabled && "cursor-default opacity-60",
         disabled && checked && "hover:bg-[#2997FF]",
-        disabled && !checked && "hover:bg-muted",
+        disabled && !checked && "hover:bg-muted-foreground/20",
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "h-[18px] w-[18px] rounded-full bg-background shadow-[0_1px_2px_rgba(0,0,0,0.18),0_2px_7px_rgba(0,0,0,0.11)]",
+          "h-[18px] w-[18px] rounded-full bg-background",
           "transition-transform duration-200 ease-out",
           checked ? "translate-x-[16px]" : "translate-x-0",
         )}

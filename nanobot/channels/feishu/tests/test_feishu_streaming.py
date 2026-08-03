@@ -286,6 +286,27 @@ class TestSendDelta:
         assert settings_call.body.sequence == 5  # after final content seq 4
 
     @pytest.mark.asyncio
+    async def test_stream_end_merge_next_preserves_buffer(self):
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="first-",
+            card_id="card_1",
+            sequence=3,
+            last_edit=time.monotonic(),
+        )
+
+        await ch.send_delta(
+            "oc_chat1",
+            "boundary",
+            stream_end=True,
+            merge_next=True,
+        )
+
+        assert ch._stream_bufs["oc_chat1"].text == "first-boundary"
+        ch._client.cardkit.v1.card_element.content.assert_not_called()
+        ch._client.cardkit.v1.card.settings.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_stream_end_fallback_when_no_card_id(self):
         """If card creation failed, stream_end falls back to a plain card message."""
         ch = _make_channel()

@@ -1,5 +1,7 @@
 """Matrix (Element) channel — inbound sync + outbound message/media delivery."""
 
+# pyright: reportMissingTypeStubs=false
+
 import asyncio
 import html
 import json
@@ -10,7 +12,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, Callable, Literal, Protocol, TypeAlias, cast
 from urllib.parse import quote, unquote, urlparse
 
 from pydantic import Field
@@ -73,6 +75,18 @@ _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.f
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
+
+
+class _MatrixCallbackRegistrar(Protocol):
+    """Runtime callback surface whose upstream stubs reject valid filtered handlers."""
+
+    def add_event_callback(self, callback: Callable[..., Any], event_filter: Any) -> None: ...
+    def add_to_device_callback(
+        self,
+        callback: Callable[..., Any],
+        event_filter: Any,
+    ) -> None: ...
+    def add_response_callback(self, callback: Callable[..., Any], response_filter: Any) -> None: ...
 
 
 class _MediaTooLargeError(Exception):
@@ -187,7 +201,7 @@ def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
         masked_text = _mask_mxc_markdown_image_sources(text)
-        rendered = _mask_mxc_image_sources(MATRIX_MARKDOWN(masked_text))
+        rendered = _mask_mxc_image_sources(cast(str, MATRIX_MARKDOWN(masked_text)))
         formatted = _unmask_mxc_image_sources(MATRIX_HTML_CLEANER.clean(rendered).strip())
     except Exception:
         return None
@@ -229,16 +243,17 @@ def _build_matrix_text_content(
         content["format"] = MATRIX_HTML_FORMAT
         content["formatted_body"] = html
     if event_id:
-        content["m.new_content"] = {
+        new_content: dict[str, object] = {
             "body": text,
             "msgtype": "m.text",
         }
+        content["m.new_content"] = new_content
         content["m.relates_to"] = {
             "rel_type": "m.replace",
             "event_id": event_id,
         }
         if thread_relates_to:
-            content["m.new_content"]["m.relates_to"] = thread_relates_to
+            new_content["m.relates_to"] = thread_relates_to
     elif thread_relates_to:
         content["m.relates_to"] = thread_relates_to
 
@@ -276,7 +291,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
     _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
-    monotonic_time = time.monotonic
+    monotonic_time: Callable[[], float] = staticmethod(time.monotonic)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -294,8 +309,8 @@ class MatrixChannel(BaseChannel):
             config = MatrixConfig.model_validate(config)
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
-        self._sync_task: asyncio.Task | None = None
-        self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._sync_task: asyncio.Task[None] | None = None
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._restrict_to_workspace = bool(restrict_to_workspace)
         self._workspace = (
             Path(workspace).expanduser().resolve(strict=False) if workspace is not None else None
@@ -325,7 +340,7 @@ class MatrixChannel(BaseChannel):
         self.client = AsyncClient(
             homeserver=self.config.homeserver,
             user=self.config.user_id,
-            store_path=self.store_path,
+            store_path=str(self.store_path),
             config=AsyncClientConfig(
                 store_sync_tokens=True,
                 encryption_enabled=self.config.e2ee_enabled,
@@ -386,6 +401,16 @@ class MatrixChannel(BaseChannel):
 
         self._sync_task = asyncio.create_task(self._sync_loop())
 
+    def _require_client(self) -> AsyncClient:
+        if self.client is None:
+            raise RuntimeError("Matrix client is not started")
+        return self.client
+
+    def _callback_registrar(self) -> _MatrixCallbackRegistrar:
+        # matrix-nio's callback annotations do not model filtered subtype or
+        # async handlers, although the runtime API supports both.
+        return cast(_MatrixCallbackRegistrar, self._require_client())
+
     async def stop(self) -> None:
         """Stop the Matrix channel with graceful sync shutdown."""
         self._running = False
@@ -428,9 +453,10 @@ class MatrixChannel(BaseChannel):
         seen: set[str] = set()
         candidates: list[Path] = []
         for raw in media:
-            if not isinstance(raw, str) or not raw.strip():
+            raw_value = cast(object, raw)
+            if not isinstance(raw_value, str) or not raw_value.strip():
                 continue
-            path = Path(raw.strip()).expanduser()
+            path = Path(raw_value.strip()).expanduser()
             try:
                 key = str(path.resolve(strict=False))
             except OSError:
@@ -535,8 +561,13 @@ class MatrixChannel(BaseChannel):
             self.logger.error("Matrix media upload failed for %s", filename, exc_info=True)
             return fail
 
-        upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
-        encryption_info = upload_result[1] if isinstance(upload_result, tuple) and isinstance(upload_result[1], dict) else None
+        is_tuple_result = isinstance(cast(object, upload_result), tuple)
+        upload_response = upload_result[0] if is_tuple_result else upload_result
+        encryption_info = (
+            upload_result[1]
+            if is_tuple_result and isinstance(cast(object, upload_result[1]), dict)
+            else None
+        )
         if isinstance(upload_response, UploadError):
             return fail
         mxc_url = getattr(upload_response, "content_uri", None)
@@ -598,9 +629,14 @@ class MatrixChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
 
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             stream_key = _matrix_stream_key(chat_id, stream_id)
             buf = self._stream_bufs.pop(stream_key, None)
@@ -640,28 +676,31 @@ class MatrixChannel(BaseChannel):
                 buf.last_edit = now
                 if not buf.event_id:
                     # we are editing the same message all the time, so only the first time the event id needs to be set
-                    buf.event_id = response.event_id
+                    buf.event_id = cast(RoomSendResponse, response).event_id
             except Exception:
                 self.logger.error("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
 
 
     def _register_event_callbacks(self) -> None:
-        self.client.add_event_callback(self._on_message, RoomMessageText)
-        self.client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
-        self.client.add_event_callback(self._on_room_invite, InviteEvent)
+        client = self._callback_registrar()
+        client.add_event_callback(self._on_message, RoomMessageText)
+        client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
+        client.add_event_callback(self._on_room_invite, InviteEvent)
 
     def _register_to_device_callbacks(self) -> None:
         if self.config.e2ee_enabled and self.config.sas_verification:
-            self.client.add_to_device_callback(
+            client = self._callback_registrar()
+            client.add_to_device_callback(
                 self._on_key_verification_event,
                 (KeyVerificationEvent,),
             )
 
     def _register_response_callbacks(self) -> None:
-        self.client.add_response_callback(self._on_sync_error, SyncError)
-        self.client.add_response_callback(self._on_join_error, JoinError)
-        self.client.add_response_callback(self._on_send_error, RoomSendError)
+        client = self._callback_registrar()
+        client.add_response_callback(self._on_sync_error, SyncError)
+        client.add_response_callback(self._on_join_error, JoinError)
+        client.add_response_callback(self._on_send_error, RoomSendError)
 
     def _is_sas_sender_allowed(self, sender: str) -> bool:
         return bool(sender and self.is_allowed(sender))
@@ -786,7 +825,8 @@ class MatrixChannel(BaseChannel):
         backoff = 2.0
         while self._running:
             try:
-                await self.client.sync_forever(timeout=30000, full_state=True)
+                client = self._require_client()
+                await client.sync_forever(timeout=30000, full_state=True)
                 backoff = 2.0
             except asyncio.CancelledError:
                 break
@@ -798,7 +838,8 @@ class MatrixChannel(BaseChannel):
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         if self.is_allowed(event.sender):
-            await self.client.join(room.room_id)
+            client = self._require_client()
+            await client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
         count = getattr(room, "member_count", None)
@@ -809,13 +850,19 @@ class MatrixChannel(BaseChannel):
         source = getattr(event, "source", None)
         if not isinstance(source, dict):
             return False
-        mentions = (source.get("content") or {}).get("m.mentions")
+        source_data = cast(dict[str, Any], source)
+        content = cast(dict[str, Any], source_data.get("content") or {})
+        mentions = cast(object, content.get("m.mentions"))
         if not isinstance(mentions, dict):
             return False
-        user_ids = mentions.get("user_ids")
+        mentions_data = cast(dict[str, Any], mentions)
+        user_ids = cast(object, mentions_data.get("user_ids"))
         if isinstance(user_ids, list) and self.config.user_id in user_ids:
             return True
-        return bool(self.config.allow_room_mentions and mentions.get("room") is True)
+        return bool(
+            self.config.allow_room_mentions
+            and mentions_data.get("room") is True
+        )
 
     def _is_pre_startup_event(self, event: RoomMessage) -> bool:
         """Skip events that landed in the timeline before this process started.
@@ -850,14 +897,21 @@ class MatrixChannel(BaseChannel):
         source = getattr(event, "source", None)
         if not isinstance(source, dict):
             return {}
-        content = source.get("content")
-        return content if isinstance(content, dict) else {}
+        source_data = cast(dict[str, Any], source)
+        content = cast(object, source_data.get("content"))
+        return cast(dict[str, Any], content) if isinstance(content, dict) else {}
 
     def _event_thread_root_id(self, event: RoomMessage) -> str | None:
-        relates_to = self._event_source_content(event).get("m.relates_to")
-        if not isinstance(relates_to, dict) or relates_to.get("rel_type") != "m.thread":
+        relates_to = cast(
+            object,
+            self._event_source_content(event).get("m.relates_to"),
+        )
+        if not isinstance(relates_to, dict):
             return None
-        root_id = relates_to.get("event_id")
+        relation = cast(dict[str, Any], relates_to)
+        if relation.get("rel_type") != "m.thread":
+            return None
+        root_id = cast(object, relation.get("event_id"))
         return root_id if isinstance(root_id, str) and root_id else None
 
     def _thread_metadata(self, event: RoomMessage) -> dict[str, str] | None:
@@ -883,7 +937,7 @@ class MatrixChannel(BaseChannel):
 
     def _event_attachment_type(self, event: MatrixMediaEvent) -> str:
         msgtype = self._event_source_content(event).get("msgtype")
-        return _MSGTYPE_MAP.get(msgtype, "file")
+        return _MSGTYPE_MAP.get(cast(str, msgtype), "file")
 
     @staticmethod
     def _is_encrypted_media_event(event: MatrixMediaEvent) -> bool:
@@ -892,16 +946,27 @@ class MatrixChannel(BaseChannel):
                 and isinstance(getattr(event, "iv", None), str))
 
     def _event_declared_size_bytes(self, event: MatrixMediaEvent) -> int | None:
-        info = self._event_source_content(event).get("info")
-        size = info.get("size") if isinstance(info, dict) else None
+        info = cast(object, self._event_source_content(event).get("info"))
+        size = (
+            cast(dict[str, Any], info).get("size")
+            if isinstance(info, dict)
+            else None
+        )
         return size if type(size) is int and size >= 0 else None  # noqa: E721
 
     def _event_mime(self, event: MatrixMediaEvent) -> str | None:
-        info = self._event_source_content(event).get("info")
-        if isinstance(info, dict) and isinstance(m := info.get("mimetype"), str) and m:
-            return m
-        m = getattr(event, "mimetype", None)
-        return m if isinstance(m, str) and m else None
+        info = cast(object, self._event_source_content(event).get("info"))
+        if (
+            isinstance(info, dict)
+            and isinstance(
+                mime := cast(dict[str, Any], info).get("mimetype"),
+                str,
+            )
+            and mime
+        ):
+            return mime
+        mime = getattr(event, "mimetype", None)
+        return mime if isinstance(mime, str) and mime else None
 
     def _event_filename(self, event: MatrixMediaEvent, attachment_type: str) -> str:
         body = getattr(event, "body", None)
@@ -968,9 +1033,21 @@ class MatrixChannel(BaseChannel):
 
     def _decrypt_media_bytes(self, event: MatrixMediaEvent, ciphertext: bytes) -> bytes | None:
         key_obj, hashes, iv = getattr(event, "key", None), getattr(event, "hashes", None), getattr(event, "iv", None)
-        key = key_obj.get("k") if isinstance(key_obj, dict) else None
-        sha256 = hashes.get("sha256") if isinstance(hashes, dict) else None
-        if not all(isinstance(v, str) for v in (key, sha256, iv)):
+        key = (
+            cast(dict[str, Any], key_obj).get("k")
+            if isinstance(key_obj, dict)
+            else None
+        )
+        sha256 = (
+            cast(dict[str, Any], hashes).get("sha256")
+            if isinstance(hashes, dict)
+            else None
+        )
+        if (
+            not isinstance(key, str)
+            or not isinstance(sha256, str)
+            or not isinstance(iv, str)
+        ):
             return None
         try:
             return decrypt_attachment(ciphertext, key, sha256, iv)

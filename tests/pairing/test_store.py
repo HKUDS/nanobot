@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from nanobot.pairing import __all__ as pairing_all
@@ -240,3 +242,147 @@ class TestStoreDurability:
         # Should recover gracefully and act as empty store
         assert store.list_pending() == []
         assert store.is_approved("telegram", "123") is False
+
+
+def test_load_treats_null_approved_channel_list_as_empty(tmp_path, monkeypatch):
+    """Null approved channel lists must not crash pairing checks.
+
+    JSON stores can contain ``"telegram": null`` after partial edits; treat
+    that like an empty allow-list, matching corrupt-JSON reset behavior.
+    """
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {"telegram": null, "discord": ["456"]}, "pending": {}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.is_approved("telegram", "123") is False
+    assert store.is_approved("discord", "456") is True
+    assert store.get_approved("telegram") == []
+
+
+def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypatch):
+    """Top-level approved/pending null must not crash pairing load or list_pending."""
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": null, "pending": null}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.is_approved("telegram", "123") is False
+    assert store.list_pending() == []
+    assert store.get_approved("telegram") == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("approved", "corrupt"), ("pending", ["corrupt"])],
+)
+def test_load_treats_non_object_approved_and_pending_maps_as_empty(
+    tmp_path, monkeypatch, field, value
+):
+    path = tmp_path / "pairing.json"
+    payload = {"approved": {}, "pending": {}}
+    payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+
+    assert store.is_approved("telegram", "123") is False
+    assert store.list_pending() == []
+
+
+@pytest.mark.parametrize("payload", ["null", "[]", "true"])
+def test_load_treats_non_object_store_as_empty(tmp_path, monkeypatch, payload):
+    path = tmp_path / "pairing.json"
+    path.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []
+    assert store.is_approved("telegram", "123") is False
+
+
+def test_list_pending_skips_null_pending_entries(tmp_path, monkeypatch):
+    """Null pending entry values must be dropped instead of crashing list_pending."""
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {}, "pending": {"ABCD-EFGH": null}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []
+    assert store.clear_channel("telegram") == {"approved": 0, "pending": 0}
+
+
+def test_pending_gc_drops_malformed_entries(tmp_path, monkeypatch):
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {}, "pending": {'
+        '"bad-expiry": {"channel": "telegram", "sender_id": "123", "expires_at": null},'
+        '"missing-sender": {"channel": "telegram", "expires_at": 9999999999}'
+        "}}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.list_pending() == []
+
+
+def _fail_reads_of(monkeypatch, path):
+    """Make reads of *path* raise like a transiently locked/busy file."""
+    import builtins
+    from pathlib import Path
+
+    real_open = builtins.open
+
+    def flaky_open(file, mode="r", *args, **kwargs):
+        try:
+            same = Path(file) == path
+        except TypeError:
+            same = False
+        if same and "r" in mode and "+" not in mode:
+            raise PermissionError(13, "temporarily locked", str(path))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", flaky_open)
+
+
+class TestTransientReadFailure:
+    """A transient I/O failure is not corruption and must never wipe the store."""
+
+    def test_generate_code_does_not_wipe_approvals(self, tmp_path, monkeypatch):
+        """An unapproved DM during a read blip previously erased every approval.
+
+        _load treated OSError like corruption and returned an empty store;
+        generate_code then unconditionally saved it, overwriting pairing.json
+        with no approved senders.
+        """
+        code = store.generate_code("telegram", "123")
+        store.approve_code(code)
+
+        with monkeypatch.context() as m:
+            _fail_reads_of(m, store._store_path())
+            with pytest.raises(OSError):
+                store.generate_code("telegram", "stranger")
+
+        assert store.is_approved("telegram", "123") is True
+
+    def test_reads_fail_closed_without_crashing(self, tmp_path, monkeypatch):
+        code = store.generate_code("telegram", "123")
+        store.approve_code(code)
+
+        with monkeypatch.context() as m:
+            _fail_reads_of(m, store._store_path())
+            assert store.is_approved("telegram", "123") is False
+            assert store.list_pending() == []
+            assert store.get_approved("telegram") == []
+
+        assert store.is_approved("telegram", "123") is True
+
+    def test_approve_command_reports_store_unavailable(self, tmp_path, monkeypatch):
+        """/pairing approve must fail loudly instead of claiming the code is invalid."""
+        code = store.generate_code("telegram", "123")
+
+        with monkeypatch.context() as m:
+            _fail_reads_of(m, store._store_path())
+            reply = store.handle_pairing_command("telegram", f"approve {code}")
+
+        assert "unavailable" in reply.lower()
+        assert store.approve_code(code) == ("telegram", "123")

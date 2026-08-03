@@ -8,7 +8,6 @@ import {
 
 const VOICE_RECORDING_MAX_MS = 120_000;
 const VOICE_RECORDING_MIN_MS = 650;
-const VOICE_NO_INPUT_HINT_MS = 1_100;
 const VOICE_HOLD_START_MS = 140;
 const VOICE_WAVEFORM_BAR_COUNT = 64;
 const VOICE_WAVEFORM_SILENT_HEIGHT = 3;
@@ -30,7 +29,6 @@ export type VoiceRecorderState = "idle" | "recording" | "transcribing";
 export type VoiceRecorderErrorKey =
   | "failed"
   | "noDevice"
-  | "noInput"
   | "notConfigured"
   | "permission"
   | "tooLong"
@@ -61,7 +59,6 @@ export function useVoiceRecorder({
   const audioRef = useRef<VoiceAudioState | null>(null);
   const startedAtRef = useRef(0);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdActiveRef = useRef(false);
   const startPendingRef = useRef(false);
@@ -69,15 +66,10 @@ export function useVoiceRecorder({
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shortcutActiveRef = useRef(false);
-  const levelObservedRef = useRef(false);
-  const peakLevelRef = useRef(0);
-  const levelReliableRef = useRef(false);
-  const noInputHintVisibleRef = useRef(false);
   const [state, setState] = useState<VoiceRecorderState>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
   const [levels, setLevels] = useState<number[]>(VOICE_WAVEFORM_IDLE_LEVELS);
 
-  const clearInputHintTimer = useCallback(() => clearTimer(inputHintTimerRef), []);
   const clearSuppressClickTimer = useCallback(() => clearTimer(suppressClickTimerRef), []);
 
   const suppressNextClick = useCallback(() => {
@@ -128,16 +120,6 @@ export function useVoiceRecorder({
         }
         current.analyser.getByteTimeDomainData(current.data);
         const level = voiceLevelFromSamples(current.data);
-        levelReliableRef.current = true;
-        levelObservedRef.current = true;
-        peakLevelRef.current = Math.max(peakLevelRef.current, level);
-        if (level >= VOICE_MIN_LEVEL) {
-          clearInputHintTimer();
-          if (noInputHintVisibleRef.current) {
-            noInputHintVisibleRef.current = false;
-            onClearError();
-          }
-        }
         setLevels((currentLevels) => [
           ...currentLevels.slice(1),
           waveformHeightFromLevel(level),
@@ -150,11 +132,10 @@ export function useVoiceRecorder({
     } catch {
       stopWaveform();
     }
-  }, [clearInputHintTimer, onClearError, stopWaveform]);
+  }, [stopWaveform]);
 
   const cleanupRecording = useCallback(() => {
     clearTimer(holdTimerRef);
-    clearInputHintTimer();
     clearTimer(maxTimerRef);
     stopWaveform();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -162,8 +143,7 @@ export function useVoiceRecorder({
     mediaRecorderRef.current = null;
     startPendingRef.current = false;
     shortcutActiveRef.current = false;
-    noInputHintVisibleRef.current = false;
-  }, [clearInputHintTimer, stopWaveform]);
+  }, [stopWaveform]);
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -197,10 +177,6 @@ export function useVoiceRecorder({
       streamRef.current = stream;
       mediaRecorderRef.current = recorder;
       startedAtRef.current = Date.now();
-      levelObservedRef.current = false;
-      peakLevelRef.current = 0;
-      levelReliableRef.current = false;
-      noInputHintVisibleRef.current = false;
       setElapsedMs(0);
       startWaveform(stream);
       recorder.ondataavailable = (event) => {
@@ -210,10 +186,6 @@ export function useVoiceRecorder({
         const chunks = chunksRef.current.splice(0);
         const durationMs = Math.max(0, Date.now() - startedAtRef.current);
         const mimeType = recorder.mimeType || "audio/webm";
-        const hasMeasuredSilence =
-          levelReliableRef.current
-          && levelObservedRef.current
-          && peakLevelRef.current < VOICE_MIN_LEVEL;
         cleanupRecording();
         if (chunks.length === 0) {
           setState("idle");
@@ -222,11 +194,6 @@ export function useVoiceRecorder({
         if (durationMs < VOICE_RECORDING_MIN_MS) {
           setState("idle");
           onError("tooShort");
-          return;
-        }
-        if (hasMeasuredSilence) {
-          setState("idle");
-          onError("noInput");
           return;
         }
         setState("transcribing");
@@ -242,19 +209,6 @@ export function useVoiceRecorder({
       setState("recording");
       onClearError();
       maxTimerRef.current = setTimeout(stopRecording, VOICE_RECORDING_MAX_MS);
-      inputHintTimerRef.current = setTimeout(() => {
-        const recording = mediaRecorderRef.current?.state === "recording";
-        if (
-          !recording
-          || !levelReliableRef.current
-          || !levelObservedRef.current
-          || peakLevelRef.current >= VOICE_MIN_LEVEL
-        ) {
-          return;
-        }
-        noInputHintVisibleRef.current = true;
-        onError("noInput");
-      }, VOICE_NO_INPUT_HINT_MS);
     } catch (error) {
       cleanupRecording();
       setState("idle");

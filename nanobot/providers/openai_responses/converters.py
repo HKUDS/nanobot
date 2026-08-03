@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from nanobot.providers.base import tool_arguments_json_for_replay
 
 
-def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+def _as_json_object(value: object) -> dict[str, Any] | None:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def convert_messages(
+    messages: list[dict[str, Any]],
+    *,
+    preserve_reasoning: bool = False,
+) -> tuple[str, list[dict[str, Any]]]:
     """Convert Chat Completions messages to Responses API input items.
 
     Returns ``(system_prompt, input_items)`` where *system_prompt* is extracted
@@ -32,6 +40,13 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
             continue
 
         if role == "assistant":
+            if preserve_reasoning:
+                reasoning = msg.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    input_items.append({
+                        "type": "reasoning",
+                        "content": reasoning,
+                    })
             if isinstance(content, str) and content:
                 message_id = _unique_item_id(f"msg_{idx}", used_item_ids)
                 input_items.append({
@@ -39,8 +54,11 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
                     "content": [{"type": "output_text", "text": content}],
                     "status": "completed", "id": message_id,
                 })
-            for tool_call in msg.get("tool_calls", []) or []:
-                fn = tool_call.get("function") or {}
+            for raw_tool_call in cast(list[object], msg.get("tool_calls", []) or []):
+                tool_call = _as_json_object(raw_tool_call)
+                if tool_call is None:
+                    continue
+                fn = _as_json_object(tool_call.get("function")) or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
                 response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
                 input_items.append({
@@ -54,8 +72,8 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
 
         if role == "tool":
             call_id, _ = split_tool_call_id(msg.get("tool_call_id"))
-            output_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-            input_items.append({"type": "function_call_output", "call_id": call_id, "output": output_text})
+            output = convert_tool_output(content)
+            input_items.append({"type": "function_call_output", "call_id": call_id, "output": output})
 
     return system_prompt, input_items
 
@@ -70,13 +88,15 @@ def convert_user_message(content: Any) -> dict[str, Any]:
         return {"role": "user", "content": [{"type": "input_text", "text": content}]}
     if isinstance(content, list):
         converted: list[dict[str, Any]] = []
-        for item in content:
-            if not isinstance(item, dict):
+        for raw_item in cast(list[object], content):
+            item = _as_json_object(raw_item)
+            if item is None:
                 continue
             if item.get("type") == "text":
                 converted.append({"type": "input_text", "text": item.get("text", "")})
             elif item.get("type") == "image_url":
-                url = (item.get("image_url") or {}).get("url")
+                image = _as_json_object(item.get("image_url")) or {}
+                url = image.get("url")
                 if url:
                     converted.append({"type": "input_image", "image_url": url, "detail": "auto"})
         if converted:
@@ -84,15 +104,89 @@ def convert_user_message(content: Any) -> dict[str, Any]:
     return {"role": "user", "content": [{"type": "input_text", "text": ""}]}
 
 
+def convert_tool_output(content: Any) -> str | list[dict[str, Any]]:
+    """Convert a tool result to Responses API function-call output content.
+
+    The Responses API accepts text, image, and file blocks as function tool
+    output. Nanobot's file tools use Chat Completions-style ``text`` and
+    ``image_url`` blocks for image reads; serializing those blocks as JSON
+    turns the image into inert text and can make the request unnecessarily
+    large. Preserve supported multimodal blocks and strip internal metadata.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        converted: list[dict[str, Any]] = []
+        for raw_item in cast(list[object], content):
+            item = _as_json_object(raw_item)
+            if item is None:
+                break
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"}:
+                if set(item) - {"type", "text", "_meta"}:
+                    break
+                text = item.get("text")
+                if not isinstance(text, str):
+                    break
+                converted.append({"type": "input_text", "text": text})
+            elif item_type in {"image_url", "input_image"}:
+                image = item.get("image_url")
+                image_object = _as_json_object(image)
+                if image_object is not None and set(image_object) - {"url", "detail"}:
+                    break
+                if set(item) - {"type", "image_url", "file_id", "detail", "_meta"}:
+                    break
+                url = image_object.get("url") if image_object is not None else image
+                file_id = item.get("file_id")
+                detail = item.get(
+                    "detail",
+                    image_object.get("detail", "auto") if image_object is not None else "auto",
+                )
+                if detail not in {"low", "high", "auto", "original"}:
+                    break
+                block = {"type": "input_image", "detail": detail}
+                if isinstance(url, str) and url:
+                    block["image_url"] = url
+                elif isinstance(file_id, str) and file_id:
+                    block["file_id"] = file_id
+                else:
+                    break
+                converted.append(block)
+            elif item_type in {"file", "input_file"}:
+                if set(item) - {
+                    "type",
+                    "file_data",
+                    "file_id",
+                    "file_url",
+                    "filename",
+                    "_meta",
+                }:
+                    break
+                block = {"type": "input_file"}
+                for key in ("file_data", "file_id", "file_url", "filename"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value:
+                        block[key] = value
+                if not any(key in block for key in ("file_data", "file_id", "file_url")):
+                    break
+                converted.append(block)
+            else:
+                break
+        else:
+            if converted:
+                return converted
+    return json.dumps(content, ensure_ascii=False)
+
+
 def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert OpenAI function-calling tool schema to Responses API flat format."""
     converted: list[dict[str, Any]] = []
     for tool in tools:
-        fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+        fn = _as_json_object(tool.get("function")) or {} if tool.get("type") == "function" else tool
         name = fn.get("name")
         if not name:
             continue
-        params = fn.get("parameters") or {}
+        params: object = fn.get("parameters") or {}
         converted.append({
             "type": "function",
             "name": name,

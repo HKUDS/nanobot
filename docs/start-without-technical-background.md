@@ -70,53 +70,35 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer downloads the stable nanobot package into an isolated Python environment and opens the setup wizard. It can take a few minutes on the first run. When it finishes, it prints the exact command it used to run nanobot. Keep that command: if `nanobot` is not found later, reuse the whole printed command instead of switching to a different Python command.
+The installer downloads the stable nanobot package into an isolated Python environment. On a fresh local desktop, it then starts the WebUI and opens your browser. This can take a few minutes on the first run. Keep the terminal open. It prints the exact command used to run nanobot; if `nanobot` is not found later, reuse that whole command instead of switching to a different Python command.
 
 If your organization blocks downloaded install scripts, use the [alternative install methods](./quick-start.md#other-install-methods) or ask your administrator to review the scripts first.
 
-## 4. Follow Quick Start
+## 4. Configure Your Model in the WebUI
 
-The wizard shows a menu similar to:
-
-```text
-> What would you like to do?
-  [Q] Quick Start
-  [A] Advanced Settings
-  [X] Exit
-```
-
-Choose **Quick Start**. Use the arrow keys to highlight an option and press `Enter`.
-
-The wizard asks for only the information needed for the first reply:
+In the browser, open **Settings → Models**. Then:
 
 1. Choose your provider.
-2. Choose an endpoint option if the provider offers several plans.
-3. Paste the API key if asked.
-4. Enter the base URL if asked.
-5. Enter a model ID.
-6. Confirm the local WebUI setup.
-7. Choose a WebUI password.
-8. Review the summary and save.
+2. Enter its API key and base URL when required.
+3. Create or select a model preset.
+4. Enter a model ID available to your provider account.
+5. Save the configuration.
 
-When you paste a password or API key, the terminal may hide the characters. That is normal.
+Treat every API key like a password. Do not include it in screenshots or support requests.
 
-If the installer finishes without opening the wizard and `nanobot` is available, run:
+If the installer finishes without opening the browser and `nanobot` is available, run:
 
 ```bash
-nanobot onboard --wizard
+nanobot webui
 ```
 
-If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `onboard --wizard`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
+If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `webui`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
 
-## 5. Open the Browser
+On SSH, a computer without a desktop, an existing configuration, or an older nanobot release, the installer may open the terminal wizard instead. Choose **Quick Start** there and follow its prompts.
 
-Run:
+## 5. Get the First Reply
 
-```bash
-nanobot gateway
-```
-
-Leave the terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password from the wizard if the browser asks for it. Current source versions also provide `nanobot webui`, which starts the gateway and opens the browser automatically.
+Leave the WebUI terminal open. If the browser did not open automatically, visit `http://127.0.0.1:8765`.
 
 Send this message:
 
@@ -143,7 +125,7 @@ Do not configure every feature immediately. Choose one next goal:
 
 Repository docs show the current development version. If your stable package does not yet show **Settings → Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
 
-Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI, or return to the terminal, press `Ctrl+C`, and run `nanobot gateway` again.
+Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI, or return to the terminal, press `Ctrl+C`, and run `nanobot webui` again.
 
 For a chat platform's account, bot, token, or permission prerequisites, use the [Chat Apps guide](./chat-apps.md). For local models and provider-specific recipes, use the [Provider Cookbook](./provider-cookbook.md).
 
@@ -175,7 +157,7 @@ Continue with the full [Troubleshooting guide](./troubleshooting.md) for an orde
 Run:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave that terminal open and visit `http://127.0.0.1:8765`. To stop nanobot, return to the terminal and press `Ctrl+C`. Use `nanobot gateway --background` only after the normal foreground start works; then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+Leave that terminal open while you use nanobot. To stop it, return to the terminal and press `Ctrl+C`. Use `nanobot webui --background` only after the normal foreground start and model setup work; then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
