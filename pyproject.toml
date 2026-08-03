@@ -86,7 +86,7 @@ pdf = [
     "pypdf>=5.0.0,<6.0.0",
 ]
 mst = [
-    "mst-python>=0.4.0; python_version < '3.14' and sys_platform != 'win32'",
+    "mst-python>=0.4.2",
 ]
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
