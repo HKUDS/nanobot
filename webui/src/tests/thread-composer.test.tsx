@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
+import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
@@ -124,6 +124,18 @@ const MCP_PRESETS: McpPresetInfo[] = [
     connection_summary: "",
   },
 ];
+
+function session(chatId: string, title: string, preview = ""): ChatSummary {
+  return {
+    key: `websocket:${chatId}`,
+    channel: "websocket",
+    chatId,
+    createdAt: null,
+    updatedAt: null,
+    title,
+    preview,
+  };
+}
 
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 const ORIGINAL_MEDIA_DEVICES = navigator.mediaDevices;
@@ -1536,25 +1548,24 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("reuses the mention palette for persisted sessions", () => {
+  it("attaches persisted sessions only through the shared mention palette", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
         placeholder="Type your message..."
-        sessions={[{
-          key: "websocket:pricing",
-          channel: "websocket",
-          chatId: "pricing",
-          createdAt: null,
-          updatedAt: null,
-          title: "收费设计",
-          preview: "讨论云存储",
-        }]}
+        sessions={[session("pricing", "收费设计", "讨论云存储")]}
       />,
     );
 
     const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "普通文字 @收费设计", selectionStart: 10 },
+    });
+    expect(screen.queryByTestId("composer-session-mention-收费设计")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenLastCalledWith("普通文字 @收费设计", undefined, undefined);
+
     fireEvent.change(input, {
       target: { value: "参考 @收费", selectionStart: 6 },
     });
@@ -1579,49 +1590,16 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("attaches a session only after an explicit palette selection", () => {
-    const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-        sessions={[{
-          key: "websocket:pricing",
-          channel: "websocket",
-          chatId: "pricing",
-          createdAt: null,
-          updatedAt: null,
-          title: "收费设计",
-          preview: "讨论云存储",
-        }]}
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, {
-      target: { value: "普通文字 @收费设计", selectionStart: 10 },
-    });
-
-    expect(screen.queryByTestId("composer-session-mention-收费设计")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(onSend).toHaveBeenCalledWith("普通文字 @收费设计", undefined, undefined);
-  });
-
-  it("shows stable aliases for sessions with the same title", () => {
+  it("disambiguates duplicate and capability-colliding session names", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        sessions={["a", "b"].map((chatId) => ({
-          key: `websocket:${chatId}`,
-          channel: "websocket",
-          chatId,
-          createdAt: null,
-          updatedAt: null,
-          title: "Plan",
-          preview: "",
-        }))}
+        cliApps={CLI_APPS}
+        sessions={[
+          ...["a", "b"].map((chatId) => session(chatId, "Plan")),
+          session("blender-chat", "Blender", "3D notes"),
+        ]}
       />,
     );
 
@@ -1633,52 +1611,50 @@ describe("ThreadComposer", () => {
       expect.stringContaining("@Plan"),
       expect.stringContaining("@Plan-chat"),
     ]);
+    expect(screen.getByRole("group", { name: "Nanobot conversations" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "CLI apps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Blender @Blender-chat Reference/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Blender @blender Use/i }))
+      .toBeInTheDocument();
   });
 
-  it("keeps the composer and wire payload on the same eight-session limit", () => {
+  it("releases the eight-session limit when a mention is removed", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
         placeholder="Type your message..."
-        sessions={Array.from({ length: 9 }, (_, index) => ({
-          key: `websocket:topic-${index}`,
-          channel: "websocket",
-          chatId: `topic-${index}`,
-          createdAt: null,
-          updatedAt: null,
-          title: `Topic${index}`,
-          preview: "",
-        }))}
+        sessions={Array.from(
+          { length: 9 },
+          (_, index) => session(`topic-${index}`, `Topic${index}`),
+        )}
       />,
     );
 
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       const value = `${input.value}${input.value ? " " : ""}@Topic${index}`;
       fireEvent.change(input, { target: { value, selectionStart: value.length } });
       fireEvent.keyDown(input, { key: "Tab" });
     }
+    const replacement = `${input.value.replace("@Topic0 ", "")} @Topic8`;
+    fireEvent.change(input, {
+      target: { value: replacement, selectionStart: replacement.length },
+    });
+    fireEvent.keyDown(input, { key: "Tab" });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     const options = onSend.mock.calls[0]?.[2];
     expect(options.sessionMentions).toHaveLength(8);
     expect(options.sessionMentions.map((mention: { session_key: string }) => (
       mention.session_key
-    ))).not.toContain("websocket:topic-8");
+    ))).toEqual(expect.arrayContaining(["websocket:topic-8"]));
   });
 
   it("keeps a selected session stable across refreshes and queued guidance", () => {
     const onSend = vi.fn();
-    const target = {
-      key: "websocket:z-target",
-      channel: "websocket",
-      chatId: "z-target",
-      createdAt: null,
-      updatedAt: null,
-      title: "Plan",
-      preview: "Original plan",
-    };
+    const target = session("z-target", "Plan", "Original plan");
     const { rerender } = render(
       <ThreadComposer
         onSend={onSend}
@@ -1701,12 +1677,7 @@ describe("ThreadComposer", () => {
         placeholder="Type your message..."
         sessions={[
           { ...target, title: "Renamed plan" },
-          {
-            ...target,
-            key: "websocket:a-new",
-            chatId: "a-new",
-            title: "Plan",
-          },
+          session("a-new", "Plan", target.preview),
         ]}
       />,
     );
@@ -1723,48 +1694,6 @@ describe("ThreadComposer", () => {
       }],
       continueActiveTurn: true,
     });
-  });
-
-  it("disambiguates a session mention that shares a capability name", () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        cliApps={CLI_APPS}
-        sessions={[
-          {
-            key: "websocket:blender-chat",
-            channel: "websocket",
-            chatId: "blender-chat",
-            createdAt: null,
-            updatedAt: null,
-            title: "Blender",
-            preview: "3D notes",
-          },
-          ...Array.from({ length: 8 }, (_, index) => ({
-            key: `websocket:chat-${index}`,
-            channel: "websocket",
-            chatId: `chat-${index}`,
-            createdAt: null,
-            updatedAt: null,
-            title: `Chat ${index}`,
-            preview: "",
-          })),
-        ]}
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
-
-    expect(screen.getByRole("group", { name: "Nanobot conversations" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "CLI apps" })).toBeInTheDocument();
-    expect(screen.getByRole("option", {
-      name: /Blender @Blender-chat Reference/i,
-    })).toBeInTheDocument();
-    expect(screen.getByRole("option", {
-      name: /Blender @blender Use/i,
-    })).toBeInTheDocument();
   });
 
   it("opens skills only from a $ reference and prioritizes the skill name", () => {

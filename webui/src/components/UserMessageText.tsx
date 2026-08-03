@@ -2,9 +2,7 @@ import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  CliAppMentionToken,
-  McpPresetMentionToken,
-  SessionMentionToken,
+  CapabilityMentionToken,
   splitCapabilityMentionSegments,
   type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
@@ -98,27 +96,10 @@ export function UserMessageText({
             {segment.text}
           </InlineTokenHighlight>
         );
-        if (segment.kind === "cli") return (
-          <CliAppMentionToken
-            key={`cli-${segment.app.name}-${index}`}
-            app={segment.app}
-            label={segment.text}
-            variant="message"
-          />
-        );
-        if (segment.kind === "mcp") return (
-          <McpPresetMentionToken
-            key={`mcp-${segment.preset.name}-${index}`}
-            preset={segment.preset}
-            label={segment.text}
-            variant="message"
-          />
-        );
         return (
-          <SessionMentionToken
-            key={`session-${segment.mention.session_key}-${index}`}
-            mention={segment.mention}
-            label={segment.text}
+          <CapabilityMentionToken
+            key={`${segment.kind}-${index}`}
+            segment={segment}
             variant="message"
           />
         );

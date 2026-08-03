@@ -106,15 +106,10 @@ class ToolRegistry:
             mcp_tools.sort(key=self._schema_name)
             self._cached_definitions = builtins + mcp_tools
 
-        available = {
-            name
-            for name, tool in self._tools.items()
-            if tool.available()
-        }
         return [
             schema
             for schema in self._cached_definitions
-            if self._schema_name(schema) in available
+            if self._tools[self._schema_name(schema)].available()
         ]
 
     def prepare_call(

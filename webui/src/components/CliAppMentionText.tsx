@@ -123,33 +123,48 @@ export function CliAppMentionText({
         if (segment.kind === "text") {
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
-        if (segment.kind === "cli") return (
-          <CliAppMentionToken
-            key={`cli-${segment.app.name}-${index}`}
-            app={segment.app}
-            label={segment.text}
-            variant="message"
-          />
-        );
-        if (segment.kind === "mcp") return (
-          <McpPresetMentionToken
-            key={`mcp-${segment.preset.name}-${index}`}
-            preset={segment.preset}
-            label={segment.text}
-            variant="message"
-          />
-        );
         return (
-          <SessionMentionToken
-            key={`session-${segment.mention.session_key}-${index}`}
-            mention={segment.mention}
-            label={segment.text}
+          <CapabilityMentionToken
+            key={`${segment.kind}-${index}`}
+            segment={segment}
             variant="message"
           />
         );
       })}
     </>
   );
+}
+
+export function CapabilityMentionToken({
+  segment,
+  variant,
+  isHero = false,
+}: {
+  segment: Exclude<CapabilityMentionSegment, { kind: "text" }>;
+  variant: "composer" | "message";
+  isHero?: boolean;
+}) {
+  if (segment.kind === "cli") {
+    return (
+      <CliAppMentionToken
+        app={segment.app}
+        label={segment.text}
+        variant={variant}
+        isHero={isHero}
+      />
+    );
+  }
+  if (segment.kind === "mcp") {
+    return (
+      <McpPresetMentionToken
+        preset={segment.preset}
+        label={segment.text}
+        variant={variant}
+        isHero={isHero}
+      />
+    );
+  }
+  return <SessionMentionToken mention={segment.mention} label={segment.text} variant={variant} />;
 }
 
 export function SessionMentionToken({

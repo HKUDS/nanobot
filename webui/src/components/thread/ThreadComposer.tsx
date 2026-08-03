@@ -11,9 +11,7 @@ import {
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
-  CliAppMentionToken,
-  McpPresetMentionToken,
-  SessionMentionToken,
+  CapabilityMentionToken,
   cliAppInitials,
   mcpPresetInitials,
   splitCapabilityMentionSegments,
@@ -301,10 +299,18 @@ interface CliAppMentionQuery {
   end: number;
 }
 
-type MentionCandidate =
-  | { kind: "cli"; name: string; app: CliAppInfo }
-  | { kind: "mcp"; name: string; preset: McpPresetInfo }
-  | { kind: "session"; name: string; mention: SessionMention };
+type MentionCandidate = {
+  name: string;
+  displayName: string;
+} & (
+  | { kind: "session"; mention: SessionMention }
+  | {
+      kind: "cli" | "mcp";
+      brandColor: string | null;
+      logoUrl: string | null;
+      initials: string;
+    }
+);
 
 function sessionMentionBase(session: ChatSummary): string {
   const label = session.title?.trim() || session.preview.trim() || "session";
@@ -1248,12 +1254,24 @@ export function ThreadComposer({
     ),
     [cliApps, mcpPresets, sessions],
   );
+  const mentionSegments = useMemo(
+    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
+    [cliApps, mcpPresets, selectedSessionMentions, value],
+  );
+  const activeSessionMentions = useMemo(() => {
+    const seen = new Set<string>();
+    return mentionSegments.flatMap((segment) => {
+      if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
+      seen.add(segment.mention.session_key);
+      return [segment.mention];
+    }).slice(0, SESSION_MENTIONS_LIMIT);
+  }, [mentionSegments]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
     const sessionCandidates: MentionCandidate[] = availableSessionMentions
       .filter((mention) => (
-        selectedSessionMentions.length < SESSION_MENTIONS_LIMIT
-        || selectedSessionMentions.some(
+        activeSessionMentions.length < SESSION_MENTIONS_LIMIT
+        || activeSessionMentions.some(
           (selected) => selected.session_key === mention.session_key,
         )
       ))
@@ -1264,6 +1282,7 @@ export function ThreadComposer({
       .map((mention) => ({
         kind: "session",
         name: mention.name,
+        displayName: mention.title || mention.name,
         mention,
       }));
     const cliCandidates: MentionCandidate[] = cliApps
@@ -1278,7 +1297,14 @@ export function ThreadComposer({
         ].join(" ").toLowerCase();
         return haystack.includes(cliAppMention.query);
       })
-      .map((app) => ({ kind: "cli", name: app.name, app }));
+      .map((app) => ({
+        kind: "cli",
+        name: app.name,
+        displayName: app.display_name,
+        brandColor: app.brand_color ?? null,
+        logoUrl: app.logo_url ?? null,
+        initials: cliAppInitials(app),
+      }));
     const mcpCandidates: MentionCandidate[] = mcpPresets
       .filter((preset) => preset.installed && preset.configured)
       .filter((preset) => {
@@ -1291,29 +1317,26 @@ export function ThreadComposer({
         ].join(" ").toLowerCase();
         return haystack.includes(cliAppMention.query);
       })
-      .map((preset) => ({ kind: "mcp", name: preset.name, preset }));
-    const groups = [sessionCandidates, cliCandidates, mcpCandidates];
-    const limits = groups.map((group, index) => Math.min(group.length, [4, 2, 2][index]));
-    let remaining = 8 - limits.reduce((total, limit) => total + limit, 0);
-    for (let index = 0; index < groups.length && remaining > 0; index += 1) {
-      const extra = Math.min(groups[index].length - limits[index], remaining);
-      limits[index] += extra;
-      remaining -= extra;
-    }
-    return groups.flatMap((group, index) => group.slice(0, limits[index]));
-  }, [availableSessionMentions, cliAppMention, cliApps, mcpPresets, selectedSessionMentions]);
+      .map((preset) => ({
+        kind: "mcp",
+        name: preset.name,
+        displayName: preset.display_name,
+        brandColor: preset.brand_color ?? null,
+        logoUrl: preset.logo_url ?? null,
+        initials: mcpPresetInitials(preset),
+      }));
+    return [
+      ...sessionCandidates.slice(0, 4),
+      ...cliCandidates.slice(0, 2),
+      ...mcpCandidates.slice(0, 2),
+      ...sessionCandidates.slice(4),
+      ...cliCandidates.slice(2),
+      ...mcpCandidates.slice(2),
+    ].slice(0, 8);
+  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
-  const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(
-      value,
-      cliApps,
-      mcpPresets,
-      selectedSessionMentions,
-    ),
-    [cliApps, mcpPresets, selectedSessionMentions, value],
-  );
   const hasMentionDecorations = mentionSegments.some(
     (segment) => segment.kind !== "text",
   );
@@ -1333,28 +1356,6 @@ export function ThreadComposer({
       return [segment.preset];
     });
   }, [mentionSegments]);
-  const activeSessionMentions = useMemo(() => {
-    const seen = new Set<string>();
-    return mentionSegments.flatMap((segment) => {
-      if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
-      seen.add(segment.mention.session_key);
-      return [segment.mention];
-    }).slice(0, SESSION_MENTIONS_LIMIT);
-  }, [mentionSegments]);
-  useEffect(() => {
-    setSelectedSessionMentions((current) => {
-      if (
-        current.length === activeSessionMentions.length
-        && current.every((mention, index) => {
-          const active = activeSessionMentions[index];
-          return mention.name === active.name
-            && mention.session_key === active.session_key
-            && mention.title === active.title;
-        })
-      ) return current;
-      return activeSessionMentions;
-    });
-  }, [activeSessionMentions]);
   const [slashPaletteLayout, setSlashPaletteLayout] = useState<SlashPaletteLayout>({
     placement: "above",
     maxHeight: SLASH_PALETTE_MAX_HEIGHT_PX,
@@ -1596,8 +1597,11 @@ export function ThreadComposer({
       if (!cliAppMention) return;
       if (candidate.kind === "session") {
         const name = candidate.name.toLowerCase();
-        setSelectedSessionMentions((current) => [
-          ...current.filter((mention) => mention.name.toLowerCase() !== name),
+        setSelectedSessionMentions([
+          ...activeSessionMentions.filter((mention) => (
+            mention.name.toLowerCase() !== name
+            && mention.session_key !== candidate.mention.session_key
+          )),
           candidate.mention,
         ]);
       }
@@ -1618,7 +1622,7 @@ export function ThreadComposer({
         el.setSelectionRange(nextCursor, nextCursor);
       });
     },
-    [cliAppMention, resizeTextarea, value],
+    [activeSessionMentions, cliAppMention, resizeTextarea, value],
   );
 
   const clearComposerText = useCallback((restoreFocus = true) => {
@@ -2595,30 +2599,12 @@ function ComposerCliMentionOverlay({
         if (segment.kind === "text") {
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
-        if (segment.kind === "cli") return (
-          <CliAppMentionToken
-            key={`cli-${segment.app.name}-${index}`}
-            app={segment.app}
-            label={segment.text}
-            variant="composer"
-            isHero={isHero}
-          />
-        );
-        if (segment.kind === "mcp") return (
-          <McpPresetMentionToken
-            key={`mcp-${segment.preset.name}-${index}`}
-            preset={segment.preset}
-            label={segment.text}
-            variant="composer"
-            isHero={isHero}
-          />
-        );
         return (
-          <SessionMentionToken
-            key={`session-${segment.mention.session_key}-${index}`}
-            mention={segment.mention}
-            label={segment.text}
+          <CapabilityMentionToken
+            key={`${segment.kind}-${index}`}
+            segment={segment}
             variant="composer"
+            isHero={isHero}
           />
         );
       })}
@@ -2709,11 +2695,6 @@ function CliAppMentionPalette({
             {group.items.map(({ candidate, index }) => {
               const selected = index === selectedIndex;
               const name = candidate.name;
-              const displayName = candidate.kind === "cli"
-                ? candidate.app.display_name
-                : candidate.kind === "mcp"
-                  ? candidate.preset.display_name
-                  : candidate.mention.title || candidate.name;
               const typeLabel = candidate.kind === "cli"
                 ? t("thread.composer.mentions.cliBadge")
                 : candidate.kind === "mcp"
@@ -2731,7 +2712,7 @@ function CliAppMentionPalette({
                   role="option"
                   data-palette-index={index}
                   aria-selected={selected}
-                  aria-label={`${displayName} @${name} ${ariaDescription} ${typeLabel}`}
+                  aria-label={`${candidate.displayName} @${name} ${ariaDescription} ${typeLabel}`}
                   onMouseEnter={() => onHover(index)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -2747,7 +2728,7 @@ function CliAppMentionPalette({
                   <MentionCandidateLogo candidate={candidate} selected={selected} />
                   <span className="flex min-w-0 flex-1 items-baseline gap-2">
                     <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
-                      {displayName}
+                      {candidate.displayName}
                     </span>
                     <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
                       @{name}
@@ -2782,16 +2763,10 @@ function MentionCandidateLogo({
   candidate: MentionCandidate;
   selected: boolean;
 }) {
-  const color = (candidate.kind === "cli"
-    ? candidate.app.brand_color
-    : candidate.kind === "mcp"
-      ? candidate.preset.brand_color
-      : null) || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const rawLogoUrl = candidate.kind === "cli"
-    ? candidate.app.logo_url
-    : candidate.kind === "mcp"
-      ? candidate.preset.logo_url
-      : null;
+  const color = candidate.kind === "session"
+    ? INLINE_TOKEN_HIGHLIGHT_COLOR
+    : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
+  const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
@@ -2827,9 +2802,7 @@ function MentionCandidateLogo({
       className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[7.5px] font-semibold text-white"
       style={{ backgroundColor: color }}
     >
-      {candidate.kind === "cli"
-        ? cliAppInitials(candidate.app)
-        : mcpPresetInitials(candidate.preset)}
+      {candidate.initials}
     </span>
   );
 }

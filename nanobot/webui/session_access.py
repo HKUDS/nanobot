@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from nanobot.runtime_context import (
     RuntimeContextBlock,
@@ -23,34 +24,26 @@ from nanobot.webui.transcript import (
 )
 
 _VISIBLE_ROLES = {"user", "assistant"}
+_WEBUI_SESSION_PREFIX = "websocket:"
 
 
-class SessionMention(TypedDict):
-    name: str
-    session_key: str
-    title: str
-
-
-class SessionMessage(TypedDict):
-    message_index: int
-    role: str
-    timestamp: str | int | None
-    content: str
-
-
-class SessionMatch(TypedDict):
-    session_key: str
-    title: str
-    updated_at: str | None
-    messages: list[SessionMessage]
+SessionMention = dict[str, str]
+SessionMessage = dict[str, Any]
+SessionMatch = dict[str, Any]
 
 
 @dataclass(frozen=True)
 class SessionAccessScope:
     current_session_key: str
-    session_key_prefix: str
     project_path: Path | None = None
     restrict_to_workspace: bool = False
+
+    def allows(self, session_key: object) -> bool:
+        return (
+            isinstance(session_key, str)
+            and session_key.startswith(_WEBUI_SESSION_PREFIX)
+            and session_key != self.current_session_key
+        )
 
 
 def _message_text(message: Mapping[str, Any]) -> str:
@@ -70,36 +63,7 @@ def _message_text(message: Mapping[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
-def _core_messages(payload: Mapping[str, Any]) -> list[SessionMessage]:
-    raw_messages = payload.get("messages")
-    if not isinstance(raw_messages, list):
-        return []
-    visible: list[SessionMessage] = []
-    for index, raw_message in enumerate(cast(list[object], raw_messages)):
-        if not isinstance(raw_message, dict):
-            continue
-        message = cast(dict[str, Any], raw_message)
-        if (
-            message.get("role") not in _VISIBLE_ROLES
-            or message.get("_command")
-            or is_hidden_history_message(message)
-        ):
-            continue
-        public = public_history_message(message)
-        text = _message_text(public)
-        if not text:
-            continue
-        timestamp = public.get("timestamp")
-        visible.append({
-            "message_index": index,
-            "role": cast(str, public.get("role")),
-            "timestamp": timestamp if isinstance(timestamp, (str, int)) else None,
-            "content": text,
-        })
-    return visible
-
-
-def _ui_messages(raw_messages: object) -> list[SessionMessage]:
+def _visible_messages(raw_messages: object) -> list[SessionMessage]:
     if not isinstance(raw_messages, list):
         return []
     visible: list[SessionMessage] = []
@@ -108,10 +72,13 @@ def _ui_messages(raw_messages: object) -> list[SessionMessage]:
             continue
         message = cast(dict[str, Any], raw_message)
         role = message.get("role")
-        text = _message_text(message)
-        if role not in _VISIBLE_ROLES or not text:
+        if role not in _VISIBLE_ROLES or message.get("_command") or is_hidden_history_message(message):
             continue
-        timestamp = message.get("createdAt")
+        public = public_history_message(message)
+        text = _message_text(public)
+        if not text:
+            continue
+        timestamp = public.get("createdAt", public.get("timestamp"))
         visible.append({
             "message_index": index,
             "role": cast(str, role),
@@ -121,9 +88,8 @@ def _ui_messages(raw_messages: object) -> list[SessionMessage]:
     return visible
 
 
-def _title(metadata: Mapping[str, Any]) -> str:
-    raw = metadata.get("title")
-    return raw.strip()[:160] if isinstance(raw, str) else ""
+def _text(value: object) -> str:
+    return value.strip()[:160] if isinstance(value, str) else ""
 
 
 def _session_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -132,11 +98,7 @@ def _session_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _row_title(row: Mapping[str, Any]) -> str:
-    title = row.get("title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()[:160]
-    preview = row.get("preview")
-    return preview.strip()[:160] if isinstance(preview, str) else ""
+    return _text(row.get("title")) or _text(row.get("preview"))
 
 
 def _project_path(raw_scope: object, default_workspace: Path) -> Path:
@@ -163,20 +125,13 @@ class WebuiSessionAccess:
 
     def _allowed_row(self, row: Mapping[str, Any], scope: SessionAccessScope) -> bool:
         key = row.get("key")
-        if (
-            not isinstance(key, str)
-            or not key.startswith(scope.session_key_prefix)
-            or key == scope.current_session_key
-        ):
+        if not scope.allows(key):
             return False
         present, raw_scope = indexed_workspace_scope(cast(dict[str, Any], row))
         return self._allowed_project(raw_scope if present else None, scope)
 
     def _metadata(self, session_key: str, scope: SessionAccessScope) -> dict[str, Any] | None:
-        if (
-            not session_key.startswith(scope.session_key_prefix)
-            or session_key == scope.current_session_key
-        ):
+        if not scope.allows(session_key):
             return None
         payload = self._sessions.read_session_metadata(session_key)
         if payload is None:
@@ -186,31 +141,25 @@ class WebuiSessionAccess:
         return payload if self._allowed_project(raw_scope, scope) else None
 
     def _messages(self, session_key: str) -> list[SessionMessage]:
-        session_messages: list[dict[str, Any]] | None = None
-
+        @cache
         def load_session_messages() -> list[dict[str, Any]] | None:
-            nonlocal session_messages
-            if session_messages is None:
-                payload = self._sessions.read_session_file(session_key)
-                raw_messages = payload.get("messages") if payload is not None else None
-                session_messages = (
-                    [
-                        cast(dict[str, Any], message)
-                        for message in cast(list[object], raw_messages)
-                        if isinstance(message, dict)
-                    ]
-                    if isinstance(raw_messages, list)
-                    else []
-                )
-            return session_messages
+            payload = self._sessions.read_session_file(session_key)
+            raw_messages = payload.get("messages") if payload is not None else None
+            if not isinstance(raw_messages, list):
+                return []
+            return [
+                cast(dict[str, Any], message)
+                for message in cast(list[object], raw_messages)
+                if isinstance(message, dict)
+            ]
 
         thread = build_webui_thread_response(
             session_key,
             session_messages_loader=load_session_messages,
         )
         if thread is not None:
-            return _ui_messages(thread.get("messages"))
-        return _core_messages({"messages": load_session_messages() or []})
+            return _visible_messages(thread.get("messages"))
+        return _visible_messages(load_session_messages())
 
     def search(self, scope: SessionAccessScope, query: str, limit: int) -> list[SessionMatch]:
         needle = query.casefold()
@@ -219,7 +168,7 @@ class WebuiSessionAccess:
             for row in list_webui_sessions(self._sessions)
             if self._allowed_row(row, scope)
         ]
-        ranked: list[tuple[int, str, SessionMatch]] = []
+        ranked: list[tuple[int, SessionMatch]] = []
         remaining: list[dict[str, Any]] = []
         for row in rows:
             title = _row_title(row)
@@ -234,14 +183,13 @@ class WebuiSessionAccess:
                 remaining.append(row)
                 continue
             updated = row.get("updated_at")
-            ranked.append((rank, updated if isinstance(updated, str) else "", {
+            ranked.append((rank, {
                 "session_key": cast(str, row["key"]),
                 "title": title,
                 "updated_at": updated if isinstance(updated, str) else None,
                 "messages": [],
             }))
 
-        ranked.sort(key=lambda item: item[1], reverse=True)
         ranked.sort(key=lambda item: item[0])
         needed = max(0, limit - len(ranked))
         for row in remaining:
@@ -256,14 +204,14 @@ class WebuiSessionAccess:
             if not matches:
                 continue
             updated = row.get("updated_at")
-            ranked.append((3, updated if isinstance(updated, str) else "", {
+            ranked.append((3, {
                 "session_key": key,
                 "title": _row_title(row),
                 "updated_at": updated if isinstance(updated, str) else None,
                 "messages": matches[-2:],
             }))
             needed -= 1
-        return [item[2] for item in ranked[:limit]]
+        return [item[1] for item in ranked[:limit]]
 
     def read(
         self,
@@ -283,7 +231,7 @@ class WebuiSessionAccess:
         updated = payload.get("updated_at")
         return {
             "session_key": session_key,
-            "title": _title(_session_metadata(payload)),
+            "title": _text(_session_metadata(payload).get("title")),
             "updated_at": updated if isinstance(updated, str) else None,
             "messages": messages[-limit:],
         }
@@ -297,7 +245,7 @@ class WebuiSessionAccess:
         seen_keys: set[str] = set()
         seen_names: set[str] = set()
         for raw_mention in normalize_session_mentions_metadata(raw):
-            mention = cast(SessionMention, raw_mention)
+            mention = raw_mention
             key = mention["session_key"]
             folded_name = mention["name"].lower()
             payload = self._metadata(key, scope)
@@ -306,7 +254,7 @@ class WebuiSessionAccess:
             normalized.append({
                 "name": mention["name"],
                 "session_key": key,
-                "title": _title(_session_metadata(payload)),
+                "title": _text(_session_metadata(payload).get("title")),
             })
             seen_keys.add(key)
             seen_names.add(folded_name)

@@ -814,7 +814,7 @@ class WebSocketChannel(BaseChannel):
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
             if trusted_webui:
-                metadata[INBOUND_META_SESSION_READ_SCOPE] = f"{self.name}:"
+                metadata[INBOUND_META_SESSION_READ_SCOPE] = True
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -831,7 +831,6 @@ class WebSocketChannel(BaseChannel):
                     envelope.get("session_mentions"),
                     SessionAccessScope(
                         current_session_key=f"{self.name}:{cid}",
-                        session_key_prefix=f"{self.name}:",
                         project_path=scope.project_path,
                         restrict_to_workspace=scope.restrict_to_workspace,
                     ),
