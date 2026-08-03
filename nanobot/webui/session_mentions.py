@@ -32,6 +32,7 @@ def normalize_session_mentions(
     sessions: SessionManager,
     *,
     current_session_key: str,
+    session_key_prefix: str,
 ) -> list[SessionMention]:
     """Return existing, distinct session references from a WebUI envelope."""
     if not isinstance(raw, list):
@@ -49,6 +50,7 @@ def normalize_session_mentions(
         folded_name = name.lower() if name else ""
         if (
             not key
+            or not key.startswith(session_key_prefix)
             or key == current_session_key
             or key in seen
             or folded_name in seen_names

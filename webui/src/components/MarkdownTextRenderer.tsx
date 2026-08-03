@@ -353,9 +353,14 @@ function fileReferenceFromLink(href: string | undefined): string | null {
 }
 
 function sessionReferenceHref(href: string): string | null {
-  if (!href.startsWith("#/chat/")) return null;
+  const prefix = href.startsWith("#session/")
+    ? "#session/"
+    : href.startsWith("#/chat/")
+      ? "#/chat/"
+      : null;
+  if (!prefix) return null;
   try {
-    const sessionKey = decodeURIComponent(href.slice("#/chat/".length)).trim();
+    const sessionKey = decodeURIComponent(href.slice(prefix.length)).trim();
     if (!sessionKey.startsWith("websocket:") || sessionKey === "websocket:") return null;
     return `#/chat/${encodeURIComponent(sessionKey)}`;
   } catch {
@@ -620,7 +625,9 @@ export default function MarkdownTextRenderer({
             </a>
           );
         }
-        if (href.startsWith("#/chat/")) return <>{markdownChildren}</>;
+        if (href.startsWith("#/chat/") || href.startsWith("#session/")) {
+          return <>{markdownChildren}</>;
+        }
         const filePath = fileReferenceFromLink(href);
         if (filePath) {
           const label = nodeText(markdownChildren).trim();

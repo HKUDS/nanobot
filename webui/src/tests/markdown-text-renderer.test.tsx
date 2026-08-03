@@ -16,7 +16,7 @@ describe("MarkdownTextRenderer", () => {
   it("renders canonical session references as same-tab links", () => {
     render(
       <MarkdownTextRenderer>
-        {"We discussed this in [收费设计](#/chat/websocket%3Apricing)."}
+        {"We discussed this in [收费设计](#session/websocket%3Apricing)."}
       </MarkdownTextRenderer>,
     );
 
@@ -28,7 +28,7 @@ describe("MarkdownTextRenderer", () => {
   it("does not link non-WebUI session references", () => {
     const { container } = render(
       <MarkdownTextRenderer>
-        {"[private channel](#/chat/telegram%3Aprivate)"}
+        {"[private channel](#session/telegram%3Aprivate)"}
       </MarkdownTextRenderer>,
     );
 

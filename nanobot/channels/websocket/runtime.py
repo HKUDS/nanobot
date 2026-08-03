@@ -18,7 +18,11 @@ from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
-from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_SESSION_READ_SCOPE,
+    OUTBOUND_META_AGENT_UI,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
@@ -802,6 +806,9 @@ class WebSocketChannel(BaseChannel):
             if envelope.get("webui") is True:
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
+            trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
+            if trusted_webui:
+                metadata[INBOUND_META_SESSION_READ_SCOPE] = f"{self.name}:"
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -810,14 +817,14 @@ class WebSocketChannel(BaseChannel):
                 metadata["mcp_presets"] = mcp_presets
             session_mentions: list[SessionMention] = []
             if (
-                metadata.get("webui") is True
-                and connection in self._webui_connections
+                trusted_webui
                 and self.gateway.session_manager is not None
             ):
                 session_mentions = normalize_session_mentions(
                     envelope.get("session_mentions"),
                     self.gateway.session_manager,
-                    current_session_key=f"websocket:{cid}",
+                    current_session_key=f"{self.name}:{cid}",
+                    session_key_prefix=f"{self.name}:",
                 )
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions
@@ -841,7 +848,7 @@ class WebSocketChannel(BaseChannel):
                         mcp_presets=mcp_presets or None,
                         session_mentions=session_mentions or None,
                     )
-                if is_webui and connection in self._webui_connections:
+                if trusted_webui:
                     context_blocks: list[RuntimeContextBlock] = []
                     quote = webui_quote_runtime_context({
                         WEBUI_QUOTE_METADATA: envelope.get("quoted_context"),

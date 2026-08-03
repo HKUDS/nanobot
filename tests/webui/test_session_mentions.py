@@ -35,6 +35,7 @@ def test_normalize_session_mentions_keeps_existing_distinct_targets(tmp_path) ->
         ],
         manager,
         current_session_key="websocket:current",
+        session_key_prefix="websocket:",
     )
 
     assert mentions == [{
@@ -70,9 +71,28 @@ def test_normalize_session_mentions_matches_browser_lowercase_rules(tmp_path) ->
         ],
         manager,
         current_session_key="websocket:current",
+        session_key_prefix="websocket:",
     )
 
     assert [mention["session_key"] for mention in mentions] == [
         "websocket:street",
         "websocket:upper",
     ]
+
+
+def test_normalize_session_mentions_rejects_other_session_scopes(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    _save_session(manager, "websocket:visible", "Visible")
+    _save_session(manager, "telegram:private", "Private")
+
+    mentions = normalize_session_mentions(
+        [
+            {"name": "visible", "session_key": "websocket:visible"},
+            {"name": "private", "session_key": "telegram:private"},
+        ],
+        manager,
+        current_session_key="websocket:current",
+        session_key_prefix="websocket:",
+    )
+
+    assert [mention["session_key"] for mention in mentions] == ["websocket:visible"]

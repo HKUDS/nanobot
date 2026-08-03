@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.events import INBOUND_META_SESSION_READ_SCOPE
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
@@ -218,6 +219,7 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
 
     channel._handle_message.assert_awaited_once()
     metadata = channel._handle_message.call_args.kwargs["metadata"]
+    assert metadata[INBOUND_META_SESSION_READ_SCOPE] == "websocket:"
     assert metadata["session_mentions"] == [{
         "name": "pricing",
         "session_key": "websocket:pricing",
