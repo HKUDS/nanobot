@@ -80,12 +80,14 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             raise ValueError("cron schedule requires a non-empty 'expr'")
         try:
             from croniter import croniter
+
             croniter(schedule.expr)
-        except Exception as e:
-            raise ValueError(f"invalid cron expression '{schedule.expr}': {e}") from None
+        except Exception as exc:
+            raise ValueError(f"invalid cron expression '{schedule.expr}': {exc}") from None
         if schedule.tz:
             try:
                 from zoneinfo import ZoneInfo
+
                 ZoneInfo(schedule.tz)
             except Exception:
                 raise ValueError(f"unknown timezone '{schedule.tz}'") from None
