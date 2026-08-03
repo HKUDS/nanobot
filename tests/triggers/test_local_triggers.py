@@ -150,6 +150,9 @@ def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
     assert record["content"] == "Review PR #4591"
     assert record["origin_metadata"] == {"webui": True}
     assert record["updated_at_ms"] > 0
+    stored = store.get(trigger.id)
+    assert stored is not None
+    assert stored.last_message == "Review PR #4591"
 
 
 def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path) -> None:
@@ -168,6 +171,9 @@ def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path
     assert queued_record["content"].startswith("content-")
     assert queued_record["content"].endswith("\n... (truncated)")
     assert len(queued_record["content"]) < len(large_content)
+    stored = store.get(trigger.id)
+    assert stored is not None
+    assert stored.last_message == queued_record["content"]
 
     store.write_delivery_run_record(
         delivery,

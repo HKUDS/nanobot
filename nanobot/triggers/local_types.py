@@ -61,6 +61,7 @@ class LocalTrigger:
     origin_metadata: dict[str, Any] = field(default_factory=dict)
     created_at_ms: int = 0
     updated_at_ms: int = 0
+    last_message: str = ""
     last_run_at_ms: int | None = None
     last_status: TriggerStatus | None = None
     last_error: str | None = None
@@ -90,6 +91,7 @@ class LocalTrigger:
             origin_metadata=dict(_get(data, "originMetadata", "origin_metadata", {}) or {}),
             created_at_ms=_int_or_zero(_get(data, "createdAtMs", "created_at_ms", 0)),
             updated_at_ms=_int_or_zero(_get(data, "updatedAtMs", "updated_at_ms", 0)),
+            last_message=str(_get(data, "lastMessage", "last_message", "") or ""),
             last_run_at_ms=_optional_int(_get(data, "lastRunAtMs", "last_run_at_ms")),
             last_status=_get(data, "lastStatus", "last_status"),  # type: ignore[arg-type]
             last_error=_get(data, "lastError", "last_error"),
@@ -108,6 +110,7 @@ class LocalTrigger:
             "originMetadata": self.origin_metadata,
             "createdAtMs": self.created_at_ms,
             "updatedAtMs": self.updated_at_ms,
+            "lastMessage": self.last_message,
             "lastRunAtMs": self.last_run_at_ms,
             "lastStatus": self.last_status,
             "lastError": self.last_error,

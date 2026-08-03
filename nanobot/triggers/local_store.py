@@ -166,7 +166,8 @@ class LocalTriggerStore:
             raise ValueError("trigger message is required")
         self._ensure_dirs()
         with self._lock:
-            trigger = self._find_unlocked(self._load_triggers_unlocked(), trigger_id)
+            triggers = self._load_triggers_unlocked()
+            trigger = self._find_unlocked(triggers, trigger_id)
             if trigger is None:
                 raise TriggerNotFoundError(f"trigger not found: {trigger_id}")
             if not trigger.enabled:
@@ -182,6 +183,9 @@ class LocalTriggerStore:
             delivery.path = path
             try:
                 self.write_delivery_run_record(delivery, trigger=trigger, status="queued")
+                trigger.last_message = _run_record_text(content)
+                trigger.updated_at_ms = delivery.created_at_ms
+                self._save_triggers_unlocked(triggers)
             except BaseException:
                 path.unlink(missing_ok=True)
                 delivery.path = None
