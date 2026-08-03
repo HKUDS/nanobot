@@ -6,6 +6,7 @@ import json
 import os
 import re
 from collections import OrderedDict
+from collections.abc import Collection
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -56,6 +57,28 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "title",
     "title_user_edited",
 }
+
+# Metadata keys that hold an absolute index into session.messages (the same
+# category as the built-in last_consolidated field), registered by higher-level
+# modules that mint such keys (e.g. Consolidator.DREAM_TAIL_MARKER_KEY in
+# memory.py — see the registration call there). Session/SessionManager can't
+# import those modules directly (memory.py already imports Session from here,
+# so the reverse would cycle), so this is a passive registry callers push into
+# instead of a hardcoded reference. Any key registered here is automatically
+# reset by Session.clear() and remapped by fork_session_before_user_index() —
+# callers don't need to remember to opt in per call site.
+_POSITION_DEPENDENT_METADATA_KEYS: set[str] = set()
+
+
+def register_position_dependent_metadata_key(key: str) -> None:
+    """Register a metadata key that holds an absolute index into session.messages.
+
+    Such keys need the same treatment last_consolidated already gets: cleared on
+    Session.clear(), remapped (or dropped) on fork. See the module-level comment
+    above _POSITION_DEPENDENT_METADATA_KEYS for why this is a registry rather
+    than a direct import.
+    """
+    _POSITION_DEPENDENT_METADATA_KEYS.add(key)
 
 
 def _json_object(value: object) -> dict[str, Any]:
@@ -320,6 +343,13 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        # Any registered position-dependent key (see
+        # register_position_dependent_metadata_key) is an absolute index into
+        # messages, same as last_consolidated above — with messages now empty,
+        # a stale value would silently make future content look "already
+        # archived" from turn one.
+        for key in _POSITION_DEPENDENT_METADATA_KEYS:
+            self.metadata.pop(key, None)
 
     def retain_recent_legal_suffix(
         self,
@@ -349,6 +379,13 @@ class Session:
 
         original = list(self.messages)
         before_lc = self.last_consolidated
+        before_marker_values = {
+            key: value
+            for key in _POSITION_DEPENDENT_METADATA_KEYS
+            if isinstance(value := self.metadata.get(key), int)
+            and not isinstance(value, bool)
+            and value > 0
+        }
 
         start_idx = max(0, len(self.messages) - max_messages)
         if extend_to_user:
@@ -392,13 +429,14 @@ class Session:
         retained_ids = set(id(m) for m in retained)
         dropped = [m for m in original if id(m) not in retained_ids]
 
-        # Count how many dropped messages were in the already-consolidated
-        # prefix of the original list.  This cannot be a simple min() because
-        # dropped may include messages from *after* the consolidated prefix
-        # (e.g. in the else branch).
+        # Must include any registered marker too, or enforce_file_cap would
+        # re-archive a range another mechanism already covered. Not a plain
+        # min() because dropped can include messages from *after* the
+        # consolidated prefix (e.g. in the else branch above).
+        already_covered_before = max(before_lc, *before_marker_values.values()) if before_marker_values else before_lc
         already_consolidated = sum(
             1 for i, m in enumerate(original)
-            if i < before_lc and id(m) not in retained_ids
+            if i < already_covered_before and id(m) not in retained_ids
         )
 
         # New last_consolidated = count of retained messages that were inside
@@ -407,6 +445,19 @@ class Session:
             1 for i, m in enumerate(original)
             if i < before_lc and id(m) in retained_ids
         )
+
+        # Same identity-based remapping as new_lc, for any registered
+        # position-dependent key: left at its old absolute index, a marker
+        # would land on the wrong message after a trim.
+        for key, before_value in before_marker_values.items():
+            new_value = sum(
+                1 for i, m in enumerate(original)
+                if i < before_value and id(m) in retained_ids
+            )
+            if new_value > 0:
+                self.metadata[key] = new_value
+            else:
+                self.metadata.pop(key, None)
 
         self.messages = retained
         self.last_consolidated = new_lc
@@ -1111,6 +1162,8 @@ class SessionManager:
         source_key: str,
         target_key: str,
         before_user_index: int,
+        *,
+        extra_index_metadata_keys: Collection[str] = (),
     ) -> Session | None:
         """Create *target_key* from *source_key* before a global user-message index.
 
@@ -1119,6 +1172,11 @@ class SessionManager:
         second user message", and so on. A value equal to the total user-message
         count copies the full session prefix. WebUI assistant-reply forks pass
         the next user index so the selected completed assistant turn is included.
+
+        ``extra_index_metadata_keys`` names any other ``session.metadata`` keys
+        that hold an absolute message index (like ``last_consolidated``) and so
+        need the same fork-time remapping — see Consolidator.DREAM_TAIL_MARKER_KEY
+        for the motivating example.
         """
         if before_user_index < 0:
             return None
@@ -1149,6 +1207,23 @@ class SessionManager:
         if source.last_consolidated > len(copied):
             metadata.pop("_last_summary", None)
             last_consolidated = 0
+
+        # Any other metadata key holding an absolute message index (e.g. Dream's
+        # tail-archive marker) needs handling too — but clamped, not dropped
+        # like last_consolidated above: last_consolidated covers a range an LLM
+        # *summary* absorbed (doesn't describe the fork's own subset), so
+        # resetting is correct there. The tail marker covers verbatim raw-dumped
+        # text; dropping it would make the fork raw-dump that same text again
+        # under its own session_key. Clamping means "already covered, verbatim,
+        # by the source's entry" — exactly true.
+        # Registered keys are covered automatically; extra_index_metadata_keys
+        # is an escape hatch for keys that were never registered.
+        for meta_key in _POSITION_DEPENDENT_METADATA_KEYS | set(extra_index_metadata_keys):
+            value = metadata.get(meta_key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                continue
+            if value > len(copied):
+                metadata[meta_key] = len(copied)
 
         now = datetime.now()
         target = Session(

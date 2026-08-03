@@ -686,6 +686,44 @@ class TestCompactIdleSession:
         assert "CORRECTED_FINAL_RESULT_alpha" in summarized
 
     @pytest.mark.asyncio
+    async def test_summary_context_includes_a_previously_tail_archived_prefix(
+        self, real_consolidator, mock_provider, runtime
+    ):
+        """A session already dream-tail-archived (marker > 0, last_consolidated
+        == 0) must still have that prefix included in the LLM's summarization
+        context on its first real consolidation — excluding it from
+        history.jsonl duplication (archive_start) is correct, but excluding it
+        from the summary too would make that content invisible everywhere
+        except Dream's raw input: not in the live prompt (trimmed here), not
+        in the persisted summary. summary_messages is pure LLM context and
+        never written anywhere, so widening it can't cause duplication."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:tailprefix")
+        for i in range(4):
+            session.add_message("user", f"TAILARCHIVED_u{i}")
+            session.add_message("assistant", f"TAILARCHIVED_a{i}")
+        for i in range(15):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        session.metadata[Consolidator.DREAM_TAIL_MARKER_KEY] = 8
+        sessions.save(session)
+        assert session.last_consolidated == 0
+
+        await real_consolidator.compact_idle_session(
+            "cli:tailprefix", runtime=runtime, max_suffix=8
+        )
+
+        summarized = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "TAILARCHIVED_u0" in summarized, (
+            "The tail-archived prefix should still reach the LLM's summary "
+            "context even though it's excluded from what actually gets "
+            "removed/raw-fallback-dumped. Summary input: " + summarized
+        )
+
+    @pytest.mark.asyncio
     async def test_raw_dumps_only_dropped_messages_on_llm_failure(
         self, real_consolidator, mock_provider, store, runtime
     ):

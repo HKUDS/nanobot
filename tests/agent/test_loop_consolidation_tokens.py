@@ -241,7 +241,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     archived_session_keys: list[str | None] = []
 
-    async def track_consolidate(messages, *, runtime, session_key=None):
+    async def track_consolidate(messages, *, runtime, session_key=None, summary_messages=None):
         order.append("consolidate")
         archived_session_keys.append(session_key)
         return True

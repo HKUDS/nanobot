@@ -405,8 +405,17 @@ class TestCheckExpired:
         scheduler.assert_not_called()
         assert "dream:20260602-155256" not in ac._archiving
 
-    def test_already_trimmed_session_skips(self):
-        """Expired session with no removable tail should not be re-scheduled."""
+    def test_already_trimmed_session_skips_real_archive_but_takes_dream_tail_path(self):
+        """Expired session with no removable tail should not go through the real
+        compact_idle_session archive path.
+
+        Intentional behavior change for #3973 (Dream hunger problem): this test used
+        to assert the scheduler was never called at all for such a session. That is
+        precisely the bug #3973 describes — a short session (<= _RECENT_SUFFIX_MESSAGES)
+        idling forever without ever producing a history.jsonl entry, starving Dream of
+        input. It is now expected to be scheduled onto the separate, lightweight
+        _dream_tail_archive path instead of the real archive path (see AutoCompact.
+        check_expired's if/elif branching)."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         last_active = datetime(2026, 1, 1, 10, 0, 0)
@@ -417,11 +426,17 @@ class TestCheckExpired:
         ]
         mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
+        ac._dream_tail_archive = AsyncMock()
 
         scheduler = MagicMock()
         ac.check_expired(scheduler, _runtime)
 
-        scheduler.assert_not_called()
+        # The real archive path (which would call consolidator.compact_idle_session)
+        # must still not fire — this session has nothing a full LLM-summarized
+        # archive pass could remove.
+        ac.consolidator.compact_idle_session.assert_not_called()
+        scheduler.assert_called_once()
+        ac._dream_tail_archive.assert_called_once_with("cli:done")
 
 
 # ---------------------------------------------------------------------------

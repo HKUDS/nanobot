@@ -300,10 +300,19 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
+    # Imported locally: nanobot.agent.memory pulls in nanobot.agent.loop, which
+    # imports from nanobot.command — a module-level import here cycles back
+    # (breaks `import nanobot.command` and `import nanobot.webui.ws_http`).
+    from nanobot.agent.memory import Consolidator
+
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
+    # Consolidator.archive_start, not last_consolidated alone: a session that
+    # was only ever dream-tail-archived (last_consolidated still 0) would
+    # otherwise have its already-archived prefix re-summarized into this
+    # snapshot too.
+    snapshot = session.messages[Consolidator.archive_start(session):]
     runtime = None
     if snapshot:
         runtime = ctx.runtime or loop.runtime_for_session(session)

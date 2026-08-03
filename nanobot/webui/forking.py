@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from nanobot.agent.memory import Consolidator
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
 from nanobot.webui.transcript import (
@@ -40,10 +41,15 @@ def create_webui_chat_fork(
     source_key = f"websocket:{source_chat_id}"
     target_key = f"websocket:{new_id}"
     try:
+        # Explicit rather than relying on the module-level registry (populated
+        # when nanobot.agent.memory happens to be imported): a fork that misses
+        # the marker would raw-dump already-archived content again under its
+        # own session_key.
         forked = session_manager.fork_session_before_user_index(
             source_key,
             target_key,
             before_user_index,
+            extra_index_metadata_keys=(Consolidator.DREAM_TAIL_MARKER_KEY,),
         )
         if forked is None:
             return None

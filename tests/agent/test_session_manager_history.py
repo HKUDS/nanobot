@@ -595,6 +595,84 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
     assert "_last_summary" not in forked.metadata
 
 
+def test_fork_session_clamps_extra_index_metadata_key_beyond_copied_prefix(tmp_path):
+    """Clamp-not-drop rationale: see fork_session_before_user_index's own
+    comment. Here the marker (4) exceeds the copied prefix (2 messages), so
+    it must clamp to 2, not reset to 0 like last_consolidated would."""
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.messages = [
+        {"role": "user", "content": "round1"},
+        {"role": "assistant", "content": "answer1"},
+        {"role": "user", "content": "round2 fork me"},
+        {"role": "assistant", "content": "answer2"},
+    ]
+    source.metadata["_dream_tail_through"] = 4
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+        extra_index_metadata_keys=("_dream_tail_through",),
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+    assert forked.metadata.get("_dream_tail_through") == 2, (
+        "Marker should be clamped to len(copied)=2, not dropped — the fork's "
+        "2 copied messages are already covered verbatim by the source "
+        "session's tail-archive entry."
+    )
+
+
+def test_fork_session_keeps_extra_index_metadata_key_within_copied_prefix(tmp_path):
+    """The counterpart to the test above: a marker that still points within the
+    copied prefix is valid and must be preserved, not unconditionally dropped."""
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.messages = [
+        {"role": "user", "content": "round1"},
+        {"role": "assistant", "content": "answer1"},
+        {"role": "user", "content": "round2 fork me"},
+        {"role": "assistant", "content": "answer2"},
+    ]
+    source.metadata["_dream_tail_through"] = 2
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+        extra_index_metadata_keys=("_dream_tail_through",),
+    )
+
+    assert forked is not None
+    assert forked.metadata.get("_dream_tail_through") == 2
+
+
+def test_fork_session_ignores_extra_index_metadata_key_when_not_requested(tmp_path):
+    """Without extra_index_metadata_keys, an unrelated metadata key must ride
+    through deepcopy unchanged — this call site opts in explicitly."""
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.messages = [
+        {"role": "user", "content": "round1"},
+        {"role": "assistant", "content": "answer1"},
+    ]
+    source.metadata["unrelated_counter"] = 999
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert forked.metadata.get("unrelated_counter") == 999
+
+
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
     """``media`` only ever appears on user entries in practice, but the
     synthesizer must be defensive: assistants / tools with list content

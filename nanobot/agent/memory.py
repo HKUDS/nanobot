@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import (
+    Session,
+    SessionManager,
+    register_position_dependent_metadata_key,
+)
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -49,6 +53,14 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
+
+# Session-key prefix for AutoCompact's dream-tail archive entries (#3973):
+# written under f"{DREAM_TAIL_SESSION_KEY_PREFIX}{real_key}" instead of the
+# real session's own key, and excluded via _INTERNAL_HISTORY_SESSION_PREFIXES
+# below so it doesn't duplicate into a resumed session's live prompt. Single
+# source of truth for both the write side (AutoCompact) and the filter side
+# (MemoryStore).
+DREAM_TAIL_SESSION_KEY_PREFIX = "tail:"
 
 
 class DreamRunProgress:
@@ -82,7 +94,7 @@ class MemoryStore:
     # durable files are tiny in practice (~5 KB total), but a runaway file must
     # not unbounded the prompt.
     _DREAM_FILE_EMBED_CAP = 8000
-    _INTERNAL_HISTORY_SESSION_PREFIXES = ("cron:", "dream:")
+    _INTERNAL_HISTORY_SESSION_PREFIXES = ("cron:", "dream:", DREAM_TAIL_SESSION_KEY_PREFIX)
     _INTERNAL_HISTORY_SESSION_KEYS = {"heartbeat"}
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
     _LEGACY_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*")
@@ -725,8 +737,17 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
         session_key: str | None = None,
+        degraded: bool = True,
     ) -> None:
-        """Fallback: dump raw messages to history.jsonl without LLM summarization."""
+        """Dump raw messages to history.jsonl without LLM summarization.
+
+        ``degraded`` controls whether this call represents a fallback from a
+        failed/skipped LLM summarization pass (the historical, and default,
+        meaning of this method — logged as a warning) versus an intentionally
+        lightweight raw dump on an expected path, such as AutoCompact's
+        Dream-tail archive for short sessions (#3973), which never attempts an
+        LLM summary in the first place and should not be logged as degraded.
+        """
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         formatted = truncate_text(
             self._format_messages(public_history_messages(messages)),
@@ -737,9 +758,12 @@ class MemoryStore:
             f"{formatted}",
             session_key=session_key,
         )
-        logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
-        )
+        if degraded:
+            logger.warning(
+                "Memory consolidation degraded: raw-archived {} messages", len(messages)
+            )
+        else:
+            logger.info("Raw-archived {} messages", len(messages))
 
     # ------------------------------------------------------------------
     # Dream helpers
@@ -812,6 +836,12 @@ class Consolidator:
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
+    # Single source of truth for the session.metadata key AutoCompact's Dream-tail
+    # archive (#3973) uses to record how far it has archived. Public (no leading
+    # underscore) because AutoCompact reads it too — a mismatched copy of this
+    # string in two files would silently corrupt archive boundaries.
+    DREAM_TAIL_MARKER_KEY = "_dream_tail_through"
+
     def __init__(
         self,
         store: MemoryStore,
@@ -835,13 +865,35 @@ class Consolidator:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
+    # Skip content already covered by AutoCompact's Dream-tail archive (#3973).
+    # Deliberately does NOT touch session.last_consolidated / live-prompt
+    # retention — only shifts where formal archiving *starts*, so resume fidelity
+    # is unaffected and an already-tail-archived range is never re-summarized
+    # into a duplicate history.jsonl entry.
+    @classmethod
+    def dream_tail_marker(cls, session: Session) -> int:
+        marker = session.metadata.get(cls.DREAM_TAIL_MARKER_KEY, 0)
+        if isinstance(marker, bool) or not isinstance(marker, int) or marker < 0:
+            return 0
+        # Clamp: an unclamped stale marker would point past len(session.messages),
+        # making every archive path see nothing to do — permanently, not once.
+        return min(marker, len(session.messages))
+
+    @classmethod
+    def archive_start(cls, session: Session) -> int:
+        """The boundary every real archive path (and the tail-archive path)
+        must start from: whichever of last_consolidated / dream_tail_marker is
+        further along, so neither path ever re-covers what the other already
+        archived."""
+        return max(session.last_consolidated, cls.dream_tail_marker(session))
+
     def pick_consolidation_boundary(
         self,
         session: Session,
         tokens_to_remove: int,
     ) -> tuple[int, int] | None:
         """Pick a user-turn boundary that removes enough old prompt tokens."""
-        start = session.last_consolidated
+        start = self.archive_start(session)
         if start >= len(session.messages) or tokens_to_remove <= 0:
             return None
 
@@ -861,7 +913,17 @@ class Consolidator:
     def _full_unconsolidated_history(
         session: Session,
     ) -> list[dict[str, Any]]:
-        """Return the whole unconsolidated tail for consolidation decisions."""
+        """Return the whole unconsolidated tail for consolidation decisions.
+
+        Deliberately counts from ``last_consolidated`` only, not
+        ``max(last_consolidated, dream_tail_marker)`` like the real archive
+        boundaries do — and this is exactly correct, not a trade-off. This
+        feeds token-budget *estimation* for the live prompt, and tail-archived
+        messages are still sent raw in that prompt (dream_tail_marker never
+        advances ``last_consolidated`` — see TestLastConsolidatedMustNotCoverTheLiveSuffix).
+        Subtracting the tail-marker range here would *undercount* real prompt
+        size, since those messages have not actually left the live context.
+        """
         unconsolidated_count = len(session.messages) - session.last_consolidated
         if unconsolidated_count <= 0:
             return []
@@ -874,7 +936,8 @@ class Consolidator:
     ) -> int | None:
         if not replay_max_messages or replay_max_messages <= 0:
             return None
-        tail = list(enumerate(session.messages[session.last_consolidated:], session.last_consolidated))
+        start = Consolidator.archive_start(session)
+        tail = list(enumerate(session.messages[start:], start))
         if len(tail) <= replay_max_messages:
             return None
 
@@ -887,10 +950,10 @@ class Consolidator:
         sliced = tail[start_idx:]
         for i, (_idx, message) in enumerate(sliced):
             if message.get("role") == "user":
-                start = i
+                retain_from = i
                 if i > 0 and sliced[i - 1][1].get("_channel_delivery"):
-                    start = i - 1
-                sliced = sliced[start:]
+                    retain_from = i - 1
+                sliced = sliced[retain_from:]
                 break
 
         legal_start = find_legal_message_start([message for _idx, message in sliced])
@@ -900,7 +963,7 @@ class Consolidator:
             return len(session.messages)
 
         first_visible_idx = sliced[0][0]
-        if first_visible_idx <= session.last_consolidated:
+        if first_visible_idx <= start:
             return None
         return first_visible_idx
 
@@ -915,7 +978,8 @@ class Consolidator:
         end_idx = self._replay_overflow_boundary(session, replay_max_messages)
         if end_idx is None:
             return None
-        chunk = session.messages[session.last_consolidated:end_idx]
+        chunk_start = self.archive_start(session)
+        chunk = session.messages[chunk_start:end_idx]
         if not chunk:
             return None
         logger.info(
@@ -924,10 +988,14 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
+        # Summary context starts at last_consolidated, while the end remains
+        # end_idx; see compact_idle_session for why only the start is widened.
+        summary_messages = list(session.messages[session.last_consolidated:end_idx])
         summary = await self.archive(
             chunk,
             runtime=runtime,
             session_key=session.key,
+            summary_messages=summary_messages,
         )
         session.last_consolidated = end_idx
         session.provider_state = None
@@ -1111,7 +1179,8 @@ class Consolidator:
 
                 end_idx = boundary[0]
 
-                chunk = session.messages[session.last_consolidated:end_idx]
+                chunk_start = self.archive_start(session)
+                chunk = session.messages[chunk_start:end_idx]
                 if not chunk:
                     break
 
@@ -1124,10 +1193,15 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
+                # Summary context starts at last_consolidated, while the end
+                # remains end_idx; see compact_idle_session for why only the
+                # start is widened.
+                summary_messages = list(session.messages[session.last_consolidated:end_idx])
                 summary = await self.archive(
                     chunk,
                     runtime=runtime,
                     session_key=session.key,
+                    summary_messages=summary_messages,
                 )
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
@@ -1168,14 +1242,15 @@ class Consolidator:
             self.sessions.invalidate(session_key)
             session = self.sessions.get_or_create(session_key)
 
-            messages_to_summarize = list(session.messages[session.last_consolidated:])
-            if not messages_to_summarize:
+            idle_start = self.archive_start(session)
+            tail = list(session.messages[idle_start:])
+            if not tail:
                 self.sessions.save(session)
                 return ""
 
             probe = Session(
                 key=session.key,
-                messages=messages_to_summarize.copy(),
+                messages=tail.copy(),
                 created_at=session.created_at,
                 updated_at=session.updated_at,
                 metadata={},
@@ -1190,12 +1265,22 @@ class Consolidator:
                 return ""
 
             last_active = session.updated_at
-            # The visible suffix informs the summary but stays out of raw fallback.
+            new_last_consolidated = len(session.messages) - len(visible_suffix)
+            # summary_messages spans from last_consolidated through the end
+            # of the session — widening only the start (not archive_start/
+            # idle_start), not the end. The end must stay at the full session
+            # tail: the retained visible suffix is deliberately included too
+            # (#4264 — a late correction landing in that suffix must still
+            # reach the persisted summary). summary_messages is pure LLM
+            # context, never written anywhere, so widening the start can't
+            # cause a duplicate history.jsonl entry — only messages_to_remove
+            # (bounded by archive_start) decides what leaves the live view.
+            summary_messages = list(session.messages[session.last_consolidated:])
             summary = await self.archive(
                 messages_to_remove,
                 runtime=runtime,
                 session_key=session_key,
-                summary_messages=messages_to_summarize,
+                summary_messages=summary_messages,
             )
 
             if summary and summary != "(nothing)":
@@ -1205,7 +1290,7 @@ class Consolidator:
                 }
 
             # Preserve history and advance only the replay boundary.
-            session.last_consolidated = len(session.messages) - len(visible_suffix)
+            session.last_consolidated = new_last_consolidated
             session.provider_state = None
             self.sessions.save(session)
 
@@ -1219,3 +1304,11 @@ class Consolidator:
             )
 
             return summary
+
+
+# Session.clear() and fork_session_before_user_index() both need to treat this
+# key as an absolute index into session.messages (same category as the
+# built-in last_consolidated field) — see register_position_dependent_metadata_
+# key's docstring for why this is a registry call rather than Session directly
+# importing Consolidator (would cycle).
+register_position_dependent_metadata_key(Consolidator.DREAM_TAIL_MARKER_KEY)
