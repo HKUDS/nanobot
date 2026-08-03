@@ -206,7 +206,6 @@ async def _close_gateway_runtime(
     channels: Any,
     tasks: list[asyncio.Task[Any]],
     runtime_tasks: asyncio.Future[list[Any]] | None,
-    runtime_tasks_drained: bool,
     *,
     task_wait_timeout: float = 15.0,
     close_timeout: float = 15.0,
@@ -230,16 +229,26 @@ async def _close_gateway_runtime(
     for task in tasks:
         if not task.done():
             task.cancel()
+    pending: set[asyncio.Task[Any]] = set()
     if tasks:
         # Bounded: a coroutine that swallows cancellation (e.g. an SDK reconnect
         # loop) must not hold the stop open until systemd's timeout kills the
         # cgroup. Anything still pending is abandoned and closed underneath.
-        await asyncio.wait(tasks, timeout=task_wait_timeout)
+        _done, pending = await asyncio.wait(tasks, timeout=task_wait_timeout)
+        # A task can swallow the first cancellation while unwinding. Re-cancel
+        # timed-out tasks so an agent loop stuck draining background work reaches
+        # its resource-cleanup phase before the explicit final close below.
+        for task in pending:
+            task.cancel()
+    if runtime_tasks is not None and not runtime_tasks.done():
+        runtime_tasks.cancel()
     try:
         await asyncio.wait_for(agent.close_mcp(), timeout=close_timeout)
     except BaseException as exc:  # noqa: BLE001 - shutdown must proceed
         logger.warning("Gateway shutdown: agent resource cleanup incomplete: {}", exc)
-    if runtime_tasks is not None and not runtime_tasks_drained:
+    # Retrieving an already-finished gather prevents noisy unhandled exceptions,
+    # but never wait for it here: its children were bounded individually above.
+    if runtime_tasks is not None and runtime_tasks.done():
         with suppress(asyncio.CancelledError, Exception):
             await runtime_tasks
 
@@ -777,7 +786,6 @@ def _run_gateway(
         tasks: list[asyncio.Task[Any]] = []
         shutdown_task: asyncio.Task[Any] | None = None
         runtime_tasks: asyncio.Future[list[Any]] | None = None
-        runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
         cli_terminal._ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
@@ -829,7 +837,6 @@ def _run_gateway(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if runtime_tasks in done:
-                runtime_tasks_drained = True
                 await runtime_tasks
             else:
                 runtime_tasks.cancel()
@@ -850,9 +857,7 @@ def _run_gateway(
                 agent.stop()
                 # Cancel runtime tasks first, then deterministically close
                 # exec/MCP resources while the event loop is still alive.
-                await _close_gateway_runtime(
-                    agent, channels, tasks, runtime_tasks, runtime_tasks_drained
-                )
+                await _close_gateway_runtime(agent, channels, tasks, runtime_tasks)
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
