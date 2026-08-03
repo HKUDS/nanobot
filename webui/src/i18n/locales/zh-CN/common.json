@@ -7,18 +7,18 @@
     },
     "error": {
       "title": "无法连接到 nanobot",
-      "gatewayHint": "请确认 gateway 已启动（`nanobot gateway`），并且当前页面与 gateway 运行在同一台机器上。"
+      "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前页面与网关运行在同一台机器上。"
     },
     "auth": {
       "title": "需要验证",
-      "hint": "请输入 gateway 配置中的 tokenIssueSecret。",
+      "hint": "请输入网关配置中的 tokenIssueSecret。",
       "placeholder": "密码",
       "submit": "连接",
       "invalid": "密码无效，请重试。"
     },
     "account": {
       "section": "账户",
-      "logoutHint": "断开此浏览器与 gateway 的连接。",
+      "logoutHint": "断开此浏览器与网关的连接。",
       "logout": "退出登录"
     },
     "system": {
@@ -38,6 +38,15 @@
     },
     "meta": {
       "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
+    },
+    "pairing": {
+      "title": "配对聊天用户",
+      "description": "输入聊天中显示的配对码。",
+      "code": "配对码",
+      "matched": "已匹配 {{channel}}，正在连接…",
+      "expiresInline": "配对码将于 {{expires}} 过期。",
+      "queueCount": "{{count}} 个待处理",
+      "noMatch": "没有待处理请求与此配对码匹配。"
     }
   },
   "sidebar": {
@@ -75,7 +84,7 @@
       "providers": "提供商",
       "image": "图片",
       "voice": "语音",
-      "browser": "网页",
+      "browser": "网络",
       "channels": "渠道",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
@@ -95,8 +104,8 @@
       "presets": "预设",
       "imageGeneration": "图片生成",
       "imageDefaults": "默认值",
-      "webSearch": "网页搜索",
-      "webBehavior": "行为",
+      "webSearch": "网络搜索",
+      "webBehavior": "网络行为",
       "cliApps": "CLI 应用",
       "mcp": "MCP 服务",
       "regional": "区域",
@@ -129,7 +138,7 @@
       "advancedOptions": "高级选项",
       "advancedSummary": "上下文 {{context}} · 最大输出 {{max}} tokens",
       "maxTokens": "最大输出 tokens",
-      "temperature": "Temperature",
+      "temperature": "温度",
       "reasoningEffort": "推理强度",
       "convertTitle": "转换现有模型设置",
       "convertHelp": "把现有主模型和备用模型转换成预设，之后即可在这里管理调用顺序。",
@@ -175,7 +184,7 @@
       "presetModel": "预设模型",
       "density": "密度",
       "activityMode": "活动详情",
-      "fileEditDisplay": "文件编辑展示",
+      "fileEditDisplay": "文件编辑显示",
       "codeWrap": "代码换行",
       "brandLogos": "品牌 Logo",
       "maxResults": "最大结果数",
@@ -217,16 +226,16 @@
       "selectedModelProvider": "由选中的模型决定。",
       "selectedModelValue": "由选中的模型决定。",
       "selectedPreset": "命名预设在这里只读；请在 config.json 中编辑。",
-      "presetModel": "切回 Default 后可在 WebUI 中编辑模型和提供商。",
+      "presetModel": "切回默认预设后可在 WebUI 中编辑模型和提供商。",
       "density": "只保存在此浏览器中。",
-      "activityMode": "选择默认显示多少 agent 活动细节。",
+      "activityMode": "选择默认显示多少智能体活动详情。",
       "fileEditDisplay": "选择文件编辑活动默认显示行数还是差异。",
       "codeWrap": "让长代码行在小屏幕上也易读。",
       "brandLogos": "在设置中显示第三方提供商和 CLI 图标。",
       "maxResults": "每次 web_search 调用返回的结果数。",
-      "timeout": "搜索提供商请求超时前的秒数。",
+      "timeout": "搜索提供商请求超时前等待的秒数。",
       "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
-      "imageGeneration": "配置图片提供商后，在聊天中开放 generate_image。",
+      "imageGeneration": "配置图片提供商后，即可在聊天中使用 generate_image。",
       "imageProvider": "选择 generate_image 使用的注册提供商。",
       "imageProviderStatus": "图片生成会复用「提供商」里的凭据。",
       "imageModel": "选择当前图片提供商支持的模型。",
@@ -246,7 +255,7 @@
       "contextWindow": "选择此模型配置的默认上下文预算。",
       "transcription": "发送前先把麦克风输入转写到输入框。聊天渠道里的语音消息也使用同一套设置。",
       "transcriptionProvider": "使用「提供商」中对应提供商的凭据。",
-      "transcriptionProviderStatus": "API Key 仍保存在 providers 里，不写进 transcription 设置。",
+      "transcriptionProviderStatus": "API 密钥仍保存在“提供商”配置中，不写入“语音转写”设置。",
       "transcriptionModel": "除非提供商需要自定义模型 ID，否则保持解析后的默认值即可。",
       "transcriptionLanguage": "可选 ISO-639 语言提示，例如 en、zh、ja 或 ko。"
     },
@@ -331,15 +340,16 @@
       "setup": "连接",
       "configure": "连接",
       "connectTitle": "连接 {{name}}",
-      "connectHint": "填入你账户里的 key。",
+      "connectHint": "填入账户中的密钥。",
       "saveAndEnable": "保存并启用",
       "updateSetup": "更新配置",
       "configured": "已配置",
       "keepExisting": "留空则保留当前值",
       "statusConfigured": "已配置",
-      "statusMissingCredentials": "需要 key",
+      "statusMissingCredentials": "需要密钥",
       "statusMissingDependency": "缺少依赖",
       "statusComingSoon": "暂不支持",
+      "comingSoon": "即将推出",
       "statusNotInstalled": "未启用",
       "toolScope": "工具",
       "allTools": "全部",
@@ -355,7 +365,7 @@
       "restartPending": "等待重启",
       "ready": "就绪",
       "privateEngine": "私有引擎",
-      "unixSocket": "Unix socket",
+      "unixSocket": "Unix 套接字",
       "defaultWorkspace": "默认工作区",
       "comfortable": "舒适",
       "compact": "紧凑",
@@ -372,7 +382,10 @@
       "configured": "已配置",
       "notConfigured": "未配置",
       "pending": "等待中",
-      "restartingEngine": "正在重启"
+      "restartingEngine": "正在重启",
+      "checking": "检查中",
+      "running": "运行中",
+      "needsSetup": "需要设置"
     },
     "status": {
       "loading": "正在加载设置...",
@@ -400,51 +413,52 @@
       "delete": "删除",
       "deleting": "正在删除...",
       "cancel": "取消",
+      "dismiss": "关闭",
       "open": "打开",
       "export": "导出",
       "opening": "正在打开...",
       "exporting": "正在导出..."
     },
     "byok": {
-      "description": "自带服务商密钥。Nanobot 会从当前 config 读取这些值，只有已配置的服务商才能用于模型预设。",
+      "description": "使用自己的提供商密钥。nanobot 会从当前配置读取这些值，只有已配置的提供商才能用于模型预设。",
       "configured": "已配置",
       "notConfigured": "未配置",
       "configuredSection": "已配置",
       "notConfiguredSection": "未配置",
       "showMore": "再显示 {{count}} 个",
       "showLess": "收起",
-      "apiKey": "API key",
-      "apiBase": "API base",
-      "apiKeyPlaceholder": "输入 API key",
-      "apiKeyConfiguredPlaceholder": "留空则保留当前 key",
-      "configuredKeyHint": "已配置的 key",
-      "apiBasePlaceholder": "使用服务商默认地址",
-      "apiKeyRequired": "需要 API key 才能配置此服务商。",
-      "showApiKey": "显示 API key",
-      "hideApiKey": "隐藏 API key",
-      "noConfiguredProviders": "没有已配置的服务商",
-      "configureFirst": "请先在 BYOK 里配置服务商。",
+      "apiKey": "API 密钥",
+      "apiBase": "API 基础地址",
+      "apiKeyPlaceholder": "输入 API 密钥",
+      "apiKeyConfiguredPlaceholder": "留空则保留当前密钥",
+      "configuredKeyHint": "已配置的密钥",
+      "apiBasePlaceholder": "使用提供商默认地址",
+      "apiKeyRequired": "需要 API 密钥才能配置此提供商。",
+      "showApiKey": "显示 API 密钥",
+      "hideApiKey": "隐藏 API 密钥",
+      "noConfiguredProviders": "没有已配置的提供商",
+      "configureFirst": "请先在 BYOK 中配置提供商。",
       "openByok": "打开 BYOK",
       "tabs": {
         "ariaLabel": "BYOK 凭证类型",
         "llm": "LLM",
-        "webSearch": "网页搜索"
+        "webSearch": "网络搜索"
       },
       "webSearch": {
-        "provider": "搜索服务商",
-        "providerHelp": "选择网页搜索工具使用的后端。",
-        "selectProvider": "选择服务商",
+        "provider": "搜索提供商",
+        "providerHelp": "选择网络搜索工具使用的后端。",
+        "selectProvider": "选择提供商",
         "credentials": "凭证",
-        "noCredentialRequired": "无需 key",
-        "noCredentialHelp": "DuckDuckGo 不需要保存 API key。",
-        "apiKeyHelp": "保存到 config 后只显示掩码提示。",
-        "baseUrl": "Base URL",
+        "noCredentialRequired": "无需密钥",
+        "noCredentialHelp": "DuckDuckGo 无需保存 API 密钥。",
+        "apiKeyHelp": "保存到 config 后仅显示掩码。",
+        "baseUrl": "基础 URL",
         "baseUrlHelp": "SearXNG 需要你自己的实例地址。",
         "baseUrlPlaceholder": "https://search.example.com",
-        "apiKeyRequired": "这个搜索服务商需要 API key。",
-        "baseUrlRequired": "SearXNG 需要 Base URL。",
+        "apiKeyRequired": "此搜索提供商需要 API 密钥。",
+        "baseUrlRequired": "SearXNG 需要基础 URL。",
         "missingCredential": "填写所需凭证后才能保存。",
-        "saveHint": "改动会应用到新的网页搜索请求。"
+        "saveHint": "改动会应用到新的网络搜索请求。"
       }
     },
     "overview": {
@@ -452,19 +466,19 @@
       "providers": "提供商",
       "configuredCount": "已配置 {{count}} 个",
       "totalProviders": "共 {{count}} 个可用",
-      "webSearch": "网页搜索",
+      "webSearch": "网络搜索",
       "imageGeneration": "图片生成",
       "voiceInput": "语音识别",
       "workspace": "工作区"
     },
     "usage": {
-      "title": "Token 活动",
-      "shortTitle": "Token Usage",
-      "subtitle": "最近 12 个月由提供商上报的 token 用量。",
-      "empty": "新的模型回复产生后，这里会显示 token 活动。",
-      "totalTokens": "累计 Token 数",
-      "peakTokens": "峰值 Token 数",
-      "thirtyDayTokens": "30 天 Token 数",
+      "title": "Token 用量",
+      "shortTitle": "Token 用量",
+      "subtitle": "最近 12 个月由提供商上报的 Token 用量。",
+      "empty": "模型产生新的回复后，这里会显示 Token 用量。",
+      "totalTokens": "Token 总数",
+      "peakTokens": "Token 峰值",
+      "thirtyDayTokens": "30 天 Token 用量",
       "currentStreak": "当前连续天数",
       "longestStreak": "最长连续天数",
       "daysValue": "{{count}} 天",
@@ -509,13 +523,23 @@
       "selectProvider": "选择提供商",
       "selectAspect": "选择比例",
       "selectSize": "选择尺寸",
+      "selectModel": "选择图片模型",
+      "searchOrTypeModel": "搜索或输入模型 ID",
+      "typeModelId": "输入此提供商支持的模型 ID。",
       "configureProvider": "配置提供商",
       "missingCredential": "启用图片生成前请先配置此提供商。"
+    },
+    "capabilities": {
+      "providerSupport": "提供商支持",
+      "providerInstallOnSave": "保存此提供商时会自动安装所需支持。",
+      "searchSupport": "搜索提供商支持",
+      "searchInstallOnSave": "保存时会自动安装 Olostep 支持。",
+      "installing": "正在安装支持…"
     },
     "api": {
       "title": "API 服务",
       "openaiCompatible": "OpenAI 兼容 API",
-      "description": "让 SDK 和其他 Agent 通过本地 /v1 接口连接 nanobot。",
+      "description": "让 SDK 和其他智能体通过本地 /v1 接口连接 nanobot。",
       "start": "启动 API 服务",
       "starting": "正在启动...",
       "stop": "停止",
@@ -524,13 +548,13 @@
       "thisDevice": "仅此设备",
       "localNetwork": "局域网",
       "localHelp": "只有当前设备可以连接。",
-      "networkHelp": "局域网内其他设备可以连接，因此必须设置 API Key。",
+      "networkHelp": "局域网内其他设备可以连接，因此必须设置 API 密钥。",
       "port": "端口",
       "portHelp": "API 服务使用的本地端口。",
-      "apiKey": "API Key",
+      "apiKey": "API 密钥",
       "apiKeyHelp": "客户端使用 Bearer Token 发送此密钥。",
       "apiKeyRequired": "向局域网开放 API 前必须设置密钥。",
-      "apiKeyPlaceholder": "输入 API Key",
+      "apiKeyPlaceholder": "输入 API 密钥",
       "autoInstall": "启动时会自动安装 API 支持。"
     },
     "observability": {
@@ -540,7 +564,7 @@
       "enable": "启用追踪支持"
     },
     "apps": {
-      "description": "把工具连接到 nanobot，然后在对话中 @ 使用。",
+      "description": "将工具接入 nanobot，然后在对话中通过 @ 调用。",
       "cliLabel": "应用",
       "mcpLabel": "集成",
       "channelLabel": "渠道",
@@ -569,7 +593,7 @@
       "requires": "需要：{{requirements}}",
       "setUp": "设置",
       "setupGuide": "配置指南",
-      "setupSummary": "启用只会打开 nanobot 的渠道支持。请补充平台凭据，然后重启 nanobot。",
+      "setupSummary": "启用只会开启 nanobot 对该渠道的支持。请补充平台凭据，然后重启 nanobot。",
       "configKeys": "配置字段",
       "enable": "启用渠道",
       "disable": "禁用渠道",
@@ -579,6 +603,8 @@
       "advanced": "高级",
       "checkAndEnable": "检查并启用",
       "checkConnection": "检查连接",
+      "connectionChecks": "连接检查",
+      "open": "打开",
       "checkedAndEnabled": "已检查并启用。",
       "checking": "正在检查...",
       "checkOnly": "仅检查",
@@ -601,7 +627,7 @@
       "managedByWebui": "由 WebUI 管理",
       "officialGuide": "官方指南",
       "optional": "可选",
-      "providerPreset": "服务商",
+      "providerPreset": "提供商",
       "requiredSetup": "必需配置",
       "savedSecret": "已保存",
       "savedSecretPlaceholder": "已保存的密钥",
@@ -674,6 +700,8 @@
       "protected": "受保护",
       "editTitle": "编辑自动任务",
       "save": "保存",
+      "commandCopied": "已复制",
+      "copyCommand": "复制",
       "deleteTitle": "删除自动任务",
       "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
       "cancel": "取消",
@@ -733,6 +761,7 @@
       "fields": {
         "name": "名称",
         "message": "消息",
+        "command": "命令",
         "scheduleType": "计划类型",
         "every": "每隔",
         "unit": "单位",
@@ -767,7 +796,7 @@
       "signInAgain": "重新登录",
       "signOut": "退出登录",
       "signedInAs": "已登录为 {{account}}",
-      "signInHelp": "从这台设备登录；不会在配置中保存 API key。",
+      "signInHelp": "从这台设备登录；不会在配置中保存 API 密钥。",
       "remoteSignInHelp": "点击“登录”在你的电脑上打开 xAI，完成登录后粘贴页面显示的授权码。",
       "codexRemoteSignInHelp": "在此浏览器中登录，然后将完整的 localhost 回调 URL 粘贴回 nanobot。",
       "signInRequired": "需要登录",
@@ -790,7 +819,7 @@
       "finishSignIn": "完成登录"
     },
     "skills": {
-      "description": "查看此 agent 在对话中可以加载的指令技能。",
+      "description": "查看此智能体在对话中可以加载的指令技能。",
       "caption": "{{available}} 个可用 · 共 {{total}} 个",
       "views": "技能视图",
       "installedTab": "已安装",
@@ -809,7 +838,7 @@
       "showLess": "收起",
       "showMore": "展开",
       "enabledControl": "使用此技能",
-      "enabledDescription": "当技能需求满足时，允许 agent 加载并使用它。",
+      "enabledDescription": "当技能需求满足时，允许智能体加载并使用它。",
       "enableSkill": "启用 {{name}}",
       "disableSkill": "停用 {{name}}",
       "updateFailed": "无法更新此技能。",
@@ -850,7 +879,7 @@
       "marketplaceInstall": "安装",
       "marketplaceNoTrend": "暂无趋势",
       "marketplaceTrendLabel": "近 8 周安装趋势",
-      "featured": "Agent 技能",
+      "featured": "智能体技能",
       "empty": "暂无可用技能。",
       "sourceWorkspace": "自定义",
       "sourceBuiltin": "内置",
@@ -891,8 +920,8 @@
     "actions": "“{{title}}” 的话题操作",
     "newInProject": "在 {{project}} 中开始新话题",
     "activity": {
-      "running": "Agent 正在运行",
-      "complete": "Agent 已完成",
+      "running": "智能体正在运行",
+      "complete": "智能体已完成",
       "updated": "有新内容"
     },
     "pin": "置顶",
@@ -1065,7 +1094,7 @@
       "modelNotConfigured": "模型未配置",
       "configureModel": "配置模型",
       "queued": {
-        "label": "待引导提示",
+        "label": "排队中的引导消息",
         "guide": "引导",
         "delete": "删除引导",
         "edit": "编辑引导",
@@ -1132,7 +1161,7 @@
           },
           "stop": {
             "title": "停止当前任务",
-            "description": "取消这个对话中正在运行的 agent 回合。"
+            "description": "取消这个对话中正在运行的智能体回合。"
           },
           "restart": {
             "title": "重启 nanobot",
@@ -1140,7 +1169,7 @@
           },
           "status": {
             "title": "查看状态",
-            "description": "显示运行时、服务商和通道状态。"
+            "description": "显示运行时、提供商和渠道状态。"
           },
           "model": {
             "title": "模型",
@@ -1192,7 +1221,9 @@
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "使用 @{{name}} 调用本地 CLI",
-        "mcpDescription": "使用 @{{name}} 调用 MCP 服务"
+        "mcpDescription": "使用 @{{name}} 调用 MCP 服务",
+        "cliTitle": "CLI 应用：{{name}}",
+        "mcpTitle": "MCP 服务：{{name}}"
       },
       "encoding": "处理中…",
       "remove": "移除附件",
@@ -1225,11 +1256,12 @@
     "loadEarlier": "加载更早消息",
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {
-      "open": "打开输入导航",
-      "title": "输入列表",
-      "search": "搜索输入",
-      "noResults": "没有匹配的输入。",
-      "jumpTo": "跳转到输入：{{label}}"
+      "open": "打开提示词导航",
+      "title": "提示词列表",
+      "search": "搜索提示词",
+      "noResults": "没有匹配的提示词。",
+      "jumpTo": "跳转到提示词：{{label}}",
+      "railAria": "用户提示词导航"
     }
   },
   "message": {
@@ -1268,10 +1300,18 @@
     "cliRunRan": "已使用",
     "cliRunFailed": "失败",
     "imageAttachment": "图片附件",
+    "videoAttachment": "视频附件",
+    "fileAttachment": "文件附件",
+    "attachmentUnavailable": "附件不可用",
+    "dataTable": "数据表",
+    "fileEditPreparing": "正在准备文件编辑…",
+    "openLink": "打开链接：{{label}}",
+    "openAttachment": "打开 {{name}}",
+    "skill": "技能：{{name}}",
     "automationSourceFallback": "自动化",
     "automationTriggered": "自动触发",
-    "askAboutSelection": "继续提问",
-    "forkFromHere": "分叉",
+    "askAboutSelection": "询问此内容",
+    "forkFromHere": "从此处分叉",
     "copyReply": "复制",
     "copiedReply": "已复制",
     "turnLatencyTitle": "本轮耗时（端到端）",
@@ -1293,10 +1333,11 @@
   },
   "filePreview": {
     "aria": "文件预览",
+    "breadcrumb": "文件路径",
     "close": "关闭文件预览",
     "loading": "正在加载预览...",
     "failed": "无法预览这个文件。",
-    "routeMissing": "文件预览需要最新的 gateway。请重启 nanobot gateway 后再试。",
+    "routeMissing": "文件预览需要最新的网关。请重启 nanobot gateway 后再试。",
     "resize": "调整文件预览宽度",
     "truncated": "文件较大，当前只显示前半部分预览。"
   },
@@ -1307,7 +1348,10 @@
     "copied": "已复制"
   },
   "common": {
-    "dismiss": "关闭"
+    "dismiss": "关闭",
+    "close": "关闭",
+    "current": "当前",
+    "cancel": "取消"
   },
   "errors": {
     "messageTooBig": {

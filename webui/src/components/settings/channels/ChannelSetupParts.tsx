@@ -304,10 +304,13 @@ export function ChannelValidationDetails({ validation }: { validation: ChannelVa
 }
 
 export function ChannelValidationChecks({ validation }: { validation: ChannelValidationPayload }) {
+  const { t } = useTranslation();
   if (!validation.checks.length) return null;
   return (
     <div className="border-t border-border/60 px-4 py-4">
-      <div className="mb-2 text-[12px] font-semibold text-foreground">Connection checks</div>
+      <div className="mb-2 text-[12px] font-semibold text-foreground">
+        {t("settings.channels.connectionChecks")}
+      </div>
       <div className="space-y-2">
         {validation.checks.slice(0, 6).map((check) => (
           <div key={check.id} className="flex gap-2 text-[12px] leading-5">
@@ -326,7 +329,7 @@ export function ChannelValidationChecks({ validation }: { validation: ChannelVal
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4"
                 >
-                  Open
+                  {t("settings.channels.open")}
                   <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
               ) : null}

@@ -1,4 +1,5 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
@@ -49,6 +50,7 @@ export function PromptRail({
   onJumpToPrompt,
   scrollRef,
 }: PromptRailProps) {
+  const { t } = useTranslation();
   const railRef = useRef<HTMLDivElement>(null);
   const measuredPromptsRef = useRef<MeasuredPrompt[]>([]);
   const promptAnchors = useMemo(() => userPromptAnchors(messages), [messages]);
@@ -142,7 +144,7 @@ export function PromptRail({
   return (
     <div
       ref={railRef}
-      aria-label="User prompt navigation"
+      aria-label={t("thread.promptNavigator.railAria")}
       className={cn(
         "thread-prompt-rail group pointer-events-auto absolute top-3 z-20 w-9 opacity-100",
         "transition-opacity duration-200",
@@ -159,7 +161,7 @@ export function PromptRail({
           <button
             key={marker.ids.join("|")}
             type="button"
-            aria-label={`Jump to prompt: ${marker.label}`}
+            aria-label={t("thread.promptNavigator.jumpTo", { label: marker.label })}
             onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
             onBlur={() => setFocusedMarkerIndex(null)}
             onFocus={() => setFocusedMarkerIndex(index)}

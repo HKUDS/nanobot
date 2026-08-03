@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
@@ -140,6 +141,7 @@ export function CliAppMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
+  const { t } = useTranslation();
   const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
@@ -150,7 +152,7 @@ export function CliAppMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-cli-mention-${app.name}`}
-      title={`CLI app: ${app.display_name || app.name}`}
+      title={t("thread.composer.mentions.cliTitle", { name: app.display_name || app.name })}
       color={color}
     >
       <span
@@ -195,6 +197,7 @@ export function McpPresetMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
+  const { t } = useTranslation();
   const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
@@ -205,7 +208,7 @@ export function McpPresetMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-mcp-mention-${preset.name}`}
-      title={`MCP server: ${preset.display_name || preset.name}`}
+      title={t("thread.composer.mentions.mcpTitle", { name: preset.display_name || preset.name })}
       color={color}
     >
       <span

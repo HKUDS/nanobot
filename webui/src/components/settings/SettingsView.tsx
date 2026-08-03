@@ -7678,7 +7678,7 @@ function McpAppsCatalogRow({
               onClick={() => setSetupOpen(false)}
               className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold text-muted-foreground"
             >
-              {tx("actions.cancel", "Cancel")}
+              {tx("settings.actions.cancel", "Cancel")}
             </Button>
           </div>
           <div className="mt-3 grid gap-2">

@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   CliAppMentionToken,
@@ -69,6 +70,7 @@ export function UserMessageText({
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
 }) {
+  const { t } = useTranslation();
   const segments = splitUserMessageSegments(text, cliApps, mcpPresets);
   return (
     <>
@@ -80,7 +82,7 @@ export function UserMessageText({
           <InlineTokenHighlight
             key={`skill-${segment.name}-${index}`}
             testId={`message-skill-reference-${segment.name.toLowerCase()}`}
-            title={`Skill: ${segment.name}`}
+            title={t("message.skill", { name: segment.name })}
             color={INLINE_TOKEN_HIGHLIGHT_COLOR}
             className="font-medium"
           >

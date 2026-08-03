@@ -116,12 +116,13 @@ const RenameChatDialog = lazy(async () => {
 });
 
 function SurfaceLoadingFallback() {
+  const { t } = useTranslation();
   return (
     <div
       aria-busy="true"
       className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
     >
-      <span className="sr-only">Loading</span>
+      <span className="sr-only">{t("settings.status.loading")}</span>
       <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
       <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
       <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />

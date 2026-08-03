@@ -411,6 +411,7 @@ function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview |
 }
 
 function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
+  const { t } = useTranslation();
   const { favicon, onFaviconError, onFaviconLoad } = useFaviconFallback(link.host);
   const label = link.prefix
     ? `${link.prefix} — ${link.title}`
@@ -421,7 +422,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"
-      aria-label={`Open link: ${label}`}
+      aria-label={t("message.openLink", { label })}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
         "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",

@@ -38,6 +38,15 @@
     },
     "meta": {
       "description": "nanobot web UI — chat with your nanobot workspace."
+    },
+    "pairing": {
+      "title": "Pair a chat user",
+      "description": "Enter the pairing code shown in the chat.",
+      "code": "Pairing code",
+      "matched": "Matched {{channel}}. Connecting...",
+      "expiresInline": "Code expires {{expires}}.",
+      "queueCount": "{{count}} pending",
+      "noMatch": "No pending request matches this code."
     }
   },
   "sidebar": {
@@ -340,6 +349,7 @@
       "statusMissingCredentials": "Needs key",
       "statusMissingDependency": "Needs dependency",
       "statusComingSoon": "Coming soon",
+      "comingSoon": "Coming soon",
       "statusNotInstalled": "Not enabled",
       "toolScope": "Tools",
       "allTools": "All",
@@ -372,7 +382,10 @@
       "configured": "Configured",
       "notConfigured": "Not configured",
       "pending": "Pending",
-      "restartingEngine": "Restarting"
+      "restartingEngine": "Restarting",
+      "checking": "Checking",
+      "running": "Running",
+      "needsSetup": "Needs setup"
     },
     "status": {
       "loading": "Loading settings...",
@@ -400,6 +413,7 @@
       "delete": "Delete",
       "deleting": "Deleting...",
       "cancel": "Cancel",
+      "dismiss": "Dismiss",
       "open": "Open",
       "export": "Export",
       "opening": "Opening...",
@@ -509,8 +523,18 @@
       "selectProvider": "Select provider",
       "selectAspect": "Select aspect",
       "selectSize": "Select size",
+      "selectModel": "Select image model",
+      "searchOrTypeModel": "Search or type model ID",
+      "typeModelId": "Type the model ID supported by this provider.",
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
+    },
+    "capabilities": {
+      "providerSupport": "Provider support",
+      "providerInstallOnSave": "Required support will be installed automatically when you save this provider.",
+      "searchSupport": "Search provider support",
+      "searchInstallOnSave": "Olostep support will be installed automatically when you save.",
+      "installing": "Installing support..."
     },
     "api": {
       "title": "API server",
@@ -579,6 +603,8 @@
       "advanced": "Advanced",
       "checkAndEnable": "Check and enable",
       "checkConnection": "Check connection",
+      "connectionChecks": "Connection checks",
+      "open": "Open",
       "checkedAndEnabled": "Checked and enabled.",
       "checking": "Checking...",
       "checkOnly": "Check only",
@@ -674,6 +700,8 @@
       "protected": "Protected",
       "editTitle": "Edit automation",
       "save": "Save",
+      "commandCopied": "Copied",
+      "copyCommand": "Copy",
       "deleteTitle": "Delete automation",
       "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
       "cancel": "Cancel",
@@ -733,6 +761,7 @@
       "fields": {
         "name": "Name",
         "message": "Message",
+        "command": "Command",
         "scheduleType": "Schedule type",
         "every": "Every",
         "unit": "Unit",
@@ -1193,7 +1222,9 @@
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Use @{{name}} as a local CLI app",
-        "mcpDescription": "Use @{{name}} as an MCP server"
+        "mcpDescription": "Use @{{name}} as an MCP server",
+        "cliTitle": "CLI app: {{name}}",
+        "mcpTitle": "MCP server: {{name}}"
       },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
@@ -1229,7 +1260,8 @@
       "title": "Prompts",
       "search": "Search prompts",
       "noResults": "No matching prompts.",
-      "jumpTo": "Jump to prompt: {{label}}"
+      "jumpTo": "Jump to prompt: {{label}}",
+      "railAria": "User prompt navigation"
     }
   },
   "message": {
@@ -1268,6 +1300,14 @@
     "cliRunRan": "Used",
     "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
+    "videoAttachment": "Video attachment",
+    "fileAttachment": "File attachment",
+    "attachmentUnavailable": "Attachment unavailable",
+    "dataTable": "Data table",
+    "fileEditPreparing": "Preparing file edit…",
+    "openLink": "Open link: {{label}}",
+    "openAttachment": "Open {{name}}",
+    "skill": "Skill: {{name}}",
     "automationSourceFallback": "Automation",
     "automationTriggered": "Triggered automatically",
     "askAboutSelection": "Ask about this",
@@ -1293,6 +1333,7 @@
   },
   "filePreview": {
     "aria": "File preview",
+    "breadcrumb": "File path",
     "close": "Close file preview",
     "loading": "Loading preview...",
     "failed": "Could not preview this file.",
@@ -1307,7 +1348,10 @@
     "copied": "Copied"
   },
   "common": {
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "close": "Close",
+    "current": "Current",
+    "cancel": "Cancel"
   },
   "errors": {
     "messageTooBig": {

@@ -38,6 +38,15 @@
     },
     "meta": {
       "description": "nanobot Web UI — nanobot ワークスペースと会話します。"
+    },
+    "pairing": {
+      "title": "チャットユーザーをペアリング",
+      "description": "チャットに表示されたペアリングコードを入力してください。",
+      "code": "ペアリングコード",
+      "matched": "{{channel}} と一致しました。接続中…",
+      "expiresInline": "コードの有効期限: {{expires}}。",
+      "queueCount": "{{count}} 件待機中",
+      "noMatch": "このコードに一致する保留中のリクエストはありません。"
     }
   },
   "sidebar": {
@@ -162,9 +171,9 @@
       "model": "このプリセットで使用するモデルを選択します。",
       "configPath": "現在ゲートウェイが使用している設定ファイルです。",
       "selectedPreset": "名前付きプリセットはここでは読み取り専用です。編集するには config.json を変更してください。",
-      "presetModel": "Default に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
+      "presetModel": "既定に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
       "density": "このブラウザーにのみ保存されます。",
-      "activityMode": "既定で表示する agent アクティビティの詳細量を選択します。",
+      "activityMode": "既定で表示するエージェントアクティビティの詳細量を選択します。",
       "fileEditDisplay": "ファイル編集アクティビティを行数または差分で表示します。",
       "codeWrap": "小さな画面でも長いコード行を読みやすくします。",
       "maxResults": "各 web_search 呼び出しで返す結果数です。",
@@ -172,13 +181,13 @@
       "jinaReader": "利用可能な場合、web_fetch に Jina Reader を使います。",
       "imageGeneration": "画像プロバイダーが設定済みのとき、チャットで generate_image を有効にします。",
       "imageProvider": "generate_image で使用する登録済みプロバイダーを選択します。",
-      "imageProviderStatus": "画像生成は「プロバイダー」の認証情報を再利用します。",
+      "imageProviderStatus": "画像生成はプロバイダー設定の認証情報を再利用します。",
       "imageModel": "選択した画像プロバイダーへ送信するモデル名です。",
       "defaultAspectRatio": "プロンプトで比率が指定されていない場合に使用します。",
       "defaultImageSize": "対応しているプロバイダーへ送信するサイズ指定です。",
       "maxImagesPerTurn": "1 回の generate_image リクエストで生成できる画像数の上限です。",
       "timezone": "スケジュールと時刻を考慮する返信に使用します。",
-      "localServiceAccess": "Full Access の shell コマンドが localhost サービスにアクセスできるようにします。",
+      "localServiceAccess": "フルアクセスの shell コマンドが localhost サービスにアクセスできるようにします。",
       "webuiDefaultAccess": "プロジェクト固有の権限がない Web チャットで使用します。",
       "securityManagedControls": "Web 取得は常にローカル、プライベート、メタデータサービスを保護します。コアチャネルの安全性は config.json で管理されます。",
       "currentModel": "新しい返信に使用します。",
@@ -189,7 +198,7 @@
       "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
       "logs": "ネイティブエンジンのログフォルダーを開きます。",
       "diagnostics": "サポート用の小さなランタイムレポートを書き出します。",
-      "localServiceAccessNative": "Full Access の shell コマンドがこの Mac 上のサービスにアクセスできるようにします。",
+      "localServiceAccessNative": "フルアクセスの shell コマンドがこの Mac 上のサービスにアクセスできるようにします。",
       "webuiDefaultAccessNative": "プロジェクト固有の権限がないネイティブチャットで使用します。",
       "contextWindow": "このモデル設定で使う既定のコンテキスト予算を選択します。",
       "transcription": "マイク入力を送信前に文字起こしします。チャネルの音声メッセージも同じ設定を使います。",
@@ -208,12 +217,12 @@
       "ready": "準備完了",
       "privateEngine": "プライベートエンジン",
       "unixSocket": "Unix ソケット",
-      "defaultWorkspace": "デフォルトワークスペース",
+      "defaultWorkspace": "既定のワークスペース",
       "comfortable": "標準",
       "compact": "コンパクト",
       "auto": "自動",
       "expanded": "展開",
-      "default": "デフォルト",
+      "default": "既定",
       "summary": "概要",
       "diff": "差分",
       "collapsedDiff": "折りたたみ差分",
@@ -224,7 +233,10 @@
       "configured": "設定済み",
       "notConfigured": "未設定",
       "pending": "保留中",
-      "restartingEngine": "再起動中"
+      "restartingEngine": "再起動中",
+      "checking": "確認中",
+      "running": "実行中",
+      "needsSetup": "設定が必要"
     },
     "status": {
       "loading": "設定を読み込んでいます...",
@@ -252,30 +264,31 @@
       "deleting": "削除中...",
       "edit": "編集",
       "cancel": "キャンセル",
+      "dismiss": "閉じる",
       "open": "開く",
       "export": "書き出す",
       "opening": "開いています...",
       "exporting": "書き出しています..."
     },
     "byok": {
-      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけをモデルプリセットで使用できます。",
+      "description": "自分のプロバイダーキーを使います。Nanobot は現在の設定から値を読み込み、設定済みのプロバイダーだけをモデルプリセットで使用できます。",
       "configured": "設定済み",
       "notConfigured": "未設定",
       "configuredSection": "設定済み",
       "notConfiguredSection": "未設定",
       "showMore": "さらに {{count}} 件表示",
       "showLess": "折りたたむ",
-      "apiKey": "API key",
-      "apiBase": "API base",
-      "apiKeyPlaceholder": "API key を入力",
+      "apiKey": "API キー",
+      "apiBase": "API ベース",
+      "apiKeyPlaceholder": "API キーを入力",
       "apiKeyConfiguredPlaceholder": "空欄のままなら現在の key を保持",
       "configuredKeyHint": "設定済み key",
-      "apiBasePlaceholder": "provider の既定値を使用",
-      "apiKeyRequired": "この provider を設定するには API key が必要です。",
-      "showApiKey": "API key を表示",
-      "hideApiKey": "API key を隠す",
-      "noConfiguredProviders": "設定済み provider がありません",
-      "configureFirst": "先に BYOK で provider を設定してください。",
+      "apiBasePlaceholder": "プロバイダーの既定値を使用",
+      "apiKeyRequired": "このプロバイダーを設定するには API キーが必要です。",
+      "showApiKey": "API キーを表示",
+      "hideApiKey": "API キーを隠す",
+      "noConfiguredProviders": "設定済みプロバイダーがありません",
+      "configureFirst": "先に BYOK でプロバイダーを設定してください。",
       "openByok": "BYOK を開く",
       "tabs": {
         "ariaLabel": "BYOK 認証情報タイプ",
@@ -283,20 +296,20 @@
         "webSearch": "ウェブ検索"
       },
       "webSearch": {
-        "provider": "検索 provider",
-        "providerHelp": "web search ツールで使うバックエンドを選択します。",
-        "selectProvider": "provider を選択",
+        "provider": "検索プロバイダー",
+        "providerHelp": "Web 検索ツールで使うバックエンドを選択します。",
+        "selectProvider": "プロバイダーを選択",
         "credentials": "認証情報",
         "noCredentialRequired": "key は不要",
-        "noCredentialHelp": "DuckDuckGo は API key を保存せずに使えます。",
+        "noCredentialHelp": "DuckDuckGo は API キーを保存せずに使えます。",
         "apiKeyHelp": "config に保存され、保存後はマスク表示されます。",
-        "baseUrl": "Base URL",
+        "baseUrl": "ベース URL",
         "baseUrlHelp": "SearXNG には自分のインスタンス URL が必要です。",
         "baseUrlPlaceholder": "https://search.example.com",
-        "apiKeyRequired": "この検索 provider には API key が必要です。",
-        "baseUrlRequired": "SearXNG には Base URL が必要です。",
+        "apiKeyRequired": "この検索プロバイダーには API キーが必要です。",
+        "baseUrlRequired": "SearXNG にはベース URL が必要です。",
         "missingCredential": "保存する前に必要な認証情報を入力してください。",
-        "saveHint": "変更は新しい web search リクエストに適用されます。"
+        "saveHint": "変更は新しい Web 検索リクエストに適用されます。"
       }
     },
     "overview": {
@@ -310,13 +323,13 @@
       "workspace": "ワークスペース"
     },
     "usage": {
-      "title": "Token アクティビティ",
-      "shortTitle": "Token Usage",
-      "subtitle": "直近 12 か月にプロバイダーが報告した使用量。",
-      "empty": "新しいモデル返信の後に token アクティビティが表示されます。",
-      "totalTokens": "累計 Token 数",
-      "peakTokens": "ピーク Token 数",
-      "thirtyDayTokens": "30 日 Token 数",
+      "title": "トークンアクティビティ",
+      "shortTitle": "トークン使用量",
+      "subtitle": "直近 12 か月にプロバイダーが報告したトークン使用量。",
+      "empty": "新しいモデル返信の後にトークンアクティビティが表示されます。",
+      "totalTokens": "累計トークン数",
+      "peakTokens": "ピークトークン数",
+      "thirtyDayTokens": "30 日間のトークン数",
       "currentStreak": "現在の連続日数",
       "longestStreak": "最長連続日数",
       "daysValue": "{{count}} 日",
@@ -325,7 +338,7 @@
       "requests": "リクエスト",
       "estimated": "推定",
       "includesEstimates": "推定を含む",
-      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} 件のリクエスト",
+      "cellTitle": "{{date}}: {{tokens}} トークン、{{requests}} 件のリクエスト",
       "sources": {
         "user": "チャット",
         "api": "API",
@@ -358,8 +371,18 @@
       "selectProvider": "プロバイダーを選択",
       "selectAspect": "比率を選択",
       "selectSize": "サイズを選択",
+      "selectModel": "画像モデルを選択",
+      "searchOrTypeModel": "モデル ID を検索または入力",
+      "typeModelId": "このプロバイダーが対応するモデル ID を入力してください。",
       "configureProvider": "プロバイダーを設定",
       "missingCredential": "画像生成を有効にする前に、このプロバイダーを設定してください。"
+    },
+    "capabilities": {
+      "providerSupport": "プロバイダーサポート",
+      "providerInstallOnSave": "このプロバイダーを保存すると、必要なサポートが自動的にインストールされます。",
+      "searchSupport": "検索プロバイダーサポート",
+      "searchInstallOnSave": "保存時に Olostep のサポートが自動的にインストールされます。",
+      "installing": "サポートをインストール中..."
     },
     "models": {
       "selectModel": "モデルを選択",
@@ -383,7 +406,7 @@
       "advancedOptions": "詳細オプション",
       "advancedSummary": "コンテキスト {{context}} · 最大 {{max}} トークン",
       "maxTokens": "最大出力トークン",
-      "temperature": "Temperature",
+      "temperature": "温度",
       "reasoningEffort": "推論の強度",
       "convertTitle": "現在のモデル設定を変換",
       "convertHelp": "既存のプライマリモデルとフォールバックモデルをプリセットに変換し、ここで順序を管理できるようにします。",
@@ -473,9 +496,9 @@
       "serverUrl": "URL",
       "transport": "トランスポート",
       "command": "コマンド",
-      "args": "Args JSON",
-      "headers": "Headers JSON",
-      "env": "Env JSON",
+      "args": "引数 JSON",
+      "headers": "ヘッダー JSON",
+      "env": "環境変数 JSON",
       "timeout": "ツールのタイムアウト",
       "advancedOptions": "詳細オプション",
       "hideAdvanced": "詳細を隠す",
@@ -503,6 +526,7 @@
       "statusMissingCredentials": "キーが必要",
       "statusMissingDependency": "依存関係が必要",
       "statusComingSoon": "近日公開",
+      "comingSoon": "近日公開",
       "statusNotInstalled": "未有効",
       "toolScope": "ツール",
       "allTools": "すべて",
@@ -565,6 +589,8 @@
       "advanced": "詳細設定",
       "checkAndEnable": "確認して有効化",
       "checkConnection": "接続を確認",
+      "connectionChecks": "接続チェック",
+      "open": "開く",
       "checkedAndEnabled": "確認して有効化しました。",
       "checking": "確認中...",
       "checkOnly": "確認のみ",
@@ -660,6 +686,8 @@
       "protected": "保護済み",
       "editTitle": "自動タスクを編集",
       "save": "保存",
+      "commandCopied": "コピーしました",
+      "copyCommand": "コピー",
       "deleteTitle": "自動タスクを削除",
       "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
       "cancel": "キャンセル",
@@ -719,6 +747,7 @@
       "fields": {
         "name": "名前",
         "message": "メッセージ",
+        "command": "コマンド",
         "scheduleType": "スケジュール種別",
         "every": "間隔",
         "unit": "単位",
@@ -753,7 +782,7 @@
       "signInAgain": "再度サインイン",
       "signOut": "サインアウト",
       "signedInAs": "{{account}} としてサインイン済み",
-      "signInHelp": "このデバイスからサインインします。API key は config に保存されません。",
+      "signInHelp": "このデバイスからサインインします。API キーは設定に保存されません。",
       "remoteSignInHelp": "「サインイン」を選択して自分のコンピューターで xAI を開き、サインイン後に表示される認証コードを貼り付けてください。",
       "codexRemoteSignInHelp": "このブラウザーでサインインし、localhost の完全なコールバック URL を nanobot に貼り付けてください。",
       "signInRequired": "サインインが必要です",
@@ -877,34 +906,34 @@
     "actions": "「{{title}}」のトピック操作",
     "newInProject": "「{{project}}」で新しいトピックを開始",
     "activity": {
-      "running": "Agent running",
-      "complete": "Agent finished",
-      "updated": "New activity"
+      "running": "エージェント実行中",
+      "complete": "エージェント完了",
+      "updated": "新しいアクティビティ"
     },
-    "pin": "Pin",
-    "unpin": "Unpin",
-    "rename": "Rename",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "rename": "名前を変更",
     "renameTitle": "トピック名を変更",
     "renameDescription": "このトピックのサイドバー表示名を選択します。",
     "renamePlaceholder": "トピック名",
-    "renameProjectTitle": "Rename project",
-    "renameProjectDescription": "Choose a local sidebar name for this project.",
-    "renameProjectPlaceholder": "Project name",
-    "renameSave": "Save",
-    "archive": "Archive",
-    "unarchive": "Unarchive",
-    "showArchived": "Show archived",
-    "hideArchived": "Hide archived",
+    "renameProjectTitle": "プロジェクト名を変更",
+    "renameProjectDescription": "このプロジェクトのサイドバー表示名を選択します。",
+    "renameProjectPlaceholder": "プロジェクト名",
+    "renameSave": "保存",
+    "archive": "アーカイブ",
+    "unarchive": "アーカイブを解除",
+    "showArchived": "アーカイブ済みを表示",
+    "hideArchived": "アーカイブ済みを隠す",
     "delete": "削除",
     "newChat": "新しいトピック",
     "groups": {
-      "pinned": "Pinned",
+      "pinned": "ピン留め",
       "all": "トピック",
-      "projects": "Projects",
-      "today": "Today",
-      "yesterday": "Yesterday",
-      "earlier": "Earlier",
-      "archived": "Archived"
+      "projects": "プロジェクト",
+      "today": "今日",
+      "yesterday": "昨日",
+      "earlier": "以前",
+      "archived": "アーカイブ済み"
     }
   },
   "deleteConfirm": {
@@ -1109,7 +1138,7 @@
           },
           "stop": {
             "title": "現在のタスクを停止",
-            "description": "このチャットで実行中の agent ターンをキャンセルします。"
+            "description": "このチャットで実行中のエージェントのターンをキャンセルします。"
           },
           "restart": {
             "title": "nanobot を再起動",
@@ -1117,7 +1146,7 @@
           },
           "status": {
             "title": "ステータスを表示",
-            "description": "ランタイム、provider、channel の状態を表示します。"
+            "description": "ランタイム、プロバイダー、チャンネルの状態を表示します。"
           },
           "model": {
             "title": "モデル",
@@ -1195,7 +1224,9 @@
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}} をローカル CLI アプリとして使用",
-        "mcpDescription": "@{{name}} を MCP サーバーとして使用"
+        "mcpDescription": "@{{name}} を MCP サーバーとして使用",
+        "cliTitle": "CLI アプリ: {{name}}",
+        "mcpTitle": "MCP サーバー: {{name}}"
       },
       "workspace": {
         "accessAria": "ワークスペースのアクセスモード",
@@ -1215,7 +1246,8 @@
       "title": "プロンプト",
       "search": "プロンプトを検索",
       "noResults": "一致するプロンプトがありません。",
-      "jumpTo": "プロンプトへ移動: {{label}}"
+      "jumpTo": "プロンプトへ移動: {{label}}",
+      "railAria": "ユーザープロンプトのナビゲーション"
     }
   },
   "message": {
@@ -1239,6 +1271,14 @@
     "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
     "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
     "imageAttachment": "画像の添付",
+    "videoAttachment": "動画の添付",
+    "fileAttachment": "ファイルの添付",
+    "attachmentUnavailable": "添付ファイルを利用できません",
+    "dataTable": "データテーブル",
+    "fileEditPreparing": "ファイル編集を準備中…",
+    "openLink": "リンクを開く: {{label}}",
+    "openAttachment": "開く: {{name}}",
+    "skill": "スキル: {{name}}",
     "askAboutSelection": "この内容について質問",
     "forkFromHere": "分岐",
     "copyReply": "コピー",
@@ -1279,6 +1319,7 @@
   },
   "filePreview": {
     "aria": "ファイルプレビュー",
+    "breadcrumb": "ファイルパス",
     "close": "ファイルプレビューを閉じる",
     "loading": "プレビューを読み込み中...",
     "failed": "このファイルをプレビューできませんでした。",
@@ -1293,7 +1334,10 @@
     "copied": "コピーしました"
   },
   "common": {
-    "dismiss": "閉じる"
+    "dismiss": "閉じる",
+    "close": "閉じる",
+    "current": "現在",
+    "cancel": "キャンセル"
   },
   "errors": {
     "messageTooBig": {
