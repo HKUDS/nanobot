@@ -2395,3 +2395,13 @@ async def test_callback_query_handles_inaccessible_message() -> None:
     query.answer.assert_awaited_once()
     channel._handle_message.assert_awaited_once()
     assert channel._handle_message.await_args.kwargs["chat_id"] == "123"
+
+def test_markdown_to_html_code_block_special_chars_language() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html, _strip_md_block
+
+    text = "```c++\nint main() { return 0; }\n```"
+    html = _markdown_to_telegram_html(text)
+    assert html == "<pre><code>int main() { return 0; }\n</code></pre>"
+
+    stripped = _strip_md_block(text)
+    assert stripped == "int main() { return 0; }\n"
