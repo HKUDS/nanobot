@@ -100,6 +100,39 @@ Gateway-style setup for model IDs served through OpenRouter.
 
 Use the model ID exactly as OpenRouter lists it.
 
+### Eden AI Gateway
+
+Eden AI exposes an OpenAI-compatible chat-completions endpoint at
+`https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use
+the full `provider/model` identifier listed by Eden AI:
+
+```json
+{
+  "providers": {
+    "edenai": {
+      "apiKey": "${EDENAI_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "edenai",
+      "model": "anthropic/claude-sonnet-4-5",
+      "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged, including its provider prefix. Use
+Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
+to choose a currently available model. The WebUI can also load that catalog
+after the Eden AI API key is saved under **Settings → Models**.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
