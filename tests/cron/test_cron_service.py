@@ -127,6 +127,16 @@ def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     assert service.list_jobs(include_disabled=True) == []
 
 
+def test_validate_schedule_rejects_invalid_cron_expression(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    with pytest.raises(ValueError, match="invalid cron expression"):
+        service.add_job(
+            name="invalid cron test",
+            schedule=CronSchedule(kind="cron", expr="invalid cron expr"),
+            message="hello",
+        )
+    assert service.list_jobs(include_disabled=True) == []
+
 def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

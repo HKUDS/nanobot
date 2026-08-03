@@ -75,13 +75,27 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
 
-    if schedule.kind == "cron" and schedule.tz:
-        try:
-            from zoneinfo import ZoneInfo
+    if schedule.kind == "cron":
+        if not schedule.expr:
+            raise ValueError("cron schedule requires an expression (expr)")
+        from croniter import croniter
 
-            ZoneInfo(schedule.tz)
-        except Exception:
-            raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+        if not croniter.is_valid(schedule.expr):
+            raise ValueError(f"invalid cron expression '{schedule.expr}'")
+
+        if schedule.tz:
+            try:
+                from zoneinfo import ZoneInfo
+
+                ZoneInfo(schedule.tz)
+            except Exception:
+                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+    elif schedule.kind == "every":
+        if not schedule.every_ms or schedule.every_ms <= 0:
+            raise ValueError("every schedule requires a positive every_ms interval")
+    elif schedule.kind == "at":
+        if not schedule.at_ms or schedule.at_ms <= 0:
+            raise ValueError("at schedule requires a positive at_ms timestamp")
 
 
 def _has_legacy_delivery_context(payload: CronPayload) -> bool:
