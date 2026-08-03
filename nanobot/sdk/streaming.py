@@ -59,6 +59,8 @@ class RunStream:
                 if item is _STREAM_SENTINEL:
                     self._events_done = True
                     break
+                if not isinstance(item, StreamEvent):
+                    raise TypeError("SDK event queue contained an invalid item")
                 yield item
         finally:
             self._stream_active = False

@@ -7,8 +7,11 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import GoalStatusEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.providers.base import GenerationSettings, LLMResponse
-from nanobot.session.webui_turns import WebuiTurnCoordinator
+from nanobot.session import webui_turns as wth
+from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
+from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 
 
 def _make_loop(tmp_path):
@@ -30,8 +33,9 @@ def _make_loop(tmp_path):
     WebuiTurnCoordinator(
         bus=bus,
         sessions=loop.sessions,
-        schedule_background=lambda coro: loop._schedule_background(coro),
+        schedule_background=lambda coro: loop.schedule_background(coro),
     ).subscribe(loop.runtime_events)
+    loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
 
@@ -39,29 +43,51 @@ def _make_loop(tmp_path):
 @pytest.mark.asyncio
 async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-
-    response = await loop.process_direct(
-        "deliver reminder",
-        session_key="cron:reminder-1",
-        channel="websocket",
-        chat_id="chat-1",
+    gateway = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        loop.bus,
+        gateway=gateway,
     )
 
-    assert response is not None
-    assert response.content == "done"
+    try:
+        response = await loop.process_direct(
+            "deliver reminder",
+            session_key="cron:reminder-1",
+            channel="websocket",
+            chat_id="chat-1",
+        )
 
-    events = []
-    while loop.bus.outbound_size:
-        events.append(await loop.bus.consume_outbound())
+        assert response is not None
+        assert response.content == "done"
 
-    statuses = [
-        event.event
-        for event in events
-        if isinstance(event.event, GoalStatusEvent)
-    ]
-    assert [status.status for status in statuses] == ["running", "idle"]
-    assert isinstance(statuses[0].started_at, float)
-    assert statuses[1].started_at is None
+        events = []
+        while loop.bus.outbound_size:
+            event = await loop.bus.consume_outbound()
+            events.append(event)
+            await channel.send(event)
+
+        status_messages = [
+            event
+            for event in events
+            if isinstance(event.event, GoalStatusEvent)
+        ]
+        statuses = [event.event for event in status_messages]
+        assert [status.status for status in statuses] == ["running", "idle"]
+        assert isinstance(statuses[0].started_at, float)
+        assert statuses[1].started_at is None
+        owners = {
+            event.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+            for event in status_messages
+        }
+        assert len(owners) == 1
+        assert wth.websocket_turn_wall_started_at("chat-1") is None
+        assert "chat-1" not in wth._WEBSOCKET_ACTIVE_TURNS
+    finally:
+        wth._WEBSOCKET_ACTIVE_TURNS.clear()
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth._WEBSOCKET_TURN_IDS.clear()
+        wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
 @pytest.mark.asyncio

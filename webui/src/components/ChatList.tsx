@@ -2,6 +2,7 @@ import {
   memo,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -23,7 +24,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deriveTitle, relativeTime } from "@/lib/format";
+import {
+  SIDEBAR_SELECTION_ITEM_CLASS,
+  SidebarSelectionHighlight,
+} from "@/components/SidebarSelectionHighlight";
+import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,
@@ -102,6 +107,7 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
+  const activeRowRef = useRef<HTMLDivElement>(null);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -181,7 +187,13 @@ export const ChatList = memo(function ChatList({
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
-      <div className="min-w-0 space-y-3 px-2 py-1.5">
+      <SidebarSelectionHighlight
+        targetRef={activeRowRef}
+        activeId={activeKey}
+        scope="sessions"
+        data-chat-list-content
+        className="relative min-w-0 space-y-3 px-2 py-1.5"
+      >
         {limitedGroups.map((group, index) => {
           const foldableChatsGroup = isFoldableChatsGroup(group);
           const foldedChatsGroup = isFoldedChatsGroup(group, collapsedGroups);
@@ -194,7 +206,7 @@ export const ChatList = memo(function ChatList({
           const canToggleFold = group.sessions.length > COLLAPSED_CHATS_VISIBLE_COUNT;
 
           return (
-            <section key={group.id} aria-label={group.label}>
+            <section key={group.id} aria-label={group.label} className="relative z-[1]">
               {index === firstProjectGroupIndex ? (
                 <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
                   {labels.projects}
@@ -237,7 +249,7 @@ export const ChatList = memo(function ChatList({
                       deriveTitle(s.preview, fallbackTitle);
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
-                    const preview = s.preview.trim();
+                    const preview = visibleSessionPreview(s.preview);
                     const showPreview = showPreviews && preview && preview !== title;
                     const timestamp = showTimestamps
                       ? relativeTime(s.updatedAt ?? s.createdAt)
@@ -251,17 +263,21 @@ export const ChatList = memo(function ChatList({
                     return (
                       <li key={s.key} className="min-w-0">
                         <div
+                          ref={active ? activeRowRef : undefined}
+                          data-chat-row={s.key}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] transition-colors",
+                            "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
+                            SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             active
-                              ? "bg-sidebar-accent/70 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.28)]"
-                              : "text-sidebar-foreground/82 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                              ? "text-sidebar-accent-foreground"
+                              : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
                           )}
                         >
                           <button
                             type="button"
                             onClick={() => onSelect(s.key)}
+                            aria-current={active ? "page" : undefined}
                             title={tooltipTitle}
                             className={cn(
                               "min-w-0 flex-1 overflow-hidden text-left",
@@ -274,6 +290,7 @@ export const ChatList = memo(function ChatList({
                                 <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                   {title}
                                 </span>
+                                {isPinned ? <PinnedChatIndicator label={labels.pinned} /> : null}
                                 {timestamp ? (
                                   <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground/58">
                                     {timestamp}
@@ -281,8 +298,11 @@ export const ChatList = memo(function ChatList({
                                 ) : null}
                               </span>
                             ) : (
-                              <span className="block w-full truncate font-medium leading-5">
-                                {title}
+                              <span className="flex w-full min-w-0 items-center gap-1.5">
+                                <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                                  {title}
+                                </span>
+                                {isPinned ? <PinnedChatIndicator label={labels.pinned} /> : null}
                               </span>
                             )}
                             {showPreview ? (
@@ -375,7 +395,7 @@ export const ChatList = memo(function ChatList({
           );
         })}
         {hiddenSessionCount > 0 ? (
-          <div className="px-2 pb-2 pt-1">
+          <div className="relative z-[1] px-2 pb-2 pt-1">
             <button
               type="button"
               onClick={() =>
@@ -389,7 +409,7 @@ export const ChatList = memo(function ChatList({
             </button>
           </div>
         ) : null}
-      </div>
+      </SidebarSelectionHighlight>
     </div>
   );
 });
@@ -488,6 +508,18 @@ function ChatsGroupHeader({ label }: { label: string }) {
   );
 }
 
+function PinnedChatIndicator({ label }: { label: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      title={label}
+      className="inline-flex shrink-0 items-center text-muted-foreground/65"
+    >
+      <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+    </span>
+  );
+}
+
 function ChatsFoldFooter({
   folded,
   hiddenCount,
@@ -500,7 +532,7 @@ function ChatsFoldFooter({
   const { t, i18n } = useTranslation();
   const collapsedFallback = i18n.resolvedLanguage?.startsWith("zh")
     ? `已折叠 ${hiddenCount} 个对话`
-    : `${hiddenCount} hidden chats`;
+    : `${hiddenCount} hidden topics`;
 
   return (
     <div className="px-2 pb-1 pt-1">

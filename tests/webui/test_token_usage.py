@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -12,6 +13,60 @@ from nanobot.webui.token_usage import (
     record_token_usage,
     token_usage_payload,
 )
+
+
+def _write_state(tmp_path, days: dict) -> None:
+    state_dir = tmp_path / "webui"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "token-usage.json").write_text(
+        json.dumps({"days": days}), encoding="utf-8"
+    )
+
+
+def test_payload_tolerates_malformed_persisted_day_keys(tmp_path, monkeypatch) -> None:
+    """Day keys that are not real dates must not break settings payloads.
+
+    normalize_token_usage_state only length-checks day keys, so a hand-edited
+    10-char key survives reads and atomic rewrites; token_usage_payload then
+    parsed it with an unguarded fromisoformat, failing every /api/settings and
+    /api/settings/usage request until the file was fixed by hand.
+    """
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    _write_state(tmp_path, {
+        "not-a-dat3": {"total_tokens": 7, "requests": 1},
+        "2026-13-01": {"total_tokens": 9, "requests": 1},
+        "2026-06-02": {"total_tokens": 5, "requests": 1},
+    })
+
+    payload = token_usage_payload(
+        timezone_name="UTC",
+        now=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert payload["total_tokens"] == 5
+    assert payload["total_tokens_30d"] == 5
+    assert payload["requests_30d"] == 1
+    assert payload["active_days_30d"] == 1
+
+
+def test_record_scrubs_malformed_day_keys(tmp_path, monkeypatch) -> None:
+    """Rewrites drop malformed day keys instead of persisting them forever."""
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    _write_state(tmp_path, {
+        "not-a-dat3": {"total_tokens": 7, "requests": 1},
+        "2026-06-02": {"total_tokens": 5, "requests": 1},
+    })
+
+    record_token_usage(
+        {"prompt_tokens": 1, "completion_tokens": 1},
+        timezone_name="UTC",
+        now=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    raw = json.loads((tmp_path / "webui" / "token-usage.json").read_text(encoding="utf-8"))
+    assert "not-a-dat3" not in raw["days"]
+    assert "2026-06-02" in raw["days"]
+    assert "2026-06-03" in raw["days"]
 
 
 def test_record_token_usage_aggregates_by_local_day(tmp_path, monkeypatch) -> None:

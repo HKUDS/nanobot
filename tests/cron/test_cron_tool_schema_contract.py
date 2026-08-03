@@ -9,9 +9,11 @@ and tightens the runtime error for ``add`` without ``message``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.registry import ToolRegistry
 
@@ -39,14 +41,14 @@ class _SvcStub:
 
 
 @pytest.fixture
-def registry() -> ToolRegistry:
+def registry() -> Iterator[ToolRegistry]:
     tool = CronTool(_SvcStub(), default_timezone="UTC")
-    tool.set_context(
-        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
-    )
     reg = ToolRegistry()
     reg.register(tool)
-    return reg
+    with request_context(
+        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
+    ):
+        yield reg
 
 
 class TestSchemaContract:

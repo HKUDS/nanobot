@@ -66,6 +66,7 @@ so nanobot can link it to the correct session and workspace.
 
 ## Related nanobot docs
 
+- [Automations](../automations.md)
 - [WebUI Automations](../webui.md#automations)
 - [Chat Commands](../chat-commands.md)
 - [Memory](../memory.md)

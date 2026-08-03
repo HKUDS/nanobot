@@ -13,12 +13,29 @@ from nanobot.security.network import (
     contains_internal_url,
     env_proxy_applies_to_url,
     httpx_env_proxy_mounts,
+    is_loopback_host,
     pin_resolved_url_dns,
     resolve_url_target,
     validate_url_target,
 )
 
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["localhost", "LOCALHOST.", "127.0.0.1", "127.0.0.2", "::1", "[::1]"],
+)
+def test_is_loopback_host_accepts_explicit_loopback(host: str) -> None:
+    assert is_loopback_host(host)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "::", "192.168.1.10", "api.internal", "example.com"],
+)
+def test_is_loopback_host_rejects_network_targets(host: str) -> None:
+    assert not is_loopback_host(host)
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +148,7 @@ def test_blocks_sampled_addresses_from_internal_networks():
         "169.254.0.0/16",
         "172.16.0.0/12",
         "192.168.0.0/16",
+        "::/128",
         "::1/128",
         "fc00::/7",
         "fe80::/10",
@@ -175,6 +193,47 @@ def test_resolve_url_target_returns_validated_public_ips():
 
     assert ok, err
     assert resolved_ips == ("93.184.216.34",)
+
+
+@pytest.mark.parametrize(
+    ("trust_remote_dns", "expected_ok"),
+    [(False, False), (True, True)],
+)
+def test_resolve_url_target_only_delegates_dns_to_trusted_proxy(
+    trust_remote_dns: bool,
+    expected_ok: bool,
+):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, err, resolved_ips = resolve_url_target(
+            "https://proxy-only.example/image.png",
+            trust_remote_dns=trust_remote_dns,
+        )
+
+    assert ok is expected_ok, err
+    assert resolved_ips == ()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/secret",
+        "http://service.localhost/secret",
+        "http://127.0.0.1/secret",
+        "http://169.254.169.254/latest",
+        "http://[::1]/secret",
+    ],
+)
+def test_resolve_url_target_does_not_delegate_local_targets(url: str):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, _, _ = resolve_url_target(url, trust_remote_dns=True)
+
+    assert not ok
 
 
 def test_pin_resolved_url_dns_prevents_second_resolution_rebind():

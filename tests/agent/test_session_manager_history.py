@@ -1,3 +1,9 @@
+from nanobot.providers.base import ProviderConversationState
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -425,6 +431,55 @@ def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     }]
 
 
+def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
+    content, marker = append_runtime_context(
+        "please use @drawio",
+        [RuntimeContextBlock(
+            source="cli_apps",
+            content="[Runtime Context]\nCLI App Attachment: @drawio",
+        )],
+    )
+    session = Session(key="test:cli-app-persisted")
+    session.messages.append({
+        "role": "user",
+        "content": content,
+        "cli_apps": [{
+            "name": "drawio",
+            "entry_point": "cli-anything-drawio",
+        }],
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    })
+
+    model_history = session.get_history(max_messages=500)
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert model_history == [{"role": "user", "content": content}]
+    assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
+    assert public_history == [{"role": "user", "content": "please use @drawio"}]
+
+
+def test_public_history_omits_cli_app_breadcrumb():
+    session = Session(key="test:legacy-capabilities")
+    session.messages.append({
+        "role": "user",
+        "content": "please use the attachments",
+        "cli_apps": [{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+    })
+
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert public_history == [{
+        "role": "user",
+        "content": "please use the attachments",
+    }]
+
+
 def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")
@@ -451,6 +506,40 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert "goal_state" not in forked.metadata
     saved = manager.read_session_file("websocket:fork")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+
+
+def test_fork_session_drops_source_runtime_context(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    content, marker = append_runtime_context(
+        "round1",
+        [
+            RuntimeContextBlock(source="goal", content="host-only goal guidance"),
+            RuntimeContextBlock(source="cli_apps", content="attached CLI App context"),
+        ],
+    )
+    source.add_message(
+        "user",
+        content,
+        cli_apps=[{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert forked.messages[0]["content"] == "round1"
+    assert RUNTIME_CONTEXT_HISTORY_META not in forked.messages[0]
+    model_content = forked.get_history()[0]["content"]
+    assert model_content.startswith("round1")
+    assert "CLI App Attachment: @drawio" in model_content
+    assert "host-only goal guidance" not in model_content
 
 
 def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
@@ -681,7 +770,16 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
 def test_retain_recent_legal_suffix_returns_dropped_messages():
     """retain_recent_legal_suffix returns the actually-dropped messages."""
-    session = Session(key="test:return-dropped")
+    session = Session(
+        key="test:return-dropped",
+        provider_state=ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="test-model",
+            version=1,
+            payload={"items": []},
+        ),
+    )
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
@@ -691,11 +789,19 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
     assert result.already_consolidated_count == 0
+    assert session.provider_state is None
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     """No messages dropped → empty list returned."""
-    session = Session(key="test:no-drop")
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
+    session = Session(key="test:no-drop", provider_state=state)
     for i in range(3):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
@@ -704,6 +810,7 @@ def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     assert result.dropped == []
     assert result.already_consolidated_count == 0
     assert len(session.messages) == 3
+    assert session.provider_state is state
 
 
 def test_retain_recent_legal_suffix_returns_all_on_zero():

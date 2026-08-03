@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
   findPromptElement,
-  jumpToPrompt,
   type PromptAnchor,
   promptTop,
   userPromptAnchors,
@@ -13,6 +12,7 @@ import {
 interface PromptRailProps {
   bottomOffset: number;
   messages: UIMessage[];
+  onJumpToPrompt: (promptId: string) => void;
   scrollRef: RefObject<HTMLDivElement>;
 }
 
@@ -46,9 +46,11 @@ const HOVER_MARKER_WIDTHS_PX = [28, 22, 16, 11];
 export function PromptRail({
   bottomOffset,
   messages,
+  onJumpToPrompt,
   scrollRef,
 }: PromptRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
+  const measuredPromptsRef = useRef<MeasuredPrompt[]>([]);
   const promptAnchors = useMemo(() => userPromptAnchors(messages), [messages]);
   const [markers, setMarkers] = useState<PromptMarker[]>([]);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function PromptRail({
     const nextRailHeight = railRef.current?.clientHeight ?? 0;
 
     if (!scrollEl || promptAnchors.length < MIN_PROMPTS_FOR_RAIL) {
+      measuredPromptsRef.current = [];
       setMarkers([]);
       setActivePromptId(null);
       return;
@@ -66,16 +69,25 @@ export function PromptRail({
 
     const scrollRange = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (scrollRange < RAIL_MIN_SCROLL_RANGE_PX) {
+      measuredPromptsRef.current = [];
       setMarkers([]);
       setActivePromptId(null);
       return;
     }
 
     const measured = measurePrompts(scrollEl, promptAnchors, scrollRange);
+    measuredPromptsRef.current = measured;
     const grouped = groupPromptMarkers(measured, nextRailHeight);
     setMarkers(distributeMarkerPositions(grouped, nextRailHeight));
     setActivePromptId(activePromptForScroll(measured, scrollEl.scrollTop));
   }, [promptAnchors, scrollRef]);
+
+  const updateActivePrompt = useCallback(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    const next = activePromptForScroll(measuredPromptsRef.current, scrollEl.scrollTop);
+    setActivePromptId((current) => current === next ? current : next);
+  }, [scrollRef]);
 
   useEffect(() => {
     let frame = 0;
@@ -95,20 +107,26 @@ export function PromptRail({
     const scrollEl = scrollRef.current;
     if (!scrollEl) return undefined;
 
-    let frame = 0;
-    const schedule = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(updateMarkers);
+    let scrollFrame = 0;
+    let resizeFrame = 0;
+    const scheduleActivePrompt = () => {
+      window.cancelAnimationFrame(scrollFrame);
+      scrollFrame = window.requestAnimationFrame(updateActivePrompt);
+    };
+    const scheduleMeasurement = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(updateMarkers);
     };
 
-    scrollEl.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
+    scrollEl.addEventListener("scroll", scheduleActivePrompt, { passive: true });
+    window.addEventListener("resize", scheduleMeasurement);
     return () => {
-      window.cancelAnimationFrame(frame);
-      scrollEl.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
+      window.cancelAnimationFrame(scrollFrame);
+      window.cancelAnimationFrame(resizeFrame);
+      scrollEl.removeEventListener("scroll", scheduleActivePrompt);
+      window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [scrollRef, updateMarkers]);
+  }, [scrollRef, updateActivePrompt, updateMarkers]);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -142,7 +160,7 @@ export function PromptRail({
             key={marker.ids.join("|")}
             type="button"
             aria-label={`Jump to prompt: ${marker.label}`}
-            onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
+            onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
             onBlur={() => setFocusedMarkerIndex(null)}
             onFocus={() => setFocusedMarkerIndex(index)}
             onPointerEnter={() => setFocusedMarkerIndex(index)}
@@ -170,8 +188,8 @@ export function PromptRail({
               aria-hidden
               className={cn(
                 "pointer-events-none absolute left-10 top-1/2 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
-                "border border-border/70 bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
-                "dark:border-white/10 dark:bg-[#2f2f2f]/95 dark:text-white dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
+                "bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
+                "dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
                 "-translate-x-2 scale-[0.98] opacity-0 transition-[opacity,transform] duration-150",
                 "group-hover/marker:translate-x-0 group-hover/marker:scale-100 group-hover/marker:opacity-100",
                 "group-focus-visible/marker:translate-x-0 group-focus-visible/marker:scale-100 group-focus-visible/marker:opacity-100",
@@ -309,16 +327,20 @@ function activePromptForScroll(
   scrollTop: number,
 ): string | null {
   if (measured.length === 0) return null;
-  let active = measured[0];
   const cursor = scrollTop + 96;
-  for (const prompt of measured) {
-    if (prompt.top <= cursor) {
-      active = prompt;
-      continue;
+  let lower = 0;
+  let upper = measured.length - 1;
+  let activeIndex = 0;
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    if (measured[middle].top <= cursor) {
+      activeIndex = middle;
+      lower = middle + 1;
+    } else {
+      upper = middle - 1;
     }
-    break;
   }
-  return active.id;
+  return measured[activeIndex].id;
 }
 
 function groupedPromptLabel(count: number, latestLabel: string): string {

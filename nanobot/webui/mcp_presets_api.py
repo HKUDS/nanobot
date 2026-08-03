@@ -14,7 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, cast
 
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
@@ -187,6 +187,25 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
             "Uses Firecrawl Keyless through the hosted MCP endpoint. No API key is required for "
             "the built-in preset; use a custom MCP server URL if you want account-specific limits."
         ),
+    ),
+    McpPreset(
+        name="parallel-search",
+        display_name="Parallel Search",
+        category="web",
+        description="Search the web and fetch relevant page content through Parallel's hosted MCP server.",
+        docs_url="https://docs.parallel.ai/integrations/mcp/search-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="parallel.ai",
+        brand_color="#111827",
+        requires="Network access",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://search.parallel.ai/mcp",
+            tool_timeout=60,
+            enabled_tools=["web_search", "web_fetch"],
+        ),
+        note="Free anonymous access for light use; no API key is required.",
     ),
     McpPreset(
         name="exa",
@@ -436,9 +455,10 @@ def normalize_mcp_preset_mentions(raw: Any) -> list[dict[str, Any]]:
     known = _known_mcp_names()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in raw[:8]:
-        if not isinstance(item, dict):
+    for item_value in cast(list[object], raw)[:8]:
+        if not isinstance(item_value, dict):
             continue
+        item = cast(dict[str, Any], item_value)
         name = _clip_ws_string(item.get("name"), 64)
         if not name or _MCP_PRESET_NAME_RE.match(name) is None:
             continue
@@ -940,7 +960,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
         "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
     )
     if status == "missing_credentials":
-        last_action = {
+        last_action: dict[str, Any] = {
             "ok": False,
             "message": f"{display_name} is missing required credentials.",
             "error": "missing credentials",
@@ -969,7 +989,11 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
             timeout=_test_timeout(cfg),
         )
         tool_prefix = f"mcp_{name}_"
-        tool_names = sorted(name for name in registry.tool_names if name.startswith(tool_prefix))
+        tool_names = sorted(
+            tool_name
+            for tool_name in registry.tool_names
+            if tool_name.startswith(tool_prefix)
+        )
         ok = name in stacks
         if ok:
             last_action = {
@@ -1014,7 +1038,8 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
     finally:
         await _close_mcp_stacks(stacks)
 
-    preview = {name: last_action.get("tool_names", [])} if last_action.get("tool_names") else None
+    tool_names = last_action.get("tool_names", [])
+    preview = {name: tool_names} if tool_names else None
     return mcp_presets_payload(last_action=last_action, tool_preview=preview)
 
 
@@ -1031,8 +1056,10 @@ def _parse_string_list(raw: str | None) -> list[str]:
     if raw is None or not raw.strip():
         return []
     parsed = _parse_json_value(raw, fallback=None)
-    if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
-        return [item for item in parsed if item.strip()]
+    if isinstance(parsed, list):
+        items = cast(list[object], parsed)
+        if all(isinstance(item, str) for item in items):
+            return [item for item in cast(list[str], items) if item.strip()]
     if isinstance(parsed, str):
         return shlex.split(parsed)
     raise McpPresetError("expected a JSON string array")
@@ -1043,7 +1070,7 @@ def _parse_string_map(raw: str | None) -> dict[str, str]:
     if not isinstance(parsed, dict):
         raise McpPresetError("expected a JSON object")
     out: dict[str, str] = {}
-    for key, value in parsed.items():
+    for key, value in cast(dict[object, object], parsed).items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise McpPresetError("JSON object values must be strings")
         if key.strip():
@@ -1122,42 +1149,56 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     server_name = _validated_server_name(name)
     if not isinstance(raw, Mapping):
         raise McpPresetError(f"MCP server '{server_name}' must be an object")
-    command = str(raw.get("command") or "").strip()
-    url = str(raw.get("url") or "").strip()
-    transport_value = str(raw.get("type", raw.get("transport", "")) or "")
+    server = cast(Mapping[str, Any], raw)
+    command = str(server.get("command") or "").strip()
+    url = str(server.get("url") or "").strip()
+    transport_value = str(server.get("type", server.get("transport", "")) or "")
     transport = _normalize_transport(transport_value, command=command, url=url)
     if transport == "stdio" and not command:
         raise McpPresetError(f"MCP server '{server_name}' stdio transport requires a command")
     if transport in {"sse", "streamableHttp"} and not url:
         raise McpPresetError(f"MCP server '{server_name}' remote transport requires a URL")
-    args = raw.get("args") or []
-    env = raw.get("env") or {}
-    headers = raw.get("headers") or {}
-    cwd = str(raw.get("cwd") or "").strip()
-    enabled_tools = raw.get("enabledTools", raw.get("enabled_tools", ["*"]))
-    tool_timeout = raw.get("toolTimeout", raw.get("tool_timeout", _DEFAULT_CUSTOM_TIMEOUT))
+    args_value: object = server.get("args") or []
+    env_value: object = server.get("env") or {}
+    headers_value: object = server.get("headers") or {}
+    cwd = str(server.get("cwd") or "").strip()
+    enabled_tools_value: object = server.get("enabledTools", server.get("enabled_tools", ["*"]))
+    tool_timeout: object = server.get("toolTimeout", server.get("tool_timeout", _DEFAULT_CUSTOM_TIMEOUT))
     try:
-        timeout_int = max(5, min(int(tool_timeout), 600))
+        timeout_int = max(5, min(int(cast(Any, tool_timeout)), 600))
     except (TypeError, ValueError):
         timeout_int = _DEFAULT_CUSTOM_TIMEOUT
-    if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+    if not isinstance(args_value, list):
         raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
-    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+    args = cast(list[object], args_value)
+    if not all(isinstance(item, str) for item in args):
+        raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
+    if not isinstance(env_value, dict):
         raise McpPresetError(f"MCP server '{server_name}' env must be a string object")
-    if not isinstance(headers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+    env = cast(dict[object, object], env_value)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        raise McpPresetError(f"MCP server '{server_name}' env must be a string object")
+    if not isinstance(headers_value, dict):
         raise McpPresetError(f"MCP server '{server_name}' headers must be a string object")
-    if not isinstance(enabled_tools, list) or not all(isinstance(item, str) for item in enabled_tools):
-        enabled_tools = ["*"]
+    headers = cast(dict[object, object], headers_value)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+        raise McpPresetError(f"MCP server '{server_name}' headers must be a string object")
+    if not isinstance(enabled_tools_value, list):
+        enabled_tools_value = ["*"]
+    else:
+        enabled_tools = cast(list[object], enabled_tools_value)
+        if not all(isinstance(item, str) for item in enabled_tools):
+            enabled_tools_value = ["*"]
     return server_name, MCPServerConfig(
         type=transport,
         command=command if transport == "stdio" else "",
-        args=args,
-        env=dict(env),
+        args=cast(list[str], args),
+        env=cast(dict[str, str], env),
         cwd=cwd if transport == "stdio" else "",
         url=url if transport in {"sse", "streamableHttp"} else "",
-        headers=dict(headers),
+        headers=cast(dict[str, str], headers),
         tool_timeout=timeout_int,
-        enabled_tools=list(enabled_tools),
+        enabled_tools=cast(list[str], enabled_tools_value),
     )
 
 
@@ -1165,11 +1206,12 @@ def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
     parsed = _parse_json_value(raw_json, fallback=None)
     if not isinstance(parsed, Mapping):
         raise McpPresetError("MCP config must be a JSON object")
-    servers = parsed.get("mcpServers", parsed)
+    parsed_mapping = cast(Mapping[str, Any], parsed)
+    servers: object = parsed_mapping.get("mcpServers", parsed_mapping)
     if not isinstance(servers, Mapping):
         raise McpPresetError("MCP config must contain mcpServers")
     out: dict[str, MCPServerConfig] = {}
-    for name, raw_server in servers.items():
+    for name, raw_server in cast(Mapping[object, object], servers).items():
         if not isinstance(name, str):
             raise McpPresetError("MCP server names must be strings")
         server_name, cfg = _mcp_server_config(name, raw_server)

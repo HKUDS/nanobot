@@ -1,0 +1,35 @@
+{
+  "description": "Utilisez nanobot depuis les conversations WeChat.",
+  "requirements": "Configuration du canal WeChat et passerelle",
+  "setup": {
+    "primaryAction": "Connecter WeChat",
+    "docsLabel": "Ouvrir le guide WeChat",
+    "officialLabel": "Ouvrir WeChat",
+    "tryIt": "Après la connexion par QR code, envoyez un message privé au compte connecté.",
+    "summary": "WeChat se connecte par QR code et enregistre localement l’état du compte.",
+    "steps": [
+      "Cliquez sur Connecter et scannez le QR code avec WeChat.",
+      "Gardez la passerelle locale active pendant la réception des messages.",
+      "Envoyez un message privé test pour confirmer la connexion."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "token": {
+        "label": "Jeton",
+        "placeholder": "Enregistré après la connexion QR"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "QR code de connexion WeChat",
+    "scanTitle": "Scanner avec WeChat",
+    "scanDescription": "Scannez ce code avec WeChat. nanobot enregistre localement l’état du compte après la connexion.",
+    "waiting": "En attente du scan WeChat...",
+    "connected": "WeChat est connecté.",
+    "stopped": "Connexion WeChat arrêtée.",
+    "connecting": "Connexion..."
+  }
+}

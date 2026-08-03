@@ -11,12 +11,12 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { FileReferenceChip } from "@/components/FileReferenceChip";
+import { codeLanguageFromPath } from "@/lib/code-language";
 import {
   hasRenderableFileDiff,
   parseRenderableFileDiff,
   type RenderableFileDiff,
   type RenderableFileDiffHunk,
-  type RenderableFileDiffLine,
 } from "@/lib/file-diff";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import type { UIFileDiff, UIFileEdit } from "@/lib/types";
@@ -24,11 +24,10 @@ import { cn } from "@/lib/utils";
 
 import { ActivityStep } from "./ActivityStep";
 import { DiffPair } from "./DiffPair";
+import { DiffSyntaxHighlight } from "./DiffSyntaxHighlight";
 
 const INITIAL_VISIBLE_DIFF_LINES = 160;
 const AUTO_COLLAPSE_DIFF_LINES = INITIAL_VISIBLE_DIFF_LINES;
-
-type DiffFileEditDisplayMode = Exclude<FileEditDisplayMode, "summary">;
 
 interface VisibleDiffHunk {
   hunk: RenderableFileDiffHunk;
@@ -61,73 +60,23 @@ export function FileEditGroup({
   edits,
   displayMode,
   onOpenFilePreview,
-  density = "default",
 }: {
   edits: FileEditSummary[];
   displayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
-  density?: "default" | "diff-only";
 }) {
   if (edits.length === 0) return null;
   return (
-    <ul className="space-y-1">
-      {edits.map((edit) => {
-        if (density === "diff-only" && canRenderDiff(edit, displayMode)) {
-          return (
-            <FileEditDiffOnly
-              key={edit.key}
-              edit={edit}
-              displayMode={displayMode}
-              onOpenFilePreview={onOpenFilePreview}
-            />
-          );
-        }
-        return (
-          <FileEditRow
-            key={edit.key}
-            edit={edit}
-            displayMode={displayMode}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        );
-      })}
-    </ul>
-  );
-}
-
-function canRenderDiff(
-  edit: FileEditSummary,
-  displayMode: FileEditDisplayMode,
-): displayMode is DiffFileEditDisplayMode {
-  return (
-    displayMode !== "summary"
-    && edit.status !== "editing"
-    && edit.status !== "error"
-    && hasRenderableFileDiff(edit.diff)
-  );
-}
-
-function FileEditDiffOnly({
-  edit,
-  displayMode,
-  onOpenFilePreview,
-}: {
-  edit: FileEditSummary;
-  displayMode: DiffFileEditDisplayMode;
-  onOpenFilePreview?: (path: string) => void;
-}) {
-  return (
-    <li className="min-w-0 py-0.5">
-      <FileUnifiedDiff
-        diff={edit.diff!}
-        collapsed={displayMode === "collapsed_diff"}
-        added={edit.added}
-        deleted={edit.deleted}
-        showCollapsedStats={false}
-        previewPath={edit.absolute_path || edit.path}
-        onOpenFilePreview={onOpenFilePreview}
-      />
-    </li>
+    <>
+      {edits.map((edit) => (
+        <FileEditRow
+          key={edit.key}
+          edit={edit}
+          displayMode={displayMode}
+          onOpenFilePreview={onOpenFilePreview}
+        />
+      ))}
+    </>
   );
 }
 
@@ -143,13 +92,9 @@ function FileEditRow({
   const { t } = useTranslation();
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
+  const action = fileEditAction(edit, editing, failed);
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
-  const rawFailureDetail = failed ? cleanFileEditError(edit.error) : "";
-  const failureDetail = failed
-    ? formatFileEditError(edit.error)
-      || t("message.fileEditFailedFallback", { defaultValue: "File change was not applied." })
-    : "";
   const statusIcon = failed ? (
     <AlertCircle className="h-3 w-3" aria-hidden />
   ) : editing ? (
@@ -157,60 +102,56 @@ function FileEditRow({
   ) : (
     <CheckCircle2 className="h-3 w-3" aria-hidden />
   );
+
   return (
-    <ActivityStep
-      as="li"
-      marker={(
-        <span
-          className={cn(
-            "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-            failed && "border-destructive/30 text-destructive/78",
-            editing && "border-muted-foreground/24 text-muted-foreground/65",
-            !failed && !editing && "border-emerald-500/28 text-emerald-500/78",
-          )}
-        >
-          {statusIcon}
-        </span>
-      )}
-      active={editing}
-      tone={failed ? "error" : editing ? "active" : "success"}
-      className="text-xs"
-      contentClassName={failed || showDiff ? "min-w-0" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"}
-      title={rawFailureDetail || edit.absolute_path || edit.path}
-      label={edit.pending && !edit.path
-        ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
-        : (
-          <FileReferenceChip
-            path={edit.path}
-            tooltipPath={edit.absolute_path}
-            previewPath={edit.absolute_path || edit.path}
-            onOpen={onOpenFilePreview}
-            display="path"
-            active={editing}
-            className="min-w-0"
-            textClassName="text-[12px]"
-            testId="activity-file-reference"
-          />
+    <div className="min-w-0">
+      <ActivityStep
+        marker={(
+          <span
+            className={cn(
+              "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
+              failed && "border-destructive/30 text-destructive/78",
+              editing && "border-muted-foreground/24 text-muted-foreground/65",
+              !failed && !editing && "border-emerald-500/28 text-emerald-500/78",
+            )}
+          >
+            {statusIcon}
+          </span>
         )}
-      detail={null}
-      aside={hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
-    >
-      {failed ? (
-        <span className="block max-w-[42rem] truncate text-[11px] leading-4 text-destructive/75">
-          {failureDetail}
-        </span>
-      ) : null}
+        active={editing}
+        tone={failed ? "error" : editing ? "active" : "success"}
+        className="text-xs"
+        ariaLabel={edit.path ? `${action} ${edit.path}` : action}
+        label={edit.pending && !edit.path
+          ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
+          : (
+            <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+              <span className="shrink-0">{action}</span>
+              <FileReferenceChip
+                path={edit.path}
+                previewPath={edit.absolute_path || edit.path}
+                onOpen={onOpenFilePreview}
+                display="path"
+                active={editing}
+                className="min-w-0"
+                textClassName="truncate text-[12px]"
+                testId="activity-file-reference"
+              />
+              {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
+            </span>
+          )}
+      />
       {showDiff ? (
-        <FileUnifiedDiff
-          diff={edit.diff!}
-          collapsed={displayMode === "collapsed_diff"}
-          added={edit.added}
-          deleted={edit.deleted}
-          previewPath={edit.absolute_path || edit.path}
-          onOpenFilePreview={onOpenFilePreview}
-        />
+        <div className="ml-[2.125rem] min-w-0">
+          <FileUnifiedDiff
+            diff={edit.diff!}
+            collapsed={displayMode === "collapsed_diff"}
+            previewPath={edit.absolute_path || edit.path}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </div>
       ) : null}
-    </ActivityStep>
+    </div>
   );
 }
 
@@ -218,46 +159,30 @@ export function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "delet
   return edit.added > 0 || edit.deleted > 0;
 }
 
-function cleanFileEditError(error?: string): string {
-  const firstLine = (error || "").replace(/\s+/g, " ").trim();
-  if (!firstLine) return "";
-  return firstLine
-    .replace(/^Error applying patch:\s*/i, "")
-    .replace(/^Error writing file:\s*/i, "")
-    .replace(/^Error editing file:\s*/i, "")
-    .replace(/^Error:\s*/i, "");
+function fileEditAction(edit: FileEditSummary, editing: boolean, failed: boolean): string {
+  const deleting = edit.operation === "delete";
+  if (failed) return deleting ? "Could not delete" : "Could not edit";
+  if (editing) return deleting ? "Deleting" : "Editing";
+  return deleting ? "Deleted" : "Edited";
 }
 
-function formatFileEditError(error?: string): string {
-  const cleaned = cleanFileEditError(error);
-  if (!cleaned) return "";
-
-  if (/\bpermission denied\b/i.test(cleaned) || /\boperation not permitted\b/i.test(cleaned)) {
-    return "No permission to change this location.";
-  }
-
-  return cleaned
-    .replace(/^old_text not found in (.+)$/i, "Target text was not found in $1.")
-    .replace(/^old_text appears multiple times in (.+)$/i, "Target text matched multiple places in $1.")
-    .replace(/^file to (?:update|delete) does not exist: (.+)$/i, "File does not exist: $1.")
-    .replace(/^path to (?:update|delete) is not a file: (.+)$/i, "Path is not a file: $1.")
-    .slice(0, 180);
+function canRenderDiff(edit: FileEditSummary, displayMode: FileEditDisplayMode): boolean {
+  return (
+    displayMode !== "summary"
+    && edit.status !== "editing"
+    && edit.status !== "error"
+    && hasRenderableFileDiff(edit.diff)
+  );
 }
 
 function FileUnifiedDiff({
   diff,
   collapsed,
-  added,
-  deleted,
-  showCollapsedStats = true,
   previewPath,
   onOpenFilePreview,
 }: {
   diff: UIFileDiff;
   collapsed: boolean;
-  added: number;
-  deleted: number;
-  showCollapsedStats?: boolean;
   previewPath?: string;
   onOpenFilePreview?: (path: string) => void;
 }) {
@@ -266,6 +191,7 @@ function FileUnifiedDiff({
   const [open, setOpen] = useState(false);
   const [expandedLines, setExpandedLines] = useState(false);
   const renderableDiff = useMemo(() => parseRenderableFileDiff(diff), [diff]);
+  const language = useMemo(() => codeLanguageFromPath(previewPath), [previewPath]);
   const totalLineCount = useMemo(() => countDiffLines(renderableDiff), [renderableDiff]);
   const shouldAutoCollapse = totalLineCount > AUTO_COLLAPSE_DIFF_LINES || !!diff.truncated;
   const startsCollapsed = collapsed || shouldAutoCollapse;
@@ -312,16 +238,7 @@ function FileUnifiedDiff({
         >
           {skippedBefore > 0 ? <DiffHunkGap lineCount={skippedBefore} /> : null}
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse font-mono text-[11px] leading-5">
-              <tbody>
-                {hunk.lines.map((line, lineIndex) => (
-                  <DiffLineRow
-                    key={`${line.old_lineno ?? ""}:${line.new_lineno ?? ""}:${lineIndex}`}
-                    line={line}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <DiffSyntaxHighlight language={language} lines={hunk.lines} />
           </div>
         </div>
       ))}
@@ -406,7 +323,6 @@ function FileUnifiedDiff({
         />
         <span className="min-w-0 flex-1">{viewDiffLabel}</span>
         <span className="shrink-0 text-muted-foreground/65">{lineCountLabel}</span>
-        {showCollapsedStats ? <DiffPair added={added} deleted={deleted} /> : null}
       </button>
       {open ? renderBody() : null}
     </div>
@@ -483,39 +399,5 @@ function DiffHunkGap({ lineCount }: { lineCount: number }) {
         })}
       </span>
     </div>
-  );
-}
-
-function DiffLineRow({ line }: { line: RenderableFileDiffLine }) {
-  const kind = line.kind === "add" || line.kind === "delete" ? line.kind : "context";
-  const marker = kind === "add" ? "+" : kind === "delete" ? "-" : " ";
-  return (
-    <tr
-      className={cn(
-        "border-0",
-        kind === "add" && "bg-emerald-500/[0.09] dark:bg-emerald-300/[0.11]",
-        kind === "delete" && "bg-rose-500/[0.09] dark:bg-rose-300/[0.11]",
-      )}
-    >
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
-        {line.old_lineno ?? ""}
-      </td>
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
-        {line.new_lineno ?? ""}
-      </td>
-      <td
-        className={cn(
-          "w-5 select-none px-1 text-center",
-          kind === "add" && "text-emerald-600/80 dark:text-emerald-300/85",
-          kind === "delete" && "text-rose-600/80 dark:text-rose-300/85",
-          kind === "context" && "text-muted-foreground/45",
-        )}
-      >
-        {marker}
-      </td>
-      <td className="min-w-[16rem] px-1.5 text-foreground/86">
-        <span className="whitespace-pre">{line.content || " "}</span>
-      </td>
-    </tr>
   );
 }

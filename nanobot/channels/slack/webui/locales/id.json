@@ -1,0 +1,38 @@
+{
+  "description": "Gunakan nanobot dari workspace Slack.",
+  "requirements": "Token aplikasi Slack, token bot, dan instalasi workspace",
+  "setup": {
+    "docsLabel": "Buka panduan Slack",
+    "officialLabel": "Buka aplikasi Slack",
+    "tryIt": "Sebut aplikasi Slack atau kirim pesan langsung.",
+    "summary": "Slack menggunakan Socket Mode secara default sehingga memerlukan token aplikasi dan token bot.",
+    "steps": [
+      "Buat aplikasi Slack dari manifest yang disediakan dan aktifkan Socket Mode.",
+      "Pasang aplikasi ke workspace dan salin token aplikasi serta bot.",
+      "Simpan dan aktifkan Slack, lalu sebut aplikasi atau kirim DM."
+    ],
+    "actions": {
+      "slack-manifest": "Salin manifest"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Token aplikasi",
+        "placeholder": "xapp-...",
+        "help": "Buat dari Socket Mode Slack."
+      },
+      "botToken": {
+        "label": "Token bot",
+        "placeholder": "xoxb-...",
+        "help": "Gunakan token bot setelah memasang aplikasi Slack."
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya sebutan",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      }
+    }
+  }
+}

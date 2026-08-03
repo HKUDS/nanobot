@@ -6,6 +6,35 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-07-24** 🧭 Guided first-run setup, inline subagents, and model switching from the composer.
+- **2026-07-23** 🔎 Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
+- **2026-07-22** 🔌 Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
+- **2026-07-21** ⚡ Codex fast mode, visible skill references, safer configuration saves, and sturdier task cleanup.
+- **2026-07-20** 💬 Cleaner code blocks and copy actions, self-contained channels, and steadier QQ reconnects.
+- **2026-07-19** 🔀 Cross-provider failover, safer local triggers, WhatsApp group allowlists, and sturdier workspace staging.
+- **2026-07-18** 🧰 More resilient automation recovery and UTF-8 CLI App installs.
+- **2026-07-17** 🌙 Kimi K3 support, more reliable scheduled jobs, and cleaner provider behavior.
+- **2026-07-16** 📁 Native folder picker bridges, tighter Docker defaults, and bounded session caching.
+- **2026-07-15** 🔐 Short-lived Render access, safer gateway shutdown, validated file previews, and highlighted app mentions.
+- **2026-07-14** 📎 Document attachments, one-click Render deployment, clearer workflow docs, and stronger Windows support.
+- **2026-07-13** 🌍 Guided WebUI setup, Brazilian Portuguese, and steadier Dream, gateway, and Discord behavior.
+- **2026-07-12** 🎯 Explicit `/goal` activation, safer runtime and workspace access.
+- **2026-07-11** 🛠️ Syntax-highlighted previews and diffs, queued prompts, safer edits.
+- **2026-07-10** 🧠 Stable model routing, multiline CLI input, new automation guide.
+- **2026-07-09** 📝 Live file-edit diffs, safer localhost setup, Matrix image fixes.
+- **2026-07-08** 🔐 Safer WebUI/API setup, onboard refresh, responsive prompt rail.
+- **2026-07-07** ⌨️ CLI multiline input, steadier slash commands, safer web fetching.
+- **2026-07-06** 💬 Mattermost channel, Serper search, safer Windows shells.
+- **2026-07-04** 🔌 MCP reconnects, safer Copilot refresh, Windows shutdown fixes.
+- **2026-07-03** 🧙 Guided WebUI setup, plugin controls, Claude Sonnet 4.6 default.
+- **2026-07-02** ⏰ Local triggers with recovery, audit history, WebUI pending status.
+- **2026-07-01** 🛡️ API keys for remote binds, `$skill` shortcuts, clearer tool errors.
+- **2026-06-30** 🌐 Provider proxies, Copilot Enterprise, steadier WhatsApp and Weixin.
+- **2026-06-29** 🧠 Context replay scaled to model windows, without fixed message caps.
+- **2026-06-28** 🖼️ MCP images, steadier WebUI reconnects, safer tool calls.
+- **2026-06-27** 🔒 Collision-safe sessions, safer shells, Neonize WhatsApp.
+- **2026-06-25** 🎛️ Thinking controls, MiMo voice input, opt-in Telegram rich messages.
+- **2026-06-24** 🌙 Kimi Coding and OpenCode, steadier reasoning and Anthropic tool calls.
 - **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
 - **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
 - **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.

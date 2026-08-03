@@ -297,6 +297,45 @@ def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> N
     assert "beta" in summary
 
 
+def test_build_skills_summary_groups_paths_by_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace_skills = workspace / "skills"
+    workspace_skills.mkdir(parents=True)
+    workspace_path = _write_skill(workspace_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin_path = _write_skill(builtin, "beta", body="# Beta")
+
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
+
+    assert summary.count(str(workspace_skills)) == 1
+    assert summary.count(str(builtin)) == 1
+    assert str(workspace_path) not in summary
+    assert str(builtin_path) not in summary
+    assert "`alpha/SKILL.md`" in summary
+    assert "`beta/SKILL.md`" in summary
+
+
+def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
+    metadata = SkillsLoader(tmp_path).get_skill_metadata("update-setup")
+
+    assert metadata is not None
+    assert metadata["description"].startswith("One-time setup wizard")
+    assert "Triggers:" in metadata["description"]
+
+
+def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path)
+    memory = loader.load_skill("memory")
+    update_setup = loader.load_skill("update-setup")
+
+    assert memory is not None
+    assert "<history-log-path>" in memory
+    assert 'path="memory/history.jsonl"' not in memory
+    assert update_setup is not None
+    assert "<agent-workspace>/skills/update/SKILL.md" in update_setup
+    assert "Never substitute a project-relative" in update_setup
+
+
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
@@ -310,6 +349,37 @@ def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None
     always = loader.get_always_skills()
     assert "alpha" not in always
     assert "beta" in always
+
+
+def test_explicit_skill_references_resolve_available_enabled_names_in_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "alpha", body="# Alpha")
+    _write_skill(skills_root, "beta", body="# Beta")
+    _write_skill(
+        skills_root,
+        "blocked",
+        metadata_json={"requires": {"env": ["MISSING_SKILL_TEST_ENV"]}},
+        body="# Blocked",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    monkeypatch.delenv("MISSING_SKILL_TEST_ENV", raising=False)
+    loader = SkillsLoader(
+        workspace,
+        builtin_skills_dir=builtin,
+        disabled_skills={"beta"},
+    )
+
+    invoked = loader.get_explicitly_invoked_skills(
+        "Use $alpha, then $unknown, $alpha again, $beta, and $blocked."
+    )
+
+    assert invoked == ["alpha"]
 
 
 # -- multiline description tests (YAML folded > and literal |) -----------------
@@ -397,3 +467,45 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     assert meta.get("always") is True
     # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
+
+
+def test_check_requirements_tolerates_null_requires_and_lists(tmp_path: Path) -> None:
+    """Null requires/bins/env must not crash skill listing (JSON/YAML nulls)."""
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(
+        ws_skills,
+        "null-requires",
+        metadata_json={"always": True, "requires": None},
+        body="# Null requires",
+    )
+    _write_skill(
+        ws_skills,
+        "null-bins",
+        metadata_json={"always": True, "requires": {"bins": None, "env": None}},
+        body="# Null bins",
+    )
+    _write_skill(
+        ws_skills,
+        "null-elems",
+        metadata_json={"always": True, "requires": {"bins": [None, ""], "env": [None]}},
+        body="# Null elems",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert loader._check_requirements(loader._get_skill_meta("null-requires")) is True
+    assert loader._check_requirements(loader._get_skill_meta("null-bins")) is True
+    assert loader._check_requirements(loader._get_skill_meta("null-elems")) is True
+    always = loader.get_always_skills()
+    assert set(always) >= {"null-requires", "null-bins", "null-elems"}
+    listed = {e["name"] for e in loader.list_skills(filter_unavailable=True)}
+    assert {"null-requires", "null-bins", "null-elems"} <= listed
+    assert loader.get_skill_requirements("null-requires") == {
+        "bins": [],
+        "env": [],
+        "missing_bins": [],
+        "missing_env": [],
+    }

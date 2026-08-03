@@ -2,6 +2,8 @@
 
 Use this page when the first reply fails because of provider/model mismatch, or when you want to adapt the concrete setup example to a different provider. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
+For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
+
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?
@@ -61,11 +63,11 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers and OpenAI Codex. |
+| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, OpenAI Codex, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex`, including Codex OAuth token exchange/refresh and Codex Responses API requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Common Provider Patterns
 
@@ -227,7 +229,9 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 }
 ```
 
-`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account.
+`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it.
+
+DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` automatically uses DeepSeek's native Responses API, while `deepseek-v4-pro` remains on Chat Completions.
 
 ### Custom OpenAI-Compatible Endpoint
 
@@ -329,6 +333,13 @@ Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
 
 Most Ollama setups do not require an API key.
 
+Ollama renders the OpenAI-compatible messages and tools through each model's chat
+template. If ordinary model responses are fast but tool-using turns show low prompt
+cache reuse, diagnose the rendered template before changing nanobot's context or
+memory settings. The
+[Ollama prompt-cache guide](./guides/configure-ollama-prompt-cache.md) explains the
+log pattern and a tested `llama3.1:8b` workaround.
+
 ### vLLM or Other Local OpenAI-Compatible Server
 
 ```json
@@ -418,38 +429,38 @@ See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-spe
 
 Some providers do not use API keys in `config.json`.
 
+For OpenAI Codex:
+
 ```bash
-nanobot provider login openai-codex
-nanobot provider login github-copilot
+nanobot provider login openai-codex --set-main
 ```
 
-Then explicitly select the provider and model in a preset. OAuth providers are not valid automatic fallbacks.
+For an eligible X Premium / Grok subscription:
 
-For OpenAI Codex, add `providers.openai_codex.proxy` only when Codex OAuth/token refresh or Codex API requests must use a proxy:
-
-```json
-{
-  "providers": {
-    "openai_codex": {
-      "proxy": "http://127.0.0.1:7890"
-    }
-  },
-  "modelPresets": {
-    "codex": {
-      "provider": "openai_codex",
-      "model": "gpt-5.1-codex",
-      "reasoningEffort": "high"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "codex"
-    }
-  }
-}
+```bash
+nanobot provider login xai-grok --set-main
 ```
 
-If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
+This selects `xai-grok/grok-4.5`. The provider reads xAI's model catalog and
+exposes the hosted `x_search` tool only when the selected model advertises
+`supportsBackendSearch`; otherwise the model runs without hosted X Search.
+When enabled, Grok can search current X posts and return inline source links
+without invoking a local nanobot tool. Credentials are stored under the
+active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
+`config.json` and not in Grok Build's credential file.
+
+The login is xAI subscription OAuth, not X Developer OAuth. It follows the
+public client contract documented and implemented by
+[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md);
+xAI may change that upstream contract independently of nanobot.
+
+For GitHub Copilot:
+
+```bash
+nanobot provider login github-copilot --set-main
+```
+
+Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

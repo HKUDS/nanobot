@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 if TYPE_CHECKING:
+    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage, OutboundMessage
     from nanobot.session.manager import Session
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 Handler = Callable[["CommandContext"], Awaitable["OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -42,7 +45,10 @@ class CommandContext:
     key: str
     raw: str
     args: str = ""
-    loop: Any = None
+    loop: AgentLoop = field(kw_only=True)
+    runtime: LLMRuntime | None = None
+    is_user_turn: bool = False
+    turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
 
 
 class CommandRouter:

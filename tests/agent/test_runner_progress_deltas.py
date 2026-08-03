@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.hook import CompositeHook
 from nanobot.agent.hooks import FileEditActivityHook
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.progress_hook import AgentProgressHook
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -27,8 +30,8 @@ async def test_runner_can_disable_provider_progress_delta_streaming():
     tools.get_definitions.return_value = []
     progress_cb = AsyncMock()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hi"},
@@ -64,8 +67,8 @@ async def test_runner_streams_provider_progress_deltas_by_default():
     tools.get_definitions.return_value = []
     progress_cb = AsyncMock()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hi"},
@@ -79,6 +82,151 @@ async def test_runner_streams_provider_progress_deltas_by_default():
 
     assert result.final_content == "hello"
     assert [call.args[0] for call in progress_cb.await_args_list] == ["he", "llo"]
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_routes_hosted_tool_events_to_structured_progress():
+    provider = MagicMock()
+    provider.supports_progress_deltas = True
+
+    async def chat_stream_with_retry(*, on_content_delta, on_tool_call_delta, **kwargs):
+        await on_tool_call_delta({
+            "call_id": "local-call",
+            "name": "read_file",
+            "arguments_delta": "",
+        })
+        await on_tool_call_delta({
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": None,
+        })
+        await on_tool_call_delta({
+            "kind": "hosted_tool",
+            "phase": "end",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": {"name": "x_semantic_search"},
+        })
+        await on_content_delta("done")
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress_events: list[dict] = []
+    progress_text: list[str] = []
+
+    async def progress_cb(content, *, tool_events=None, **kwargs):
+        progress_text.append(content)
+        if tool_events:
+            progress_events.extend(tool_events)
+
+    hook = CompositeHook([AgentProgressHook(on_progress=progress_cb)])
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "search X"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        progress_callback=progress_cb,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert result.tools_used == []
+    assert result.tool_events == []
+    assert progress_events == [
+        {
+            "version": 1,
+            "phase": "start",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": None,
+            "error": None,
+            "files": [],
+            "embeds": [],
+        },
+        {
+            "version": 1,
+            "phase": "end",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": {"name": "x_semantic_search"},
+            "error": None,
+            "files": [],
+            "embeds": [],
+        },
+    ]
+    assert progress_text == ['search X "nanobot oauth"', "", "done"]
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
+    provider = MagicMock()
+    provider.supports_progress_deltas = True
+
+    async def chat_stream_with_retry(*, on_tool_call_delta, **kwargs):
+        await on_tool_call_delta({
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": "x-search-failed",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": None,
+        })
+        return LLMResponse(
+            content="hosted search backend failed",
+            finish_reason="error",
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress_events: list[dict] = []
+
+    async def progress_cb(content, *, tool_events=None, **kwargs):
+        if tool_events:
+            progress_events.extend(tool_events)
+
+    hook = CompositeHook([AgentProgressHook(on_progress=progress_cb)])
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "search X"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        progress_callback=progress_cb,
+        hook=hook,
+    ))
+
+    assert result.stop_reason == "error"
+    assert [(event["phase"], event["call_id"]) for event in progress_events] == [
+        ("start", "x-search-failed"),
+        ("error", "x-search-failed"),
+    ]
+    assert progress_events[-1] == {
+        "version": 1,
+        "phase": "error",
+        "call_id": "x-search-failed",
+        "name": "x_search",
+        "arguments": {"query": "nanobot oauth"},
+        "result": None,
+        "error": "hosted search backend failed",
+        "files": [],
+        "embeds": [],
+    }
     provider.chat_with_retry.assert_not_awaited()
 
 
@@ -124,8 +272,8 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a large file"}],
         tools=tools,
         model="test-model",
@@ -198,8 +346,8 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "edit a file"}],
         tools=tools,
         model="test-model",
@@ -264,8 +412,8 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a file"}],
         tools=tools,
         model="test-model",
@@ -328,8 +476,8 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    task = asyncio.create_task(runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    task = asyncio.create_task(runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a file"}],
         tools=tools,
         model="test-model",

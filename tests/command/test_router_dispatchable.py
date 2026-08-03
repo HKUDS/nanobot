@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.command.builtin import register_builtin_commands
+from nanobot.command.builtin import (
+    builtin_command_starts_agent_turn,
+    register_builtin_commands,
+)
 from nanobot.command.router import CommandContext, CommandRouter
+
+
+def test_command_context_requires_loop_as_keyword_dependency() -> None:
+    loop_parameter = signature(CommandContext).parameters["loop"]
+
+    assert loop_parameter.kind is Parameter.KEYWORD_ONLY
+    assert loop_parameter.default is Parameter.empty
 
 
 class TestIsDispatchableCommand:
@@ -64,6 +75,20 @@ class TestIsDispatchableCommand:
         assert not router.is_dispatchable_command("/foo bar")
 
 
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("/status", False),
+        ("/history 5", False),
+        ("/goal", False),
+        ("/goal migrate the database", True),
+        ("regular prompt", True),
+    ],
+)
+def test_builtin_command_agent_turn_lifecycle(content: str, expected: bool) -> None:
+    assert builtin_command_starts_agent_turn(content) is expected
+
+
 class TestMidTurnCommandDispatchedDirectly:
     """Verify that commands matching is_dispatchable_command() are dispatched
     correctly when session=None (the mid-turn path)."""
@@ -83,7 +108,7 @@ class TestMidTurnCommandDispatchedDirectly:
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()
-        loop._schedule_background = MagicMock()
+        loop.schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
         return loop
 

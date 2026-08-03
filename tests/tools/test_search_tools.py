@@ -16,6 +16,8 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @pytest.mark.asyncio
@@ -293,6 +295,39 @@ async def test_grep_reports_skipped_binary_and_large_files(
 
 
 @pytest.mark.asyncio
+async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    large_file = tmp_path / "history.jsonl"
+    large_file.write_text("needle\n" + "x" * 20, encoding="utf-8")
+    monkeypatch.setattr(GrepTool, "_MAX_FILE_BYTES", 10)
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 100)
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    explicit_result = await tool.execute(
+        pattern="needle",
+        path=str(large_file),
+        output_mode="content",
+    )
+    directory_result = await tool.execute(pattern="needle", path=".")
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 10)
+    capped_result = await tool.execute(pattern="needle", path=str(large_file))
+
+    assert "needle" in explicit_result
+    assert "skipped 1 large files" in directory_result
+    assert "skipped 1 large files" in capped_result
+
+
+def test_grep_description_keeps_size_thresholds_implementation_specific(tmp_path: Path) -> None:
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    assert "limits are enforced by the tool" in tool.description
+    assert "2 MB" not in tool.description
+    assert "100 MB" not in tool.description
+
+
+@pytest.mark.asyncio
 async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside-search.txt"
     outside.write_text("secret\n", encoding="utf-8")
@@ -320,8 +355,8 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
@@ -341,7 +376,14 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     mgr._announce_result = AsyncMock()
 
     status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
-    await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status)
+    await mgr._run_subagent(
+        "sub-1",
+        "search task",
+        "label",
+        {"channel": "cli", "chat_id": "direct"},
+        status,
+        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    )
 
     assert "find_files" in captured["tool_names"]
     assert "grep" in captured["tool_names"]
@@ -349,8 +391,6 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
 
 def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
     skills_dir = tmp_path / "skills"
     (skills_dir / "alpha").mkdir(parents=True)
     (skills_dir / "alpha" / "SKILL.md").write_text("# Alpha\n\nhidden\n", encoding="utf-8")
@@ -358,7 +398,6 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     (skills_dir / "beta" / "SKILL.md").write_text("# Beta\n\nshown\n", encoding="utf-8")
 
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,

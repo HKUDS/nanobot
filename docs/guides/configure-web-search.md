@@ -7,7 +7,7 @@ providers.
 ## What you will build
 
 - web tools enabled in nanobot
-- one search provider selected in `config.json`
+- one search provider selected in the WebUI or `config.json`
 - optional web fetch settings for page reading
 
 ## When to use this
@@ -28,7 +28,15 @@ provider, API key, proxy, fetch behavior, or SSRF allowlist.
 
 ## Minimal working example
 
-Use the default search provider:
+For local interactive setup:
+
+1. Run `nanobot webui`.
+2. Open **Settings → Web**.
+3. Enable web search, choose a provider, and enter its API key if required.
+4. Save and restart when prompted.
+5. Ask a question that requires current information and inspect the cited sources.
+
+For manual or deployment-managed config, use the default search provider:
 
 ```json
 {

@@ -1,0 +1,31 @@
+{
+  "description": "Sử dụng nanobot trong các nhóm DingTalk.",
+  "requirements": "Thông tin xác thực ứng dụng DingTalk và gateway",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn DingTalk",
+    "officialLabel": "Mở bảng điều khiển DingTalk",
+    "tryIt": "Gửi tin nhắn thử từ nhóm DingTalk đã cài ứng dụng.",
+    "summary": "DingTalk cần thông tin xác thực ứng dụng ở chế độ Stream.",
+    "steps": [
+      "Tạo hoặc chọn ứng dụng DingTalk đã bật chế độ Stream.",
+      "Thêm Client ID và Client Secret.",
+      "Lưu và bật DingTalk, sau đó gửi tin nhắn thử."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "Client ID DingTalk",
+        "help": "Sao chép từ thông tin xác thực ứng dụng DingTalk."
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••",
+        "help": "Sao chép từ cùng trang thông tin xác thực."
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      }
+    }
+  }
+}

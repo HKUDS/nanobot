@@ -1,0 +1,38 @@
+{
+  "description": "Signal メッセージから nanobot を利用します。",
+  "requirements": "signal-cli HTTP デーモン、電話番号、許可リスト",
+  "setup": {
+    "docsLabel": "Signal 設定ガイドを開く",
+    "officialLabel": "signal-cli ガイドを開く",
+    "tryIt": "連携した電話番号に Signal の DM を送信します。",
+    "summary": "Signal は、Signal の電話番号に連携済みの signal-cli HTTP デーモン経由で接続します。",
+    "steps": [
+      "signal-cli-rest-api をインストールし、Signal 番号を連携または登録します。",
+      "デーモンのホスト、ポート、連携済み電話番号を入力します。",
+      "保存して Signal を有効にし、DM でテストします。"
+    ],
+    "fields": {
+      "phoneNumber": {
+        "label": "電話番号",
+        "placeholder": "+1234567890",
+        "help": "signal-cli に登録した Signal 番号を使います。"
+      },
+      "daemonHost": {
+        "label": "デーモンホスト",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "デーモンポート",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "許可する DM",
+        "placeholder": "電話番号または UUID"
+      },
+      "group_allowFrom": {
+        "label": "許可するグループ",
+        "placeholder": "グループ ID"
+      }
+    }
+  }
+}

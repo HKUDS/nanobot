@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -41,9 +42,14 @@ class FakeClient:
         return FakeResponse()
 
 
-def _patch_env():
-    return patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public), \
-           patch("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+@contextmanager
+def _patched_web_fetch():
+    with (
+        patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public),
+        patch("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient),
+        patch("nanobot.agent.tools.web._pinned_dns_transport", lambda: object()),
+    ):
+        yield
 
 
 # --- urlparse / _validate_url level tests ---
@@ -77,7 +83,7 @@ def test_backtick_url_produces_empty_scheme_in_urlparse():
 @pytest.mark.asyncio
 async def test_execute_strips_backticks_and_succeeds():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url="`https://example.com/page`")
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"
@@ -86,7 +92,7 @@ async def test_execute_strips_backticks_and_succeeds():
 @pytest.mark.asyncio
 async def test_execute_strips_double_quotes_and_succeeds():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url='"https://example.com/page"')
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"
@@ -95,7 +101,7 @@ async def test_execute_strips_double_quotes_and_succeeds():
 @pytest.mark.asyncio
 async def test_execute_strips_single_quotes_and_succeeds():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url="'https://example.com/page'")
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"
@@ -104,7 +110,7 @@ async def test_execute_strips_single_quotes_and_succeeds():
 @pytest.mark.asyncio
 async def test_execute_strips_space_and_backticks():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url="  `https://example.com/page`  ")
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"
@@ -113,7 +119,7 @@ async def test_execute_strips_space_and_backticks():
 @pytest.mark.asyncio
 async def test_execute_strips_mixed_markdown_and_quotes():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url='"`https://example.com/page`"')
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"
@@ -122,7 +128,7 @@ async def test_execute_strips_mixed_markdown_and_quotes():
 @pytest.mark.asyncio
 async def test_execute_keeps_case_insensitive_http_scheme():
     tool = WebFetchTool()
-    with _patch_env()[0], _patch_env()[1]:
+    with _patched_web_fetch():
         result = await tool.execute(url="HTTPS://example.com/page")
     data = json.loads(result)
     assert "error" not in data, f"unexpected error: {data}"

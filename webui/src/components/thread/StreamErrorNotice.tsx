@@ -11,9 +11,8 @@ interface StreamErrorNoticeProps {
 }
 
 /**
- * Dismissible banner that surfaces transport-level faults the user needs to
- * know about. Rendered above the composer so the message the fault referred
- * to remains in view just above. ``role="alert"`` + ``aria-live="assertive"``
+ * Fallback banner for transport-level faults that cannot be attached to a
+ * visible failed message. ``role="alert"`` + ``aria-live="assertive"``
  * ensures screen readers announce the failure.
  */
 export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) {
@@ -66,6 +65,11 @@ function resolveCopy(
       return {
         title: t("errors.workspaceScopeRejected.title"),
         body: t("errors.workspaceScopeRejected.body"),
+      };
+    case "turn_rejected":
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
       };
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will

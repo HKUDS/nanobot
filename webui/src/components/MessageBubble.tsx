@@ -9,18 +9,21 @@ import {
 import {
   Check,
   ChevronRight,
+  CircleAlert,
   Clock3,
   Copy,
   ImageIcon,
-  Sparkles,
+  Quote,
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import { MarkdownText } from "@/components/MarkdownText";
+import { SlashCommandText } from "@/components/SlashCommandText";
+import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
   TooltipContent,
@@ -29,24 +32,30 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatTurnLatency } from "@/lib/format";
+import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
+import { matchingSlashCommand } from "@/lib/slash-command";
+import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
   McpPresetInfo,
+  SlashCommand,
   UICliAppAttachment,
   UIMcpPresetAttachment,
   UIImage,
   UIMediaAttachment,
   UIMessage,
+  MessageDeliveryErrorKind,
+  MessageDeliveryStatus,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
-  /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
-  showAssistantCopyAction?: boolean;
+  /** When false, hide this message's copy button. Default true. */
+  showCopyAction?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
 }
@@ -71,35 +80,10 @@ function ForkArrowIcon({ className }: { className?: string }) {
   );
 }
 
-/**
- * Render a single message. Following agent-chat-ui: user turns are a rounded
- * "pill" right-aligned with a muted fill; assistant turns render as bare
- * markdown so prose/code read like a document rather than a chat bubble.
- * Each turn fades+slides in for a touch of motion polish.
- *
- * Trace rows (tool-call hints, progress breadcrumbs) render as a subdued
- * collapsible group so intermediate steps never masquerade as replies.
- */
-export function MessageBubble({
-  message,
-  showAssistantCopyAction = true,
-  cliApps = [],
-  mcpPresets = [],
-  onOpenFilePreview,
-  onForkFromHere,
-}: MessageBubbleProps) {
+function MessageCopyButton({ content }: { content: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
-  const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
-  const mentionCliApps = useMemo(
-    () => mergeCliMentionApps(cliApps, message.cliApps),
-    [cliApps, message.cliApps],
-  );
-  const mentionMcpPresets = useMemo(
-    () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
-    [mcpPresets, message.mcpPresets],
-  );
 
   useEffect(() => {
     return () => {
@@ -109,8 +93,8 @@ export function MessageBubble({
     };
   }, []);
 
-  const onCopyAssistantReply = useCallback(() => {
-    void copyTextToClipboard(message.content).then((ok) => {
+  const onCopy = useCallback(() => {
+    void copyTextToClipboard(content).then((ok) => {
       if (!ok) return;
       setCopied(true);
       if (copyResetRef.current !== null) {
@@ -121,7 +105,139 @@ export function MessageBubble({
         copyResetRef.current = null;
       }, 1_500);
     });
-  }, [message.content]);
+  }, [content]);
+
+  const label = copied ? t("message.copiedReply") : t("message.copyReply");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onCopy}
+          aria-label={label}
+          className={cn(
+            "touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            "transition-colors hover:bg-muted/55 hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          {copied ? (
+            <Check className="h-4 w-4" aria-hidden />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="center">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function deliveryErrorCopy(
+  kind: MessageDeliveryErrorKind | undefined,
+  t: (key: string) => string,
+): { title: string; body: string } {
+  switch (kind) {
+    case "message_too_big":
+      return {
+        title: t("errors.messageTooBig.title"),
+        body: t("errors.messageTooBig.body"),
+      };
+    case "workspace_scope_rejected":
+      return {
+        title: t("errors.workspaceScopeRejected.title"),
+        body: t("errors.workspaceScopeRejected.body"),
+      };
+    case "turn_rejected":
+    case undefined:
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
+      };
+    default: {
+      const _exhaustive: never = kind;
+      return { title: String(_exhaustive), body: "" };
+    }
+  }
+}
+
+function UserDeliveryStatus({
+  status,
+  errorKind,
+}: {
+  status: MessageDeliveryStatus | undefined;
+  errorKind: MessageDeliveryErrorKind | undefined;
+}) {
+  const { t } = useTranslation();
+  if (status !== "sending" && status !== "failed") return null;
+  if (status === "sending") {
+    return (
+      <span
+        role="status"
+        className="inline-flex items-center gap-1 text-[12px] leading-none text-muted-foreground"
+      >
+        <Clock3 className="h-3.5 w-3.5" aria-hidden />
+        {t("message.delivery.sending")}
+      </span>
+    );
+  }
+
+  const label = t("message.delivery.failed");
+  const { title, body } = deliveryErrorCopy(errorKind, t);
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label}: ${title}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-sm text-[12px] leading-none",
+              "text-destructive/80 transition-colors hover:text-destructive",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "dark:text-red-400/80 dark:hover:text-red-400",
+            )}
+          >
+            <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+            {label}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="end"
+          className="max-w-72 px-3 py-2.5 text-left"
+        >
+          <p className="font-medium text-popover-foreground">{title}</p>
+          <p className="mt-1 leading-relaxed text-muted-foreground">{body}</p>
+        </TooltipContent>
+      </Tooltip>
+      <span role="alert" aria-live="assertive" className="sr-only">
+        {title}. {body}
+      </span>
+    </>
+  );
+}
+
+/** Render user turns as compact bubbles and assistant turns as document-like prose. */
+export function MessageBubble({
+  message,
+  showCopyAction = true,
+  cliApps = [],
+  mcpPresets = [],
+  slashCommands = [],
+  onOpenFilePreview,
+  onForkFromHere,
+}: MessageBubbleProps) {
+  const { t } = useTranslation();
+  const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
+  const mentionCliApps = useMemo(
+    () => mergeCliMentionApps(cliApps, message.cliApps),
+    [cliApps, message.cliApps],
+  );
+  const mentionMcpPresets = useMemo(
+    () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
+    [mcpPresets, message.mcpPresets],
+  );
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} animClass={baseAnim} />;
@@ -132,7 +248,32 @@ export function MessageBubble({
     const media = message.media ?? [];
     const hasImages = images.length > 0;
     const hasMedia = media.length > 0;
-    const hasText = message.content.trim().length > 0;
+    const parsedMessage = parseQuotedUserMessage(message.content);
+    const userContent = parsedMessage.content;
+    const hasText = userContent.trim().length > 0;
+    const showDeliveryStatus =
+      message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const createdAtLabel = formatMessageEndTime(message.createdAt);
+    const showCreatedAt = createdAtLabel.length > 0;
+    const createdAtTitle = showCreatedAt ? fmtDateTime(message.createdAt) : "";
+    const quotedContext = parsedMessage.quotedContext;
+    const slashCommand = matchingSlashCommand(userContent, slashCommands);
+    const messageText = slashCommand ? (
+      <>
+        <SlashCommandText command={slashCommand.command} />
+        <UserMessageText
+          text={userContent.slice(slashCommand.command.length)}
+          cliApps={mentionCliApps}
+          mcpPresets={mentionMcpPresets}
+        />
+      </>
+    ) : (
+      <UserMessageText
+        text={userContent}
+        cliApps={mentionCliApps}
+        mcpPresets={mentionMcpPresets}
+      />
+    );
     return (
       <div
         className={cn(
@@ -144,6 +285,12 @@ export function MessageBubble({
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" />
         ) : null}
+        {quotedContext ? (
+          <UserQuotedContext
+            text={quotedContext}
+            label={t("thread.composer.quotedContext")}
+          />
+        ) : null}
         {hasText ? (
           <p
             className={cn(
@@ -151,12 +298,29 @@ export function MessageBubble({
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
             )}
           >
-            <CliAppMentionText
-              text={message.content}
-              cliApps={mentionCliApps}
-              mcpPresets={mentionMcpPresets}
-            />
+            {messageText}
           </p>
+        ) : null}
+        {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
+          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+              {showCreatedAt ? (
+                <time
+                  data-message-created-at
+                  dateTime={new Date(message.createdAt).toISOString()}
+                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                  title={createdAtTitle}
+                >
+                  {createdAtLabel}
+                </time>
+              ) : null}
+              <UserDeliveryStatus
+                status={message.deliveryStatus}
+                errorKind={message.deliveryErrorKind}
+              />
+              {hasText && showCopyAction ? <MessageCopyButton content={message.content} /> : null}
+            </div>
+          </TooltipProvider>
         ) : null}
       </div>
     );
@@ -179,17 +343,33 @@ export function MessageBubble({
   const automationTriggeredLabel = t("message.automationTriggered");
 
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
-  const showCopyButton = showAssistantCopyAction && showAssistantActions;
+  const showCopyButton = showCopyAction && showAssistantActions;
   const showForkButton = showAssistantActions && !!onForkFromHere;
-  const copyReplyLabel = copied ? t("message.copiedReply") : t("message.copyReply");
   const forkLabel = t("message.forkFromHere");
-  const latencyMs = message.latencyMs;
-  const showLatencyFooter =
-    message.role === "assistant"
-    && latencyMs != null
-    && !message.isStreaming
+  const completedAt = message.completedAt;
+  const completedAtLabel =
+    message.role === "assistant" && !message.isStreaming
+      ? formatMessageEndTime(completedAt)
+      : "";
+  const assistantTimestamp =
+    typeof completedAt === "number" && Number.isFinite(completedAt)
+      ? completedAt
+      : message.createdAt;
+  const assistantTimestampLabel =
+    message.role === "assistant" && !message.isStreaming
+      ? formatMessageEndTime(assistantTimestamp)
+      : "";
+  const showCompletedAt =
+    completedAtLabel.length > 0
     && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterRow = showCopyButton || showForkButton || showLatencyFooter;
+  const showAssistantTimestamp =
+    assistantTimestampLabel.length > 0
+    && (!empty || hasReasoning || media.length > 0);
+  const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
+  const showAssistantFooterRow = showCopyButton || showForkButton || showAssistantTimestamp;
+  const showAssistantFooterSlot =
+    message.role === "assistant"
+    && (!empty || hasReasoning || media.length > 0);
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -197,11 +377,10 @@ export function MessageBubble({
           text={reasoning}
           streaming={reasoningStreaming}
           hasBodyBelow={!empty}
-          onOpenFilePreview={onOpenFilePreview}
         />
       ) : null}
       {empty && message.isStreaming && !hasReasoning ? (
-        <TypingDots />
+        <ThinkingState />
       ) : empty && message.isStreaming ? null : (
         <>
           {automationSourceLabel ? (
@@ -210,72 +389,88 @@ export function MessageBubble({
               triggerLabel={automationTriggeredLabel}
             />
           ) : null}
-          <MarkdownText
-            streaming={!!message.isStreaming}
-            onOpenFilePreview={onOpenFilePreview}
-          >
-            {message.content}
-          </MarkdownText>
+          <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
+            {/* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */}
+            <MarkdownText
+              streaming={!!message.isStreaming}
+              preserveStreamingLayout
+              onOpenFilePreview={onOpenFilePreview}
+            >
+              {message.content}
+            </MarkdownText>
+          </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
-          {showAssistantFooterRow ? (
-            <TooltipProvider delayDuration={220} skipDelayDuration={80}>
-              <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-                {showCopyButton ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={onCopyAssistantReply}
-                        aria-label={copyReplyLabel}
-                        className={cn(
-                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                          "transition-colors hover:bg-muted/55 hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        )}
-                      >
-                        {copied ? (
-                          <Check className="h-4 w-4" aria-hidden />
-                        ) : (
-                          <Copy className="h-4 w-4" aria-hidden />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">{copyReplyLabel}</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                {showForkButton ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={onForkFromHere}
-                        aria-label={forkLabel}
-                        className={cn(
-                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                          "transition-colors hover:bg-muted/55 hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        )}
-                      >
-                        <ForkArrowIcon className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                {showLatencyFooter ? (
-                  <span
-                    className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                    title={t("message.turnLatencyTitle")}
-                  >
-                    {formatTurnLatency(latencyMs)}
-                  </span>
-                ) : null}
-              </div>
-            </TooltipProvider>
-          ) : null}
         </>
       )}
+      {showAssistantFooterSlot ? (
+        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <div
+            data-assistant-footer
+            data-state={showAssistantFooterRow ? "visible" : "reserved"}
+            aria-hidden={showAssistantFooterRow ? undefined : true}
+            className={cn(
+              "mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
+              "transition-opacity duration-300 ease-out motion-reduce:transition-none",
+              showAssistantFooterRow
+                ? "opacity-100"
+                : "pointer-events-none opacity-0",
+            )}
+          >
+            {showCopyButton ? (
+              <MessageCopyButton content={message.content} />
+            ) : null}
+            {showForkButton ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onForkFromHere}
+                    aria-label={forkLabel}
+                    className={cn(
+                      "touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                      "transition-colors hover:bg-muted/55 hover:text-foreground",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                  >
+                    <ForkArrowIcon className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {showAssistantTimestamp ? (
+              <time
+                {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
+                data-message-timestamp
+                dateTime={new Date(assistantTimestamp).toISOString()}
+                className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                title={assistantTimestampTitle}
+              >
+                {assistantTimestampLabel}
+              </time>
+            ) : null}
+          </div>
+        </TooltipProvider>
+      ) : null}
     </div>
+  );
+}
+
+function UserQuotedContext({ text, label }: { text: string; label: string }) {
+  return (
+    <blockquote
+      className={cn(
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-[14px]",
+        "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
+      )}
+      aria-label={label}
+      title={text}
+    >
+      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+      <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
+        {text}
+      </p>
+    </blockquote>
   );
 }
 
@@ -399,10 +594,6 @@ function MessageMedia({
 
 /**
  * Right-aligned preview row for images attached to a user turn.
- *
- * Visual follows agent-chat-ui: a single wrapping row of fixed-size square
- * thumbnails that stay modest next to the text pill regardless of how many
- * images are attached.
  *
  * The URL is expected to be a self-contained ``data:`` URL (the Composer
  * hands the normalized base64 payload to the optimistic bubble so that the
@@ -537,30 +728,18 @@ function UserImageCell({
   );
 }
 
-/** Pre-token-arrival placeholder: three bouncing dots. */
-function TypingDots() {
+/** Quiet pre-token state that occupies a stable line in the answer column. */
+function ThinkingState() {
   const { t } = useTranslation();
   return (
     <span
       aria-label={t("message.assistantTyping")}
-      className="inline-flex items-center gap-1 py-1"
+      className="inline-flex min-h-7 items-center py-1 text-[13px]"
     >
-      <Dot delay="0ms" />
-      <Dot delay="150ms" />
-      <Dot delay="300ms" />
+      <StreamingLabelSheen active>
+        {t("message.reasoningStreaming", { defaultValue: "Thinking…" })}
+      </StreamingLabelSheen>
     </span>
-  );
-}
-
-function Dot({ delay }: { delay: string }) {
-  return (
-    <span
-      style={{ animationDelay: delay }}
-      className={cn(
-        "inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60",
-        "animate-bounce",
-      )}
-    />
   );
 }
 
@@ -597,105 +776,22 @@ interface ReasoningBubbleProps {
   text: string;
   streaming: boolean;
   hasBodyBelow: boolean;
-  /** When true, skip the slide-in wrapper (used inside ``AgentActivityCluster``). */
-  embeddedInCluster?: boolean;
-  onOpenFilePreview?: (path: string) => void;
 }
 
-/**
- * Subordinate "thinking" trace shown above an assistant turn.
- *
- * Lifecycle:
- *   - While ``streaming`` is true (``reasoning_delta`` frames still arriving),
- *     the bubble defaults to open and the header shows a sheen + pulse so
- *     the user sees the model "thinking out loud" in real time.
- *   - Expanded reasoning uses the same Markdown pipeline as assistant replies
- *     (deferred while streaming to reduce parser thrash), so headings and
- *     emphasis render instead of leaking raw ``###`` / ``**``.
- *   - On ``reasoning_end`` the bubble auto-collapses for prose density —
- *     the user can re-expand to inspect the chain of thought. The local
- *     toggle persists once the user interacts.
- */
 export function ReasoningBubble({
   text,
   streaming,
   hasBodyBelow,
-  embeddedInCluster = false,
-  onOpenFilePreview,
 }: ReasoningBubbleProps) {
-  const { t } = useTranslation();
-  const [userToggled, setUserToggled] = useState(false);
-  const [openLocal, setOpenLocal] = useState(true);
-  const open = userToggled ? openLocal : streaming;
-  const onToggle = () => {
-    setUserToggled(true);
-    setOpenLocal((v) => (userToggled ? !v : !open));
-  };
-  useEffect(() => {
-    if (open && text.length > 0) {
-      preloadMarkdownText();
-    }
-  }, [open, text.length]);
   return (
-    <div
+    <ReasoningRow
+      text={text}
+      streaming={streaming}
       className={cn(
-        "w-full",
-        !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
+        "animate-in fade-in-0 slide-in-from-top-1 duration-200",
         hasBodyBelow && "mb-2",
       )}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
-        )}
-        aria-expanded={open}
-        aria-live={streaming ? "polite" : undefined}
-      >
-        <Sparkles
-          className={cn("h-3.5 w-3.5", streaming && "animate-pulse")}
-          aria-hidden
-        />
-        <StreamingLabelSheen active={streaming} className="min-w-0 flex-1 text-left">
-          {streaming
-            ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
-            : t("message.reasoning", { defaultValue: "Thinking" })}
-        </StreamingLabelSheen>
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
-            open && "rotate-90",
-          )}
-        />
-      </button>
-      {open && text.length > 0 && (
-        <div
-          className={cn(
-            "mt-1 min-w-0 border-l border-muted-foreground/20 pl-3",
-            !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
-        >
-          <MarkdownText
-            streaming={streaming}
-            onOpenFilePreview={onOpenFilePreview}
-            className={cn(
-              "text-[12.5px] italic text-muted-foreground/88",
-              "prose-p:my-1.5 prose-li:my-0.5",
-              "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
-              "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
-              "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-              "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
-              "prose-code:text-[0.92em]",
-            )}
-          >
-            {text}
-          </MarkdownText>
-        </div>
-      )}
-    </div>
+    />
   );
 }
 

@@ -127,6 +127,14 @@ async def test_skill_command_no_render_as_text(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_skill_command_does_not_list_goal_runtime_protocol(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path)
+    out = await cmd_skill(_ctx(loop))
+
+    assert "long-goal" not in out.content
+
+
+@pytest.mark.asyncio
 async def test_skill_command_registered_on_router(tmp_path: Path) -> None:
     router = CommandRouter()
     register_builtin_commands(router)

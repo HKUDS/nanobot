@@ -4,10 +4,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.model_selection import model_preset_from_metadata
 
 
 def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
@@ -54,13 +56,17 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.model_preset == "fast"
     assert loop.model == "openai/gpt-4.1"
     assert loop.context_window_tokens == 32_768
-    assert loop.provider.generation.temperature == 0.5
-    assert loop.provider.generation.max_tokens == 4096
-    assert loop.provider.generation.reasoning_effort == "low"
-    assert loop.subagents.model == "openai/gpt-4.1"
-    assert loop.consolidator.model == "openai/gpt-4.1"
-    assert loop.consolidator.context_window_tokens == 32_768
-    assert loop.consolidator.max_completion_tokens == 4096
+    runtime = loop.llm_runtime()
+    assert runtime.generation.temperature == 0.5
+    assert runtime.generation.max_tokens == 4096
+    assert runtime.generation.reasoning_effort == "low"
+    assert not hasattr(loop.subagents, "model")
+    assert not hasattr(loop.consolidator, "model")
+    assert not hasattr(loop.consolidator, "context_window_tokens")
+    assert loop.llm_runtime().model == "openai/gpt-4.1"
+    assert loop.llm_runtime().context_window_tokens == 32_768
+    assert not hasattr(loop.consolidator, "max_completion_tokens")
+    assert loop.llm_runtime().generation.max_tokens == 4096
 
 
 def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
@@ -107,13 +113,14 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     loop.set_model_preset("deep")
 
     assert loop.provider is new_provider
-    assert loop.runner.provider is new_provider
-    assert loop.subagents.provider is new_provider
-    assert loop.subagents.runner.provider is new_provider
-    assert loop.consolidator.provider is new_provider
+    assert not hasattr(loop.runner, "provider")
+    assert not hasattr(loop.subagents, "provider")
+    assert not hasattr(loop.subagents.runner, "provider")
+    assert not hasattr(loop.consolidator, "provider")
     assert loop.model == "anthropic/claude-opus-4-5"
     assert loop.context_window_tokens == 200_000
-    assert loop.consolidator.max_completion_tokens == 2048
+    assert not hasattr(loop.consolidator, "max_completion_tokens")
+    assert loop.llm_runtime().generation.max_tokens == 2048
 
 
 def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
@@ -135,10 +142,11 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
 
     assert loop.model_preset is None
     assert loop.model == "base-model"
-    assert loop.subagents.model == "base-model"
-    assert loop.consolidator.model == "base-model"
+    assert not hasattr(loop.subagents, "model")
+    assert not hasattr(loop.consolidator, "model")
     assert loop.context_window_tokens == 1000
-    assert loop.consolidator.max_completion_tokens == 123
+    assert not hasattr(loop.consolidator, "max_completion_tokens")
+    assert loop.llm_runtime().generation.max_tokens == 123
 
 
 def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None:
@@ -169,7 +177,8 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
     )
 
     loop.set_model_preset("fast")
-    loop._refresh_provider_snapshot()
+    loop.runtime_resolver.invalidate()
+    loop.llm_runtime()
 
     assert loop.model_preset == "fast"
     assert loop.provider is fast_provider
@@ -205,7 +214,8 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
     )
 
     loop.set_model_preset("fast")
-    loop._refresh_provider_snapshot()
+    loop.runtime_resolver.invalidate()
+    loop.llm_runtime()
 
     assert loop.model_preset is None
     assert loop.provider is webui_provider
@@ -279,6 +289,78 @@ def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
     assert loop.model == "base-model"
 
 
+def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
+    presets = {
+        "default": ModelPresetConfig(model="base-model"),
+        "fast": ModelPresetConfig(model="openai/gpt-4.1"),
+    }
+    loop = _make_loop(tmp_path, presets=presets)
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key="cli:one",
+        metadata={"source": "self-tool"},
+    )):
+        result = tool._modify("model_preset", "fast")
+
+    assert "for the next turn" in result
+    assert model_preset_from_metadata(
+        loop.sessions.get_or_create("cli:one").metadata
+    ) == "fast"
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+
+
+def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    loop.set_session_model_preset = MagicMock(
+        side_effect=ValueError("No API key configured for provider 'openai'.")
+    )
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key="cli:one",
+    )):
+        result = tool._modify("model_preset", "broken")
+
+    assert result == "Error: No API key configured for provider 'openai'."
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("model", "other-model"),
+        ("context_window_tokens", 8_192),
+    ],
+)
+def test_self_tool_rejects_instance_runtime_changes_in_session(
+    tmp_path,
+    key: str,
+    value: object,
+) -> None:
+    loop = _make_loop(tmp_path)
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+    session = loop.sessions.get_or_create("cli:one")
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key=session.key,
+        runtime=loop.runtime_for_session(session),
+    )):
+        result = tool._modify(key, value)
+
+    other_runtime = loop.runtime_for_session(loop.sessions.get_or_create("cli:two"))
+    assert "instance-wide and disabled" in result
+    assert "model_preset" in result
+    assert other_runtime.model == "base-model"
+    assert other_runtime.context_window_tokens == 1000
+
+
 def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
     presets = {
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),
@@ -287,7 +369,7 @@ def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
     tool = MyTool(runtime_state=loop, modify_allowed=True)
     result = tool._modify("model", "anthropic/claude-opus-4-5")
     assert "Error" not in result
-    assert loop._active_preset is None
+    assert loop.model_preset is None
     assert loop.model == "anthropic/claude-opus-4-5"
 
 
@@ -318,5 +400,7 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
-    assert loop._provider_snapshot_loader is None
-    assert loop._preset_snapshot_loader is not None
+        default_runtime = loop.runtime_resolver.runtime
+        resolved = loop.runtime_resolver.resolve_preset("fast")
+    assert resolved.model == "openai/gpt-4.1-mini"
+    assert loop.runtime_resolver.runtime is default_runtime

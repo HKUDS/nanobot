@@ -1,10 +1,10 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+from unittest.mock import patch
+
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from nanobot.utils.gitstore import CommitInfo, GitStore, GitStoreError
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -50,6 +50,11 @@ class TestInit:
         assert len(commits) == 1
         assert "init" in commits[0].message
 
+    def test_init_failure_is_explicit(self, git):
+        with patch("dulwich.porcelain.init", side_effect=OSError("cannot initialize")):
+            with pytest.raises(GitStoreError, match="init failed"):
+                git.init()
+
 
 class TestBuildGitignore:
     def test_subdirectory_dirs(self, git):
@@ -64,7 +69,11 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [
+            line
+            for line in content.split("\n")
+            if line.startswith("!") and line.endswith("/")
+        ]
         assert dir_lines == []
 
 
@@ -94,6 +103,11 @@ class TestAutoCommit:
         git_ready.auto_commit("nothing 2")
         assert len(git_ready.log()) == 1  # only init commit
 
+    def test_status_failure_is_explicit(self, git_ready):
+        with patch("dulwich.porcelain.status", side_effect=OSError("broken index")):
+            with pytest.raises(GitStoreError, match="auto-commit failed"):
+                git_ready.auto_commit("update")
+
 
 class TestLog:
     def test_empty_when_not_initialized(self, git):
@@ -116,6 +130,17 @@ class TestLog:
             (ws / "SOUL.md").write_text(f"v{i}", encoding="utf-8")
             git_ready.auto_commit(f"c{i}")
         assert len(git_ready.log(max_entries=3)) == 3
+
+    def test_message_prefix_skips_unrelated_commits_before_counting_limit(self, git_ready):
+        ws = git_ready._workspace
+        messages = ["dream: older", "backup: first", "dream: latest", "backup: newest"]
+        for i, message in enumerate(messages):
+            (ws / "SOUL.md").write_text(f"v{i}", encoding="utf-8")
+            git_ready.auto_commit(message)
+
+        commits = git_ready.log(max_entries=2, message_prefix="dream:")
+
+        assert [commit.message for commit in commits] == ["dream: latest", "dream: older"]
 
     def test_commit_info_fields(self, git_ready):
         c = git_ready.log()[0]
@@ -178,6 +203,25 @@ class TestShowCommitDiff:
     def test_returns_none_for_unknown(self, git_ready):
         assert git_ready.show_commit_diff("deadbeef") is None
 
+    def test_message_prefix_finds_commit_beyond_unrelated_history_window(self, git_ready):
+        ws = git_ready._workspace
+        (ws / "SOUL.md").write_text("dream content", encoding="utf-8")
+        dream_sha = git_ready.auto_commit("dream: latest")
+        for i in range(20):
+            (ws / "SOUL.md").write_text(f"backup {i}", encoding="utf-8")
+            git_ready.auto_commit(f"backup: {i}")
+
+        result = git_ready.show_commit_diff(
+            dream_sha,
+            max_entries=1,
+            message_prefix="dream:",
+        )
+
+        assert result is not None
+        commit, diff = result
+        assert commit.sha == dream_sha
+        assert "dream content" in diff
+
 
 class TestCommitInfoFormat:
     def test_format_with_diff(self):
@@ -193,6 +237,14 @@ class TestCommitInfoFormat:
         c = CommitInfo(sha="abcd1234", message="test", timestamp="2026-04-02 12:00")
         result = c.format()
         assert "(no file changes)" in result
+
+    def test_format_empty_message(self):
+        from nanobot.utils.gitstore import CommitInfo
+        c = CommitInfo(sha="abcd1234", message="", timestamp="2026-04-02 12:00")
+        result = c.format()
+        assert "(no message)" in result
+        assert "`abcd1234`" in result
+        assert c.subject() == "(no message)"
 
 
 class TestRevert:
@@ -220,6 +272,19 @@ class TestRevert:
 
     def test_invalid_sha_returns_none(self, git_ready):
         assert git_ready.revert("deadbeef") is None
+
+    def test_message_prefix_rejects_unrelated_commit_without_changing_files(self, git_ready):
+        ws = git_ready._workspace
+        (ws / "SOUL.md").write_text("dream v1", encoding="utf-8")
+        git_ready.auto_commit("dream: v1")
+        (ws / "SOUL.md").write_text("backup state", encoding="utf-8")
+        backup_sha = git_ready.auto_commit("backup: workspace")
+        (ws / "SOUL.md").write_text("dream v2", encoding="utf-8")
+        latest_sha = git_ready.auto_commit("dream: v2")
+
+        assert git_ready.revert(backup_sha, message_prefix="dream:") is None
+        assert (ws / "SOUL.md").read_text(encoding="utf-8") == "dream v2"
+        assert git_ready.log()[0].sha == latest_sha
 
 
 class TestMemoryStoreGitProperty:

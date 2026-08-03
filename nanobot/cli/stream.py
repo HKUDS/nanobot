@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import contextmanager, nullcontext
+from typing import Literal
 
 from rich.console import Console
 from rich.live import Live
@@ -51,12 +52,12 @@ class ThinkingSpinner:
         self._spinner = c.status(f"[dim]{bot_name} is thinking...[/dim]", spinner="dots")
         self._active = False
 
-    def __enter__(self):
+    def __enter__(self) -> ThinkingSpinner:
         self._spinner.start()
         self._active = True
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> Literal[False]:
         self._active = False
         self._spinner.stop()
         _clear_current_line(self._console)
@@ -110,7 +111,7 @@ class StreamRenderer:
         self._header_printed = False
         self._start_spinner()
 
-    def _renderable(self):
+    def _renderable(self) -> Markdown | Text:
         """Create a renderable from the current buffer."""
         if self._md and self._buf:
             return Markdown(self._buf)

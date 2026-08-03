@@ -1,16 +1,25 @@
 import type {
+  ApiServicePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
+  ChannelConfigurePayload,
+  ChannelConnectPayload,
+  ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  PairingPayload,
+  ProviderCreationUpdate,
   ProviderModelsPayload,
+  ProviderOAuthCompletionResult,
+  ProviderOAuthLoginResult,
   ProviderSettingsUpdate,
   SessionDeleteResult,
   SessionAutomationsPayload,
@@ -18,7 +27,12 @@ import type {
   SettingsUpdate,
   SidebarStatePayload,
   SkillDetail,
+  SkillActionPayload,
+  SkillInstallPayload,
   SkillsPayload,
+  SkillsSearchPayload,
+  SkillsTrendsPayload,
+  SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
   TranscriptionSettingsUpdate,
@@ -44,6 +58,11 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
     && SLASH_COMMAND_LIFECYCLES.has(value as SlashCommandLifecycle)
   );
 }
+const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
+const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
+const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
+const OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback";
+const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -125,6 +144,7 @@ export async function listSessions(
     updated_at: string | null;
     title?: string;
     preview?: string;
+    model_preset?: string | null;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
   };
@@ -141,6 +161,7 @@ export async function listSessions(
     updatedAt: s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
+    modelPreset: s.model_preset ?? null,
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
   }));
@@ -151,6 +172,7 @@ export interface FetchWebuiThreadOptions {
   limit?: number;
   direction?: "latest";
   before?: string | null;
+  signal?: AbortSignal;
 }
 
 export async function fetchWebuiThread(
@@ -171,6 +193,8 @@ export async function fetchWebuiThread(
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
+    cache: "no-store",
+    signal: options?.signal,
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -191,6 +215,24 @@ export async function fetchFilePreview(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchFilePreviewAvailability(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<boolean> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  query.set("probe", "1");
+  const payload = await request<{ available?: boolean }>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+  return payload.available !== false;
 }
 
 export async function fetchSessionAutomations(
@@ -274,6 +316,93 @@ export async function fetchSkillDetail(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateSkillEnabled(
+  token: string,
+  name: string,
+  enabled: boolean,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name, enabled: String(enabled) });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/update?${params}`,
+    token,
+  );
+}
+
+export async function deleteSkill(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillActionPayload> {
+  const params = new URLSearchParams({ name });
+  return request<SkillActionPayload>(
+    `${base}/api/webui/skills/delete?${params}`,
+    token,
+  );
+}
+
+export async function searchMarketplaceSkills(
+  token: string,
+  query: string,
+  provider: MarketplaceProvider = "all",
+  base: string = "",
+): Promise<SkillsSearchPayload> {
+  const params = new URLSearchParams({ q: query, provider });
+  return request<SkillsSearchPayload>(
+    `${base}/api/webui/skills/search?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchTrendingMarketplaceSkills(
+  token: string,
+  provider: MarketplaceProvider = "all",
+  base: string = "",
+): Promise<SkillsTrendingPayload> {
+  const params = new URLSearchParams({ provider });
+  return request<SkillsTrendingPayload>(
+    `${base}/api/webui/skills/trending?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchMarketplaceSkillTrends(
+  token: string,
+  skillIds: string[],
+  base: string = "",
+): Promise<SkillsTrendsPayload> {
+  const params = new URLSearchParams();
+  skillIds.forEach((id) => params.append("id", id));
+  return request<SkillsTrendsPayload>(
+    `${base}/api/webui/skills/trends?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function installMarketplaceSkill(
+  token: string,
+  provider: Exclude<MarketplaceProvider, "all">,
+  source: string,
+  skill: string,
+  version: string = "",
+  base: string = "",
+): Promise<SkillInstallPayload> {
+  const params = new URLSearchParams({ provider, source, skill });
+  if (version) params.set("version", version);
+  return request<SkillInstallPayload>(
+    `${base}/api/webui/skills/install?${params}`,
+    token,
+    undefined,
+    150_000,
   );
 }
 
@@ -386,13 +515,43 @@ export async function fetchNanobotFeatures(
   );
 }
 
+export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
+}
+
+export async function startApiService(
+  token: string,
+  values: { host: string; port: number; timeout: number; apiKey?: string },
+  base: string = "",
+): Promise<ApiServicePayload> {
+  const query = new URLSearchParams({
+    host: values.host,
+    port: String(values.port),
+    timeout: String(values.timeout),
+  });
+  const headers = values.apiKey === undefined
+    ? undefined
+    : { [API_SERVICE_VALUES_HEADER]: JSON.stringify({ api_key: values.apiKey }) };
+  return request<ApiServicePayload>(
+    `${base}/api/settings/api-service/start?${query}`,
+    token,
+    { headers },
+  );
+}
+
+export async function stopApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service/stop`, token);
+}
+
 export async function enableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/enable?${query}`,
     token,
@@ -402,13 +561,135 @@ export async function enableNanobotFeature(
 export async function disableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/disable?${query}`,
     token,
+  );
+}
+
+export async function fetchPairingRequests(
+  token: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runPairingAction(
+  token: string,
+  action: "approve" | "deny",
+  code: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  const query = new URLSearchParams();
+  query.set("code", code);
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing/${action}?${query}`,
+    token,
+  );
+}
+
+export async function startChannelConnect(
+  token: string,
+  channel: string,
+  options: {
+    domain?: string;
+    instanceId?: string;
+    mode?: "replace" | "create";
+    force?: boolean;
+  } = {},
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  if (options.domain) query.set("domain", options.domain);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  if (options.mode) query.set("mode", options.mode);
+  if (options.force) query.set("force", "true");
+  const suffix = query.toString();
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/start${suffix ? `?${suffix}` : ""}`,
+    token,
+  );
+}
+
+export async function pollChannelConnect(
+  token: string,
+  channel: string,
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/poll?${query}`,
+    token,
+  );
+}
+
+export async function cancelChannelConnect(
+  token: string,
+  channel: string,
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/cancel?${query}`,
+    token,
+  );
+}
+
+export async function configureChannel(
+  token: string,
+  name: string,
+  values: Record<string, string>,
+  options: { enable?: boolean; instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelConfigurePayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.enable !== undefined) query.set("enable", String(options.enable));
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelConfigurePayload>(
+    `${base}/api/settings/channels/configure?${query}`,
+    token,
+    {
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
+  );
+}
+
+export async function validateChannel(
+  token: string,
+  name: string,
+  values: Record<string, string> = {},
+  options: { instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelValidationPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelValidationPayload>(
+    `${base}/api/settings/channels/validate?${query}`,
+    token,
+    {
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
   );
 }
 
@@ -577,12 +858,31 @@ export async function updateSettings(
     query.set("context_window_tokens", String(update.contextWindowTokens));
   }
   if (update.timezone !== undefined) query.set("timezone", update.timezone);
-  if (update.botName !== undefined) query.set("bot_name", update.botName);
-  if (update.botIcon !== undefined) query.set("bot_icon", update.botIcon);
   if (update.toolHintMaxLength !== undefined) {
     query.set("tool_hint_max_length", String(update.toolHintMaxLength));
   }
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
+}
+
+function appendModelGenerationSettings(
+  query: URLSearchParams,
+  configuration: Pick<
+    ModelConfigurationCreate,
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+  >,
+): void {
+  if (configuration.maxTokens !== undefined) {
+    query.set("max_tokens", String(configuration.maxTokens));
+  }
+  if (configuration.contextWindowTokens !== undefined) {
+    query.set("context_window_tokens", String(configuration.contextWindowTokens));
+  }
+  if (configuration.temperature !== undefined) {
+    query.set("temperature", String(configuration.temperature));
+  }
+  if (configuration.reasoningEffort !== undefined) {
+    query.set("reasoning_effort", configuration.reasoningEffort ?? "");
+  }
 }
 
 export async function createModelConfiguration(
@@ -595,6 +895,7 @@ export async function createModelConfiguration(
   query.set("label", configuration.label);
   query.set("provider", configuration.provider);
   query.set("model", configuration.model);
+  appendModelGenerationSettings(query, configuration);
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/create?${query}`,
     token,
@@ -611,11 +912,43 @@ export async function updateModelConfiguration(
   if (configuration.label !== undefined) query.set("label", configuration.label);
   if (configuration.provider !== undefined) query.set("provider", configuration.provider);
   if (configuration.model !== undefined) query.set("model", configuration.model);
-  if (configuration.contextWindowTokens !== undefined) {
-    query.set("context_window_tokens", String(configuration.contextWindowTokens));
-  }
+  appendModelGenerationSettings(query, configuration);
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/update?${query}`,
+    token,
+  );
+}
+
+export async function deleteModelConfiguration(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams({ name });
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/delete?${query}`,
+    token,
+  );
+}
+
+export async function migrateModelConfigurations(
+  token: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/migrate`,
+    token,
+  );
+}
+
+export async function updateModelCallOrder(
+  token: string,
+  order: string[],
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams({ order: JSON.stringify(order) });
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-call-order/update?${query}`,
     token,
   );
 }
@@ -625,14 +958,32 @@ export async function updateProviderSettings(
   update: ProviderSettingsUpdate,
   base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("provider", update.provider);
-  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
-  if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
-  if (update.apiType !== undefined) query.set("api_type", update.apiType);
+  const { provider, ...values } = update;
+  const query = new URLSearchParams({ provider });
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
     token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(values)),
+      },
+    },
+  );
+}
+
+export async function createProviderSettings(
+  token: string,
+  update: ProviderCreationUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/create`,
+    token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(update)),
+      },
+    },
   );
 }
 
@@ -640,12 +991,38 @@ export async function loginProviderOAuth(
   token: string,
   provider: string,
   base: string = "",
-): Promise<SettingsPayload> {
+  remoteBrowserAccess: boolean = false,
+): Promise<ProviderOAuthLoginResult> {
   const query = new URLSearchParams();
   query.set("provider", provider);
-  return request<SettingsPayload>(
+  if (remoteBrowserAccess) query.set("remote_browser", "true");
+  return request<ProviderOAuthLoginResult>(
     `${base}/api/settings/provider/oauth-login?${query}`,
     token,
+    { cache: "no-store" },
+  );
+}
+
+export async function completeProviderOAuth(
+  token: string,
+  provider: string,
+  flowId: string,
+  authorizationResponse?: string,
+  base: string = "",
+): Promise<ProviderOAuthCompletionResult> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  query.set("flow_id", flowId);
+  const responseHeader = provider === "openai_codex"
+    ? OAUTH_CALLBACK_HEADER
+    : OAUTH_CODE_HEADER;
+  const headers = authorizationResponse
+    ? { [responseHeader]: authorizationResponse }
+    : undefined;
+  return request<ProviderOAuthCompletionResult>(
+    `${base}/api/settings/provider/oauth-login/complete?${query}`,
+    token,
+    { cache: "no-store", ...(headers ? { headers } : {}) },
   );
 }
 

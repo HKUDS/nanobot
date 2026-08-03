@@ -191,7 +191,7 @@ Note: This is a text placeholder. Actual assets can be any file type.
 """
 
 
-def normalize_skill_name(skill_name):
+def normalize_skill_name(skill_name: str) -> str:
     """Normalize a skill name to lowercase hyphen-case."""
     normalized = skill_name.strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
@@ -200,12 +200,12 @@ def normalize_skill_name(skill_name):
     return normalized
 
 
-def title_case_skill_name(skill_name):
+def title_case_skill_name(skill_name: str) -> str:
     """Convert hyphenated skill name to Title Case for display."""
     return " ".join(word.capitalize() for word in skill_name.split("-"))
 
 
-def parse_resources(raw_resources):
+def parse_resources(raw_resources: str) -> list[str]:
     if not raw_resources:
         return []
     resources = [item.strip() for item in raw_resources.split(",") if item.strip()]
@@ -215,8 +215,8 @@ def parse_resources(raw_resources):
         print(f"[ERROR] Unknown resource type(s): {', '.join(invalid)}")
         print(f"   Allowed: {allowed}")
         sys.exit(1)
-    deduped = []
-    seen = set()
+    deduped: list[str] = []
+    seen: set[str] = set()
     for resource in resources:
         if resource not in seen:
             deduped.append(resource)
@@ -224,7 +224,13 @@ def parse_resources(raw_resources):
     return deduped
 
 
-def create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_examples):
+def create_resource_dirs(
+    skill_dir: Path,
+    skill_name: str,
+    skill_title: str,
+    resources: list[str],
+    include_examples: bool,
+) -> None:
     for resource in resources:
         resource_dir = skill_dir / resource
         resource_dir.mkdir(exist_ok=True)
@@ -252,7 +258,12 @@ def create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_
                 print("[OK] Created assets/")
 
 
-def init_skill(skill_name, path, resources, include_examples):
+def init_skill(
+    skill_name: str,
+    path: str | Path,
+    resources: list[str],
+    include_examples: bool,
+) -> Path | None:
     """
     Initialize a new skill directory with template SKILL.md.
 
@@ -317,7 +328,7 @@ def init_skill(skill_name, path, resources, include_examples):
     return skill_dir
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create a new skill directory with a SKILL.md template.",
     )
