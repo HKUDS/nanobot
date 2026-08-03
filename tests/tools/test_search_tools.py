@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -408,3 +410,103 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
 
     assert "alpha" not in prompt
     assert "beta" in prompt
+
+
+# ── MST search tests ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_web_search_mst_success(monkeypatch) -> None:
+    async def fake_mst_search(self, query: str, n: int) -> str:
+        captured["query"] = query
+        captured["n"] = n
+        return "Result 1\nhttps://example.com/1\nsnippet one"
+
+    captured: dict = {}
+    monkeypatch.setattr(WebSearchTool, "_search_mst", fake_mst_search)
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst"))
+    result = await tool.execute("test query", count=3)
+
+    assert captured["query"] == "test query"
+    assert captured["n"] == 3
+    assert "Result 1" in result
+    assert "https://example.com/1" in result
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_no_package(monkeypatch) -> None:
+    with patch.dict(sys.modules, {"mst": None}):
+        tool = WebSearchTool(config=WebSearchConfig(provider="mst"))
+        result = await tool.execute("test query")
+
+    assert "Error:" in result and "mst-python" in result
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_env_engines(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_mst_search(self, query: str, n: int) -> str:
+        # Capture by patching mst_lib.search internally
+        captured["engines"] = os.environ.get("MST_ENGINES")
+        return {"query": "q", "results": []}
+
+    monkeypatch.setattr(WebSearchTool, "_search_mst", fake_mst_search)
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst", mst_engines=[]))
+
+    with patch.dict(os.environ, {"MST_ENGINES": "ddg,google"}):
+        await tool.execute("test query")
+
+    assert captured.get("engines") == "ddg,google"
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_env_weights(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_mst_search(self, query: str, n: int) -> str:
+        captured["weights"] = os.environ.get("MST_WEIGHTS")
+        return {"query": "q", "results": []}
+
+    monkeypatch.setattr(WebSearchTool, "_search_mst", fake_mst_search)
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst", mst_weights={}))
+
+    with patch.dict(os.environ, {"MST_WEIGHTS": json.dumps({"brave": 2.0})}):
+        await tool.execute("test query")
+
+    assert json.loads(captured.get("weights", "{}")) == {"brave": 2.0}
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_config_engines_override_env(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_mst_search(self, query: str, n: int) -> str:
+        captured["engines"] = self.config.mst_engines
+        return {"query": "q", "results": []}
+
+    monkeypatch.setattr(WebSearchTool, "_search_mst", fake_mst_search)
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="mst", mst_engines=["bing"]),
+    )
+
+    with patch.dict(os.environ, {"MST_ENGINES": "ddg,google"}):
+        await tool.execute("test query")
+
+    # Config takes priority over env var
+    assert captured.get("engines") == ["bing"]
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_custom_timeout(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_mst_search(self, query: str, n: int) -> str:
+        captured["timeout"] = self.config.timeout
+        return {"query": "q", "results": []}
+
+    monkeypatch.setattr(WebSearchTool, "_search_mst", fake_mst_search)
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst", timeout=15))
+
+    await tool.execute("test query")
+
+    assert captured.get("timeout") == 15
