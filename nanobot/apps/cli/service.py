@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -204,6 +205,11 @@ def _now() -> float:
     return time.time()
 
 
+def _as_object_dict(value: object) -> dict[str, Any] | None:
+    """Narrow a JSON-like object to the string-keyed mapping used by this module."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
 def _safe_skill_name(name: str) -> str:
     clean = _SAFE_NAME_RE.sub("-", name.lower()).strip("-")
     return f"cli-app-{clean or 'app'}"
@@ -277,10 +283,11 @@ def _console_script_distribution(entry_point: str) -> str | None:
             if item.group != "console_scripts" or item.name != entry_point:
                 continue
             try:
-                name = distribution.metadata.get("Name")
+                name: object = cast(Any, distribution.metadata).get("Name")
             except Exception:
                 name = None
-            return str(name or getattr(distribution, "name", "") or "").strip() or None
+            fallback_name = cast(object, getattr(distribution, "name", ""))
+            return str(name or fallback_name or "").strip() or None
     return None
 
 
@@ -335,10 +342,10 @@ def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    return _as_object_dict(data)
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -414,8 +421,8 @@ class CliAppManager:
         cached = _read_json(cache_path)
         if not cached:
             return None, 0.0
-        data = cached.get("data")
-        if not isinstance(data, dict):
+        data = _as_object_dict(cached.get("data"))
+        if data is None:
             return None, 0.0
         try:
             cached_at = float(cached.get("_cached_at", 0))
@@ -425,8 +432,8 @@ class CliAppManager:
 
     def _load_installed(self) -> dict[str, Any]:
         data = _read_json(self.installed_path) or {}
-        apps = data.get("apps") if isinstance(data.get("apps"), dict) else data
-        return apps if isinstance(apps, dict) else {}
+        apps = _as_object_dict(data.get("apps"))
+        return apps if apps is not None else data
 
     def _save_installed(self, installed: dict[str, Any]) -> None:
         _write_json(self.installed_path, {"schema_version": 1, "apps": installed})
@@ -453,8 +460,8 @@ class CliAppManager:
         try:
             response = httpx.get(url, timeout=15.0, follow_redirects=True)
             response.raise_for_status()
-            fetched = response.json()
-            if not isinstance(fetched, dict):
+            fetched = _as_object_dict(response.json())
+            if fetched is None:
                 raise ValueError("registry response must be an object")
         except Exception:
             if data is not None:
@@ -483,8 +490,8 @@ class CliAppManager:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 response = await client.get(url)
             response.raise_for_status()
-            fetched = response.json()
-            if not isinstance(fetched, dict):
+            fetched = _as_object_dict(response.json())
+            if fetched is None:
                 raise ValueError("registry response must be an object")
         except Exception:
             if data is not None:
@@ -534,13 +541,14 @@ class CliAppManager:
         apps_by_name: dict[str, dict[str, Any]] = {}
         updated_values: list[str] = []
         for source, raw_base, registry in registries:
-            meta = registry.get("meta")
-            if isinstance(meta, dict) and isinstance(meta.get("updated"), str):
+            meta = _as_object_dict(registry.get("meta"))
+            if meta is not None and isinstance(meta.get("updated"), str):
                 updated_values.append(meta["updated"])
-            for row in registry.get("clis", []):
-                if not isinstance(row, dict) or not row.get("name"):
+            for row in cast(Iterable[object], registry.get("clis", [])):
+                entry = _as_object_dict(row)
+                if entry is None or not entry.get("name"):
                     continue
-                entry = dict(row)
+                entry = dict(entry)
                 entry["_source"] = source
                 entry["_raw_base"] = raw_base
                 key = str(entry["name"]).lower()
@@ -588,7 +596,7 @@ class CliAppManager:
         if not installed:
             return []
         installed_by_name = {
-            str(name).lower(): (str(name), data if isinstance(data, dict) else {})
+            str(name).lower(): (str(name), _as_object_dict(data) or {})
             for name, data in installed.items()
         }
         seen: set[str] = set()
@@ -769,12 +777,14 @@ class CliAppManager:
             for app in cached_apps
             if app.get("name")
         }
-        rows = []
+        rows: list[dict[str, Any]] = []
         for name, raw_entry in sorted(installed.items()):
-            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            entry = _as_object_dict(raw_entry)
+            if entry is None:
+                entry = {}
             strategy = str(entry.get("strategy") or "bundled")
             cached_app = cached_by_name.get(str(name).lower(), {})
-            app = {
+            app: dict[str, Any] = {
                 "name": str(name),
                 "display_name": str(
                     cached_app.get("display_name") or entry.get("display_name") or name
@@ -1165,7 +1175,9 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if str(app["name"]) not in installed:
             raise CliAppError("CLI app is not installed")
         raw_installed_entry = installed.get(str(app["name"]))
-        installed_entry = raw_installed_entry if isinstance(raw_installed_entry, dict) else {}
+        installed_entry = _as_object_dict(raw_installed_entry)
+        if installed_entry is None:
+            installed_entry = {}
         strategy = self._strategy(app)
         entry_point = str(app.get("entry_point") or "").strip()
         managed_entry_path = str(installed_entry.get("entry_point_path") or "").strip()

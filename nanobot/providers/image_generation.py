@@ -9,12 +9,13 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urljoin
 
 import httpx
 from loguru import logger
 
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -79,6 +80,18 @@ class GeneratedImageResponse:
     images: list[str]
     content: str
     raw: dict[str, Any]
+
+
+def _as_json_object(value: object) -> dict[str, Any] | None:
+    """Narrow an untrusted provider response value to a JSON object."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def _as_json_objects(value: object) -> list[dict[str, Any]]:
+    """Return object entries from an untrusted provider response array."""
+    if not isinstance(value, list):
+        return []
+    return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
 
 
 def _read_image_b64(path: str | Path) -> tuple[str, str]:
@@ -249,7 +262,7 @@ def image_gen_provider_names() -> tuple[str, ...]:
     return tuple(_IMAGE_GEN_PROVIDERS)
 
 
-def image_gen_provider_configs(config: Any) -> dict[str, Any]:
+def image_gen_provider_configs(config: Config) -> dict[str, ProviderConfig]:
     providers_cfg = config.providers
     return {
         name: pc
@@ -315,7 +328,7 @@ class ImageGenerationProvider(ABC):
     def _require_images(self, images: list[str], data: dict[str, Any]) -> None:
         if images:
             return
-        provider_error = data.get("error") if isinstance(data, dict) else None
+        provider_error = data.get("error")
         label = self.provider_name
         if provider_error:
             raise ImageGenerationError(f"{label} returned no images: {provider_error}")
@@ -410,20 +423,17 @@ class OpenRouterImageGenerationClient(ImageGenerationProvider):
             detail = response.text[:500]
             raise ImageGenerationError(f"OpenRouter image generation failed: {detail}") from exc
 
-        data = response.json()
+        data = _as_json_object(response.json()) or {}
         images: list[str] = []
         text_parts: list[str] = []
-        for choice in data.get("choices") or []:
-            if not isinstance(choice, dict):
-                continue
-            message = choice.get("message") or {}
-            if isinstance(message.get("content"), str):
-                text_parts.append(message["content"])
-            for image in message.get("images") or []:
-                if not isinstance(image, dict):
-                    continue
-                image_url = image.get("image_url") or image.get("imageUrl") or {}
-                url_value = image_url.get("url") if isinstance(image_url, dict) else None
+        for choice in _as_json_objects(data.get("choices")):
+            message = _as_json_object(choice.get("message")) or {}
+            message_content = message.get("content")
+            if isinstance(message_content, str):
+                text_parts.append(message_content)
+            for image in _as_json_objects(message.get("images")):
+                image_url = _as_json_object(image.get("image_url") or image.get("imageUrl"))
+                url_value = image_url.get("url") if image_url is not None else None
                 if isinstance(url_value, str) and url_value.startswith("data:image/"):
                     images.append(url_value)
 
@@ -527,7 +537,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
             detail = response.text[:500]
             raise ImageGenerationError(f"AIHubMix image generation failed: {detail}") from exc
 
-        payload = response.json()
+        payload = _as_json_object(response.json()) or {}
         images = await _aihubmix_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
@@ -538,11 +548,12 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
 def _http_error_detail(response: httpx.Response) -> str:
     """Extract a readable error message from an HTTP error response."""
     try:
-        data = response.json()
-        if isinstance(data, dict):
-            err = data.get("error")
-            if isinstance(err, dict):
-                return err.get("message") or str(err)
+        data = _as_json_object(response.json())
+        if data is not None:
+            err = _as_json_object(data.get("error"))
+            if err is not None:
+                message = err.get("message")
+                return message if isinstance(message, str) else str(err)
             if err:
                 return str(err)
     except Exception:
@@ -595,11 +606,11 @@ def _ollama_image_data_url(value: str) -> str:
 def _ollama_images_from_payload(payload: dict[str, Any]) -> list[str]:
     images: list[str] = []
 
-    def collect(value: Any) -> None:
+    def collect(value: object) -> None:
         if isinstance(value, str) and value:
             images.append(_ollama_image_data_url(value))
         elif isinstance(value, list):
-            for item in value:
+            for item in cast(list[object], value):
                 collect(item)
 
     collect(payload.get("image"))
@@ -768,14 +779,12 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
                 f"Gemini Imagen generation failed (HTTP {response.status_code}): {detail}"
             ) from exc
 
-        data = response.json()
+        data = _as_json_object(response.json()) or {}
         images: list[str] = []
-        for prediction in data.get("predictions") or []:
-            if not isinstance(prediction, dict):
-                continue
+        for prediction in _as_json_objects(data.get("predictions")):
             b64 = prediction.get("bytesBase64Encoded")
             mime = prediction.get("mimeType", "image/png")
-            if isinstance(b64, str) and b64:
+            if isinstance(b64, str) and b64 and isinstance(mime, str):
                 images.append(f"data:{mime};base64,{b64}")
 
         self._require_images(images, data)
@@ -799,7 +808,12 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
         generation_config: dict[str, Any] = {"responseModalities": ["TEXT", "IMAGE"]}
         image_config = _gemini_flash_image_config(model, aspect_ratio, image_size)
         if image_config:
-            generation_config["responseFormat"] = {"image": image_config}
+            # Gemini Flash image models accept plain-string values under
+            # ``generationConfig.imageConfig``. The legacy
+            # ``responseFormat.image`` block is rejected with INVALID_ARGUMENT
+            # by gemini-3.1-flash-lite-image (enum-based fields), so it is not
+            # used here.
+            generation_config["imageConfig"] = image_config
 
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": parts}],
@@ -824,23 +838,21 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
                 f"Gemini image generation failed (HTTP {response.status_code}): {detail}"
             ) from exc
 
-        data = response.json()
+        data = _as_json_object(response.json()) or {}
         images: list[str] = []
         text_parts: list[str] = []
-        for candidate in data.get("candidates") or []:
-            if not isinstance(candidate, dict):
-                continue
-            content = candidate.get("content") or {}
-            for part in content.get("parts") or []:
-                if not isinstance(part, dict):
-                    continue
+        for candidate in _as_json_objects(data.get("candidates")):
+            content = _as_json_object(candidate.get("content")) or {}
+            for part in _as_json_objects(content.get("parts")):
                 if "text" in part:
-                    text_parts.append(part["text"])
-                inline = part.get("inlineData")
-                if isinstance(inline, dict):
+                    text = part["text"]
+                    if isinstance(text, str):
+                        text_parts.append(text)
+                inline = _as_json_object(part.get("inlineData"))
+                if inline is not None:
                     mime = inline.get("mimeType", "image/png")
                     b64 = inline.get("data", "")
-                    if b64:
+                    if isinstance(mime, str) and isinstance(b64, str) and b64:
                         images.append(f"data:{mime};base64,{b64}")
 
         self._require_images(images, data)
@@ -857,11 +869,13 @@ def _gemini_flash_image_config(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> dict[str, str]:
-    """Build the ``responseFormat.image`` config for Gemini Flash image models.
+    """Build the ``generationConfig.imageConfig`` config for Gemini Flash image models.
 
-    Capabilities are model-specific: Gemini 3.1 Flash variants support four
-    additional extreme ratios, while configurable image sizes are limited to
-    the documented Gemini 3 image model families.
+    Values are the documented plain strings (e.g. ``16:9``, ``1K``) that the
+    live v1beta API accepts under ``imageConfig``. Capabilities are
+    model-specific: Gemini 3.1 Flash variants support four additional extreme
+    ratios, while configurable image sizes are limited to the documented
+    Gemini 3 image model families.
     """
     config: dict[str, str] = {}
     if aspect_ratio and aspect_ratio in _gemini_flash_supported_aspect_ratios(model):
@@ -914,9 +928,9 @@ async def _aihubmix_images_from_payload(
     if "output" in payload:
         candidates.append(payload["output"])
 
-    async def collect(value: Any) -> None:
+    async def collect(value: object) -> None:
         if isinstance(value, list):
-            for item in value:
+            for item in cast(list[object], value):
                 await collect(item)
             return
         if isinstance(value, str):
@@ -925,32 +939,38 @@ async def _aihubmix_images_from_payload(
             elif value.startswith(("http://", "https://")):
                 images.append(await _download_image_data_url(value, proxy=proxy))
             return
-        if not isinstance(value, dict):
+        value_object = _as_json_object(value)
+        if value_object is None:
             return
 
-        b64_json = value.get("b64_json")
+        b64_json = value_object.get("b64_json")
         if isinstance(b64_json, str) and b64_json:
             images.append(_b64_image_data_url(b64_json))
         elif b64_json is not None:
             await collect(b64_json)
 
-        bytes_base64 = value.get("bytesBase64") or value.get("bytes_base64") or value.get("base64")
+        bytes_base64 = (
+            value_object.get("bytesBase64")
+            or value_object.get("bytes_base64")
+            or value_object.get("base64")
+        )
         if isinstance(bytes_base64, str) and bytes_base64:
             images.append(_b64_image_data_url(bytes_base64))
 
-        image_url = value.get("image_url") or value.get("imageUrl")
-        if isinstance(image_url, dict):
-            await collect(image_url.get("url"))
+        image_url = value_object.get("image_url") or value_object.get("imageUrl")
+        image_url_object = _as_json_object(image_url)
+        if image_url_object is not None:
+            await collect(image_url_object.get("url"))
         elif image_url is not None:
             await collect(image_url)
 
-        url_value = value.get("url")
+        url_value = value_object.get("url")
         if url_value is not None:
             await collect(url_value)
 
         for key in ("images", "image", "output"):
-            if key in value:
-                await collect(value[key])
+            if key in value_object:
+                await collect(value_object[key])
 
     for candidate in candidates:
         await collect(candidate)
@@ -1061,9 +1081,10 @@ def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
     """
     images: list[str] = []
     data = payload.get("data")
-    if not isinstance(data, dict):
+    data_object = _as_json_object(data)
+    if data_object is None:
         return images
-    for b64 in data.get("image_base64") or []:
+    for b64 in cast(list[object], data_object.get("image_base64") or []):
         if isinstance(b64, str) and b64:
             images.append(_b64_image_data_url(b64))
     return images
@@ -1381,11 +1402,14 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         image_size: str | None = None,
     ) -> GeneratedImageResponse:
         try:
-            from oauth_cli_kit import get_token as get_codex_token
+            from oauth_cli_kit import (  # pyright: ignore[reportMissingTypeStubs]
+                get_token as _get_codex_token,
+            )
         except ImportError:
             raise ImageGenerationError(self.missing_key_message)
 
         try:
+            get_codex_token = cast(Any, _get_codex_token)
             token_kwargs = {"proxy": self.proxy} if self.proxy else {}
             token = await asyncio.to_thread(get_codex_token, **token_kwargs)
         except Exception as exc:
@@ -1405,9 +1429,9 @@ class CodexImageGenerationClient(ImageGenerationProvider):
                 len(reference_images),
             )
 
-        headers = {
+        headers: dict[str, str] = {
             "Authorization": f"Bearer {token.access}",
-            "chatgpt-account-id": token.account_id,
+            "chatgpt-account-id": str(token.account_id),
             "OpenAI-Beta": "responses=experimental",
             "originator": "nanobot",
             "User-Agent": "nanobot (python)",
@@ -1537,9 +1561,7 @@ async def _openai_images_from_payload(
     Handles both ``b64_json`` (preferred) and ``url`` (downloaded) formats.
     """
     images: list[str] = []
-    for item in payload.get("data") or []:
-        if not isinstance(item, dict):
-            continue
+    for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
         if isinstance(b64, str) and b64:
             images.append(_b64_image_data_url(b64))
@@ -1567,7 +1589,7 @@ async def _parse_codex_sse_images(
         line = line_bytes.strip()
         if line == "":
             if buffer:
-                data_lines = []
+                data_lines: list[str] = []
                 for bl in buffer:
                     if bl.startswith("data:"):
                         data_lines.append(bl[5:].strip())
@@ -1577,8 +1599,10 @@ async def _parse_codex_sse_images(
                     if raw == "[DONE]":
                         break
                     try:
-                        event = _json.loads(raw)
+                        event = _as_json_object(_json.loads(raw))
                     except Exception:
+                        continue
+                    if event is None:
                         continue
                     ev_type = event.get("type", "")
                     if ev_type in ("error", "response.failed"):
@@ -1596,12 +1620,13 @@ async def _parse_codex_sse_images(
         raw = "".join(data_lines)
         if raw and raw != "[DONE]":
             try:
-                event = _json.loads(raw)
+                event = _as_json_object(_json.loads(raw))
             except Exception:
                 pass
             else:
-                _collect_images_from_sse_event(event, images)
-                _collect_text_from_sse_event(event, text_parts)
+                if event is not None:
+                    _collect_images_from_sse_event(event, images)
+                    _collect_text_from_sse_event(event, text_parts)
 
     return images, "".join(text_parts).strip()
 
@@ -1609,7 +1634,7 @@ async def _parse_codex_sse_images(
 def _collect_images_from_sse_event(event: dict[str, Any], images: list[str]) -> None:
     if event.get("type") != "response.output_item.done":
         return
-    item = event.get("item") or {}
+    item = _as_json_object(event.get("item")) or {}
     if item.get("type") != "image_generation_call":
         return
     result = item.get("result")
@@ -1618,8 +1643,8 @@ def _collect_images_from_sse_event(event: dict[str, Any], images: list[str]) -> 
             images.append(result)
         else:
             images.append(_b64_image_data_url(result))
-    elif isinstance(result, dict):
-        image_url = result.get("image_url") or result.get("image") or ""
+    elif (result_object := _as_json_object(result)) is not None:
+        image_url = result_object.get("image_url") or result_object.get("image") or ""
         if isinstance(image_url, str):
             if image_url.startswith("data:image/"):
                 images.append(image_url)
@@ -1749,9 +1774,7 @@ def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
     StepFun returns images in ``data[].b64_json`` (base64 strings).
     """
     images: list[str] = []
-    for item in payload.get("data") or []:
-        if not isinstance(item, dict):
-            continue
+    for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
         if isinstance(b64, str) and b64:
             images.append(_b64_image_data_url(b64))
@@ -1894,9 +1917,7 @@ async def _zhipu_images_from_payload(
     We download and re-encode as base64 data URLs.
     """
     images: list[str] = []
-    for item in payload.get("data") or []:
-        if not isinstance(item, dict):
-            continue
+    for item in _as_json_objects(payload.get("data")):
         url = item.get("url")
         if isinstance(url, str) and url:
             images.append(await _download_image_data_url(url, proxy=proxy))
@@ -2080,7 +2101,7 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         data: dict[str, Any],
     ) -> list[str]:
         images: list[str] = []
-        for url in data.get("output_images") or []:
+        for url in cast(list[object], data.get("output_images") or []):
             if isinstance(url, str) and url:
                 if url.startswith("data:image/"):
                     images.append(url)

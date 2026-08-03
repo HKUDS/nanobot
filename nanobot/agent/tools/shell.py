@@ -18,13 +18,14 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
     MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
+    ExecSessionManager,
     clamp_session_int,
     format_session_poll,
 )
@@ -174,11 +175,11 @@ class ExecTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
@@ -193,7 +194,7 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
-            session_manager=getattr(ctx, "exec_session_manager", None),
+            session_manager=ctx.exec_session_manager,
         )
 
     def __init__(
@@ -211,7 +212,7 @@ class ExecTool(Tool):
         sandbox_ro_binds: list[str] | None = None,
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
-        session_manager: Any | None = None,
+        session_manager: ExecSessionManager | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -344,7 +345,7 @@ class ExecTool(Tool):
             # misses it, leaving a zombie.
             _reap_pid(process.pid)
 
-            output_parts = []
+            output_parts: list[str] = []
 
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
@@ -504,7 +505,7 @@ class ExecTool(Tool):
         )
 
     def _compose_path(self, current_path: str) -> str:
-        parts = []
+        parts: list[str] = []
         if self.path_prepend:
             parts.append(self.path_prepend)
         if current_path:
@@ -514,7 +515,7 @@ class ExecTool(Tool):
         return os.pathsep.join(parts)
 
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
-        segments = []
+        segments: list[str] = []
         if self.path_prepend:
             env["NANOBOT_PATH_PREPEND"] = self.path_prepend
             segments.append("$NANOBOT_PATH_PREPEND")
@@ -555,6 +556,7 @@ class ExecTool(Tool):
             command = ExecTool._normalize_powershell_command(command)
             command = (
                 "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
                 "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
                 f"{command}\n"
                 "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
@@ -568,11 +570,21 @@ class ExecTool(Tool):
                 env=env,
             )
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args = [shell_program]
+        args: list[str] = [shell_program]
         shell_name = Path(shell_program).name.lower()
         if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
             args.append("-l")
         args.extend(["-c", command])
+        if process_tree:
+            return await asyncio.create_subprocess_exec(
+                *args,
+                stdin=stdin,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=env,
+                start_new_session=True,
+            )
         return await asyncio.create_subprocess_exec(
             *args,
             stdin=stdin,
@@ -580,7 +592,6 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
-            **({"start_new_session": True} if process_tree else {}),
         )
 
     @staticmethod

@@ -65,6 +65,10 @@ import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import {
+  SIDEBAR_SELECTION_ITEM_CLASS,
+  SidebarSelectionHighlight,
+} from "@/components/SidebarSelectionHighlight";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { ToggleButton } from "@/components/settings/ToggleButton";
@@ -230,8 +234,6 @@ interface AgentSettingsDraft {
   temperature: number;
   reasoningEffort: string;
   timezone: string;
-  botName: string;
-  botIcon: string;
   toolHintMaxLength: number;
 }
 
@@ -471,8 +473,6 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   temperature: 0.1,
   reasoningEffort: "",
   timezone: "UTC",
-  botName: "nanobot",
-  botIcon: "",
   toolHintMaxLength: 40,
 };
 
@@ -540,8 +540,6 @@ function agentDraftFromPayload(
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
     timezone: payload.agent.timezone,
-    botName: payload.agent.bot_name,
-    botIcon: payload.agent.bot_icon,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
 }
@@ -633,7 +631,7 @@ export function SettingsView({
   hostChromeInset = false,
 }: SettingsViewProps) {
   const { t } = useTranslation();
-  const { token } = useClient();
+  const { getToken, token } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -661,11 +659,12 @@ export function SettingsView({
   const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
-  const [xaiOAuthFlow, setXaiOAuthFlow] =
+  const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
-  const xaiOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
-  const [xaiOAuthCode, setXaiOAuthCode] = useState("");
-  const [xaiOAuthCompleting, setXaiOAuthCompleting] = useState(false);
+  const providerOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
+  const [providerOAuthResponse, setProviderOAuthResponse] = useState("");
+  const [providerOAuthCompleting, setProviderOAuthCompleting] = useState(false);
+  const [providerOAuthDialogError, setProviderOAuthDialogError] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
@@ -765,37 +764,44 @@ export function SettingsView({
     [onSettingsChange],
   );
 
-  const closeXaiOAuthFlow = useCallback(() => {
-    xaiOAuthFlowRef.current = null;
-    setXaiOAuthFlow(null);
-    setXaiOAuthCode("");
-    setXaiOAuthCompleting(false);
+  const closeProviderOAuthFlow = useCallback(() => {
+    providerOAuthFlowRef.current = null;
+    setProviderOAuthFlow(null);
+    setProviderOAuthResponse("");
+    setProviderOAuthCompleting(false);
+    setProviderOAuthDialogError(null);
   }, []);
 
   useEffect(() => {
-    if (!xaiOAuthFlow) return;
+    if (!providerOAuthFlow) return;
     let cancelled = false;
     let timer: number | null = null;
     const poll = async () => {
       try {
         const payload = await completeProviderOAuth(
-          token,
-          xaiOAuthFlow.provider,
-          xaiOAuthFlow.flow_id,
+          getToken(),
+          providerOAuthFlow.provider,
+          providerOAuthFlow.flow_id,
         );
-        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        if (
+          cancelled
+          || providerOAuthFlowRef.current?.flow_id !== providerOAuthFlow.flow_id
+        ) return;
         if (isProviderOAuthPending(payload)) {
           timer = window.setTimeout(() => void poll(), 1000);
           return;
         }
         applyPayload(payload);
-        setExpandedProvider(xaiOAuthFlow.provider);
+        setExpandedProvider(providerOAuthFlow.provider);
         setError(null);
-        closeXaiOAuthFlow();
+        closeProviderOAuthFlow();
       } catch (err) {
-        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        if (
+          cancelled
+          || providerOAuthFlowRef.current?.flow_id !== providerOAuthFlow.flow_id
+        ) return;
         setError((err as Error).message);
-        closeXaiOAuthFlow();
+        closeProviderOAuthFlow();
       }
     };
     timer = window.setTimeout(() => void poll(), 1000);
@@ -803,7 +809,7 @@ export function SettingsView({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [applyPayload, closeXaiOAuthFlow, token, xaiOAuthFlow]);
+  }, [applyPayload, closeProviderOAuthFlow, getToken, providerOAuthFlow]);
 
   useEffect(() => {
     if (!initialSettings || settings !== null) return;
@@ -815,7 +821,7 @@ export function SettingsView({
     let cancelled = false;
     const showLoading = settings === null;
     if (showLoading) setLoading(true);
-    fetchSettings(token)
+    fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled) {
           applyPayload(payload);
@@ -831,30 +837,37 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [applyPayload, token]);
+  }, [applyPayload, getToken]);
 
   const hasSettings = settings !== null;
   useEffect(() => {
     if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
     let cancelled = false;
-    const refresh = () => {
-      fetchSettingsUsage(token)
-        .then((usage) => {
-          if (cancelled) return;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const usage = await fetchSettingsUsage(getToken());
+        if (!cancelled) {
           setSettings((current) => (current ? { ...current, usage } : current));
-        })
-        .catch(() => {});
+        }
+      } catch {
+        // Usage is best-effort telemetry; the settings snapshot remains usable.
+      } finally {
+        refreshing = false;
+      }
     };
     void refresh();
-    const interval = window.setInterval(refresh, 5000);
-    const onFocus = () => refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [activeSection, hasSettings, pageVisible, token]);
+  }, [activeSection, getToken, hasSettings, pageVisible]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -863,7 +876,7 @@ export function SettingsView({
     let retryCount = 0;
     const loadCliApps = (showLoading: boolean) => {
       if (showLoading) setCliAppsLoading(true);
-      fetchCliApps(token)
+      fetchCliApps(getToken())
         .then((payload) => {
           if (cancelled) return;
           if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
@@ -889,15 +902,23 @@ export function SettingsView({
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   useEffect(() => {
-    if (!["channels", "models", "browser", "runtime"].includes(activeSection)) return;
+    if (
+      !pageVisible
+      || !["channels", "models", "browser", "runtime"].includes(activeSection)
+    ) {
+      return;
+    }
     let cancelled = false;
-    const refresh = async (showLoading = false) => {
+    let refreshing = false;
+    const refresh = async (showLoading = false): Promise<void> => {
+      if (refreshing) return;
+      refreshing = true;
       if (showLoading) setNanobotFeaturesLoading(true);
       try {
-        const payload = await fetchNanobotFeatures(token);
+        const payload = await fetchNanobotFeatures(getToken());
         if (!cancelled) {
           setNanobotFeatures(payload);
           setNanobotFeaturesError(null);
@@ -906,6 +927,7 @@ export function SettingsView({
         const message = (err as Error).message;
         if (!cancelled && message !== "HTTP 404") setNanobotFeaturesError(message);
       } finally {
+        refreshing = false;
         if (!cancelled && showLoading) setNanobotFeaturesLoading(false);
       }
     };
@@ -926,13 +948,13 @@ export function SettingsView({
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken, pageVisible]);
 
   useEffect(() => {
     if (activeSection !== "runtime") return;
     let cancelled = false;
     setApiServiceLoading(true);
-    fetchApiService(token)
+    fetchApiService(getToken())
       .then((payload) => {
         if (!cancelled) {
           setApiService(payload);
@@ -948,13 +970,13 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
     let cancelled = false;
     setMcpPresetsLoading(true);
-    fetchMcpPresets(token)
+    fetchMcpPresets(getToken())
       .then((payload) => {
         if (!cancelled) {
           setMcpPresets(payload);
@@ -970,13 +992,13 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [activeSection, token]);
+  }, [activeSection, getToken]);
 
   const refreshAutomations = useCallback(
     async (showLoading = false) => {
       if (showLoading) setAutomationsLoading(true);
       try {
-        const payload = await fetchAutomations(token);
+        const payload = await fetchAutomations(getToken());
         setAutomations(payload);
         setAutomationsError(null);
       } catch (err) {
@@ -985,23 +1007,26 @@ export function SettingsView({
         if (showLoading) setAutomationsLoading(false);
       }
     },
-    [token],
+    [getToken],
   );
 
   useEffect(() => {
     if (activeSection !== "automations" || !pageVisible) return;
     let cancelled = false;
+    let refreshing = false;
     const refresh = async (showLoading = false) => {
-      if (cancelled) return;
+      if (cancelled || refreshing) return;
+      refreshing = true;
       if (showLoading) setAutomationsLoading(true);
       try {
-        const payload = await fetchAutomations(token);
+        const payload = await fetchAutomations(getToken());
         if (cancelled) return;
         setAutomations(payload);
         setAutomationsError(null);
       } catch (err) {
         if (!cancelled) setAutomationsError((err as Error).message);
       } finally {
+        refreshing = false;
         if (!cancelled && showLoading) setAutomationsLoading(false);
       }
     };
@@ -1014,7 +1039,7 @@ export function SettingsView({
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [activeSection, pageVisible, token]);
+  }, [activeSection, getToken, pageVisible]);
 
   useEffect(() => {
     writeLocalPreferences(localPrefs);
@@ -1050,11 +1075,7 @@ export function SettingsView({
 
   const runtimeDirty = useMemo(() => {
     if (!settings) return false;
-    return (
-      form.timezone !== settings.agent.timezone ||
-      form.botName !== settings.agent.bot_name ||
-      form.botIcon !== settings.agent.bot_icon
-    );
+    return form.timezone !== settings.agent.timezone;
   }, [form, settings]);
 
   const imageGenerationDirty = useMemo(() => {
@@ -1375,8 +1396,6 @@ export function SettingsView({
     try {
       const payload = await updateSettings(token, {
         timezone: form.timezone,
-        botName: form.botName,
-        botIcon: form.botIcon,
       });
       applyPayload(payload);
       if (payload.requires_restart) {
@@ -1593,7 +1612,11 @@ export function SettingsView({
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
     let popup: Window | null = null;
-    if (action === "login" && providerName === "xai_grok" && !remoteBrowserAccess) {
+    if (
+      action === "login"
+      && providerName === "xai_grok"
+      && !remoteBrowserAccess
+    ) {
       try {
         popup = window.open("about:blank", "_blank");
         if (popup) popup.opener = null;
@@ -1605,7 +1628,12 @@ export function SettingsView({
     try {
       const payload =
         action === "login"
-          ? await loginProviderOAuth(token, providerName)
+          ? await loginProviderOAuth(
+              token,
+              providerName,
+              "",
+              providerName === "openai_codex" && remoteBrowserAccess,
+            )
           : await logoutProviderOAuth(token, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
         try {
@@ -1613,15 +1641,16 @@ export function SettingsView({
         } catch {
           // The dialog keeps the authorization link available when the popup was closed.
         }
-        xaiOAuthFlowRef.current = payload;
-        setXaiOAuthFlow(payload);
-        setXaiOAuthCode("");
+        providerOAuthFlowRef.current = payload;
+        setProviderOAuthFlow(payload);
+        setProviderOAuthResponse("");
+        setProviderOAuthDialogError(null);
         setExpandedProvider(providerName);
         setError(null);
         return;
       }
       popup?.close();
-      closeXaiOAuthFlow();
+      closeProviderOAuthFlow();
       applyPayload(payload);
       setExpandedProvider(providerName);
       setError(null);
@@ -1633,31 +1662,31 @@ export function SettingsView({
     }
   };
 
-  const completeXaiOAuth = async () => {
-    const flow = xaiOAuthFlowRef.current;
-    const authorizationCode = xaiOAuthCode.trim();
-    if (!flow || !authorizationCode || xaiOAuthCompleting) return;
-    setXaiOAuthCompleting(true);
+  const completeProviderOAuthResponse = async () => {
+    const flow = providerOAuthFlowRef.current;
+    const authorizationResponse = providerOAuthResponse.trim();
+    if (!flow || !authorizationResponse || providerOAuthCompleting) return;
+    setProviderOAuthCompleting(true);
+    setProviderOAuthDialogError(null);
     try {
       const payload = await completeProviderOAuth(
         token,
         flow.provider,
         flow.flow_id,
-        authorizationCode,
+        authorizationResponse,
       );
-      if (xaiOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
       applyPayload(payload);
       setExpandedProvider(flow.provider);
       setError(null);
-      closeXaiOAuthFlow();
+      closeProviderOAuthFlow();
     } catch (err) {
-      if (xaiOAuthFlowRef.current?.flow_id === flow.flow_id) {
-        setError((err as Error).message);
-        closeXaiOAuthFlow();
+      if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
+        setProviderOAuthDialogError((err as Error).message);
       }
     } finally {
-      setXaiOAuthCompleting(false);
+      setProviderOAuthCompleting(false);
     }
   };
 
@@ -2298,19 +2327,33 @@ export function SettingsView({
         onConfirm={handleDeleteModelConfiguration}
       />
 
-      <XaiOAuthLoginDialog
-        flow={xaiOAuthFlow}
-        authorizationCode={xaiOAuthCode}
-        completing={xaiOAuthCompleting}
+      <ProviderOAuthLoginDialog
+        flow={providerOAuthFlow}
+        providerLabel={
+          providerOAuthFlow
+            ? settings?.providers.find((provider) => provider.name === providerOAuthFlow.provider)
+              ?.label ?? providerOAuthFlow.provider
+            : ""
+        }
+        authorizationResponse={providerOAuthResponse}
+        completing={providerOAuthCompleting}
+        error={providerOAuthDialogError}
         remoteBrowserAccess={remoteBrowserAccess}
-        onAuthorizationCodeChange={setXaiOAuthCode}
+        onAuthorizationResponseChange={(value) => {
+          setProviderOAuthResponse(value);
+          setProviderOAuthDialogError(null);
+        }}
         onOpenAuthorization={() => {
-          if (!xaiOAuthFlow) return;
-          const opened = window.open(xaiOAuthFlow.authorization_url, "_blank", "noopener,noreferrer");
+          if (!providerOAuthFlow) return;
+          const opened = window.open(
+            providerOAuthFlow.authorization_url,
+            "_blank",
+            "noopener,noreferrer",
+          );
           if (opened) opened.opener = null;
         }}
-        onComplete={() => void completeXaiOAuth()}
-        onClose={closeXaiOAuthFlow}
+        onComplete={() => void completeProviderOAuthResponse()}
+        onClose={closeProviderOAuthFlow}
       />
 
       <NanobotFeatureInstallDialog
@@ -2347,8 +2390,12 @@ export function SettingsView({
         )}
       >
         <div
+          key={activeSection}
+          data-testid="settings-section-transition"
+          data-settings-section={activeSection}
           className={cn(
-            "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 px-4 py-6 duration-200 ease-out",
+            "motion-reduce:animate-none sm:px-8 sm:py-8 lg:py-12",
             activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
             activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
@@ -2442,6 +2489,7 @@ function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
+  const activeNavItemRef = useRef<HTMLButtonElement>(null);
   const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
     ?? SETTINGS_NAV_ITEMS[0];
   const ActiveIcon = activeItem.icon;
@@ -2514,19 +2562,26 @@ function SettingsSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="hidden space-y-1 lg:block">
+        <SidebarSelectionHighlight
+          targetRef={activeNavItemRef}
+          activeId={activeSection}
+          scope="settings"
+          className="relative hidden space-y-1 lg:block"
+        >
           {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
             const active = key === activeSection;
             return (
               <button
+                ref={active ? activeNavItemRef : undefined}
                 key={key}
                 type="button"
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSection(key)}
                 className={cn(
-                  "touch-target flex h-9 w-full items-center gap-2 rounded-[10px] px-2.5 text-left text-[13px] font-medium transition-colors",
+                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[13px] font-medium",
+                  SIDEBAR_SELECTION_ITEM_CLASS,
                   active
-                    ? "bg-sidebar-accent text-foreground"
+                    ? "text-sidebar-accent-foreground"
                     : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
                 )}
               >
@@ -2537,7 +2592,7 @@ function SettingsSidebar({
               </button>
             );
           })}
-        </div>
+        </SidebarSelectionHighlight>
       </nav>
 
       <div className="hidden lg:mt-auto lg:block lg:pt-4">
@@ -2957,26 +3012,35 @@ function AppearanceSettings({
   );
 }
 
-function XaiOAuthLoginDialog({
+function ProviderOAuthLoginDialog({
   flow,
-  authorizationCode,
+  providerLabel,
+  authorizationResponse,
   completing,
+  error,
   remoteBrowserAccess,
-  onAuthorizationCodeChange,
+  onAuthorizationResponseChange,
   onOpenAuthorization,
   onComplete,
   onClose,
 }: {
   flow: ProviderOAuthAuthorizationRequired | null;
-  authorizationCode: string;
+  providerLabel: string;
+  authorizationResponse: string;
   completing: boolean;
+  error: string | null;
   remoteBrowserAccess: boolean;
-  onAuthorizationCodeChange: (value: string) => void;
+  onAuthorizationResponseChange: (value: string) => void;
   onOpenAuthorization: () => void;
   onComplete: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const expectsCallbackUrl = flow?.completion_input === "callback_url";
+  const inputId = expectsCallbackUrl ? "provider-oauth-callback" : "provider-oauth-code";
+  const inputLabel = expectsCallbackUrl
+    ? t("settings.oauth.callbackUrl")
+    : t("settings.oauth.authorizationCode");
 
   return (
     <Dialog
@@ -2994,36 +3058,75 @@ function XaiOAuthLoginDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>xAI Grok</DialogTitle>
+            <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
-              {remoteBrowserAccess
-                ? t("settings.oauth.remoteCodeHelp")
-                : t("settings.oauth.localCodeHelp")}
+              {expectsCallbackUrl
+                ? remoteBrowserAccess
+                  ? t("settings.oauth.remoteCallbackHelp")
+                  : t("settings.oauth.localCallbackHelp")
+                : remoteBrowserAccess
+                  ? t("settings.oauth.remoteCodeHelp")
+                  : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-2 rounded-[14px] border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
+            {expectsCallbackUrl && remoteBrowserAccess ? (
+              <Clipboard className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            ) : (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            )}
+            <span>
+              {expectsCallbackUrl && remoteBrowserAccess
+                ? t("settings.oauth.pasteCallbackToContinue")
+                : t("settings.oauth.waitingForCallback")}
+            </span>
+          </div>
           <div className="space-y-2">
             <label
-              htmlFor="xai-oauth-code"
+              htmlFor={inputId}
               className="block text-xs font-medium text-foreground"
             >
-              {t("settings.oauth.authorizationCode")}
+              {inputLabel}
             </label>
-            <Input
-              id="xai-oauth-code"
-              value={authorizationCode}
-              onChange={(event) => onAuthorizationCodeChange(event.target.value)}
-              placeholder={t("settings.oauth.authorizationCode")}
-              aria-label={t("settings.oauth.authorizationCode")}
-              autoComplete="off"
-              spellCheck={false}
-            />
+            {expectsCallbackUrl ? (
+              <Textarea
+                id={inputId}
+                value={authorizationResponse}
+                onChange={(event) => onAuthorizationResponseChange(event.target.value)}
+                placeholder={t("settings.oauth.callbackUrlPlaceholder")}
+                aria-label={inputLabel}
+                autoComplete="off"
+                spellCheck={false}
+                className="min-h-[88px] resize-none break-all font-mono text-[12px] leading-5"
+              />
+            ) : (
+              <Input
+                id={inputId}
+                value={authorizationResponse}
+                onChange={(event) => onAuthorizationResponseChange(event.target.value)}
+                placeholder={inputLabel}
+                aria-label={inputLabel}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            )}
           </div>
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-[14px] border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[12px] text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
           <DialogFooter className="gap-2 sm:space-x-0">
             <Button type="button" variant="outline" onClick={onOpenAuthorization}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-              {t("settings.oauth.signIn")}
+              {expectsCallbackUrl
+                ? t("settings.oauth.openChatGPT")
+                : t("settings.oauth.signIn")}
             </Button>
-            <Button type="submit" disabled={!authorizationCode.trim() || completing}>
+            <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
             </Button>
           </DialogFooter>
@@ -4232,7 +4335,12 @@ function ProvidersSettings({
                             account: provider.oauth_account || provider.label,
                             defaultValue: "Signed in as {{account}}",
                           })
-                        : provider.name === "xai_grok" && remoteBrowserAccess
+                        : provider.name === "openai_codex" && remoteBrowserAccess
+                          ? tx(
+                              "settings.oauth.codexRemoteSignInHelp",
+                              "Sign in through this browser, then paste the full localhost callback URL back into nanobot.",
+                            )
+                          : provider.name === "xai_grok" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.remoteSignInHelp",
                               "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
@@ -8295,23 +8403,15 @@ function RuntimeSettings({
   return (
     <div className="space-y-7">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
-          <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
-            <Input
-              value={form.botName}
-              onChange={(event) => setForm((prev) => ({ ...prev, botName: event.target.value }))}
-              className="h-8 w-[220px] rounded-full text-[13px]"
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.botIcon", "Bot icon")} description={tx("settings.help.botIcon", "Short emoji or text shown with the bot name.")}>
-            <Input
-              value={form.botIcon}
-              onChange={(event) => setForm((prev) => ({ ...prev, botIcon: event.target.value }))}
-              className="h-8 w-[120px] rounded-full text-center text-[13px]"
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.timezone", "Timezone")} description={tx("settings.help.timezone", "Used for schedules and time-aware replies.")}>
+        <SettingsSectionTitle>{tx("settings.sections.regional", "Regional")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.timezone", "Timezone")}
+            description={tx(
+              "settings.help.timezone",
+              "Used for schedules and time-aware replies.",
+            )}
+          >
             <TimezonePicker
               value={form.timezone}
               onChange={(timezone) => setForm((prev) => ({ ...prev, timezone }))}
@@ -8895,6 +8995,8 @@ function ModelIdPicker({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
@@ -8963,7 +9065,7 @@ function ModelIdPicker({
     setPayload(null);
     setError(null);
     setLoading(true);
-    fetchProviderModels(token, effectiveProvider)
+    fetchProviderModels(tokenRef.current, effectiveProvider)
       .then((nextPayload) => {
         if (!cancelled) setPayload(nextPayload);
       })
@@ -8976,7 +9078,7 @@ function ModelIdPicker({
     return () => {
       cancelled = true;
     };
-  }, [effectiveProvider, open, shouldFetchModels, token]);
+  }, [effectiveProvider, open, shouldFetchModels]);
 
   const selectModel = (model: string) => {
     onChange(model);

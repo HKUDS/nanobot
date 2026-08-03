@@ -935,6 +935,9 @@ export class NanobotClient {
       : null;
     if (parsed.event === "message_accepted") {
       this.recordRunAcceptance(parsed.chat_id, parsed.turn_id);
+      if (!isSystemCommandTurnId(turnId)) {
+        this.dispatch(parsed.chat_id, parsed);
+      }
       return;
     }
     if (isSystemCommandTurnId(turnId)) {

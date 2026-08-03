@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -30,8 +30,6 @@ function settingsPayload(): SettingsPayload {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "nb",
       tool_hint_max_length: 40,
     },
     model_presets: [{
@@ -439,6 +437,42 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
   });
 
+  it("coalesces focus refreshes while automations are already loading", async () => {
+    let resolveAutomations!: (response: Response) => void;
+    const pendingAutomations = new Promise<Response>((resolve) => {
+      resolveAutomations = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return pendingAutomations;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/webui/automations"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/webui/automations"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveAutomations(jsonResponse({ jobs: [] }));
+      await pendingAutomations;
+    });
+  });
+
   it("starts the managed API server from System", async () => {
     const base = settingsPayload();
     const stopped = {
@@ -468,7 +502,9 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start API server" }));
+    const startButton = await screen.findByRole("button", { name: "Start API server" });
+    await waitFor(() => expect(startButton).toBeEnabled());
+    fireEvent.click(startButton);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1968,6 +2004,53 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
   });
 
+  it("coalesces focus refreshes while usage is already loading", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      usage: {
+        days: [],
+        total_tokens: 0,
+        total_tokens_30d: 0,
+        total_tokens_365d: 0,
+        peak_day_tokens: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        active_days_30d: 0,
+        requests_30d: 0,
+        updated_at: null,
+      },
+    };
+    let resolveUsage!: (response: Response) => void;
+    const pendingUsage = new Promise<Response>((resolve) => {
+      resolveUsage = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/usage") return pendingUsage;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "overview", initialSettings: payload });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/settings/usage"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/settings/usage"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveUsage(jsonResponse(payload.usage));
+      await pendingUsage;
+    });
+  });
+
   it("aligns token activity days with the configured timezone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-02T18:00:00Z"));
@@ -2663,6 +2746,219 @@ describe("SettingsView Apps catalog", () => {
         "noopener,noreferrer",
       );
       expect(popup.opener).toBeNull();
+    } finally {
+      happyWindow.happyDOM.setURL(originalUrl);
+    }
+  });
+
+  it("polls local OpenAI Codex sign-in until the loopback callback completes", async () => {
+    const base = settingsPayload();
+    const codexProvider = {
+      name: "openai_codex",
+      label: "OpenAI Codex",
+      configured: false,
+      auth_type: "oauth" as const,
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://chatgpt.com/backend-api",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    };
+    const payload: SettingsPayload = { ...base, providers: [codexProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+    };
+    const authorization = {
+      status: "authorization_required",
+      provider: "openai_codex",
+      flow_id: "flow-codex-local",
+      authorization_url: "https://auth.openai.com/oauth/authorize?state=local",
+      expires_in: 600,
+      completion_input: "callback_url",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/provider/oauth-login?provider=openai_codex") {
+        return jsonResponse(authorization);
+      }
+      if (
+        url ===
+        "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex-local"
+      ) {
+        expect(init?.headers).not.toHaveProperty("X-Nanobot-OAuth-Callback");
+        return jsonResponse(signedIn);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await chooseProviderToConfigure("OpenAI Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+    expect(openMock).not.toHaveBeenCalled();
+    expect(
+      within(dialog).getByText(
+        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Paste the callback URL to continue."),
+    ).not.toBeInTheDocument();
+
+    expect(
+      await screen.findByText("Signed in as acct-codex", {}, { timeout: 2500 }),
+    ).toBeInTheDocument();
+  });
+
+  it("completes remote OpenAI Codex sign-in with the full callback URL", async () => {
+    const happyWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void };
+    };
+    const originalUrl = window.location.href;
+    happyWindow.happyDOM.setURL("http://203.0.113.10:18887/#/settings?section=models");
+
+    try {
+      const base = settingsPayload();
+      const codexProvider = {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: false,
+        auth_type: "oauth" as const,
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://chatgpt.com/backend-api",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+      };
+      const payload: SettingsPayload = { ...base, providers: [codexProvider] };
+      const signedIn: SettingsPayload = {
+        ...payload,
+        providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+      };
+      const authorization = {
+        status: "authorization_required",
+        provider: "openai_codex",
+        flow_id: "flow-codex",
+        authorization_url: "https://auth.openai.com/oauth/authorize?state=test",
+        expires_in: 600,
+        completion_input: "callback_url",
+      };
+      const callbackUrl =
+        "http://localhost:1455/auth/callback?code=secret&state=test";
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (
+          url ===
+          "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true"
+        ) {
+          return jsonResponse(authorization);
+        }
+        if (
+          url ===
+          "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex"
+        ) {
+          const headers = init?.headers as Record<string, string>;
+          if (headers?.["X-Nanobot-OAuth-Callback"]) {
+            expect(headers["X-Nanobot-OAuth-Callback"]).toBe(callbackUrl);
+            return jsonResponse(signedIn);
+          }
+          return jsonResponse({
+            status: "pending",
+            provider: "openai_codex",
+            flow_id: "flow-codex",
+          });
+        }
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return jsonResponse({});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const popup = {
+        opener: window,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      };
+      const openMock = vi.fn(() => popup);
+      vi.stubGlobal("open", openMock);
+
+      renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+      await chooseProviderToConfigure("OpenAI Codex");
+      expect(
+        screen.getByText(
+          "Sign in through this browser, then paste the full localhost callback URL back into nanobot.",
+        ),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      const dialog = await screen.findByRole("dialog");
+
+      expect(openMock).not.toHaveBeenCalled();
+      expect(
+        within(dialog).getByText(
+          "Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.",
+        ),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText("Paste the callback URL to continue.")).toBeInTheDocument();
+      const callbackInput = within(dialog).getByRole("textbox", {
+        name: "Full callback URL",
+      });
+      expect(callbackInput).toHaveAttribute(
+        "placeholder",
+        "http://localhost:1455/auth/callback?code=…&state=…",
+      );
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Open ChatGPT" }));
+      expect(openMock).toHaveBeenCalledWith(
+        authorization.authorization_url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(popup.opener).toBeNull();
+
+      fireEvent.change(callbackInput, { target: { value: callbackUrl } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              "X-Nanobot-OAuth-Callback": callbackUrl,
+            }),
+          }),
+        ),
+      );
+      expect(await screen.findByText("Signed in as acct-codex")).toBeInTheDocument();
     } finally {
       happyWindow.happyDOM.setURL(originalUrl);
     }

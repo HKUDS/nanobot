@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import time
 import uuid
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -16,9 +16,12 @@ from nanobot.cron.types import CronJob
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.utils.prompt_templates import render_template
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
+
 
 class BoundCronAgent(Protocol):
-    tools: Any
+    tools: ToolRegistry
 
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         ...

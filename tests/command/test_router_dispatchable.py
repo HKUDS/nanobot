@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,6 +12,13 @@ from nanobot.command.builtin import (
     register_builtin_commands,
 )
 from nanobot.command.router import CommandContext, CommandRouter
+
+
+def test_command_context_requires_loop_as_keyword_dependency() -> None:
+    loop_parameter = signature(CommandContext).parameters["loop"]
+
+    assert loop_parameter.kind is Parameter.KEYWORD_ONLY
+    assert loop_parameter.default is Parameter.empty
 
 
 class TestIsDispatchableCommand:
@@ -100,7 +108,7 @@ class TestMidTurnCommandDispatchedDirectly:
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()
-        loop._schedule_background = MagicMock()
+        loop.schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
         return loop
 

@@ -310,3 +310,25 @@ class TestNestedRepoProtection:
 
         assert result is False
         assert not (workspace / ".git").exists()
+
+
+class TestCommitIdEncoding:
+    """Commit ids must be usable with git, not hex-of-hex."""
+
+    def test_auto_commit_returns_the_real_short_sha(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("- a fact\n", encoding="utf-8")
+        sha = git.auto_commit("memory update")
+        expected = subprocess.run(
+            ["git", "-C", str(tmp_path), "log", "-1", "--format=%h", "--abbrev=8"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert sha == expected
+
+    def test_a_real_git_sha_resolves(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("- a fact\n", encoding="utf-8")
+        git.auto_commit("memory update")
+        real = subprocess.run(
+            ["git", "-C", str(tmp_path), "log", "-1", "--format=%h", "--abbrev=8"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert git._resolve_sha(real) is not None

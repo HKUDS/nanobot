@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ import pytest
 
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.providers.base import ProviderConversationState
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
@@ -27,7 +30,7 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert list_webui_sessions(manager)[0]["preview"] == "indexed preview"
     assert list_webui_sessions(manager)[0]["model_preset"] == "fast"
 
-    def fail_scan(session_manager: SessionManager, path: Path) -> None:
+    def fail_scan(session_manager: SessionManager, path: Path, webui_dir: Path) -> None:
         raise AssertionError(f"unexpected session file scan: {path}")
 
     monkeypatch.setattr(session_list_index, "_scan_session_row", fail_scan)
@@ -37,6 +40,89 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    scoped = manager.get_or_create("websocket:scoped")
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "full",
+        "future_extension": "x" * 5000,
+    }
+    manager.save(scoped)
+    explicit_null = manager.get_or_create("websocket:null")
+    explicit_null.metadata[WORKSPACE_SCOPE_METADATA_KEY] = None
+    manager.save(explicit_null)
+    manager.save(manager.get_or_create("websocket:missing"))
+
+    rows = {row["key"]: row for row in list_webui_sessions(manager)}
+
+    assert session_list_index.indexed_workspace_scope(rows["websocket:scoped"]) == (
+        True,
+        {"project_path": str(project), "access_mode": "full"},
+    )
+    assert session_list_index.indexed_workspace_scope(rows["websocket:null"]) == (True, None)
+    assert session_list_index.indexed_workspace_scope(rows["websocket:missing"]) == (False, None)
+
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY]["access_mode"] = "restricted"
+    manager.save(scoped)
+
+    refreshed = {row["key"]: row for row in list_webui_sessions(manager)}
+    assert session_list_index.indexed_workspace_scope(refreshed["websocket:scoped"])[1] == {
+        "project_path": str(project),
+        "access_mode": "restricted",
+    }
+
+
+def test_webui_session_list_does_not_cache_old_snapshot_with_new_signature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SessionManager(tmp_path)
+    session_key = "websocket:scope-race"
+    session = manager.get_or_create(session_key)
+    session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(tmp_path),
+        "access_mode": "full",
+    }
+    session.add_message("user", "hello")
+    manager.save(session)
+    session_path = manager._get_session_path(session_key)
+    original_open = open
+    scope_changed = False
+
+    class RacingReader(io.StringIO):
+        def __next__(self) -> str:
+            nonlocal scope_changed
+            if not scope_changed:
+                scope_changed = True
+                current = manager.get_or_create(session_key)
+                current.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+                    "project_path": str(tmp_path),
+                    "access_mode": "restricted",
+                }
+                manager.save(current)
+            return super().__next__()
+
+    def racing_open(path, *args, **kwargs):
+        if Path(path) == session_path:
+            with original_open(path, *args, **kwargs) as source:
+                return RacingReader(source.read())
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(session_list_index, "open", racing_open, raising=False)
+
+    first = list_webui_sessions(manager)[0]
+    second = list_webui_sessions(manager)[0]
+
+    assert session_list_index.indexed_workspace_scope(first)[1]["access_mode"] == "full"
+    assert session_list_index.indexed_workspace_scope(second)[1]["access_mode"] == "restricted"
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
@@ -73,9 +159,13 @@ def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatc
     original_scan = session_list_index._scan_session_row
     scanned: list[str] = []
 
-    def record_scan(session_manager: SessionManager, path: Path) -> dict | None:
+    def record_scan(
+        session_manager: SessionManager,
+        path: Path,
+        webui_dir: Path,
+    ) -> dict | None:
         scanned.append(path.name)
-        return original_scan(session_manager, path)
+        return original_scan(session_manager, path, webui_dir)
 
     monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
 
@@ -83,6 +173,26 @@ def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatc
 
     assert scanned == [manager._get_session_path("websocket:second").name]
     assert {row["preview"] for row in rows} == {"first", "second after"}
+
+
+def test_webui_session_list_skips_provider_state_before_preview_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(session_list_index, "_SESSION_LIST_PREVIEW_MAX_CHARS", 100)
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:private-state")
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"encrypted_content": "x" * 200}]},
+    )
+    session.add_message("user", "visible preview")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "visible preview"
 
 
 def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
@@ -226,9 +336,13 @@ def test_webui_session_list_rescans_when_transcript_changes(
     original_scan = session_list_index._scan_session_row
     scanned: list[str] = []
 
-    def record_scan(session_manager: SessionManager, path: Path) -> dict | None:
+    def record_scan(
+        session_manager: SessionManager,
+        path: Path,
+        webui_dir: Path,
+    ) -> dict | None:
         scanned.append(path.name)
-        return original_scan(session_manager, path)
+        return original_scan(session_manager, path, webui_dir)
 
     monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
 

@@ -7,8 +7,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Iterable, cast
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from dulwich.objects import Blob, Commit, ObjectID, Tree, TreeEntry
+    from dulwich.refs import Ref
+    from dulwich.repo import Repo
 
 # Cap on the unified-diff block embedded in Dream commit messages. Memory files
 # are tiny in practice, but a pathological rewrite must not blow up the audit
@@ -46,7 +52,9 @@ class LineAge:
     age_days: int  # days since last modification
 
 
-def _compute_line_ages(annotated) -> list[LineAge]:
+def _compute_line_ages(
+    annotated: Iterable[tuple[tuple["Commit", "TreeEntry"], bytes]],
+) -> list[LineAge]:
     """Convert annotate results to per-line ages."""
     now = datetime.now(tz=timezone.utc).date()
     ages: list[LineAge] = []
@@ -148,10 +156,17 @@ class GitStore:
             # .gitignore excludes everything except tracked files,
             # so any staged/unstaged change must be in our files.
             st = porcelain.status(str(self._workspace))
-            if not st.unstaged and not any(st.staged.values()):
+            unstaged = cast(list[object], st.unstaged)
+            staged = cast(dict[object, list[object]], st.staged)
+            if not unstaged and not any(staged.values()):
                 return None
 
-            msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
+            message_value = cast(object, message)
+            msg_bytes = (
+                message_value.encode("utf-8")
+                if isinstance(message_value, str)
+                else cast(bytes, message_value)
+            )
             porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
@@ -159,9 +174,12 @@ class GitStore:
                 author=b"nanobot <nanobot@dream>",
                 committer=b"nanobot <nanobot@dream>",
             )
-            if sha_bytes is None:
+            if cast(object, sha_bytes) is None:
                 return None
-            sha = sha_bytes.hex()[:8]
+            # porcelain.commit returns the id as a 40-char hex string that is
+            # already encoded to bytes; .hex() would encode those ASCII bytes
+            # again and produce an id no git command can resolve.
+            sha = sha_bytes.decode()[:8]
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
         except Exception as exc:
@@ -180,16 +198,17 @@ class GitStore:
 
             with Repo(str(self._workspace)) as repo:
                 try:
-                    sha = repo.refs[b"HEAD"]
+                    sha: ObjectID | None = repo.refs[cast("Ref", b"HEAD")]
                 except KeyError:
                     return None
 
                 while sha:
-                    if sha.hex().startswith(short_sha):
+                    if sha.decode().startswith(short_sha):
                         return sha
-                    commit = repo[sha]
-                    if commit.type_name != b"commit":
+                    commit_obj = repo[sha]
+                    if commit_obj.type_name != b"commit":
                         break
+                    commit = cast("Commit", commit_obj)
                     sha = commit.parents[0] if commit.parents else None
             return None
         except Exception as exc:
@@ -247,15 +266,16 @@ class GitStore:
             entries: list[CommitInfo] = []
             with Repo(str(self._workspace)) as repo:
                 try:
-                    head = repo.refs[b"HEAD"]
+                    head = repo.refs[cast("Ref", b"HEAD")]
                 except KeyError:
                     return []
 
-                sha = head
+                sha: ObjectID | None = head
                 while sha and len(entries) < max_entries:
-                    commit = repo[sha]
-                    if commit.type_name != b"commit":
+                    commit_obj = repo[sha]
+                    if commit_obj.type_name != b"commit":
                         break
+                    commit = cast("Commit", commit_obj)
                     ts = time.strftime(
                         "%Y-%m-%d %H:%M",
                         time.localtime(commit.commit_time),
@@ -263,7 +283,7 @@ class GitStore:
                     msg = commit.message.decode("utf-8", errors="replace").strip()
                     if message_prefix is None or msg.startswith(message_prefix):
                         entries.append(CommitInfo(
-                            sha=sha.hex()[:8],
+                            sha=sha.decode()[:8],
                             message=msg,
                             timestamp=ts,
                         ))
@@ -429,16 +449,17 @@ class GitStore:
         return body
 
     @staticmethod
-    def _head_tree(repo) -> object | None:
+    def _head_tree(repo: "Repo") -> "Tree | None":
         """Return the tree object at HEAD, or None if there are no commits."""
         try:
-            head = repo.refs[b"HEAD"]
+            head = repo.refs[cast("Ref", b"HEAD")]
         except KeyError:
             return None
-        commit = repo[head]
-        if commit.type_name != b"commit":
+        commit_obj = repo[head]
+        if commit_obj.type_name != b"commit":
             return None
-        return repo[commit.tree]
+        commit = cast("Commit", commit_obj)
+        return cast("Tree", repo[commit.tree])
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
         """Find a commit by short SHA prefix match."""
@@ -464,9 +485,9 @@ class GitStore:
                     if not full_sha:
                         return None
                     with Repo(str(self._workspace)) as repo:
-                        commit = repo[full_sha]
+                        commit = cast("Commit", repo[full_sha])
                         parent = commit.parents[0] if commit.parents else None
-                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    diff = self.diff_commits(parent.decode()[:8], c.sha) if parent else ""
                     return c, diff
             return None
         except Exception as exc:
@@ -500,8 +521,12 @@ class GitStore:
                 commit_obj = repo[full_sha]
                 if commit_obj.type_name != b"commit":
                     return None
+                typed_commit = cast("Commit", commit_obj)
 
-                commit_message = commit_obj.message.decode("utf-8", errors="replace").strip()
+                commit_message = typed_commit.message.decode(
+                    "utf-8",
+                    errors="replace",
+                ).strip()
                 if message_prefix is not None and not commit_message.startswith(message_prefix):
                     logger.warning(
                         "Git revert: commit {} does not match message prefix {!r}",
@@ -510,13 +535,13 @@ class GitStore:
                     )
                     return None
 
-                if not commit_obj.parents:
+                if not typed_commit.parents:
                     logger.warning("Git revert: cannot revert root commit {}", commit)
                     return None
 
                 # Use the parent's tree — this undoes the commit's changes
-                parent_obj = repo[commit_obj.parents[0]]
-                tree = repo[parent_obj.tree]
+                parent_obj = cast("Commit", repo[typed_commit.parents[0]])
+                tree = cast("Tree", repo[parent_obj.tree])
 
                 restored: list[str] = []
                 for filepath in self._tracked_files:
@@ -536,7 +561,11 @@ class GitStore:
             raise GitStoreError(f"Git revert failed for {commit}") from exc
 
     @staticmethod
-    def _read_blob_from_tree(repo, tree, filepath: str) -> str | None:
+    def _read_blob_from_tree(
+        repo: "Repo",
+        tree: "Tree",
+        filepath: str,
+    ) -> str | None:
         """Read a blob's content from a tree object by walking path parts."""
         parts = Path(filepath).parts
         current = tree
@@ -547,9 +576,10 @@ class GitStore:
                 return None
             obj = repo[entry[1]]
             if obj.type_name == b"blob":
-                return obj.data.decode("utf-8", errors="replace")
+                blob = cast("Blob", obj)
+                return blob.data.decode("utf-8", errors="replace")
             if obj.type_name == b"tree":
-                current = obj
+                current = cast("Tree", obj)
             else:
                 return None
         return None

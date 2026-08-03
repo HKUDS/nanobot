@@ -7,6 +7,7 @@ import tiktoken
 from nanobot.utils import helpers
 from nanobot.utils.helpers import (
     _write_text_atomic,
+    content_with_media_breadcrumbs,
     current_time_str,
     split_message,
     truncate_text_to_tokens,
@@ -53,6 +54,33 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
 def test_current_time_str_rejects_unknown_timezone():
     with pytest.raises(ZoneInfoNotFoundError):
         current_time_str("Not/AZone")
+
+
+def test_content_with_media_breadcrumbs_preserves_valid_paths():
+    assert content_with_media_breadcrumbs(
+        "user",
+        "review these",
+        ["/media/report.pdf", "/media/clip.mp4"],
+    ) == (
+        "review these\n"
+        "[image: /media/report.pdf]\n"
+        "[image: /media/clip.mp4]"
+    )
+
+
+def test_content_with_media_breadcrumbs_only_rewrites_plain_user_content():
+    structured = [{"type": "text", "text": "hello"}]
+
+    assert content_with_media_breadcrumbs(
+        "assistant",
+        "done",
+        ["/media/output.png"],
+    ) == "done"
+    assert content_with_media_breadcrumbs(
+        "user",
+        structured,
+        ["/media/input.png"],
+    ) is structured
 
 
 def test_write_text_atomic_fsyncs_file_and_parent_directory(

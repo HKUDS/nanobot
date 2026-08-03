@@ -52,7 +52,7 @@ def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
     coordinator = WebuiTurnCoordinator(
         bus=bus,
         sessions=loop.sessions,
-        schedule_background=lambda coro: loop._schedule_background(coro),
+        schedule_background=lambda coro: loop.schedule_background(coro),
     )
     coordinator.subscribe(loop.runtime_events)
 
@@ -1203,7 +1203,7 @@ class TestToolEventProgress:
             elif hasattr(coro, "close"):
                 coro.close()
 
-        loop._schedule_background = schedule_background  # type: ignore[method-assign]
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -1249,7 +1249,7 @@ class TestToolEventProgress:
             fake_title_after_turn,
         )
         scheduled: list[object] = []
-        loop._schedule_background = scheduled.append  # type: ignore[method-assign]
+        loop.schedule_background = scheduled.append  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",

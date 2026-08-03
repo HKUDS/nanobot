@@ -11,6 +11,7 @@ import {
   windowMessages,
 } from "@/components/thread/ThreadViewport";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
+import { ThreadMotionCoordinator } from "@/components/thread/thread-motion";
 import type { UIMessage } from "@/lib/types";
 
 const messages: UIMessage[] = [
@@ -762,6 +763,101 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("keeps shallow wheel and touch scrolling user-owned until intent reverses", async () => {
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
+    ];
+    const answer: UIMessage = {
+      id: "a2",
+      role: "assistant",
+      content: "streaming answer",
+      turnId: "turn-2",
+      isStreaming: true,
+      createdAt: 4,
+    };
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={threaded}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1_904 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 1_404 },
+    });
+    const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
+    expect(prompt).not.toBeNull();
+    Object.defineProperty(prompt, "offsetTop", {
+      configurable: true,
+      value: 1_420,
+    });
+
+    rerender(
+      <ThreadViewport
+        messages={[...threaded, answer]}
+        isStreaming
+        composer={<div>composer</div>}
+        activeTurnId="turn-2"
+        activeTurnStartedHere
+      />,
+    );
+    await flushAnimationFrame();
+    followTo.mockClear();
+
+    act(() => {
+      fireEvent.wheel(scroller, { deltaY: -24 });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(1_380);
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.wheel(scroller, { deltaY: 24 });
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(scroller.scrollTop).toBe(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+
+    followTo.mockClear();
+    act(() => {
+      fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.touchEnd(scroller);
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 
@@ -817,6 +913,33 @@ describe("ThreadViewport", () => {
     } finally {
       resizeObserver.restore();
     }
+  });
+
+  it("gives smooth scroll-to-bottom navigation ownership of the latest target", () => {
+    const navigateLatestTo = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "navigateLatestTo",
+    ).mockReturnValue("started");
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2_400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+
+    expect(navigateLatestTo).toHaveBeenCalledWith(1_800);
   });
 
   it("pins the waiting boundary across composer and grid-track growth", async () => {
@@ -1607,6 +1730,149 @@ describe("ThreadViewport", () => {
     );
 
     await waitFor(() => expect(scroller.scrollTop).toBe(1800));
+  });
+
+  it("pins an opened conversation to late layout growth without animating", async () => {
+    const resizeObserver = stubResizeObserver();
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+
+    try {
+      const { container, rerender } = render(
+        <ThreadViewport
+          messages={messages}
+          isStreaming={false}
+          composer={<div />}
+          conversationKey="chat-a"
+        />,
+      );
+      const scroller = getScroller(container);
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2400 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 300 },
+      });
+      act(() => {
+        dispatchUserScroll(scroller);
+      });
+
+      rerender(
+        <ThreadViewport
+          messages={messages}
+          isStreaming={false}
+          composer={<div />}
+          conversationKey="chat-b"
+        />,
+      );
+      await waitFor(() => expect(scroller.scrollTop).toBe(1800));
+      jumpTo.mockClear();
+      followTo.mockClear();
+
+      const messageRegion = screen.getByTestId("thread-message-region");
+      const messageContent = messageRegion.firstElementChild;
+      expect(messageContent).not.toBeNull();
+      const contentObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(messageContent!),
+      );
+      expect(contentObserver).toBeDefined();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 3000,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      await flushAnimationFrame();
+
+      expect(jumpTo).toHaveBeenCalledWith(2400);
+      expect(scroller.scrollTop).toBe(2400);
+      expect(followTo).not.toHaveBeenCalled();
+    } finally {
+      jumpTo.mockRestore();
+      followTo.mockRestore();
+      resizeObserver.restore();
+    }
+  });
+
+  it("animates the bottom button target and pins later layout growth", async () => {
+    const resizeObserver = stubResizeObserver();
+    const navigateLatestTo = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "navigateLatestTo",
+    );
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={messages}
+          isStreaming={false}
+          composer={<div />}
+          conversationKey="chat-a"
+        />,
+      );
+      const scroller = getScroller(container);
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2400 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 300 },
+      });
+      act(() => {
+        dispatchUserScroll(scroller);
+      });
+
+      navigateLatestTo.mockClear();
+      jumpTo.mockClear();
+      followTo.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+      expect(navigateLatestTo).toHaveBeenCalledWith(1800);
+      expect(scroller.scrollTop).toBe(300);
+
+      const messageRegion = screen.getByTestId("thread-message-region");
+      const messageContent = messageRegion.firstElementChild;
+      expect(messageContent).not.toBeNull();
+      const contentObserver = resizeObserver.observers.find(
+        (observer) => observer.elements.includes(messageContent!),
+      );
+      expect(contentObserver).toBeDefined();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 3000,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      await waitFor(() => expect(scroller.scrollTop).toBe(2400));
+
+      expect(jumpTo).not.toHaveBeenCalled();
+      expect(followTo).not.toHaveBeenCalled();
+
+      act(() => {
+        scroller.dispatchEvent(new Event("scroll"));
+      });
+      await flushAnimationFrame();
+      jumpTo.mockClear();
+
+      Object.defineProperty(scroller, "scrollHeight", {
+        configurable: true,
+        value: 3400,
+      });
+      act(() => {
+        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+      });
+      await flushAnimationFrame();
+
+      expect(jumpTo).toHaveBeenCalledWith(2800);
+      expect(scroller.scrollTop).toBe(2800);
+    } finally {
+      navigateLatestTo.mockRestore();
+      jumpTo.mockRestore();
+      followTo.mockRestore();
+      resizeObserver.restore();
+    }
   });
 
   it("waits for the next conversation's transcript before restoring its bottom", async () => {

@@ -3,7 +3,14 @@ import copy
 
 import pytest
 
-from nanobot.providers.base import RETRY_AFTER_BUFFER, GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    RETRY_AFTER_BUFFER,
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
+)
 
 
 class ScriptedProvider(LLMProvider):
@@ -328,6 +335,79 @@ async def test_successful_image_retry_mutates_original_messages_in_place() -> No
     assert isinstance(content, list)
     assert all(block.get("type") != "image_url" for block in content)
     assert any("not delivered" in (block.get("text") or "").lower() for block in content)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("messages", "payload", "pending_messages"),
+    [
+        (_IMAGE_MSG, {}, _IMAGE_MSG),
+        (
+            [{"role": "user", "content": "continue"}],
+            {
+                "items": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,abc",
+                            }
+                        ],
+                    }
+                ]
+            },
+            [],
+        ),
+    ],
+    ids=["pending-image", "opaque-payload-image"],
+)
+async def test_image_retry_discards_provider_state_with_images(
+    messages,
+    payload,
+    pending_messages,
+) -> None:
+    class ContextScriptedProvider(ScriptedProvider):
+        def __init__(self, responses):
+            super().__init__(responses)
+            self.contexts: list[ProviderCallContext] = []
+
+        async def chat_with_context(
+            self,
+            *,
+            provider_context: ProviderCallContext,
+            **kwargs,
+        ) -> LLMResponse:
+            self.contexts.append(provider_context)
+            return await self.chat(**kwargs)
+
+    provider = ContextScriptedProvider([
+        LLMResponse(content="model does not support images", finish_reason="error"),
+        LLMResponse(content="ok, no image"),
+    ])
+    messages = copy.deepcopy(messages)
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload=copy.deepcopy(payload),
+        pending_messages=copy.deepcopy(pending_messages),
+    )
+
+    response = await provider.chat_with_retry(
+        messages=messages,
+        provider_context=ProviderCallContext(conversation_state=state),
+    )
+
+    assert response.content == "ok, no image"
+    retry_context = provider.contexts[-1]
+    assert isinstance(retry_context, ProviderCallContext)
+    assert retry_context.conversation_state is None
+    public_content = messages[0]["content"]
+    if isinstance(public_content, list):
+        assert all(block.get("type") != "image_url" for block in public_content)
 
 
 @pytest.mark.asyncio

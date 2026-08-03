@@ -5,6 +5,11 @@ export type Role = "user" | "assistant" | "tool" | "system";
 export type MessageKind = "message" | "trace";
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
+export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
+export type MessageDeliveryErrorKind =
+  | "message_too_big"
+  | "workspace_scope_rejected"
+  | "turn_rejected";
 
 /** One image attached to a UIMessage.
  *
@@ -76,6 +81,10 @@ export interface UIMessage {
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** Ephemeral delivery lifecycle for optimistic user messages. */
+  deliveryStatus?: MessageDeliveryStatus;
+  /** Structured rejection reason shown with a failed optimistic message. */
+  deliveryErrorKind?: MessageDeliveryErrorKind;
 }
 
 export interface UICliAppAttachment {
@@ -169,6 +178,8 @@ export interface SkillSummary {
   name: string;
   description: string;
   source: "workspace" | "builtin" | string;
+  enabled?: boolean;
+  deletable?: boolean;
   available: boolean;
   unavailable_reason?: string;
 }
@@ -180,12 +191,74 @@ export interface SkillRequirements {
   missing_env: string[];
 }
 
+export interface SkillInstallOption {
+  id: string;
+  kind: string;
+  label: string;
+  command: string;
+}
+
 export interface SkillDetail extends SkillSummary {
   requirements: SkillRequirements;
+  install_options?: SkillInstallOption[];
   raw_markdown: string;
 }
 
 export interface SkillsPayload { skills: SkillSummary[]; }
+
+export interface SkillActionPayload extends SkillsPayload {
+  last_action: {
+    name: string;
+    enabled: boolean;
+    deleted: boolean;
+  };
+}
+
+export interface MarketplaceSkillSummary {
+  id: string;
+  skill_id: string;
+  name: string;
+  source: string;
+  provider: Exclude<MarketplaceProvider, "all">;
+  installs: number;
+  downloads?: number;
+  url: string;
+  installed: boolean;
+  install_supported: boolean;
+  metric: "installs_24h" | "installs_total";
+  version?: string;
+  verified?: boolean;
+  requires_api_key?: boolean;
+  rank?: number;
+}
+
+export type MarketplaceProvider = "all" | "skills_sh" | "skillhub";
+
+export interface SkillsSearchPayload {
+  query: string;
+  skills: MarketplaceSkillSummary[];
+  provider: MarketplaceProvider;
+  install_supported: boolean;
+}
+
+export interface SkillsTrendingPayload {
+  skills: MarketplaceSkillSummary[];
+  period: "24h" | "trending" | "mixed";
+  provider: MarketplaceProvider;
+  install_supported: boolean;
+}
+
+export interface SkillsTrendsPayload {
+  trends: Record<string, number[]>;
+}
+
+export interface SkillInstallPayload extends SkillsPayload {
+  last_action: {
+    installed: boolean;
+    already_installed: boolean;
+    name: string;
+  };
+}
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
@@ -385,6 +458,7 @@ export interface ProviderOAuthAuthorizationRequired {
   flow_id: string;
   authorization_url: string;
   expires_in: number;
+  completion_input?: "authorization_code" | "callback_url";
 }
 
 export interface ProviderOAuthPending {
@@ -416,8 +490,6 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     timezone: string;
-    bot_name: string;
-    bot_icon: string;
     tool_hint_max_length: number;
   };
   model_presets: Array<{
@@ -954,8 +1026,6 @@ export interface SettingsUpdate {
   modelPreset?: string | null;
   contextWindowTokens?: number;
   timezone?: string;
-  botName?: string;
-  botIcon?: string;
   toolHintMaxLength?: number;
 }
 
@@ -1111,12 +1181,16 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       stream_id?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */

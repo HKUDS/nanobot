@@ -62,6 +62,8 @@ export function ChannelQrConnectFlow({
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const startDomain = startOptions.domain;
   const startInstanceId = startOptions.instanceId;
   const startMode = startOptions.mode;
@@ -100,7 +102,11 @@ export function ChannelQrConnectFlow({
       if (pollInFlight.current) return;
       pollInFlight.current = true;
       try {
-        const payload = await pollChannelConnect(token, channelName, connect.session_id);
+        const payload = await pollChannelConnect(
+          tokenRef.current,
+          channelName,
+          connect.session_id,
+        );
         if (cancelled) return;
         setConnect((current) => ({
           ...(current ?? payload),
@@ -129,13 +135,20 @@ export function ChannelQrConnectFlow({
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, pageVisible, token]);
+  }, [
+    channelName,
+    connect?.interval_ms,
+    connect?.session_id,
+    connect?.status,
+    onFeaturesUpdate,
+    pageVisible,
+  ]);
 
   const start = useCallback(async (force = false) => {
     setBusy(true);
     setError(null);
     try {
-      const payload = await startChannelConnect(token, channelName, {
+      const payload = await startChannelConnect(tokenRef.current, channelName, {
         domain: startDomain,
         instanceId: startInstanceId,
         mode: startMode,
@@ -147,7 +160,7 @@ export function ChannelQrConnectFlow({
     } finally {
       setBusy(false);
     }
-  }, [channelName, startDomain, startForce, startInstanceId, startMode, token]);
+  }, [channelName, startDomain, startForce, startInstanceId, startMode]);
 
   useEffect(() => {
     if (!connectRequestId || connectRequestId === handledRequestId) return;
@@ -162,7 +175,11 @@ export function ChannelQrConnectFlow({
     }
     setBusy(true);
     try {
-      const payload = await cancelChannelConnect(token, channelName, connect.session_id);
+      const payload = await cancelChannelConnect(
+        tokenRef.current,
+        channelName,
+        connect.session_id,
+      );
       setConnect(payload);
     } catch (err) {
       setError((err as Error).message);

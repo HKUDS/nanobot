@@ -98,6 +98,80 @@ def test_save_and_load_state_persists_context_tokens(tmp_path) -> None:
     assert restored._context_tokens == {"wx-user": "ctx-1"}
 
 
+def test_save_state_preserves_token_committed_by_another_instance(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel._token = "old-token"
+    channel._save_state()
+
+    replacement = {
+        "token": "new-token",
+        "base_url": "https://new.example",
+        "get_updates_buf": "",
+        "context_tokens": {},
+        "typing_tickets": {},
+    }
+    (tmp_path / "account.json").write_text(json.dumps(replacement), encoding="utf-8")
+
+    channel._get_updates_buf = "stale-cursor"
+    channel._save_state()
+
+    assert json.loads((tmp_path / "account.json").read_text()) == replacement
+
+
+def test_save_state_force_overwrites_replaced_token(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(json.dumps({"token": "old-token"}), encoding="utf-8")
+
+    channel.connect_commit_account(token="new-token", base_url="https://new.example")
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "new-token"
+    assert saved["base_url"] == "https://new.example"
+
+
+def test_save_state_persists_explicit_config_token_over_stale_state(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    channel._token = "configured-token"
+    channel._get_updates_buf = "current-cursor"
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "stale-token", "get_updates_buf": "stale-cursor"}),
+        encoding="utf-8",
+    )
+
+    channel._save_state()
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "configured-token"
+    assert saved["get_updates_buf"] == "current-cursor"
+
+
+def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    persisted = {"token": "persisted-token", "get_updates_buf": "persisted-cursor"}
+    (tmp_path / "account.json").write_text(json.dumps(persisted), encoding="utf-8")
+
+    channel._save_state()
+
+    assert json.loads((tmp_path / "account.json").read_text()) == persisted
+
+
 @pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()
@@ -460,6 +534,56 @@ async def test_poll_once_pauses_session_on_expired_errcode() -> None:
     await channel._poll_once()
 
     assert channel._session_pause_remaining_s() > 0
+
+
+@pytest.mark.asyncio
+async def test_poll_once_reloads_refreshed_state_after_session_pause(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel._token = "old-token"
+    channel._save_state()
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "new-token", "base_url": "https://new.example"}),
+        encoding="utf-8",
+    )
+    channel._session_pause_until = time.time() + 10
+    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+
+    await channel._poll_once()
+
+    assert channel._token == "new-token"
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_keeps_explicit_token_after_session_pause(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    channel._token = "configured-token"
+    (tmp_path / "account.json").write_text(
+        json.dumps({"token": "stale-token", "base_url": "https://stale.example"}),
+        encoding="utf-8",
+    )
+    channel._session_pause_until = time.time() + 10
+    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+
+    await channel._poll_once()
+
+    assert channel._token == "configured-token"
+    assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
 
 
 @pytest.mark.asyncio

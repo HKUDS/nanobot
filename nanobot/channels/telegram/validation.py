@@ -1,7 +1,7 @@
 """Telegram setup validation owned by the channel package."""
 
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -39,7 +39,7 @@ def _get_me(token: str, proxy: str | None) -> dict[str, Any]:
         response = client.get(f"https://api.telegram.org/bot{token}/getMe")
         response.raise_for_status()
         data = response.json()
-    return data if isinstance(data, dict) else {}
+    return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
 
 def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:

@@ -105,7 +105,10 @@ class Nanobot:
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
 
-        config: Config = resolve_config_env_vars(load_config(resolved))
+        config: Config = resolve_config_env_vars(
+            load_config(resolved),
+            config_path=resolved,
+        )
         if workspace is not None:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()

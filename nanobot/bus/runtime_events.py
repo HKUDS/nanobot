@@ -12,11 +12,14 @@ import contextlib
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
+
+if TYPE_CHECKING:
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,7 @@ class TurnCompleted:
 
     context: RuntimeEventContext
     latency_ms: int | None = None
-    runtime: Any | None = None
+    runtime: LLMRuntime | None = None
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ class RuntimeEventPublisher:
     def __init__(self, bus: RuntimeEventBus | None = None) -> None:
         self.bus = bus or RuntimeEventBus()
         self._turn_latency_ms: dict[str, int] = {}
-        self._turn_runtime: dict[str, Any] = {}
+        self._turn_runtime: dict[str, LLMRuntime] = {}
 
     @staticmethod
     def _context(
@@ -174,7 +177,7 @@ class RuntimeEventPublisher:
             attributes=dict(attributes or {}),
         )
 
-    def record_turn_runtime(self, session_key: str, runtime: Any) -> None:
+    def record_turn_runtime(self, session_key: str, runtime: LLMRuntime) -> None:
         self._turn_runtime[session_key] = runtime
 
     def record_turn_latency(self, session_key: str, latency_ms: int | None) -> None:

@@ -2,10 +2,12 @@ import json
 
 import pytest
 
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.loader import (
     _resolve_env_vars,
     load_config,
     resolve_config_env_vars,
+    resolve_env_refs,
     save_config,
 )
 from nanobot.config.schema import Config
@@ -49,6 +51,12 @@ class TestResolveEnvVars:
             _resolve_env_vars("${DOES_NOT_EXIST}")
 
 
+class TestResolveSingleEnvRefs:
+    @pytest.mark.parametrize("value", [None, 42, True, {"key": "value"}])
+    def test_non_string_values_pass_through_unchanged(self, value):
+        assert resolve_env_refs(value) is value
+
+
 class TestResolveConfig:
     def test_resolves_env_vars_in_config(self, tmp_path, monkeypatch):
         monkeypatch.setenv("TEST_API_KEY", "resolved-key")
@@ -65,6 +73,22 @@ class TestResolveConfig:
 
         resolved = resolve_config_env_vars(raw)
         assert resolved.providers.groq.api_key == "resolved-key"
+
+    def test_missing_env_var_reports_config_field(self, tmp_path, monkeypatch):
+        name = "NANOBOT_TEST_MISSING_PROVIDER_KEY"
+        monkeypatch.delenv(name, raising=False)
+        config_path = tmp_path / "config.json"
+        config = Config.model_validate(
+            {"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}
+        )
+
+        with pytest.raises(ConfigLoadError) as exc_info:
+            resolve_config_env_vars(config, config_path=config_path)
+
+        error = exc_info.value
+        assert error.kind == "missing_env"
+        assert "providers.openrouter.apiKey" in str(error)
+        assert name in str(error)
 
     def test_save_preserves_templates(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_TOKEN", "real-token")

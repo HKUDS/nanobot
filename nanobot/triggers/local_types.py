@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from nanobot.utils.dict_keys import get_camel_snake as _get
 
@@ -68,9 +68,14 @@ class LocalTrigger:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LocalTrigger":
-        raw_history = data.get("runHistory", data.get("run_history", [])) or []
-        history = [
-            record if isinstance(record, TriggerRunRecord) else TriggerRunRecord.from_dict(record)
+        raw_history = cast(
+            list[Any],
+            data.get("runHistory", data.get("run_history", [])) or [],
+        )
+        history: list[TriggerRunRecord] = [
+            record
+            if isinstance(record, TriggerRunRecord)
+            else TriggerRunRecord.from_dict(cast(dict[str, Any], record))
             for record in raw_history
             if isinstance(record, (dict, TriggerRunRecord))
         ]

@@ -5,10 +5,10 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
-from nanobot.agent.tools.filesystem import _FsTool
+from nanobot.agent.tools.filesystem import _FsTool  # pyright: ignore[reportPrivateUsage]
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -134,7 +134,7 @@ class ApplyPatchTool(_FsTool):
 
     async def execute(
         self,
-        edits: list[dict] | None = None,
+        edits: list[object] | None = None,
         dry_run: bool = False,
         **kwargs: Any,
     ) -> str:
@@ -145,9 +145,10 @@ class ApplyPatchTool(_FsTool):
             writes: dict[Path, str] = {}
             summaries: list[_PatchSummary] = []
 
-            for edit in edits:
-                if not isinstance(edit, dict):
+            for edit_value in edits:
+                if not isinstance(edit_value, dict):
                     raise _PatchError("each edit must be an object")
+                edit = cast(dict[str, Any], edit_value)
                 raw_path = edit.get("path")
                 if not isinstance(raw_path, str):
                     raise _PatchError("path required for edit")
@@ -161,6 +162,7 @@ class ApplyPatchTool(_FsTool):
                     new_text = edit.get("new_text")
                     if new_text is None:
                         raise _PatchError(f"new_text required for add: {path}")
+                    new_text = cast(str, new_text)
 
                     pending = writes.get(source)
                     if pending is not None:
@@ -204,9 +206,11 @@ class ApplyPatchTool(_FsTool):
                     old_text = edit.get("old_text") or ""
                     if not old_text:
                         raise _PatchError(f"old_text required for replace: {path}")
+                    old_text = cast(str, old_text)
                     new_text = edit.get("new_text")
                     if new_text is None:
                         raise _PatchError(f"new_text required for replace: {path}")
+                    new_text = cast(str, new_text)
 
                     pending = writes.get(source)
                     if pending is not None:

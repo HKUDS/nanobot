@@ -1,4 +1,5 @@
 """Discord channel implementation using discord.py."""
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
@@ -43,7 +44,7 @@ class _StreamBuf:
     """Per-chat streaming accumulator for progressive Discord message edits."""
 
     text: str = ""
-    message: Any | None = None
+    message: discord.Message | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
 
@@ -266,13 +267,14 @@ if DISCORD_AVAILABLE:
                     self._channel.logger.warning("channel {} unavailable: {}", msg.chat_id, e)
                     raise
 
-            reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
+            messageable_channel = cast(Messageable, channel)
+            reference, mention_settings = self._build_reply_context(messageable_channel, msg.reply_to)
             sent_media = False
             failed_media: list[str] = []
 
             for index, media_path in enumerate(msg.media or []):
                 if await self._send_file(
-                    channel,
+                    messageable_channel,
                     media_path,
                     reference=reference if index == 0 else None,
                     mention_settings=mention_settings,
@@ -288,7 +290,7 @@ if DISCORD_AVAILABLE:
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
-                await channel.send(**kwargs)
+                await messageable_channel.send(**kwargs)
 
         async def _send_file(
             self,
@@ -344,7 +346,7 @@ if DISCORD_AVAILABLE:
                 self._channel.logger.warning("Invalid reply target: {}", reply_to)
                 return None, mention_settings
 
-            return channel.get_partial_message(message_id), mention_settings
+            return cast(Any, channel).get_partial_message(message_id), mention_settings
 
 
 class DiscordChannel(BaseChannel):
@@ -423,8 +425,8 @@ class DiscordChannel(BaseChannel):
                 import aiohttp
 
                 proxy_auth = aiohttp.BasicAuth(
-                    login=self.config.proxy_username,
-                    password=self.config.proxy_password,
+                    login=cast(str, self.config.proxy_username),
+                    password=cast(str, self.config.proxy_password),
                 )
             elif has_user != has_pass:
                 self.logger.warning(
@@ -507,7 +509,7 @@ class DiscordChannel(BaseChannel):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
-            await self._finalize_stream(chat_id, buf)
+            await self._finalize_stream(chat_id, buf, buf.message)
             return
 
         buf = self._stream_bufs.get(chat_id)
@@ -635,7 +637,12 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("channel {} unavailable: {}", chat_id, e)
             return None
 
-    async def _finalize_stream(self, chat_id: str, buf: _StreamBuf) -> None:
+    async def _finalize_stream(
+        self,
+        chat_id: str,
+        buf: _StreamBuf,
+        message: discord.Message,
+    ) -> None:
         """Commit the final streamed content and flush overflow chunks."""
         chunks = DiscordBotClient._build_chunks(buf.text, [], False)
         if not chunks:
@@ -643,16 +650,12 @@ class DiscordChannel(BaseChannel):
             return
 
         try:
-            await buf.message.edit(content=chunks[0])
+            await message.edit(content=chunks[0])
         except Exception as e:
             self.logger.warning("final stream edit failed: {}", e)
             raise
 
-        target = getattr(buf.message, "channel", None) or await self._resolve_channel(chat_id)
-        if target is None:
-            self.logger.warning("stream follow-up target {} unavailable", chat_id)
-            self._stream_bufs.pop(chat_id, None)
-            return
+        target = message.channel
 
         for extra_chunk in chunks[1:]:
             await target.send(content=extra_chunk)

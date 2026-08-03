@@ -250,7 +250,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const hiddenUserMessageCount =
     userMessageOffset
     + (hiddenMessageCount > 0
-      ? messages.slice(0, hiddenMessageCount).filter((message) => message.role === "user").length
+      ? messages.slice(0, hiddenMessageCount).filter(
+        (message) => message.role === "user" && message.deliveryStatus !== "failed",
+      ).length
       : 0);
   const visibleForkBoundaryMessageCount =
     forkBoundaryMessageCount !== null && forkBoundaryMessageCount > hiddenMessageCount
@@ -275,7 +277,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (el) {
       const top = Math.max(0, el.scrollHeight - el.clientHeight);
       if (smooth) {
-        threadMotionRef.current?.animateTo(top);
+        threadMotionRef.current?.navigateLatestTo(top);
       } else {
         threadMotionRef.current?.jumpTo(top);
       }
@@ -289,7 +291,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     (smooth = false, options?: { force?: boolean }) => {
       const force = options?.force ?? false;
       if (!force && threadMotionRef.current?.isAutoFollowPaused()) return;
-      threadMotionRef.current?.resumeAutoFollow();
+      if (!smooth) threadMotionRef.current?.resumeAutoFollow();
       scrollToBottomNow(smooth);
     },
     [scrollToBottomNow],
@@ -540,7 +542,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       const owner = threadMotionRef.current?.observeScroll(near) ?? "automatic";
-      const logicallyAtBottom = owner === "automatic" || near;
+      const logicallyAtBottom = owner === "automatic" || (owner === "navigation" && near);
       setAtBottom((current) =>
         current === logicallyAtBottom ? current : logicallyAtBottom,
       );
@@ -555,6 +557,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       if (!direction) return;
       threadMotionRef.current?.handleUserScrollIntent(
         canScrollInDirection(el, direction),
+        direction === "forward",
       );
     };
     const handleWheel = (event: WheelEvent) => {
@@ -570,20 +573,21 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button === 0 && event.target === el) yieldCameraToUser();
     };
-    let touchStartY: number | null = null;
+    let lastTouchY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
-      touchStartY = event.touches[0]?.clientY ?? null;
+      lastTouchY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const currentY = event.touches[0]?.clientY;
       const scrollDeltaY =
-        touchStartY !== null && currentY !== undefined
-          ? touchStartY - currentY
+        lastTouchY !== null && currentY !== undefined
+          ? lastTouchY - currentY
           : 0;
+      lastTouchY = currentY ?? null;
       handleDirectionalInput(directionFromDelta(scrollDeltaY));
     };
     const handleTouchEnd = () => {
-      touchStartY = null;
+      lastTouchY = null;
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (

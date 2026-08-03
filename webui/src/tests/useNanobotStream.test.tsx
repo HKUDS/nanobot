@@ -314,6 +314,63 @@ describe("useNanobotStream", () => {
     });
   });
 
+  it("preserves proactive automation source metadata on streamed assistant messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron-stream", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const source = { kind: "cron", label: "Repo check" };
+
+    act(() => {
+      fake.emit("chat-cron-stream", {
+        event: "delta",
+        chat_id: "chat-cron-stream",
+        text: "Repo ",
+        source,
+      });
+      fake.emit("chat-cron-stream", {
+        event: "stream_end",
+        chat_id: "chat-cron-stream",
+        source,
+      });
+      fake.emit("chat-cron-stream", {
+        event: "turn_end",
+        chat_id: "chat-cron-stream",
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Repo ",
+      isStreaming: false,
+      source,
+    });
+  });
+
+  it("preserves proactive automation source metadata on stream_end final text", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron-stream-end", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const source = { kind: "cron", label: "Repo check" };
+
+    act(() => {
+      fake.emit("chat-cron-stream-end", {
+        event: "stream_end",
+        chat_id: "chat-cron-stream-end",
+        text: "Repo clean.",
+        source,
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Repo clean.",
+      isStreaming: true,
+      source,
+    });
+  });
+
   it("does not start streaming from completed trailing activity after an answer", () => {
     const fake = fakeClient();
     const initialMessages = [
@@ -1652,6 +1709,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].content).toBe("fine");
     expect(result.current.messages[0].turnId).toEqual(expect.any(String));
     expect(result.current.messages[0].turnPhase).toBe("user");
+    expect(result.current.messages[0].deliveryStatus).toBe("sending");
   });
 
   it("returns the submitted turn identity used by the optimistic row and wire frame", () => {
@@ -1681,7 +1739,34 @@ describe("useNanobotStream", () => {
     );
   });
 
-  it("removes only the optimistic turn named by a correlated rejection", () => {
+  it("marks an optimistic turn accepted when its acknowledgement arrives", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-accept-one", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    let submitted: ReturnType<typeof result.current.send> = null;
+    act(() => {
+      submitted = result.current.send("hello");
+    });
+
+    act(() => {
+      fake.emit("chat-accept-one", {
+        event: "message_accepted",
+        chat_id: "chat-accept-one",
+        turn_id: submitted!.turnId,
+      });
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: submitted!.userMessageId,
+        deliveryStatus: "accepted",
+      }),
+    ]);
+  });
+
+  it("marks only the optimistic turn named by a correlated rejection as failed", () => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-reject-one", EMPTY_MESSAGES),
@@ -1706,9 +1791,17 @@ describe("useNanobotStream", () => {
 
     expect(result.current.messages).toEqual([
       expect.objectContaining({
+        id: first!.userMessageId,
+        turnId: first!.turnId,
+        content: "first",
+        deliveryStatus: "failed",
+        deliveryErrorKind: "turn_rejected",
+      }),
+      expect.objectContaining({
         id: second!.userMessageId,
         turnId: second!.turnId,
         content: "second",
+        deliveryStatus: "sending",
       }),
     ]);
     expect(result.current.isStreaming).toBe(true);
@@ -1751,6 +1844,12 @@ describe("useNanobotStream", () => {
       expect.objectContaining({
         id: first!.userMessageId,
         turnId: first!.turnId,
+        deliveryStatus: "accepted",
+      }),
+      expect.objectContaining({
+        id: second!.userMessageId,
+        turnId: second!.turnId,
+        deliveryStatus: "failed",
       }),
     ]);
     expect(result.current.runStartedAt).toBe(1234);
@@ -1784,7 +1883,13 @@ describe("useNanobotStream", () => {
     });
     await flushStreamFrame();
 
-    expect(result.current.messages).toEqual([]);
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: submitted!.userMessageId,
+        deliveryStatus: "failed",
+        deliveryErrorKind: "turn_rejected",
+      }),
+    ]);
     expect(result.current.runStartedAt).toBeNull();
     expect(result.current.isStreaming).toBe(false);
   });
@@ -1810,7 +1915,12 @@ describe("useNanobotStream", () => {
       });
     });
 
-    expect(result.current.messages).toEqual([]);
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: submitted!.userMessageId,
+        deliveryStatus: "failed",
+      }),
+    ]);
     expect(result.current.streamError).toMatchObject({
       kind: "turn_rejected",
       chatId: "chat-replayed-reject",
@@ -1860,7 +1970,7 @@ describe("useNanobotStream", () => {
     expect(result.current.streamError).toEqual({ kind: "message_too_big" });
   });
 
-  it("removes rejected side-channel guidance without stopping the main run", () => {
+  it("marks rejected side-channel guidance failed without stopping the main run", () => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-side-reject", EMPTY_MESSAGES),
@@ -1893,6 +2003,12 @@ describe("useNanobotStream", () => {
       expect.objectContaining({
         id: main!.userMessageId,
         turnId: main!.turnId,
+        deliveryStatus: "accepted",
+      }),
+      expect.objectContaining({
+        id: side!.userMessageId,
+        turnId: side!.turnId,
+        deliveryStatus: "failed",
       }),
     ]);
     expect(result.current.runStartedAt).toBe(9876);

@@ -3,15 +3,16 @@
 import asyncio
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 import httpx
 from pydantic import Field
+from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
-from slackify_markdown import slackify_markdown
+from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
@@ -21,6 +22,30 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
+
+
+def _as_json_object(value: Any) -> dict[str, Any] | None:
+    """Narrow Slack's untyped Socket Mode payloads at the boundary."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def _as_json_list(value: Any) -> list[Any] | None:
+    """Narrow Slack's untyped Socket Mode arrays at the boundary."""
+    return cast(list[Any], value) if isinstance(value, list) else None
+
+
+class _SlackWebAPI(Protocol):
+    """Subset of slack-sdk's dynamically typed Web API used by this channel."""
+
+    async def auth_test(self, **kwargs: Any) -> Any: ...
+    async def chat_postMessage(self, **kwargs: Any) -> Any: ...  # noqa: N802
+    async def conversations_list(self, **kwargs: Any) -> Any: ...
+    async def conversations_open(self, **kwargs: Any) -> Any: ...
+    async def conversations_replies(self, **kwargs: Any) -> Any: ...
+    async def files_upload_v2(self, **kwargs: Any) -> Any: ...
+    async def reactions_add(self, **kwargs: Any) -> Any: ...
+    async def reactions_remove(self, **kwargs: Any) -> Any: ...
+    async def users_list(self, **kwargs: Any) -> Any: ...
 
 
 class SlackDMConfig(Base):
@@ -90,6 +115,13 @@ class SlackChannel(BaseChannel):
         self._target_cache: dict[str, str] = {}
         self._thread_context_attempted: set[str] = set()
 
+    def _require_web_api(self) -> _SlackWebAPI:
+        if self._web_client is None:
+            raise RuntimeError("Slack Web API client is not started")
+        # slack-sdk's public methods are runtime-stable but its annotations do
+        # not expose a useful shared interface, so narrow once at the SDK edge.
+        return cast(_SlackWebAPI, self._web_client)
+
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
         if not self.config.bot_token or not self.config.app_token:
@@ -111,7 +143,8 @@ class SlackChannel(BaseChannel):
 
         # Resolve bot user ID for mention handling
         try:
-            auth = await self._web_client.auth_test()
+            web_api = self._require_web_api()
+            auth = await web_api.auth_test()
             self._bot_user_id = auth.get("user_id")
             self.logger.info("bot connected as {}", self._bot_user_id)
         except Exception as e:
@@ -155,10 +188,17 @@ class SlackChannel(BaseChannel):
             self.logger.warning("client not running")
             return
         try:
+            web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)
-            slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
+            raw_slack_meta: Any = msg.metadata.get("slack", {}) if msg.metadata else {}
+            slack_meta: dict[str, Any] = (
+                cast(dict[str, Any], raw_slack_meta)
+                if isinstance(raw_slack_meta, dict)
+                else {}
+            )
             thread_ts = slack_meta.get("thread_ts")
-            origin_chat_id = str((slack_meta.get("event", {}) or {}).get("channel") or msg.chat_id)
+            event_meta = cast(dict[str, Any], slack_meta.get("event", {}) or {})
+            origin_chat_id = str(event_meta.get("channel") or msg.chat_id)
             # Reply in the same thread the inbound message belongs to (works
             # for both real channel threads and DM threads). When the agent
             # is forwarding to a different channel, drop thread_ts because it
@@ -170,7 +210,20 @@ class SlackChannel(BaseChannel):
                 pass  # skip empty progress messages (e.g. tool-event-only updates)
             elif msg.content or not (msg.media or []):
                 mrkdwn = self._to_mrkdwn(msg.content) if msg.content else " "
-                buttons = getattr(msg, "buttons", None) or []
+                raw_buttons = getattr(msg, "buttons", None)
+                buttons: list[list[str]] = (
+                    cast(list[list[str]], raw_buttons)
+                    if isinstance(raw_buttons, list)
+                    and all(
+                        isinstance(row, list)
+                        and all(
+                            isinstance(label, str)
+                            for label in cast(list[object], row)
+                        )
+                        for row in cast(list[object], raw_buttons)
+                    )
+                    else []
+                )
                 chunks = split_message(mrkdwn, SLACK_MAX_MESSAGE_LEN)
                 for index, chunk in enumerate(chunks):
                     kwargs: dict[str, Any] = dict(
@@ -178,11 +231,11 @@ class SlackChannel(BaseChannel):
                     )
                     if buttons and index == len(chunks) - 1:
                         kwargs["blocks"] = self._build_button_blocks(chunk, buttons)
-                    await self._web_client.chat_postMessage(**kwargs)
+                    await web_api.chat_postMessage(**kwargs)
 
             for media_path in msg.media or []:
                 try:
-                    await self._web_client.files_upload_v2(
+                    await web_api.files_upload_v2(
                         channel=target_chat_id,
                         file=media_path,
                         thread_ts=thread_ts_param,
@@ -192,8 +245,16 @@ class SlackChannel(BaseChannel):
 
             # Update reaction emoji when the final (non-progress) response is sent
             if not is_progress:
-                event = slack_meta.get("event", {})
-                await self._update_react_emoji(origin_chat_id, event.get("ts"))
+                raw_event = slack_meta.get("event", {})
+                event = (
+                    cast(dict[str, Any], raw_event)
+                    if isinstance(raw_event, dict)
+                    else {}
+                )
+                await self._update_react_emoji(
+                    origin_chat_id,
+                    cast(str | None, event.get("ts")),
+                )
 
         except Exception:
             self.logger.exception("Error sending message")
@@ -237,20 +298,26 @@ class SlackChannel(BaseChannel):
             return self._target_cache[cache_key]
 
         cursor: str | None = None
+        web_api = self._require_web_api()
         while True:
-            response = await self._web_client.conversations_list(
+            response = cast(dict[str, Any], await web_api.conversations_list(
                 types="public_channel,private_channel",
                 exclude_archived=True,
                 limit=200,
                 cursor=cursor,
-            )
-            for channel in response.get("channels", []):
+            ))
+            for channel_value in cast(list[object], response.get("channels", [])):
+                channel = cast(dict[str, Any], channel_value)
                 if self._normalize_target_name(str(channel.get("name") or "")) == normalized:
                     channel_id = str(channel.get("id") or "")
                     if channel_id:
                         self._target_cache[cache_key] = channel_id
                         return channel_id
-            cursor = ((response.get("response_metadata") or {}).get("next_cursor") or "").strip()
+            response_metadata = cast(
+                dict[str, Any],
+                response.get("response_metadata") or {},
+            )
+            cursor = str(response_metadata.get("next_cursor") or "").strip()
             if not cursor:
                 break
 
@@ -269,9 +336,14 @@ class SlackChannel(BaseChannel):
             return self._target_cache[cache_key]
 
         cursor: str | None = None
+        web_api = self._require_web_api()
         while True:
-            response = await self._web_client.users_list(limit=200, cursor=cursor)
-            for member in response.get("members", []):
+            response = cast(
+                dict[str, Any],
+                await web_api.users_list(limit=200, cursor=cursor),
+            )
+            for member_value in cast(list[object], response.get("members", [])):
+                member = cast(dict[str, Any], member_value)
                 if self._member_matches_handle(member, normalized):
                     user_id = str(member.get("id") or "")
                     if not user_id:
@@ -279,7 +351,11 @@ class SlackChannel(BaseChannel):
                     dm_id = await self._open_dm_for_user(user_id)
                     self._target_cache[cache_key] = dm_id
                     return dm_id
-            cursor = ((response.get("response_metadata") or {}).get("next_cursor") or "").strip()
+            response_metadata = cast(
+                dict[str, Any],
+                response.get("response_metadata") or {},
+            )
+            cursor = str(response_metadata.get("next_cursor") or "").strip()
             if not cursor:
                 break
 
@@ -288,8 +364,13 @@ class SlackChannel(BaseChannel):
         )
 
     async def _open_dm_for_user(self, user_id: str) -> str:
-        response = await self._web_client.conversations_open(users=user_id)
-        channel_id = str(((response.get("channel") or {}).get("id")) or "")
+        web_api = self._require_web_api()
+        response = cast(
+            dict[str, Any],
+            await web_api.conversations_open(users=user_id),
+        )
+        channel = cast(dict[str, Any], response.get("channel") or {})
+        channel_id = str(channel.get("id") or "")
         if not channel_id:
             raise ValueError(f"Slack DM target for user '{user_id}' could not be opened.")
         return channel_id
@@ -300,7 +381,7 @@ class SlackChannel(BaseChannel):
 
     @classmethod
     def _member_matches_handle(cls, member: dict[str, Any], normalized: str) -> bool:
-        profile = member.get("profile") or {}
+        profile = cast(dict[str, Any], member.get("profile") or {})
         candidates = {
             str(member.get("name") or ""),
             str(profile.get("display_name") or ""),
@@ -312,7 +393,7 @@ class SlackChannel(BaseChannel):
 
     async def _on_socket_request(
         self,
-        client: SocketModeClient,
+        client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
         """Handle incoming Socket Mode requests."""
@@ -327,8 +408,8 @@ class SlackChannel(BaseChannel):
             SocketModeResponse(envelope_id=req.envelope_id)
         )
 
-        payload = req.payload or {}
-        event = payload.get("event") or {}
+        payload = _as_json_object(cast(Any, req).payload) or {}
+        event = _as_json_object(payload.get("event")) or {}
         event_type = event.get("type")
 
         # Handle app mentions or plain messages
@@ -349,6 +430,8 @@ class SlackChannel(BaseChannel):
         # Avoid double-processing: Slack sends both `message` and `app_mention`
         # for mentions in channels. Prefer `app_mention`.
         text = event.get("text") or ""
+        if not isinstance(text, str):
+            return
         if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
             return
 
@@ -362,10 +445,12 @@ class SlackChannel(BaseChannel):
             event.get("channel_type"),
             text[:80],
         )
-        if not sender_id or not chat_id:
+        if not isinstance(sender_id, str) or not sender_id or not isinstance(chat_id, str) or not chat_id:
             return
 
         channel_type = event.get("channel_type") or ""
+        if not isinstance(channel_type, str):
+            channel_type = ""
 
         if not self._is_allowed(sender_id, chat_id, channel_type):
             if channel_type == "im" and self.config.dm.enabled:
@@ -383,7 +468,9 @@ class SlackChannel(BaseChannel):
         text = self._strip_bot_mention(text)
 
         event_ts = event.get("ts")
+        event_ts = event_ts if isinstance(event_ts, str) else None
         raw_thread_ts = event.get("thread_ts")
+        raw_thread_ts = raw_thread_ts if isinstance(raw_thread_ts, str) else None
         thread_ts = raw_thread_ts
         # In DMs we don't auto-open a thread on top-level messages (it would
         # bury replies under "1 reply"). But if the user explicitly opened a
@@ -396,27 +483,28 @@ class SlackChannel(BaseChannel):
             thread_ts = event_ts
         # Add :eyes: reaction to the triggering message (best-effort)
         try:
-            if self._web_client and event.get("ts"):
-                await self._web_client.reactions_add(
+            if self._web_client and event_ts:
+                web_api = self._require_web_api()
+                await web_api.reactions_add(
                     channel=chat_id,
                     name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
+                    timestamp=event_ts,
                 )
         except Exception as e:
             self.logger.debug("reactions_add failed: {}", e)
 
-        # Thread-scoped session key whenever the user is in a real thread
-        # (raw_thread_ts is set). DM threads get their own session, separate
-        # from the DM root, so context doesn't bleed across thread boundaries.
-        session_key = (
-            f"slack:{chat_id}:{thread_ts}" if thread_ts and raw_thread_ts else None
-        )
+        # Thread-scoped session key whenever the turn lives in a thread: either the
+        # message arrived inside one (raw_thread_ts) or reply_in_thread opens a new
+        # thread for this channel message. DM roots have no thread_ts and keep the
+        # default per-chat session, so context doesn't bleed across thread boundaries.
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
         media_paths: list[str] = []
         file_markers: list[str] = []
-        for file_info in event.get("files") or []:
-            if not isinstance(file_info, dict):
+        for file_info in _as_json_list(event.get("files")) or []:
+            file_info_object = _as_json_object(file_info)
+            if file_info_object is None:
                 continue
-            file_path, marker = await self._download_slack_file(file_info)
+            file_path, marker = await self._download_slack_file(file_info_object)
             if file_path:
                 media_paths.append(file_path)
             if marker:
@@ -503,22 +591,30 @@ class SlackChannel(BaseChannel):
         preview = response.content[:256].lstrip().lower()
         return preview.startswith(_HTML_DOWNLOAD_PREFIXES)
 
-    async def _on_block_action(self, client: SocketModeClient, req: SocketModeRequest) -> None:
+    async def _on_block_action(
+        self,
+        client: AsyncBaseSocketModeClient,
+        req: SocketModeRequest,
+    ) -> None:
         """Handle button clicks from inline action buttons."""
         await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
-        payload = req.payload or {}
-        actions = payload.get("actions") or []
+        payload = cast(dict[str, Any], cast(Any, req).payload or {})
+        actions = cast(list[Any], payload.get("actions") or [])
         if not actions:
             return
-        value = str(actions[0].get("value") or "")
-        user_info = payload.get("user") or {}
+        action = cast(dict[str, Any], actions[0])
+        value = str(action.get("value") or "")
+        user_info = cast(dict[str, Any], payload.get("user") or {})
         sender_id = str(user_info.get("id") or "")
-        channel_info = payload.get("channel") or {}
+        channel_info = cast(dict[str, Any], payload.get("channel") or {})
         chat_id = str(channel_info.get("id") or "")
         if not sender_id or not chat_id or not value:
             return
-        message_info = payload.get("message") or {}
-        thread_ts = message_info.get("thread_ts") or message_info.get("ts")
+        message_info = cast(dict[str, Any], payload.get("message") or {})
+        thread_ts = cast(
+            str | None,
+            message_info.get("thread_ts") or message_info.get("ts"),
+        )
         channel_type = self._infer_channel_type(chat_id)
         if not self._is_allowed(sender_id, chat_id, channel_type):
             return
@@ -563,17 +659,18 @@ class SlackChannel(BaseChannel):
         self._thread_context_attempted.add(key)
 
         try:
-            response = await self._web_client.conversations_replies(
+            web_api = self._require_web_api()
+            response = cast(dict[str, Any], await web_api.conversations_replies(
                 channel=chat_id,
                 ts=thread_ts,
                 limit=max(1, self.config.thread_context_limit),
-            )
+            ))
         except Exception as e:
             self.logger.warning("thread context unavailable for {}: {}", key, e)
             return text
 
         lines = self._format_thread_context(
-            response.get("messages", []),
+            cast(list[dict[str, Any]], response.get("messages", [])),
             current_ts=current_ts,
         )
         if not lines:
@@ -605,7 +702,7 @@ class SlackChannel(BaseChannel):
         blocks: list[dict[str, Any]] = [
             {"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}},
         ]
-        elements = []
+        elements: list[dict[str, Any]] = []
         for row in buttons:
             for label in row:
                 elements.append({
@@ -622,8 +719,9 @@ class SlackChannel(BaseChannel):
         """Remove the in-progress reaction and optionally add a done reaction."""
         if not self._web_client or not ts:
             return
+        web_api = self._require_web_api()
         try:
-            await self._web_client.reactions_remove(
+            await web_api.reactions_remove(
                 channel=chat_id,
                 name=self.config.react_emoji,
                 timestamp=ts,
@@ -632,7 +730,7 @@ class SlackChannel(BaseChannel):
             self.logger.debug("reactions_remove failed: {}", e)
         if self.config.done_emoji:
             try:
-                await self._web_client.reactions_add(
+                await web_api.reactions_add(
                     channel=chat_id,
                     name=self.config.done_emoji,
                     timestamp=ts,
@@ -703,7 +801,7 @@ class SlackChannel(BaseChannel):
             return ""
         code_blocks: list[str] = []
 
-        def _save_fence(m: re.Match) -> str:
+        def _save_fence(m: re.Match[str]) -> str:
             code_blocks.append(m.group(0))
             return f"\x00CB{len(code_blocks) - 1}\x00"
 
@@ -718,7 +816,7 @@ class SlackChannel(BaseChannel):
         """Fix markdown artifacts that slackify_markdown misses."""
         code_blocks: list[str] = []
 
-        def _save_code(m: re.Match) -> str:
+        def _save_code(m: re.Match[str]) -> str:
             code_blocks.append(m.group(0))
             return f"\x00CB{len(code_blocks) - 1}\x00"
 
@@ -726,14 +824,17 @@ class SlackChannel(BaseChannel):
         text = cls._INLINE_CODE_RE.sub(_save_code, text)
         text = cls._LEFTOVER_BOLD_RE.sub(r"*\1*", text)
         text = cls._LEFTOVER_HEADER_RE.sub(r"*\1*", text)
-        text = cls._BARE_URL_RE.sub(lambda m: m.group(0).replace("&amp;", "&"), text)
+        text = cls._BARE_URL_RE.sub(
+            lambda m: m.group(0).replace("&amp;", "&"),
+            text,
+        )
 
         for i, block in enumerate(code_blocks):
             text = text.replace(f"\x00CB{i}\x00", block)
         return text
 
     @staticmethod
-    def _convert_table(match: re.Match) -> str:
+    def _convert_table(match: re.Match[str]) -> str:
         """Convert a Markdown table to a Slack-readable list."""
         lines = [ln.strip() for ln in match.group(0).strip().splitlines() if ln.strip()]
         if len(lines) < 2:

@@ -1,3 +1,4 @@
+from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
@@ -769,7 +770,16 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
 def test_retain_recent_legal_suffix_returns_dropped_messages():
     """retain_recent_legal_suffix returns the actually-dropped messages."""
-    session = Session(key="test:return-dropped")
+    session = Session(
+        key="test:return-dropped",
+        provider_state=ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="test-model",
+            version=1,
+            payload={"items": []},
+        ),
+    )
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
@@ -779,11 +789,19 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
     assert result.already_consolidated_count == 0
+    assert session.provider_state is None
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     """No messages dropped → empty list returned."""
-    session = Session(key="test:no-drop")
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
+    session = Session(key="test:no-drop", provider_state=state)
     for i in range(3):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
@@ -792,6 +810,7 @@ def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     assert result.dropped == []
     assert result.already_consolidated_count == 0
     assert len(session.messages) == 3
+    assert session.provider_state is state
 
 
 def test_retain_recent_legal_suffix_returns_all_on_zero():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 from pydantic import Field
@@ -23,6 +23,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD,
     InboundMessage,
 )
+from nanobot.bus.queue import MessageBus
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
@@ -41,6 +42,7 @@ from nanobot.utils.artifacts import (
 from nanobot.utils.helpers import detect_image_mime
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.context import ToolContext
     from nanobot.config.schema import ProviderConfig
 
 
@@ -89,11 +91,11 @@ class ImageGenerationTool(Tool):
         return ImageGenerationToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.image_generation.enabled
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             workspace=ctx.workspace,
             config=ctx.config.image_generation,
@@ -134,12 +136,14 @@ class ImageGenerationTool(Tool):
         cls = get_image_gen_provider(self.config.provider)
         if cls is None:
             return None
-        kwargs = {
-            "api_key": provider.api_key if provider else None,
-            "api_base": provider.api_base if provider else None,
-            "extra_headers": provider.extra_headers if provider else None,
-            "extra_body": provider.extra_body if provider else None,
-            "proxy": provider.proxy if provider else None,
+        kwargs: dict[str, Any] = {
+            "api_key": provider.api_key if provider and isinstance(provider.api_key, str) else None,
+            "api_base": provider.api_base if provider and isinstance(provider.api_base, str) else None,
+            "extra_headers": provider.extra_headers
+            if provider and isinstance(provider.extra_headers, dict) else None,
+            "extra_body": provider.extra_body
+            if provider and isinstance(provider.extra_body, dict) else None,
+            "proxy": provider.proxy if provider and isinstance(provider.proxy, str) else None,
         }
         return cls(**kwargs)
 
@@ -172,7 +176,7 @@ class ImageGenerationTool(Tool):
             return []
         return [self._resolve_reference_image(value) for value in values if value]
 
-    async def execute(
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         prompt: str,
         reference_images: list[str] | None = None,
@@ -238,7 +242,7 @@ async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> di
         }
 
     next_tool = (
-        ImageGenerationTool(
+        ImageGenerationTool(  # pyright: ignore[reportAbstractUsage]
             workspace=state.workspace,
             config=tool_config,
             provider_configs=provider_configs,
@@ -271,7 +275,7 @@ async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> di
 
 
 async def request_image_generation_reload(
-    bus: Any,
+    bus: MessageBus,
     *,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
@@ -298,11 +302,13 @@ async def request_image_generation_reload(
             "message": "Image generation hot reload timed out.",
             "requires_restart": True,
         }
-    return result if isinstance(result, dict) else {
-        "ok": False,
-        "message": "Image generation hot reload returned an unexpected response.",
-        "requires_restart": True,
-    }
+    if not isinstance(cast(object, result), dict):
+        return {
+            "ok": False,
+            "message": "Image generation hot reload returned an unexpected response.",
+            "requires_restart": True,
+        }
+    return result
 
 
 async def handle_runtime_control(
@@ -311,7 +317,7 @@ async def handle_runtime_control(
     registry: ToolRegistry,
 ) -> bool:
     """Handle an in-process image generation reload request."""
-    metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+    metadata = msg.metadata
     if metadata.get(INBOUND_META_RUNTIME_CONTROL) != RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD:
         return False
 
@@ -327,5 +333,5 @@ async def handle_runtime_control(
             "error": str(exc),
         }
     if isinstance(ack, asyncio.Future) and not ack.done():
-        ack.set_result(result)
+        cast(asyncio.Future[Any], ack).set_result(result)
     return True

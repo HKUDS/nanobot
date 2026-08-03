@@ -7,7 +7,7 @@ should show only the header plus a truncated result body."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 # Cap Result section length so WebSocket session replay stays readable; full text
 # remains on disk for LLM replay (we only mutate outgoing API copies in websocket).
@@ -49,7 +49,7 @@ def scrub_subagent_announce_body(content: str) -> str:
 def scrub_subagent_messages_for_channel(messages: list[dict[str, Any]]) -> None:
     """Mutate message dicts in place when they carry ``subagent_result`` inject."""
     for msg in messages:
-        if not isinstance(msg, dict):
+        if not isinstance(cast(object, msg), dict):
             continue
         if msg.get("injected_event") != "subagent_result":
             continue

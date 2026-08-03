@@ -6,7 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
-import type { CanonicalRunSnapshot } from "@/lib/nanobot-client";
+import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
 
@@ -14,7 +14,7 @@ const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
 function makeClient() {
-  const errorHandlers = new Set<(err: { kind: string }) => void>();
+  const errorHandlers = new Set<(err: StreamError) => void>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
   const runtimeModelHandlers = new Set<
@@ -107,6 +107,7 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
@@ -122,7 +123,7 @@ function makeClient() {
         handlers?.delete(handler);
       };
     },
-    onError: (handler: (err: { kind: string }) => void) => {
+    onError: (handler: (err: StreamError) => void) => {
       errorHandlers.add(handler);
       return () => {
         errorHandlers.delete(handler);
@@ -134,7 +135,7 @@ function makeClient() {
         sessionUpdateHandlers.delete(handler);
       };
     },
-    _emitError(err: { kind: string }) {
+    _emitError(err: StreamError) {
       for (const h of errorHandlers) h(err);
     },
     _emitStatus(nextStatus: ConnectionStatus) {
@@ -179,11 +180,16 @@ function makeClient() {
   };
 }
 
-function wrap(client: ReturnType<typeof makeClient>, children: ReactNode, modelName?: string | null) {
+function wrap(
+  client: ReturnType<typeof makeClient>,
+  children: ReactNode,
+  modelName?: string | null,
+  token = "tok",
+) {
   return (
     <ClientProvider
       client={client as unknown as import("@/lib/nanobot-client").NanobotClient}
-      token="tok"
+      token={token}
       modelName={modelName ?? null}
     >
       {children}
@@ -240,6 +246,26 @@ function httpJson(body: unknown) {
   };
 }
 
+function setDocumentVisibility(value: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value,
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+function restoreDocumentVisibility(
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor) {
+    Object.defineProperty(document, "visibilityState", descriptor);
+  } else {
+    delete (document as Document & {
+      visibilityState?: DocumentVisibilityState;
+    }).visibilityState;
+  }
+}
+
 interface ThreadResizeObserverInstance {
   elements: Element[];
   callback: ResizeObserverCallback;
@@ -283,8 +309,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       temperature: 0.7,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "",
       tool_hint_max_length: 40,
     },
     model_presets: [{
@@ -1757,7 +1781,7 @@ describe("ThreadShell", () => {
       expect(screen.getByText("row from the expired latest window")).toBeInTheDocument(),
     );
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("window-reset-chat", "thread"));
 
     await waitFor(() =>
       expect(screen.getByText("answer in the new latest window")).toBeInTheDocument(),
@@ -1775,7 +1799,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("recovers an uncommitted reset lineage on the next foreground hydrate", async () => {
+  it("recovers an uncommitted reset lineage on the next canonical hydrate", async () => {
     const client = makeClient();
     let chatACalls = 0;
     vi.stubGlobal(
@@ -1825,7 +1849,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("committed old lineage")).toBeInTheDocument();
     expect(screen.queryByText("disjoint new lineage")).not.toBeInTheDocument();
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("lineage-chat-a", "thread"));
 
     await waitFor(() => expect(chatACalls).toBe(3));
     await waitFor(() => expect(screen.getByText("disjoint new lineage")).toBeInTheDocument());
@@ -1873,7 +1897,7 @@ describe("ThreadShell", () => {
     );
 
     await waitFor(() => expect(screen.getByText("old canonical row")).toBeInTheDocument());
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("reset-tail-race", "thread"));
     await waitFor(() => expect(historyCalls).toBe(2));
 
     act(() => {
@@ -1937,7 +1961,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.getByText("rejected local turn")).toBeInTheDocument());
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("empty-reset-chat", "thread"));
 
     await waitFor(() => expect(historyCalls).toBe(2));
     await waitFor(() =>
@@ -2022,7 +2046,7 @@ describe("ThreadShell", () => {
     });
     canonicalComplete = true;
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("strict-canonical", "thread"));
 
     await waitFor(() => expect(screen.getByText("strict canonical answer")).toBeInTheDocument());
     expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
@@ -2093,7 +2117,7 @@ describe("ThreadShell", () => {
       .mockImplementationOnce(() => false)
       .mockImplementation((...args) => reconcileAfterReject?.(...args) ?? false);
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("layout-recheck", "thread"));
 
     await waitFor(() => expect(historyCalls).toBe(2));
     await waitFor(() =>
@@ -2103,7 +2127,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("layout canonical answer")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("layout-recheck", "thread"));
 
     await waitFor(() => expect(historyCalls).toBe(3));
     await waitFor(() => expect(screen.getByText("layout canonical answer")).toBeInTheDocument());
@@ -2257,7 +2281,7 @@ describe("ThreadShell", () => {
     );
 
     await waitFor(() => expect(screen.getByText("old answer")).toBeInTheDocument());
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("run-generation-chat", "thread"));
     await waitFor(() => expect(historyCalls).toBe(2));
 
     const newTurnId = "turn-started-during-refresh";
@@ -2350,7 +2374,7 @@ describe("ThreadShell", () => {
     });
     await waitFor(() => expect(screen.getByText("partial")).toBeInTheDocument());
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("late-frame-chat", "thread"));
     await waitFor(() =>
       expect(screen.getByText("canonical complete answer")).toBeInTheDocument(),
     );
@@ -2434,7 +2458,7 @@ describe("ThreadShell", () => {
     });
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("visibility-complete-a", "thread"));
     await waitFor(() => expect(screen.getByText("completed while hidden")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
     expect(client.getRunStartedAt("visibility-complete-a")).toBeNull();
@@ -2494,7 +2518,7 @@ describe("ThreadShell", () => {
     });
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => client._emitSessionUpdate("empty-answer", "thread"));
 
     await waitFor(() => expect(historyCalls).toBe(2));
     await waitFor(() => expect(client.reconcileCanonicalCompletion).toHaveBeenCalledWith(
@@ -2716,6 +2740,7 @@ describe("ThreadShell", () => {
   it("refreshes the current thread when the page returns to the foreground", async () => {
     const client = makeClient();
     let historyCalls = 0;
+    const turnId = "turn-visible-chat";
     const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
     vi.stubGlobal(
       "fetch",
@@ -2723,16 +2748,22 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Avisible-chat/webui-thread")) {
           historyCalls += 1;
-          return httpJson(
-            transcriptFromSimpleMessages(
+          return httpJson({
+            ...transcriptFromSimpleMessages(
               historyCalls === 1
-                ? [{ role: "user", content: "question" }]
+                ? [{ role: "user", content: "question", turnId }]
                 : [
-                    { role: "user", content: "question" },
-                    { role: "assistant", content: "answer completed in background" },
+                    { role: "user", content: "question", turnId },
+                    {
+                      role: "assistant",
+                      content: "answer completed in background",
+                      turnId,
+                    },
                   ],
             ),
-          );
+            has_pending_tool_calls: historyCalls === 1,
+            completed_turn_ids: historyCalls === 1 ? [] : [turnId],
+          });
         }
         return {
           ok: false,
@@ -2756,22 +2787,23 @@ describe("ThreadShell", () => {
       );
       await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
       expect(historyCalls).toBe(1);
+      act(() => {
+        client._emitChat("visible-chat", {
+          event: "goal_status",
+          chat_id: "visible-chat",
+          status: "running",
+          started_at: 6_000,
+          turn_id: turnId,
+        });
+      });
 
       act(() => {
-        Object.defineProperty(document, "visibilityState", {
-          configurable: true,
-          value: "hidden",
-        });
-        document.dispatchEvent(new Event("visibilitychange"));
+        setDocumentVisibility("hidden");
       });
       expect(historyCalls).toBe(1);
 
       await act(async () => {
-        Object.defineProperty(document, "visibilityState", {
-          configurable: true,
-          value: "visible",
-        });
-        document.dispatchEvent(new Event("visibilitychange"));
+        setDocumentVisibility("visible");
         await Promise.resolve();
       });
 
@@ -2780,11 +2812,114 @@ describe("ThreadShell", () => {
         expect(screen.getByText("answer completed in background")).toBeInTheDocument(),
       );
     } finally {
-      if (visibilityDescriptor) {
-        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
-      } else {
-        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
-      }
+      restoreDocumentVisibility(visibilityDescriptor);
+    }
+  });
+
+  it("does not refresh an idle thread for visibility notifications", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Aidle-visible-chat/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "settled answer" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("idle-visible-chat")}
+            title="Idle visible chat"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+      await waitFor(() => expect(screen.getByText("settled answer")).toBeInTheDocument());
+
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      act(() => {
+        setDocumentVisibility("hidden");
+      });
+      await act(async () => {
+        setDocumentVisibility("visible");
+        await Promise.resolve();
+      });
+
+      expect(historyCalls).toBe(1);
+    } finally {
+      restoreDocumentVisibility(visibilityDescriptor);
+    }
+  });
+
+  it("retries a failed hydration when the page returns to the foreground", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Aretry-visible-chat/webui-thread")) {
+          historyCalls += 1;
+          if (historyCalls === 1) {
+            return {
+              ok: false,
+              status: 500,
+              json: async () => ({}),
+            };
+          }
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "recovered answer" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("retry-visible-chat")}
+            title="Retry visible chat"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+      await waitFor(() => expect(historyCalls).toBe(1));
+
+      act(() => {
+        setDocumentVisibility("hidden");
+      });
+      await act(async () => {
+        setDocumentVisibility("visible");
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(historyCalls).toBe(2));
+      expect(await screen.findByText("recovered answer")).toBeInTheDocument();
+    } finally {
+      restoreDocumentVisibility(visibilityDescriptor);
     }
   });
 
@@ -2846,7 +2981,7 @@ describe("ThreadShell", () => {
     expect(historyCalls).toBe(1);
   });
 
-  it("does not refetch thread history for metadata-only session updates", async () => {
+  it("keeps rendered media mounted for metadata-only session updates", async () => {
     const client = makeClient();
     let historyCalls = 0;
     vi.stubGlobal(
@@ -2855,12 +2990,16 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Achat-a/webui-thread")) {
           historyCalls += 1;
-          return httpJson(
-            transcriptFromSimpleMessages([
-              { role: "user", content: "question" },
-              { role: "assistant", content: "answer" },
-            ]),
-          );
+          const thread = transcriptFromSimpleMessages([
+            { role: "user", content: "question" },
+            { role: "assistant", content: "answer" },
+          ]);
+          thread.messages[1]!.media = [{
+            kind: "image",
+            url: "/api/media/stable/image",
+            name: "answer.png",
+          }];
+          return httpJson(thread);
         }
         return {
           ok: false,
@@ -2883,6 +3022,7 @@ describe("ThreadShell", () => {
     );
 
     await waitFor(() => expect(screen.getByText("answer")).toBeInTheDocument());
+    const image = screen.getByRole("img", { name: "answer.png" });
     expect(historyCalls).toBe(1);
 
     await act(async () => {
@@ -2890,6 +3030,56 @@ describe("ThreadShell", () => {
     });
 
     expect(historyCalls).toBe(1);
+    expect(screen.getByRole("img", { name: "answer.png" })).toBe(image);
+  });
+
+  it("keeps rendered media mounted when the auth token rotates", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Atoken-media/webui-thread")) {
+          historyCalls += 1;
+          const thread = transcriptFromSimpleMessages([
+            { role: "user", content: "question" },
+            { role: "assistant", content: "answer" },
+          ]);
+          thread.messages[1]!.media = [{
+            kind: "image",
+            url: "/api/media/stable/token-image",
+            name: "token-answer.png",
+          }];
+          return httpJson(thread);
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+    const view = (token: string) => wrap(
+      client,
+      <ThreadShell
+        session={session("token-media")}
+        title="Token media"
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+      null,
+      token,
+    );
+    const { rerender } = render(view("tok-old"));
+
+    await waitFor(() => expect(screen.getByText("answer")).toBeInTheDocument());
+    const image = screen.getByRole("img", { name: "token-answer.png" });
+
+    rerender(view("tok-new"));
+    await act(async () => Promise.resolve());
+
+    expect(historyCalls).toBe(1);
+    expect(screen.getByRole("img", { name: "token-answer.png" })).toBe(image);
   });
 
   it("does not scroll again when canonical history refreshes after a session update", async () => {
@@ -3208,7 +3398,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();
   });
 
-  it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
+  it("surfaces a dismissible banner for an uncorrelated message_too_big error", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
@@ -3241,6 +3431,52 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {
+    const client = makeClient();
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-inline-error")}
+          title="Chat inline error"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "oversized payload" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledTimes(1));
+    const turnId = client.sendMessage.mock.calls[0][3]?.turnId;
+    expect(turnId).toEqual(expect.any(String));
+
+    await act(async () => {
+      client._emitError({
+        kind: "message_too_big",
+        chatId: "chat-inline-error",
+        turnId,
+      });
+    });
+
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+    const status = screen.getByRole("button", {
+      name: "Not sent: Message too large",
+    });
+    expect(screen.getByRole("alert")).toHaveClass("sr-only");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.focus(status);
+
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "The server rejected your last message because it exceeded the size limit.",
+    );
   });
 
   it("clears the stream error banner when the user switches to another chat", async () => {
@@ -3404,6 +3640,68 @@ describe("ThreadShell", () => {
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
     expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
+  });
+
+  it("does not let an older catalog request overwrite a newer install event", async () => {
+    const client = makeClient();
+    let resolveCatalog!: (response: Response) => void;
+    const pendingCatalog = new Promise<Response>((resolve) => {
+      resolveCatalog = resolve;
+    });
+    vi.mocked(fetch).mockImplementation((input) => {
+      if (String(input).includes("/api/settings/cli-apps?installed_only=1")) {
+        return pendingCatalog;
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as Response);
+    });
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-cli-race")}
+        title="Chat chat-cli-race"
+        onToggleSidebar={() => {}}
+        onGoHome={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps?installed_only=1",
+      expect.anything(),
+    ));
+    const payload: CliAppsPayload = {
+      apps: [{
+        name: "gimp",
+        display_name: "GIMP",
+        category: "image",
+        description: "Image editing",
+        requires: "",
+        source: "harness",
+        entry_point: "cli-anything-gimp",
+        install_supported: true,
+        installed: true,
+        available: true,
+        status: "installed",
+        logo_url: null,
+        brand_color: "#5C5543",
+        skill_installed: true,
+      }],
+      installed_count: 1,
+      catalog_updated_at: "2026-07-30",
+    };
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(CLI_APPS_CHANGED_EVENT, { detail: payload }));
+      resolveCatalog(httpJson({ apps: [], installed_count: 0 }));
+      await pendingCatalog;
+    });
+
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
   });
 

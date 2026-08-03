@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -403,7 +403,7 @@ class ToolsConfig(Base):
             "webuiAllowRemotePackageInstall",
             "webui_allow_remote_package_install",
         ),
-    )  # allow non-local WebUI clients to install optional Python packages
+    )  # allow non-local WebUI clients to install optional packages and agent skills
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
@@ -504,6 +504,7 @@ class Config(BaseSettings):
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
+        prefixed_provider = find_by_name(model_prefix) if model_prefix else None
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -533,6 +534,22 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
+                # Local providers (Ollama, vLLM, …) keep model-family keywords
+                # like "nemotron" or "llama" to enable bare-model auto-routing,
+                # but those keywords collide with cloud-hosted variants of the
+                # same family (e.g. `nvidia/nemotron-...` via OpenRouter). Only
+                # honor a local keyword match when the user has actually
+                # configured that local endpoint via `api_base` — mirrors the
+                # gate already used by the local-fallback loop below.
+                if spec.is_local:
+                    # A qualified model belongs to its explicit provider or a
+                    # gateway fallback, never to a different local provider
+                    # whose model-family keyword happens to match.
+                    foreign_prefix = bool(
+                        prefixed_provider is not None and prefixed_provider.name != spec.name
+                    )
+                    if not p.api_base or foreign_prefix:
+                        continue
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
 
@@ -541,16 +558,17 @@ class Config(BaseSettings):
         # Prefer providers whose detect_by_base_keyword matches the configured api_base
         # (e.g. Ollama's "11434" in "http://localhost:11434") over plain registry order.
         local_fallback: tuple[ProviderConfig, str] | None = None
-        for spec in PROVIDERS:
-            if not spec.is_local:
-                continue
-            p = getattr(self.providers, spec.name, None)
-            if not (p and p.api_base):
-                continue
-            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
-                return p, spec.name
-            if local_fallback is None:
-                local_fallback = (p, spec.name)
+        if prefixed_provider is None:
+            for spec in PROVIDERS:
+                if not spec.is_local:
+                    continue
+                p = getattr(self.providers, spec.name, None)
+                if not (p and p.api_base):
+                    continue
+                if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
+                    return p, spec.name
+                if local_fallback is None:
+                    local_fallback = (p, spec.name)
         if local_fallback:
             return local_fallback
 
@@ -618,7 +636,10 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(
+        env_prefix="NANOBOT_",
+        env_nested_delimiter="__",
+    )
 
 
 def _resolve_tool_config_refs() -> None:

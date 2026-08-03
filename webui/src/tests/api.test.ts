@@ -5,6 +5,7 @@ import {
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
+  deleteSkill,
   deleteModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -14,6 +15,7 @@ import {
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
+  fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -21,9 +23,11 @@ import {
   fetchSidebarState,
   fetchSkillDetail,
   fetchSkills,
+  fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
+  installMarketplaceSkill,
   listSessions,
   listSlashCommands,
   loginProviderOAuth,
@@ -35,6 +39,7 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  searchMarketplaceSkills,
   startApiService,
   stopApiService,
   cancelChannelConnect,
@@ -49,6 +54,7 @@ import {
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSkillEnabled,
   updateWebSearchSettings,
   validateChannel,
 } from "@/lib/api";
@@ -95,6 +101,25 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("aborts a WebUI thread request when its caller signal is aborted", async () => {
+    let requestSignal: AbortSignal | null = null;
+    vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      requestSignal = init?.signal ?? null;
+      requestSignal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }));
+    const controller = new AbortController();
+
+    const request = fetchWebuiThread("tok", "websocket:chat-1", {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -287,6 +312,78 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("encodes marketplace search queries and provider", async () => {
+    await searchMarketplaceSkills("tok", "React & testing");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/search?q=React+%26+testing&provider=all",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches a provider marketplace leaderboard", async () => {
+    await fetchTrendingMarketplaceSkills("tok", "skillhub");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trending?provider=skillhub",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches skills.sh trend history independently", async () => {
+    await fetchMarketplaceSkillTrends("tok", [
+      "vercel-labs/skills/find-skills",
+      "acme/skills/react",
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills&id=acme%2Fskills%2Freact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("encodes provider install coordinates", async () => {
+    await installMarketplaceSkill(
+      "tok",
+      "skillhub",
+      "@tencent/skills",
+      "ima-skills",
+      "1.1.8",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/install?provider=skillhub&source=%40tencent%2Fskills&skill=ima-skills&version=1.1.8",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("updates and deletes installed skills with encoded names", async () => {
+    await updateSkillEnabled("tok", "custom skill", false);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/update?name=custom+skill&enabled=false",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await deleteSkill("tok", "custom skill");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/delete?name=custom+skill",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("percent-encodes websocket keys when deleting a session", async () => {
     await deleteSession("tok", "websocket:chat-1");
 
@@ -316,13 +413,11 @@ describe("webui API helpers", () => {
       provider: "openrouter",
       contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
-      botName: "nanobot",
-      botIcon: "nb",
       toolHintMaxLength: 120,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -554,6 +649,14 @@ describe("webui API helpers", () => {
       }),
     );
 
+    await loginProviderOAuth("tok", "openai_codex", "", true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
     await completeProviderOAuth("tok", "xai_grok", "flow-123");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
@@ -574,6 +677,23 @@ describe("webui API helpers", () => {
         headers: {
           Authorization: "Bearer tok",
           "X-Nanobot-OAuth-Code": "secret",
+        },
+      }),
+    );
+
+    await completeProviderOAuth(
+      "tok",
+      "openai_codex",
+      "flow-codex",
+      "http://localhost:1455/auth/callback?code=secret&state=test",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-OAuth-Callback":
+            "http://localhost:1455/auth/callback?code=secret&state=test",
         },
       }),
     );

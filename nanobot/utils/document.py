@@ -4,6 +4,7 @@ import mimetypes
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from zipfile import BadZipFile, ZipFile
 
 from loguru import logger
@@ -102,7 +103,7 @@ class PdfExtraction:
     end_page: int
 
 
-def extract_text(path: Path) -> str | None:
+def extract_text(path: str | Path) -> str | None:
     """Extract text from a file.
 
     Args:
@@ -112,9 +113,7 @@ def extract_text(path: Path) -> str | None:
         Extracted text as string, None for unsupported types,
         or error string for failures.
     """
-    if not isinstance(path, Path):
-        path = Path(path)
-
+    path = Path(path)
     if not path.exists():
         return f"[error: file not found: {path}]"
     try:
@@ -217,14 +216,14 @@ def _extract_docx(path: Path) -> str:
     """Extract text from DOCX using python-docx."""
     try:
         from docx import Document as DocxDocument
-        from docx.table import Table, _Cell
+        from docx.table import Table, _Cell  # pyright: ignore[reportPrivateUsage]
         from docx.text.paragraph import Paragraph
     except ImportError:
         return "[error: python-docx not installed]"
     try:
         if error := _office_archive_error(path):
             return error
-        doc = DocxDocument(path)
+        doc = DocxDocument(str(path))
         collector = _TextCollector(_MAX_TEXT_LENGTH)
         table_cell_count = 0
 
@@ -235,7 +234,7 @@ def _extract_docx(path: Path) -> str:
                     text = " ".join(block.text.split())
                     if text:
                         parts.append(text)
-                elif isinstance(block, Table):
+                elif isinstance(block, Table):  # pyright: ignore[reportUnnecessaryIsInstance]
                     parts.extend(row.replace("\t", " | ") for row in table_rows(block, depth + 1))
             return " ".join(parts)
 
@@ -249,7 +248,7 @@ def _extract_docx(path: Path) -> str:
                 cells: list[str] = []
                 # row.cells expands w:gridSpan before callers can apply a bound.
                 # Physical w:tc elements keep malformed documents proportional to XML size.
-                for tc in row._tr.tc_lst:
+                for tc in row._tr.tc_lst:  # pyright: ignore[reportPrivateUsage]
                     table_cell_count += 1
                     if table_cell_count > _MAX_DOCX_TABLE_CELLS:
                         raise DocxSafetyError(
@@ -265,7 +264,7 @@ def _extract_docx(path: Path) -> str:
                 if text and not collector.add(text, separator="\n\n"):
                     break
                 continue
-            if not isinstance(block, Table):
+            if not isinstance(block, Table):  # pyright: ignore[reportUnnecessaryIsInstance]
                 continue
             first_row = True
             for row_text in table_rows(block, 1):
@@ -325,7 +324,7 @@ def _extract_pptx(path: Path) -> str:
     try:
         if error := _office_archive_error(path):
             return error
-        prs = PptxPresentation(path)
+        prs = PptxPresentation(str(path))
         collector = _TextCollector(_MAX_TEXT_LENGTH)
         for i, slide in enumerate(prs.slides, 1):
             slide_text: list[str] = []
@@ -343,7 +342,7 @@ def _extract_pptx(path: Path) -> str:
         return f"[error: failed to extract PPTX: {e!s}]"
 
 
-def _collect_pptx_shape_text(shape, out: list[str]) -> None:
+def _collect_pptx_shape_text(shape: Any, out: list[str]) -> None:
     """Collect text from a PPTX shape, recursing into groups and tables.
 
     Groups have ``has_text_frame=False`` and must be walked via ``.shapes``;

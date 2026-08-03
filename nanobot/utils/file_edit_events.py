@@ -6,7 +6,7 @@ import difflib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 TRACKED_FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
@@ -351,12 +351,13 @@ def _resolve_apply_patch_paths(
     edits = params.get("edits")
     if not isinstance(edits, list):
         return []
+    patch_edits = cast(list[Any], edits)
     paths: list[Path] = []
     seen: set[Path] = set()
-    for edit in edits:
+    for edit in patch_edits:
         if not isinstance(edit, dict):
             continue
-        raw_path = edit.get("path")
+        raw_path = cast(dict[str, Any], edit).get("path")
         if not isinstance(raw_path, str):
             continue
         raw_path = raw_path.strip()
@@ -379,7 +380,7 @@ def _resolve_single_path(tool: Any, workspace: Path | None, raw_path: Any) -> Pa
             if isinstance(resolved, Path):
                 return resolved
             if resolved:
-                return Path(resolved)
+                return Path(cast(str, resolved))
         except Exception:
             return None
     resolver = getattr(tool, "_resolve", None)
@@ -389,7 +390,7 @@ def _resolve_single_path(tool: Any, workspace: Path | None, raw_path: Any) -> Pa
             if isinstance(resolved, Path):
                 return resolved
             if resolved:
-                return Path(resolved)
+                return Path(cast(str, resolved))
         except Exception:
             return None
     if workspace is None:
@@ -407,7 +408,7 @@ def _display_workspace(tool: Any, fallback: Path | None) -> Path | None:
         if isinstance(value, Path):
             return value
         if value:
-            return Path(value)
+            return Path(cast(str, value))
     return fallback
 
 

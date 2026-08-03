@@ -230,8 +230,8 @@ class TestSpawnWindows:
         assert "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }" in command
 
     @pytest.mark.asyncio
-    async def test_powershell_configures_utf8_output(self):
-        """PowerShell should emit UTF-8 for captured output and redirections."""
+    async def test_powershell_configures_utf8_io(self):
+        """PowerShell should use UTF-8 for captured output, native input, and redirections."""
         env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -242,7 +242,10 @@ class TestSpawnWindows:
 
         command = mock_exec.call_args[0][-1]
         assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in command
-        assert "$OutputEncoding =" not in command
+        assert (
+            "if ($PSVersionTable.PSVersion.Major -lt 6) { "
+            "$OutputEncoding = [Console]::OutputEncoding }"
+        ) in command
         assert "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'" in command
 
     @pytest.mark.asyncio
@@ -820,6 +823,20 @@ class TestWindowsRealExec:
         data = (tmp_path / "marker.txt").read_bytes()
         assert b"\x00" not in data
         assert data.decode("utf-8-sig").strip() == "file café λ 你好"
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_native_pipeline_input_is_utf8(self):
+        python = sys.executable.replace("'", "''")
+        result = await ExecTool(timeout=180).execute(
+            command=(
+                f"[string][char]0x4F1A | & '{python}' "
+                '-c "import sys; print(sys.stdin.buffer.read().hex())"'
+            ),
+            shell="powershell",
+        )
+
+        assert "e4bc9a0d0a" in result
+        assert "Exit code: 0" in result
 
     @pytest.mark.asyncio
     async def test_windows_powershell_session_output_is_utf8(self):

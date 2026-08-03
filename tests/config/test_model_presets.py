@@ -1,7 +1,14 @@
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import warnings
 
 import pytest
 
+from nanobot.agent.model_presets import load_model_preset_catalog
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.schema import Config
 
 
@@ -16,9 +23,53 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
 
 
+def test_model_preset_catalog_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    name = "NANOBOT_TEST_CATALOG_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_model_preset_catalog(config_path)
+
+    assert exc_info.value.path == config_path
+
+
 def test_agent_timezone_rejects_unknown_iana_name() -> None:
     with pytest.raises(ValueError, match="unknown timezone"):
         Config.model_validate({"agents": {"defaults": {"timezone": "Not/AZone"}}})
+
+
+def test_agent_timezones_use_packaged_data_without_system_database() -> None:
+    script = textwrap.dedent(
+        """\
+        from zoneinfo import TZPATH
+
+        from nanobot.config.schema import Config
+
+        assert not TZPATH
+        for name in ("UTC", "Asia/Shanghai"):
+            config = Config.model_validate({"agents": {"defaults": {"timezone": name}}})
+            serialized = config.model_dump(mode="json", by_alias=True)
+            restored = Config.model_validate(serialized)
+            assert restored.agents.defaults.timezone == name
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=os.environ | {"PYTHONTZPATH": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_provider_api_type_accepts_exact_values_only() -> None:

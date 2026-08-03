@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, TypeGuard, cast
 
 from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve, unix_serve
@@ -67,6 +67,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
@@ -191,12 +192,13 @@ def _parse_inbound_payload(raw: str) -> str | None:
         return None
     if text.startswith("{"):
         try:
-            data = json.loads(text)
+            data = cast(object, json.loads(text))
         except json.JSONDecodeError:
             return text
         if isinstance(data, dict):
+            payload = cast(dict[str, Any], data)
             for key in ("content", "text", "message"):
-                value = data.get(key)
+                value = payload.get(key)
                 if isinstance(value, str) and value.strip():
                     return value
             return None
@@ -209,7 +211,7 @@ def _parse_inbound_payload(raw: str) -> str | None:
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 
 
-def _is_valid_chat_id(value: Any) -> bool:
+def _is_valid_chat_id(value: Any) -> TypeGuard[str]:
     return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
 
 
@@ -224,15 +226,16 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
     if not text.startswith("{"):
         return None
     try:
-        data = json.loads(text)
+        data = cast(object, json.loads(text))
     except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None
-    t = data.get("type")
+    envelope = cast(dict[str, Any], data)
+    t = envelope.get("type")
     if not isinstance(t, str):
         return None
-    return data
+    return envelope
 
 
 def _is_websocket_upgrade(request: WsRequest) -> bool:
@@ -264,13 +267,13 @@ class WebSocketChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
         # chat_id -> connections subscribed to it (fan-out target).
-        self._subs: dict[str, set[Any]] = {}
+        self._subs: dict[str, set[ServerConnection]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
-        self._conn_chats: dict[Any, set[str]] = {}
+        self._conn_chats: dict[ServerConnection, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
-        self._conn_default: dict[Any, str] = {}
+        self._conn_default: dict[ServerConnection, str] = {}
         # Connections authenticated with a one-time token from /webui/bootstrap.
-        self._webui_connections: set[Any] = set()
+        self._webui_connections: set[ServerConnection] = set()
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -286,15 +289,43 @@ class WebSocketChannel(BaseChannel):
 
     # -- Subscription bookkeeping -------------------------------------------
 
-    def _workspace_controls_available(self, connection: Any) -> bool:
+    def _workspace_controls_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_controls_available(connection)
 
-    def _attach(self, connection: Any, chat_id: str) -> None:
+    def _attach(self, connection: ServerConnection, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
 
-    def _cleanup_connection(self, connection: Any) -> None:
+    async def send_webui_protocol_error(
+        self,
+        connection: ServerConnection,
+        detail: str,
+    ) -> None:
+        """Send a stable protocol error from a WebUI-owned orchestration helper."""
+        await self._send_event(connection, "error", detail=detail)
+
+    async def attach_webui_fork(
+        self,
+        connection: ServerConnection,
+        *,
+        fork_id: str,
+        fork_key: str,
+    ) -> None:
+        """Attach and hydrate a newly created WebUI chat fork."""
+        scope = self._workspaces.scope_for_session_key(fork_key)
+        self._attach(connection, fork_id)
+        await self._send_event(connection, "attached", chat_id=fork_id)
+        await self._send_event(
+            connection,
+            "session_updated",
+            chat_id=fork_id,
+            scope="metadata",
+            workspace_scope=scope.payload(),
+        )
+        await self._hydrate_after_subscribe(fork_id)
+
+    def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         chat_ids = self._conn_chats.pop(connection, set())
         for cid in chat_ids:
@@ -317,10 +348,11 @@ class WebSocketChannel(BaseChannel):
         if self.gateway.session_manager is None:
             return
         row = self.gateway.session_manager.read_session_file(f"websocket:{chat_id}")
-        meta = row.get("metadata", {}) if isinstance(row, dict) else {}
+        row_data = row if isinstance(row, dict) else {}
+        meta = row_data.get("metadata", {})
         if not isinstance(meta, dict):
             meta = {}
-        blob = goal_state_ws_blob(meta)
+        blob = goal_state_ws_blob(cast(dict[str, Any], meta))
         if not blob.get("active"):
             return
         await self.send_goal_state(chat_id, blob)
@@ -342,7 +374,12 @@ class WebSocketChannel(BaseChannel):
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
 
-    async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
+    async def _send_event(
+        self,
+        connection: ServerConnection,
+        event: str,
+        **fields: Any,
+    ) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
         payload: dict[str, Any] = {"event": event}
         payload.update(fields)
@@ -377,7 +414,7 @@ class WebSocketChannel(BaseChannel):
 
     # -- HTTP dispatch ------------------------------------------------------
 
-    async def _dispatch_http(self, connection: Any, request: WsRequest) -> Any:
+    async def _dispatch_http(self, connection: ServerConnection, request: WsRequest) -> Any:
         """Route an inbound HTTP request to the HTTP handler or WS upgrade."""
         got, query = _parse_request_path(request.path)
 
@@ -394,7 +431,11 @@ class WebSocketChannel(BaseChannel):
         # Everything else goes to the HTTP handler
         return await self._http_router.dispatch(connection, request)
 
-    def _authorize_websocket_handshake(self, connection: Any, query: dict[str, list[str]]) -> Any:
+    def _authorize_websocket_handshake(
+        self,
+        connection: ServerConnection,
+        query: dict[str, list[str]],
+    ) -> Any:
         supplied = _query_first(query, "token")
         static_token = self.config.token.strip()
 
@@ -414,7 +455,7 @@ class WebSocketChannel(BaseChannel):
             self._consume_issued_token(connection, supplied)
         return None
 
-    def _consume_issued_token(self, connection: Any, token: str) -> bool:
+    def _consume_issued_token(self, connection: ServerConnection, token: str) -> bool:
         audience = self._tokens.take_issued_token_audience(token)
         if audience == "webui":
             self._webui_connections.add(connection)
@@ -509,7 +550,7 @@ class WebSocketChannel(BaseChannel):
         self._server_task = asyncio.create_task(runner())
         await self._server_task
 
-    async def _connection_loop(self, connection: Any) -> None:
+    async def _connection_loop(self, connection: ServerConnection) -> None:
         request = connection.request
         path_part = request.path if request else "/"
         _, query = _parse_request_path(path_part)
@@ -574,7 +615,7 @@ class WebSocketChannel(BaseChannel):
 
     async def _dispatch_envelope(
         self,
-        connection: Any,
+        connection: ServerConnection,
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
@@ -700,7 +741,7 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
-                media_paths, reason = self._media.store_inbound_attachments(raw_media)
+                media_paths, reason = self._media.store_inbound_attachments(cast(list[Any], raw_media))
                 if reason is not None:
                     await self._send_event(
                         connection,
@@ -810,7 +851,7 @@ class WebSocketChannel(BaseChannel):
 
     async def _workspace_scope_or_error(
         self,
-        connection: Any,
+        connection: ServerConnection,
         resolver: Callable[[], Any],
         *,
         chat_id: str | None = None,
@@ -841,7 +882,8 @@ class WebSocketChannel(BaseChannel):
             try:
                 await self._server_task
             except asyncio.CancelledError:
-                if asyncio.current_task() and asyncio.current_task().cancelling():
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
                     raise
                 self.logger.debug("server task was already cancelled during shutdown")
             except Exception as e:
@@ -853,7 +895,13 @@ class WebSocketChannel(BaseChannel):
         self._webui_connections.clear()
         self._tokens.clear()
 
-    async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
+    async def _safe_send_to(
+        self,
+        connection: ServerConnection,
+        raw: str,
+        *,
+        label: str = "",
+    ) -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
         try:
             await connection.send(raw)
@@ -956,6 +1004,13 @@ class WebSocketChannel(BaseChannel):
             return
         # Signal that the agent has fully finished processing the current turn.
         if isinstance(event, TurnEndEvent):
+            turn_id = (msg.metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+            session_update_scope = (
+                "metadata"
+                if isinstance(turn_id, str)
+                and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)
+                else "thread"
+            )
             turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
             await self.send_turn_end(
                 msg.chat_id,
@@ -964,7 +1019,7 @@ class WebSocketChannel(BaseChannel):
                 metadata=msg.metadata,
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
-            await self.send_session_updated(msg.chat_id, scope="thread")
+            await self.send_session_updated(msg.chat_id, scope=session_update_scope)
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:
@@ -1161,6 +1216,7 @@ class WebSocketChannel(BaseChannel):
             body,
             metadata=meta,
             phase="answer",
+            include_source=True,
         )
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:

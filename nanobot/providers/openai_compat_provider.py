@@ -1,5 +1,7 @@
 """OpenAI-compatible provider for all non-Anthropic LLM APIs."""
 
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -13,9 +15,9 @@ import string
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -24,16 +26,24 @@ from pydantic.alias_generators import to_snake
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
     ToolCallRequest,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
+    ResponsesStreamCapture,
+    build_responses_state,
     consume_sdk_stream,
-    convert_messages,
     convert_tools,
+    is_compaction_compatibility_error,
+    is_replayable_finish_reason,
     parse_response_output,
+    prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_matches,
 )
 
 if TYPE_CHECKING:
@@ -91,12 +101,18 @@ _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
 # merge into extra_body, keeping the style→wire-format mapping in one place.
-_THINKING_STYLE_MAP: dict[str, Any] = {
+_THINKING_STYLE_MAP: dict[
+    str,
+    Callable[[bool], dict[str, Any]],
+] = {
     "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
     "enable_thinking": lambda on: {"enable_thinking": on},
     "reasoning_split": lambda on: {"reasoning_split": on},
 }
-_GATEWAY_REASONING_STYLE_MAP: dict[str, Any] = {
+_GATEWAY_REASONING_STYLE_MAP: dict[
+    str,
+    Callable[[str], dict[str, Any]],
+] = {
     "reasoning_effort": lambda effort: {"reasoning": {"effort": effort}},
 }
 _QWEN_THINKING_MODELS: frozenset[str] = frozenset({
@@ -202,23 +218,30 @@ def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[Tool
     spans: list[tuple[int, int]] = []
     for match in _TEXT_TOOL_CALL_RE.finditer(content):
         try:
-            payload = json.loads(_strip_json_fence(match.group(1)))
+            raw_payload: object = json.loads(
+                _strip_json_fence(match.group(1))
+            )
         except Exception:
             continue
-        if not isinstance(payload, dict):
+        if not isinstance(raw_payload, dict):
             continue
+        payload = cast(dict[str, Any], raw_payload)
 
-        nested = payload.get("tool_call")
+        nested = cast(object, payload.get("tool_call"))
         if isinstance(nested, dict):
-            payload = nested
-        function = payload.get("function")
+            payload = cast(dict[str, Any], nested)
+        function = cast(object, payload.get("function"))
         if not isinstance(function, dict):
             function = payload
-        name = function.get("name")
+        function_data = cast(dict[str, Any], function)
+        name = cast(object, function_data.get("name"))
         if not isinstance(name, str) or not name:
             continue
 
-        arguments = function.get("arguments", payload.get("arguments", {}))
+        arguments = function_data.get(
+            "arguments",
+            payload.get("arguments", {}),
+        )
         tool_calls.append(ToolCallRequest(
             id=str(payload.get("id") or _short_tool_id()),
             name=name,
@@ -239,24 +262,24 @@ def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[Tool
     return visible_content, tool_calls
 
 
-def _get(obj: Any, key: str) -> Any:
+def _get(obj: object, key: str) -> Any:
     """Get a value from dict or object attribute, returning None if absent."""
     if isinstance(obj, dict):
-        return obj.get(key)
+        return cast(dict[str, Any], obj).get(key)
     return getattr(obj, key, None)
 
 
-def _coerce_dict(value: Any) -> dict[str, Any] | None:
+def _coerce_dict(value: object) -> dict[str, Any] | None:
     """Try to coerce *value* to a dict; return None if not possible or empty."""
     if value is None:
         return None
     if isinstance(value, dict):
-        return value if value else None
+        return cast(dict[str, Any], value) if value else None
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        dumped = model_dump()
+        dumped: object = model_dump()
         if isinstance(dumped, dict) and dumped:
-            return dumped
+            return cast(dict[str, Any], dumped)
     return None
 
 
@@ -368,19 +391,25 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
             and isinstance(merged[key], dict)
             and isinstance(value, dict)
         ):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = _deep_merge(
+                cast(dict[str, Any], merged[key]),
+                cast(dict[str, Any], value),
+            )
         else:
             merged[key] = value
     return merged
 
 
-def _merge_unique_list(base: Any, override: Any) -> Any:
+def _merge_unique_list(base: object, override: object) -> object:
     """Append list values while preserving order and removing duplicates."""
     if not isinstance(base, list) or not isinstance(override, list):
         return override
-    result: list[Any] = []
+    result: list[object] = []
     seen: set[str] = set()
-    for value in [*base, *override]:
+    for value in [
+        *cast(list[object], base),
+        *cast(list[object], override),
+    ]:
         try:
             key = json.dumps(value, sort_keys=True, ensure_ascii=False)
         except Exception:
@@ -422,6 +451,8 @@ class OpenAICompatProvider(LLMProvider):
     registry lookups needed.
     """
 
+    _native_compaction_available = True
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -442,6 +473,7 @@ class OpenAICompatProvider(LLMProvider):
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
+        self._native_compaction_available = True
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -513,7 +545,7 @@ class OpenAICompatProvider(LLMProvider):
             http_client=http_client,
         )
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> AsyncOpenAIType:
         """Return the shared OpenAI client, creating it on first call."""
         if self._client is not None:
             return self._client
@@ -534,6 +566,8 @@ class OpenAICompatProvider(LLMProvider):
                 AsyncOpenAI = _AsyncOpenAI
 
             self._build_client()
+            if self._client is None:
+                raise RuntimeError("OpenAI client initialization did not produce a client")
             return self._client
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -567,7 +601,7 @@ class OpenAICompatProvider(LLMProvider):
                     {"type": "text", "text": content, "cache_control": cache_marker},
                 ]}
             if isinstance(content, list) and content:
-                nc = list(content)
+                nc = list(cast(list[dict[str, Any]], content))
                 nc[-1] = {**nc[-1], "cache_control": cache_marker}
                 return {**msg, "content": nc}
             return msg
@@ -662,23 +696,24 @@ class OpenAICompatProvider(LLMProvider):
             return map_id(value)
 
         for clean in sanitized:
-            if isinstance(clean.get("tool_calls"), list):
-                normalized = []
+            tool_calls_value = cast(object, clean.get("tool_calls"))
+            if isinstance(tool_calls_value, list):
+                normalized: list[Any] = []
                 used_ids: set[str] = set()
-                for idx, tc in enumerate(clean["tool_calls"]):
+                for idx, tc in enumerate(cast(list[object], tool_calls_value)):
                     if not isinstance(tc, dict):
                         normalized.append(tc)
                         continue
-                    tc_clean = dict(tc)
+                    tc_clean = dict(cast(dict[str, Any], tc))
                     raw_id = tc_clean.get("id")
                     mapped_id = unique_tool_id(raw_id, used_ids, idx)
                     tc_clean["id"] = mapped_id
                     used_ids.add(mapped_id)
                     if isinstance(raw_id, str) and raw_id:
                         pending_tool_ids.setdefault(raw_id, deque()).append(mapped_id)
-                    function = tc_clean.get("function")
+                    function = cast(object, tc_clean.get("function"))
                     if isinstance(function, dict):
-                        function_clean = dict(function)
+                        function_clean = dict(cast(dict[str, Any], function))
                         if "arguments" in function_clean:
                             function_clean["arguments"] = tool_arguments_json_for_replay(
                                 function_clean.get("arguments")
@@ -715,9 +750,13 @@ class OpenAICompatProvider(LLMProvider):
         route_prefixes = getattr(spec, "strip_model_prefixes", ())
         if not isinstance(route_prefixes, tuple) or not route_prefixes:
             return model_name
+        typed_route_prefixes = cast(tuple[str, ...], route_prefixes)
         model_prefix, routed_model = model_name.split("/", 1)
         model_prefix_key = _provider_prefix_key(model_prefix)
-        if any(_provider_prefix_key(prefix) == model_prefix_key for prefix in route_prefixes):
+        if any(
+            _provider_prefix_key(prefix) == model_prefix_key
+            for prefix in typed_route_prefixes
+        ):
             return routed_model
         return model_name
 
@@ -919,22 +958,34 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None,
         reasoning_effort: str | None,
     ) -> bool:
-        """Use Responses API only for direct OpenAI requests that benefit from it."""
+        """Choose Responses for providers/models that explicitly support it."""
         if self._api_type == "chat_completions":
             return False
-        if self._spec and self._spec.name not in ("openai", "github_copilot"):
+        spec_name = self._spec.name if self._spec is not None else None
+        model_name = self._request_model_name(model or self.default_model).lower()
+        supported_models = {
+            supported.lower()
+            for supported in getattr(self._spec, "responses_models", ())
+        }
+        model_responses = any(
+            model_name == supported or model_name.endswith(f"/{supported}")
+            for supported in supported_models
+        )
+        provider_responses = spec_name in ("openai", "github_copilot")
+        if not provider_responses and not model_responses:
             return False
         if self._api_type == "responses":
             # Explicit configuration means Responses is mandatory; do not
             # consult the circuit breaker or fall back to Chat Completions.
             return True
-        if self._spec is None or self._spec.name != "github_copilot":
+        if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
             if not _is_direct_openai_base(self._effective_base):
                 return False
 
-        model_name = (model or self.default_model).lower()
         wants = False
-        if reasoning_effort and reasoning_effort.lower() != "none":
+        if model_responses:
+            wants = True
+        elif reasoning_effort and reasoning_effort.lower() != "none":
             wants = True
         elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
             wants = True
@@ -942,6 +993,37 @@ class OpenAICompatProvider(LLMProvider):
             return False
 
         return self._responses_circuit_allows_probe(model, reasoning_effort)
+
+    def _responses_state_provider(self) -> str:
+        spec_name = self._spec.name if self._spec is not None else "custom"
+        effective_base = self._effective_base or "https://api.openai.com/v1"
+        return f"openai_compat:{spec_name}:{effective_base.rstrip('/')}"
+
+    def _responses_state_model(self, model: str | None) -> str:
+        return self._request_model_name(model or self.default_model)
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return responses_state_matches(
+            state,
+            provider=self._responses_state_provider(),
+            model=self._responses_state_model(model),
+        )
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Enable server compaction only on direct OpenAI Responses endpoints."""
+        _ = model
+        if (
+            not self._native_compaction_available
+            or self._api_type == "chat_completions"
+        ):
+            return False
+        if self._spec is not None and self._spec.name != "openai":
+            return False
+        return _is_direct_openai_base(self._effective_base)
 
     def _responses_circuit_allows_probe(
         self,
@@ -1012,12 +1094,31 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
+        provider_context: ProviderCallContext | None = None,
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
-        instructions, input_items = convert_messages(sanitized_messages)
+        sanitized_state = (
+            provider_context.conversation_state
+            if provider_context is not None
+            else None
+        )
+        if sanitized_state is not None:
+            sanitized_state = sanitized_state.with_pending_messages(
+                self._sanitize_messages(
+                    self._sanitize_empty_content(sanitized_state.pending_messages)
+                )
+            )
+        preserve_reasoning = bool(self._spec and self._spec.name == "deepseek")
+        instructions, input_items, replayed = prepare_responses_input(
+            sanitized_messages,
+            state=sanitized_state,
+            provider=self._responses_state_provider(),
+            model=model_name,
+            preserve_reasoning=preserve_reasoning,
+        )
 
         body: dict[str, Any] = {
             "model": model_name,
@@ -1027,13 +1128,29 @@ class OpenAICompatProvider(LLMProvider):
             "store": False,
             "stream": False,
         }
+        compact_threshold = resolve_compact_threshold(
+            (
+                provider_context.context_window_tokens
+                if provider_context is not None
+                else None
+            ),
+            max_tokens,
+        )
+        if self.supports_native_compaction(model_name) and compact_threshold is not None:
+            body["context_management"] = [{
+                "type": "compaction",
+                "compact_threshold": compact_threshold,
+            }]
 
         if self._supports_temperature(model_name, reasoning_effort):
             body["temperature"] = temperature
 
+        if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
+            body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
-            body["include"] = ["reasoning.encrypted_content"]
+        if replayed and "gpt-5.6" in model_name.lower():
+            body.setdefault("reasoning", {})["context"] = "all_turns"
 
         if tools:
             body["tools"] = convert_tools(tools)
@@ -1045,30 +1162,53 @@ class OpenAICompatProvider(LLMProvider):
 
         return body
 
+    async def _create_response_with_compaction_fallback(
+        self,
+        client: Any,
+        body: dict[str, Any],
+    ) -> Any:
+        """Retry Responses once without server compaction on compatibility errors."""
+        try:
+            return await client.responses.create(**body)
+        except Exception as exc:
+            if (
+                "context_management" not in body
+                or not is_compaction_compatibility_error(exc)
+            ):
+                raise
+            self._native_compaction_available = False
+            body.pop("context_management", None)
+            logger.warning(
+                "Responses server compaction unsupported; disabled for this provider instance "
+                "(status={})",
+                getattr(exc, "status_code", None),
+            )
+            return await client.responses.create(**body)
+
     # ------------------------------------------------------------------
     # Response parsing
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _maybe_mapping(value: Any) -> dict[str, Any] | None:
+    def _maybe_mapping(value: object) -> dict[str, Any] | None:
         if isinstance(value, dict):
-            return value
+            return cast(dict[str, Any], value)
         model_dump = getattr(value, "model_dump", None)
         if callable(model_dump):
-            dumped = model_dump()
+            dumped: object = model_dump()
             if isinstance(dumped, dict):
-                return dumped
+                return cast(dict[str, Any], dumped)
         return None
 
     @classmethod
-    def _extract_text_content(cls, value: Any) -> str | None:
+    def _extract_text_content(cls, value: object) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
             return value
         if isinstance(value, list):
             parts: list[str] = []
-            for item in value:
+            for item in cast(list[object], value):
                 item_map = cls._maybe_mapping(item)
                 if item_map:
                     # Skip Mistral-style {"type":"thinking","thinking":[...]}
@@ -1089,7 +1229,7 @@ class OpenAICompatProvider(LLMProvider):
         return str(value)
 
     @classmethod
-    def _extract_thinking_content(cls, value: Any) -> str | None:
+    def _extract_thinking_content(cls, value: object) -> str | None:
         """Extract reasoning text from Mistral-style thinking blocks.
 
         Mistral returns content as a list mixing
@@ -1101,7 +1241,7 @@ class OpenAICompatProvider(LLMProvider):
         if not isinstance(value, list):
             return None
         parts: list[str] = []
-        for item in value:
+        for item in cast(list[object], value):
             item_map = cls._maybe_mapping(item)
             if not item_map:
                 continue
@@ -1163,21 +1303,21 @@ class OpenAICompatProvider(LLMProvider):
         return result
 
     @staticmethod
-    def _get_nested_int(obj: Any, path: tuple[str, ...]) -> int:
+    def _get_nested_int(obj: object, path: tuple[str, ...]) -> int:
         """Drill into *obj* by *path* segments and return an ``int`` value.
 
         Supports both dict-key access and attribute access so it works
         uniformly with raw JSON dicts **and** SDK Pydantic models.
         """
-        current = obj
+        current: object = obj
         for segment in path:
             if current is None:
                 return 0
             if isinstance(current, dict):
-                current = current.get(segment)
+                current = cast(dict[str, Any], current).get(segment)
             else:
                 current = getattr(current, segment, None)
-        return int(current or 0) if current is not None else 0
+        return int(cast(Any, current) or 0) if current is not None else 0
 
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
@@ -1185,7 +1325,10 @@ class OpenAICompatProvider(LLMProvider):
 
         response_map = self._maybe_mapping(response)
         if response_map is not None:
-            choices = response_map.get("choices") or []
+            choices = cast(
+                list[object],
+                response_map.get("choices") or [],
+            )
             if not choices:
                 content = self._extract_text_content(
                     response_map.get("content") or response_map.get("output_text")
@@ -1211,7 +1354,7 @@ class OpenAICompatProvider(LLMProvider):
             content = self._extract_text_content(msg0.get("content"))
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
-            raw_tool_calls: list[Any] = []
+            raw_tool_calls: list[object] = []
             # StepFun: fallback to reasoning field when content is empty
             if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
@@ -1227,9 +1370,11 @@ class OpenAICompatProvider(LLMProvider):
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
-                tool_calls = m.get("tool_calls")
-                if isinstance(tool_calls, list) and tool_calls:
-                    raw_tool_calls.extend(tool_calls)
+                message_tool_calls = cast(object, m.get("tool_calls"))
+                if isinstance(message_tool_calls, list) and message_tool_calls:
+                    raw_tool_calls.extend(
+                        cast(list[object], message_tool_calls)
+                    )
                     if ch_map.get("finish_reason") in ("tool_calls", "stop"):
                         finish_reason = str(ch_map["finish_reason"])
                 if not content:
@@ -1240,7 +1385,7 @@ class OpenAICompatProvider(LLMProvider):
             # Deduplicate tool call IDs (same pattern as streaming path)
             # Some providers reuse the same ID for parallel tool calls.
             _seen_tc_ids: set[str] = set()
-            parsed_tool_calls = []
+            parsed_tool_calls: list[ToolCallRequest] = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
@@ -1281,11 +1426,11 @@ class OpenAICompatProvider(LLMProvider):
         content = msg.content
         finish_reason = choice.finish_reason
 
-        raw_tool_calls: list[Any] = []
+        raw_sdk_tool_calls: list[Any] = []
         for ch in response.choices:
             m = ch.message
             if hasattr(m, "tool_calls") and m.tool_calls:
-                raw_tool_calls.extend(m.tool_calls)
+                raw_sdk_tool_calls.extend(m.tool_calls)
                 if ch.finish_reason in ("tool_calls", "stop"):
                     finish_reason = ch.finish_reason
             if not content and m.content:
@@ -1293,8 +1438,8 @@ class OpenAICompatProvider(LLMProvider):
             if not content and getattr(m, "reasoning", None) and self._spec and self._spec.reasoning_as_content:
                 content = m.reasoning
 
-        tool_calls = []
-        for tc in raw_tool_calls:
+        tool_calls: list[ToolCallRequest] = []
+        for tc in raw_sdk_tool_calls:
             args = parse_tool_arguments(tc.function.arguments)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
@@ -1376,7 +1521,10 @@ class OpenAICompatProvider(LLMProvider):
 
             chunk_map = cls._maybe_mapping(chunk)
             if chunk_map is not None:
-                choices = chunk_map.get("choices") or []
+                choices = cast(
+                    list[object],
+                    chunk_map.get("choices") or [],
+                )
                 if not choices:
                     usage = cls._extract_usage(chunk_map) or usage
                     text = cls._extract_text_content(
@@ -1402,7 +1550,12 @@ class OpenAICompatProvider(LLMProvider):
                     text = cls._extract_thinking_content(raw_delta_content)
                 if text:
                     reasoning_parts.append(text)
-                for idx, tc in enumerate(delta.get("tool_calls") or []):
+                for idx, tc in enumerate(
+                    cast(
+                        Iterable[object],
+                        delta.get("tool_calls") or [],
+                    )
+                ):
                     _accum_tc(tc, idx)
                 _accum_legacy_function_call(delta.get("function_call"))
                 usage = cls._extract_usage(chunk_map) or usage
@@ -1430,7 +1583,12 @@ class OpenAICompatProvider(LLMProvider):
                     text = cls._extract_text_content(reasoning)
                     if text:
                         reasoning_parts.append(text)
-            for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
+            delta_tool_calls = (
+                cast(Iterable[object], getattr(delta, "tool_calls", None) or [])
+                if delta
+                else ()
+            )
+            for tc in delta_tool_calls:
                 _accum_tc(tc, getattr(tc, "index", 0))
             if delta:
                 _accum_legacy_function_call(getattr(delta, "function_call", None))
@@ -1553,6 +1711,28 @@ class OpenAICompatProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+        )
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+        )
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -1562,16 +1742,27 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        await self._ensure_client()
+        client = await self._ensure_client()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
+                        provider_context,
                     )
-                    result = parse_response_output(await self._client.responses.create(**body))
+                    responses_raw = await self._create_response_with_compaction_fallback(
+                        client,
+                        body,
+                    )
+                    result = parse_response_output(
+                        responses_raw,
+                        state_provider=self._responses_state_provider(),
+                        state_model=str(body["model"]),
+                        state_input_items=cast(list[dict[str, Any]], body["input"]),
+                    )
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
@@ -1590,7 +1781,11 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            chat_raw = cast(
+                Any,
+                await client.chat.completions.create(**kwargs),
+            )
+            return self._parse(chat_raw)
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
@@ -1606,8 +1801,9 @@ class OpenAICompatProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        await self._ensure_client()
+        client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
@@ -1615,12 +1811,16 @@ class OpenAICompatProvider(LLMProvider):
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
+                        provider_context,
                     )
                     body["stream"] = True
-                    stream = await self._client.responses.create(**body)
+                    responses_stream = await self._create_response_with_compaction_fallback(
+                        client,
+                        body,
+                    )
 
-                    async def _timed_stream():
-                        stream_iter = stream.__aiter__()
+                    async def _timed_stream() -> AsyncIterator[Any]:
+                        stream_iter: AsyncIterator[Any] = responses_stream.__aiter__()
                         while True:
                             try:
                                 yield await asyncio.wait_for(
@@ -1630,6 +1830,7 @@ class OpenAICompatProvider(LLMProvider):
                             except StopAsyncIteration:
                                 break
 
+                    capture = ResponsesStreamCapture()
                     (
                         content,
                         tool_calls,
@@ -1640,15 +1841,26 @@ class OpenAICompatProvider(LLMProvider):
                         _timed_stream(),
                         on_content_delta,
                         on_tool_call_delta=on_tool_call_delta,
+                        on_reasoning_delta=on_thinking_delta,
+                        capture=capture,
                     )
                     self._record_responses_success(model, reasoning_effort)
-                    return LLMResponse(
+                    result = LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
                     )
+                    if capture.completed and is_replayable_finish_reason(finish_reason):
+                        result.provider_state = build_responses_state(
+                            provider=self._responses_state_provider(),
+                            model=str(body["model"]),
+                            input_items=cast(list[dict[str, Any]], body["input"]),
+                            output_items=capture.output_items,
+                            usage=usage,
+                        )
+                    return result
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
@@ -1673,12 +1885,15 @@ class OpenAICompatProvider(LLMProvider):
                 kwargs.setdefault("extra_body", {})["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
-            stream = await self._client.chat.completions.create(**kwargs)
+            chat_stream = cast(
+                Any,
+                await client.chat.completions.create(**kwargs),
+            )
             chunks: list[Any] = []
-            stream_iter = stream.__aiter__()
+            stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
                 try:
-                    chunk = await asyncio.wait_for(
+                    chunk: Any = await asyncio.wait_for(
                         stream_iter.__anext__(),
                         timeout=idle_timeout_s,
                     )

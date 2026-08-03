@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
 import type { ChatSummary } from "@/lib/types";
@@ -17,7 +17,36 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
   };
 }
 
+function rect({
+  left,
+  top,
+  width,
+  height,
+}: {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 describe("ChatList", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("orders chats by latest session activity by default", () => {
     const sessions = [
       session({
@@ -190,6 +219,116 @@ describe("ChatList", () => {
     const chatsSection = screen.getByRole("region", { name: "Topics" });
     expect(within(chatsSection).getByText("Default workspace chat")).toBeInTheDocument();
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
+  });
+
+  it("positions one background highlight and resets it across hidden targets", () => {
+    let revealFrame: FrameRequestCallback | null = null;
+    let resizeObserverCallback: ResizeObserverCallback | null = null;
+    let activeTargetVisible = true;
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallback = callback;
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      revealFrame = callback;
+      return 1;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.hasAttribute("data-chat-list-content")) {
+          return rect({ left: 0, top: 0, width: 300, height: 200 });
+        }
+        if (this.getAttribute("data-chat-row") === "websocket:active") {
+          return activeTargetVisible
+            ? rect({ left: 8, top: 12, width: 284, height: 32 })
+            : rect({ left: 0, top: 0, width: 0, height: 0 });
+        }
+        if (this.getAttribute("data-chat-row") === "websocket:inactive") {
+          return rect({ left: 8, top: 48, width: 284, height: 40 });
+        }
+        return rect({ left: 0, top: 0, width: 0, height: 0 });
+      },
+    );
+    const props = {
+      sessions: [
+        session({ chatId: "active", title: "Active topic" }),
+        session({ chatId: "inactive", title: "Inactive topic" }),
+      ],
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+
+    const { rerender } = render(
+      <ChatList
+        {...props}
+        activeKey="websocket:active"
+      />,
+    );
+
+    const highlight = screen.getByTestId("sessions-selection-highlight");
+    expect(highlight).toHaveClass(
+      "bg-sidebar-foreground/[0.055]",
+      "transition-[transform,width,height]",
+      "motion-reduce:transition-none",
+    );
+    expect(screen.queryByTestId("sessions-selection-highlight-surface"))
+      .not.toBeInTheDocument();
+    expect(resizeObserverCallback).not.toBeNull();
+
+    const activeButton = screen.getByTitle("Active topic");
+    expect(activeButton).toHaveAttribute("aria-current", "page");
+    expect(activeButton.parentElement).toHaveClass("transition-[color]");
+    expect(activeButton.parentElement).not.toHaveClass("transition-colors");
+    expect(activeButton.parentElement).not.toHaveClass(
+      "bg-sidebar-accent",
+      "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
+    );
+    expect(highlight).toHaveClass(
+      "transition-[transform,width,height]",
+      "motion-reduce:transition-none",
+    );
+    expect(highlight).toHaveStyle(
+      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
+    );
+
+    revealFrame?.(0);
+    expect(highlight.style.transitionProperty).toBe("");
+
+    activeTargetVisible = false;
+    resizeObserverCallback?.([], {} as ResizeObserver);
+    expect(highlight).toHaveStyle("opacity: 0");
+
+    activeTargetVisible = true;
+    resizeObserverCallback?.([], {} as ResizeObserver);
+    expect(highlight).toHaveStyle(
+      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
+    );
+    revealFrame?.(0);
+
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:inactive"
+      />,
+    );
+
+    expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
+    expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
+    expect(highlight).toHaveStyle(
+      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0)",
+    );
+
+    rerender(<ChatList {...props} activeKey={null} />);
+    expect(highlight).toHaveStyle("opacity: 0");
   });
 
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {

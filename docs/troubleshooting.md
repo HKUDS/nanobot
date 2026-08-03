@@ -23,15 +23,20 @@ This separates failures into layers:
 | Layer | What it proves |
 |---|---|
 | `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace path, active model, and provider summary |
+| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
 | `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
 | `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
 
 If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
 
+`nanobot status` does not call the model. If provider/model setup is incomplete, it points to
+WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+
 ## How to Read `nanobot status`
 
-`nanobot status` does not call a model. It only checks whether nanobot can find the selected config, selected workspace, active model or preset, and provider setup summary.
+`nanobot status` does not call a model. It checks the selected config and workspace,
+resolves environment references, and validates the local settings required by the active
+provider/model without constructing a provider client.
 
 The output has this shape:
 
@@ -41,6 +46,7 @@ nanobot Status
 Config: /path/to/config.json ✓
 Workspace: /path/to/workspace ✓
 Model: provider/model-name (preset: primary)
+Agent: ✓ provider/model configuration is ready
 Provider A: not set
 Provider B: ✓
 Local Provider: ✓ http://localhost:11434/v1
@@ -54,6 +60,7 @@ Read it like this:
 | `Config` | It points to the config file you meant to use and shows `✓`. | Run `nanobot onboard`, or pass `--config` to `nanobot agent`, `gateway`, or `serve` when testing a non-default instance. |
 | `Workspace` | It points to the workspace you meant to use and shows `✓`. | Run `nanobot onboard`, create the folder, fix permissions, or pass `--workspace` on commands that support it. |
 | `Model` | It shows the active model or the preset name you expect. | Set `agents.defaults.modelPreset` to the intended preset, or check `/model` if you changed models during a chat session. |
+| `Agent` | It says `provider/model configuration is ready`. | Follow the printed WebUI or CLI setup route, then run `nanobot status` again. |
 | Provider rows | The provider used by the active preset shows `✓`, an OAuth marker, or a local URL. | Configure only the active provider first. It is normal for unused providers to say `not set`. |
 
 If `nanobot status` looks right but `nanobot agent -m "Hello!"` fails, the install and config paths are probably fine. Continue with [Provider and Model Problems](#provider-and-model-problems).
@@ -108,6 +115,12 @@ Common config mistakes:
 | Environment variable error | `${VAR_NAME}` references are resolved at startup. Set the variable before running nanobot. |
 | Edited config but behavior did not change | Restart `nanobot gateway`; long-running processes read config at startup. |
 
+After editing config, check the shortest path to an Agent reply:
+
+```bash
+nanobot status
+```
+
 To refresh missing defaults without overwriting existing settings, run:
 
 ```bash
@@ -137,7 +150,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run the matching login command: `openai-codex`, `xai-grok`, or `github-copilot`, normally with `--set-main`. |
 | Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
-| Codex login runs on a remote/headless machine | Open the printed URL in a local browser, then paste the final `http://localhost:1455/auth/callback?...` URL back into the terminal. |
+| Codex login runs on a remote/headless machine | In the WebUI, open ChatGPT in your local browser; when the localhost callback page cannot load, copy the full `http://localhost:1455/auth/callback?...` URL from the address bar and paste it into the WebUI dialog. From the CLI, open the printed URL locally and paste the same callback URL back into the terminal. |
 | Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 | Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |

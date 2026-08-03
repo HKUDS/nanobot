@@ -1,5 +1,7 @@
 """Search tools: file discovery and grep."""
 
+# pyright: reportIncompatibleMethodOverride=false, reportPrivateUsage=false
+
 from __future__ import annotations
 
 import fnmatch

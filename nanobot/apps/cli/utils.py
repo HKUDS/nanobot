@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -29,9 +29,11 @@ def runtime_lines_for_request(
     """Return CLI App annotations from an immutable request snapshot."""
     structured = metadata.get("cli_apps") if isinstance(metadata, Mapping) else None
     if isinstance(structured, list):
+        structured_items = cast(list[Any], structured)
         mentions = [
-            item for item in structured
-            if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+            cast(Mapping[str, Any], item) for item in structured_items
+            if isinstance(item, Mapping)
+            and isinstance(cast(Mapping[str, Any], item).get("name"), str)
         ]
         if mentions:
             return [
@@ -49,7 +51,10 @@ def runtime_lines_for_request(
     try:
         from nanobot.apps.cli import CliAppManager
 
-        mentions = CliAppManager(workspace=workspace).mentioned_installed_apps(text)
+        mentions = cast(
+            list[dict[str, Any]],
+            CliAppManager(workspace=workspace).mentioned_installed_apps(text),
+        )
     except Exception:
         return []
     return [

@@ -8,7 +8,7 @@ for older sessions. Callers use ``goal_state_runtime_lines``, ``goal_state_ws_bl
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, cast
 
 from nanobot.session.manager import SessionManager
 
@@ -66,13 +66,13 @@ def parse_goal_state(blob: Any) -> dict[str, Any] | None:
     if blob is None:
         return None
     if isinstance(blob, dict):
-        return blob
+        return cast(dict[str, Any], blob)
     if isinstance(blob, str):
         try:
             parsed = json.loads(blob)
         except json.JSONDecodeError:
             return None
-        return parsed if isinstance(parsed, dict) else None
+        return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
     return None
 
 

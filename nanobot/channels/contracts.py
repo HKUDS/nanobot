@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
@@ -22,6 +22,8 @@ class ChannelValidationContext:
     allow_local_service_access: bool = False
 
 
+# Keep callback contracts precise for static consumers. The public adapters below
+# still validate third-party implementations at runtime.
 SetupValidator = Callable[[dict[str, Any], ChannelValidationContext], dict[str, Any]]
 DefaultConfigFactory = Callable[[], dict[str, Any]]
 InstanceSpecsFactory = Callable[..., Iterable["ChannelInstanceSpec"]]
@@ -87,7 +89,7 @@ class ChannelActivation:
         instances = (
             tuple(
                 cls.from_config(item, include_instances=True)
-                for item in raw_instances
+                for item in cast(list[Any], raw_instances)
                 if _config_mapping(item) is not None
             )
             if isinstance(raw_instances, list)
@@ -193,7 +195,7 @@ class ChannelSetupSpec:
     def to_public_dict(self, channel_name: str) -> dict[str, Any]:
         """Serialize the writable setup contract for generic WebUI consumers."""
         simple_required = set(self.simple_required_fields)
-        fields = []
+        fields: list[dict[str, Any]] = []
         for name, field in self.fields.items():
             if not field.writable:
                 continue
@@ -268,35 +270,37 @@ def channel_default_config(plugin: ChannelPlugin) -> dict[str, Any]:
     defaults: dict[str, Any] = {"enabled": plugin.default_enabled}
     if plugin.setup is not None:
         for name, field in plugin.setup.fields.items():
-            value = field.default
+            value: Any = field.default
             if value is None:
-                value = {
+                fallback_defaults: dict[str, Any] = {
                     "string": "",
                     "secret": "",
                     "list": [],
                     "bool": False,
-                }.get(field.kind, _MISSING)
+                }
+                value = fallback_defaults.get(field.kind, _MISSING)
             if value is not _MISSING:
                 _assign_channel_field(defaults, name, deepcopy(value))
 
     factory = plugin.management.default_config
     if factory is None:
         return defaults
-    values = factory()
-    if not isinstance(values, dict):
+    values_raw = cast(object, factory())
+    if not isinstance(values_raw, dict):
         raise TypeError(f"ChannelPlugin.management.default_config for '{plugin.name}' must return a dict")
-    return merge_missing_defaults(values, defaults)
+    values = cast(dict[str, Any], values_raw)
+    return cast(dict[str, Any], merge_missing_defaults(values, defaults))
 
 
 def _assign_channel_field(values: dict[str, Any], field: str, value: Any) -> None:
     target = values
     parts = field.split(".")
     for part in parts[:-1]:
-        nested = target.get(part)
+        nested: object = target.get(part)
         if not isinstance(nested, dict):
             nested = {}
             target[part] = nested
-        target = nested
+        target = cast(dict[str, Any], nested)
     target[parts[-1]] = value
 
 
@@ -327,27 +331,28 @@ def channel_instance_specs(
     factory = plugin.management.instance_specs
     if factory is None:
         activation = ChannelActivation.from_config(section)
-        raw_specs: Iterable[ChannelInstanceSpec] = (
+        raw_specs: object = (
             []
             if enabled_only and not activation.resolve(default=plugin.default_enabled)
             else [ChannelInstanceSpec(instance_id="default", config=section)]
         )
     else:
-        raw_specs = factory(section, enabled_only=enabled_only)
+        raw_specs = cast(object, factory(section, enabled_only=enabled_only))
     if not isinstance(raw_specs, Iterable):
         raise TypeError(
             f"ChannelPlugin.management.instance_specs for '{plugin.name}' must return an iterable"
         )
-    specs = list(raw_specs)
+    specs = list(cast(Iterable[object], raw_specs))
+    if not _all_channel_instance_specs(specs):
+        raise TypeError(
+            f"ChannelPlugin.management.instance_specs for '{plugin.name}' returned an invalid item"
+        )
 
     instance_ids: set[str] = set()
     runtime_names: set[str] = set()
     for spec in specs:
-        if not isinstance(spec, ChannelInstanceSpec):
-            raise TypeError(
-                f"ChannelPlugin.management.instance_specs for '{plugin.name}' returned an invalid item"
-            )
-        if not isinstance(spec.instance_id, str) or not spec.instance_id.strip():
+        instance_id = cast(object, spec.instance_id)
+        if not isinstance(instance_id, str) or not instance_id.strip():
             raise ValueError(
                 f"ChannelPlugin.management.instance_specs for '{plugin.name}' returned an empty instance id"
             )
@@ -365,6 +370,12 @@ def channel_instance_specs(
         instance_ids.add(spec.instance_id)
         runtime_names.add(runtime_name)
     return specs
+
+
+def _all_channel_instance_specs(
+    values: list[object],
+) -> TypeGuard[list[ChannelInstanceSpec]]:
+    return all(isinstance(value, ChannelInstanceSpec) for value in values)
 
 
 def resolve_channel_action_target(
@@ -393,8 +404,17 @@ def channel_instance_config(
         return {}
     config = selected.config
     if hasattr(config, "model_dump"):
-        return dict(config.model_dump(mode="json", by_alias=True))
-    return dict(config) if isinstance(config, dict) else {}
+        dumped: dict[str, Any] = config.model_dump(mode="json", by_alias=True)
+        copied: dict[str, Any] = {}
+        for key in dumped:
+            copied[key] = dumped[key]
+        return copied
+    if not isinstance(config, dict):
+        return {}
+    copied_config: dict[str, Any] = {}
+    for key, value in cast(dict[object, Any], config).items():
+        copied_config[cast(str, key)] = value
+    return copied_config
 
 
 def channel_update_instance_config(
@@ -409,7 +429,10 @@ def channel_update_instance_config(
         if instance_id not in {"", "default"}:
             raise ValueError(f"{plugin.name} does not support multiple instances")
         return values
-    return updater(section, values, instance_id=instance_id)
+    updated = cast(object, updater(section, values, instance_id=instance_id))
+    if not isinstance(updated, dict):
+        raise TypeError(f"ChannelPlugin.management.update_instance_config for '{plugin.name}' must return a dict")
+    return cast(dict[str, Any], updated)
 
 
 def channel_set_config_enabled(
@@ -423,7 +446,7 @@ def channel_set_config_enabled(
     from nanobot.config.loader import merge_missing_defaults
 
     values = channel_instance_config(plugin, section, instance_id=instance_id)
-    values = merge_missing_defaults(values, channel_default_config(plugin))
+    values = cast(dict[str, Any], merge_missing_defaults(values, channel_default_config(plugin)))
     values["enabled"] = enabled
     return channel_update_instance_config(
         plugin,
@@ -440,12 +463,16 @@ def channel_feature_instances(
     setup_spec: ChannelSetupSpec | None = None,
 ) -> list[dict[str, Any]] | None:
     factory = plugin.management.feature_instances
-    overrides = factory(section, setup_spec=setup_spec) if factory is not None else None
+    overrides = (
+        cast(object, factory(section, setup_spec=setup_spec))
+        if factory is not None
+        else None
+    )
     if overrides is None and not plugin.management.multi_instance:
         return None
     if overrides is not None and (
         not isinstance(overrides, list)
-        or any(not isinstance(instance, dict) for instance in overrides)
+        or any(not isinstance(instance, dict) for instance in cast(list[object], overrides))
     ):
         raise TypeError(
             f"ChannelPlugin.management.feature_instances for '{plugin.name}' "
@@ -470,7 +497,8 @@ def channel_feature_instances(
 
     by_id = {instance["id"]: instance for instance in instances}
     seen: set[str] = set()
-    for override in overrides:
+    for override_value in cast(list[object], overrides):
+        override = cast(dict[str, Any], override_value)
         instance_id = override.get("id")
         if not isinstance(instance_id, str) or instance_id not in by_id:
             raise ValueError(
@@ -514,20 +542,21 @@ def _validate_runtime_name(plugin: ChannelPlugin, runtime_name: Any) -> None:
 
 
 def channel_field_value(values: Any, field_path: str) -> Any:
-    current = values
+    current: Any = values
     for part in field_path.split("."):
         candidates = (part, _camel_to_snake(part))
         if isinstance(current, dict):
             for candidate in candidates:
                 if candidate in current:
-                    current = current[candidate]
+                    current = cast(Any, current)[candidate]
                     break
             else:
                 return None
             continue
         for candidate in candidates:
-            if hasattr(current, candidate):
-                current = getattr(current, candidate)
+            current_value = current
+            if hasattr(current_value, candidate):
+                current = getattr(current_value, candidate)
                 break
         else:
             return None
@@ -542,7 +571,7 @@ def stringify_channel_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
+        return ", ".join(str(item) for item in cast(list[Any], value))
     return str(value)
 
 
@@ -586,8 +615,8 @@ def _channel_feature_instance(
 def _config_mapping(value: Any) -> dict[str, Any] | None:
     if hasattr(value, "model_dump"):
         dumped = value.model_dump(mode="json", by_alias=True)
-        return dumped if isinstance(dumped, dict) else None
-    return value if isinstance(value, dict) else None
+        return cast(dict[str, Any], dumped) if isinstance(dumped, dict) else None
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _camel_to_snake(value: str) -> str:

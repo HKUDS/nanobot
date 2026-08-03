@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from nanobot.agent.hook import AgentHookContext
 
@@ -51,7 +51,7 @@ async def invoke_file_edit_progress(
 
 def _tool_event_arguments(tool_call: Any) -> dict[str, Any]:
     arguments = getattr(tool_call, "arguments", {}) or {}
-    return arguments if isinstance(arguments, dict) else {}
+    return cast(dict[str, Any], arguments) if isinstance(arguments, dict) else {}
 
 
 def build_tool_event_start_payload(tool_call: Any) -> dict[str, Any]:
@@ -71,8 +71,11 @@ def build_tool_event_start_payload(tool_call: Any) -> dict[str, Any]:
 def tool_event_result_extras(result: Any) -> tuple[list[Any], list[Any]]:
     if not isinstance(result, dict):
         return [], []
-    files = result.get("files") if isinstance(result.get("files"), list) else []
-    embeds = result.get("embeds") if isinstance(result.get("embeds"), list) else []
+    result_data = cast(dict[str, Any], result)
+    raw_files = result_data.get("files")
+    raw_embeds = result_data.get("embeds")
+    files: list[Any] = cast(list[Any], raw_files) if isinstance(raw_files, list) else []
+    embeds: list[Any] = cast(list[Any], raw_embeds) if isinstance(raw_embeds, list) else []
     return files, embeds
 
 
@@ -82,7 +85,7 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
     for idx in range(count):
         tool_call = context.tool_calls[idx]
         result = context.tool_results[idx]
-        event = context.tool_events[idx] if isinstance(context.tool_events[idx], dict) else {}
+        event = context.tool_events[idx]
         status = event.get("status")
         phase = "end" if status == "ok" else "error"
         files, embeds = tool_event_result_extras(result)

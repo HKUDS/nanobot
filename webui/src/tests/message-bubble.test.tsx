@@ -113,6 +113,53 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("renders failed delivery details on focus without persistent accepted chrome", async () => {
+    const message: UIMessage = {
+      id: "u-delivery",
+      role: "user",
+      content: "hello",
+      createdAt: Date.now(),
+      deliveryStatus: "sending",
+    };
+
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+
+    rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...message,
+          deliveryStatus: "failed",
+          deliveryErrorKind: "message_too_big",
+        }}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const failedStatus = screen.getByRole("button", {
+      name: "Not sent: Message too large",
+    });
+    expect(failedStatus).toHaveClass(
+      "text-destructive/80",
+      "dark:text-red-400/80",
+    );
+    expect(screen.getByText("hello")).not.toHaveClass("ring-1");
+    expect(screen.getByText("hello")).not.toHaveClass("ring-destructive/30");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.focus(failedStatus);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Message too large");
+    expect(tooltip).toHaveTextContent(
+      "The server rejected your last message because it exceeded the size limit.",
+    );
+    expect(screen.getByRole("alert")).toHaveClass("sr-only");
+  });
+
   it("styles only generated quoted context in user messages", () => {
     const message: UIMessage = {
       id: "u-quote",
@@ -325,6 +372,45 @@ describe("MessageBubble", () => {
       "text-muted-foreground/70",
       "tabular-nums",
     );
+  });
+
+  it("falls back to the assistant creation time when replay has no completion time", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-created-at",
+          role: "assistant",
+          content: "Proactive answer",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-timestamp]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
+    expect(time).not.toHaveAttribute("data-assistant-completed-at");
+  });
+
+  it("renders the creation time for user messages", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "u-created-at",
+          role: "user",
+          content: "A user message",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-created-at]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
   });
 
   it("does not infer completion time from the assistant creation timestamp", () => {

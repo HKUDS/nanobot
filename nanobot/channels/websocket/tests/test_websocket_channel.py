@@ -49,7 +49,12 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
-from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
+    WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
+    WEBUI_TURN_METADATA_KEY,
+)
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 from nanobot.webui.transcript import (
     append_transcript_object,
@@ -1347,6 +1352,35 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_preserves_webui_source_metadata() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-source-stream")
+    source = {"kind": "cron", "label": "Repo check"}
+    metadata = {WEBUI_MESSAGE_SOURCE_METADATA_KEY: source}
+
+    await channel.send_delta("chat-source-stream", "done", metadata=metadata, stream_id="sid")
+    await channel.send_delta(
+        "chat-source-stream",
+        "",
+        metadata=metadata,
+        stream_id="sid",
+        stream_end=True,
+    )
+
+    first = json.loads(mock_ws.send.call_args_list[0][0][0])
+    second = json.loads(mock_ws.send.call_args_list[1][0][0])
+    assert first["event"] == "delta"
+    assert first["source"] == source
+    assert second["event"] == "stream_end"
+    assert second["source"] == source
+    lines = read_transcript_lines("websocket:chat-source-stream")
+    assert lines[-2]["source"] == source
+    assert lines[-1]["source"] == source
+
+
+@pytest.mark.asyncio
 async def test_send_delta_marks_resuming_stream_end() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
@@ -1615,6 +1649,43 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
     assert _sent_ws_payloads(mock_ws) == [
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_system_command_turn_end_only_refreshes_session_metadata() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-model")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-model",
+        content="",
+        metadata={
+            WEBUI_TURN_METADATA_KEY: f"{WEBUI_SYSTEM_COMMAND_TURN_PREFIX}model-switch",
+        },
+        event=TurnEndEvent(),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [
+        {
+            "event": "turn_end",
+            "chat_id": "chat-model",
+            "turn_id": f"{WEBUI_SYSTEM_COMMAND_TURN_PREFIX}model-switch",
+            "turn_phase": "complete",
+            "turn_seq": 1,
+        },
+        {
+            "event": "session_updated",
+            "chat_id": "chat-model",
+            "scope": "metadata",
+        },
     ]
 
 
@@ -2512,6 +2583,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["agent"]["model_preset"] == "default"
         assert body["agent"]["max_tokens"] == 8192
         assert body["agent"]["timezone"] == "UTC"
+        assert "bot_name" not in body["agent"]
+        assert "bot_icon" not in body["agent"]
         assert body["agent"]["tool_hint_max_length"] == 40
         presets = {preset["name"]: preset for preset in body["model_presets"]}
         assert presets["default"]["active"] is True
@@ -2803,8 +2876,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
         assert saved.model_presets["fast-writing"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"
-        assert saved.agents.defaults.bot_name == "Nano"
-        assert saved.agents.defaults.bot_icon == "N"
+        assert saved.agents.defaults.bot_name == "nanobot"
+        assert saved.agents.defaults.bot_icon == "🐈"
         assert saved.agents.defaults.tool_hint_max_length == 120
         assert saved.providers.openrouter.api_key == "sk-or-next"
         assert saved.providers.openrouter.api_base == "https://openrouter.ai/api/v1"

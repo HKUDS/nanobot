@@ -1,5 +1,7 @@
 """Agent loop: the core processing engine."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -7,13 +9,14 @@ import dataclasses
 import inspect
 import os
 import time
-from collections.abc import Mapping
+import weakref
+from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar, cast
 
 from loguru import logger
 
@@ -46,7 +49,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -94,12 +97,16 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
         ChannelsConfig,
+        Config,
+        MCPServerConfig,
         ProviderConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.triggers.local_store import LocalTriggerStore
 
 _T = TypeVar("_T")
+_SUBAGENT_PROVIDER_TASK_META = "subagent_provider_task_id"
 
 
 class TurnKind(Enum):
@@ -120,6 +127,7 @@ class TurnContext:
 
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
     request_context: RequestContext | None = None
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -142,7 +150,7 @@ class TurnContext:
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
     on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
-    pending_queue: asyncio.Queue | None = None
+    pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: str | None = None
 
     ephemeral: bool = False
@@ -155,6 +163,18 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
+
+    def require_runtime(self) -> LLMRuntime:
+        """Return the runtime established by the BUILD stage."""
+        if self.runtime is None:
+            raise RuntimeError("turn runtime is not initialized; BUILD must run before this stage")
+        return self.runtime
+
+    def require_session(self) -> Session:
+        """Return the session established by the RESTORE stage."""
+        if self.session is None:
+            raise RuntimeError("turn session is not initialized; RESTORE must run before this stage")
+        return self.session
 
 
 class AgentLoop:
@@ -225,6 +245,8 @@ class AgentLoop:
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
+    _PROVIDER_STATE_CHECKPOINT_VERSION_KEY = "provider_state_checkpoint_version"
+    _PROVIDER_STATE_CHECKPOINT_VERSION = "v1"
 
     def __init__(
         self,
@@ -243,7 +265,7 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        mcp_servers: dict | None = None,
+        mcp_servers: dict[str, MCPServerConfig] | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
@@ -266,7 +288,7 @@ class AgentLoop:
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
-        local_trigger_store: Any | None = None,
+        local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
     ):
         from nanobot.config.schema import ToolsConfig
@@ -377,11 +399,13 @@ class AgentLoop:
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
-        self._pending_queues: dict[str, asyncio.Queue] = {}
+        self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
@@ -430,7 +454,7 @@ class AgentLoop:
     @classmethod
     def from_config(
         cls,
-        config: Any,
+        config: Config,
         bus: MessageBus | None = None,
         **extra: Any,
     ) -> AgentLoop:
@@ -657,12 +681,17 @@ class AgentLoop:
         """
         if not turn_continuation.should_persist_user_message(msg.metadata):
             return False
-        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
-        has_text = isinstance(msg.content, str) and msg.content.strip()
+        media_paths = [
+            path
+            for path in (msg.media or [])
+            if isinstance(cast(object, path), str) and path
+        ]
+        content_value = cast(object, msg.content)
+        has_text = isinstance(content_value, str) and content_value.strip()
         if has_text or media_paths or runtime_context_blocks:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
-            text = msg.content if isinstance(msg.content, str) else ""
+            text = content_value if isinstance(content_value, str) else ""
             text_override, automation_extra = automation_history_overrides(msg.metadata)
             if text_override is not None:
                 text = text_override
@@ -810,7 +839,7 @@ class AgentLoop:
 
     async def _run_agent_loop(
         self,
-        initial_messages: list[dict],
+        initial_messages: list[dict[str, Any]],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
@@ -824,7 +853,7 @@ class AgentLoop:
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         original_user_text: str | None = None,
-        pending_queue: asyncio.Queue | None = None,
+        pending_queue: asyncio.Queue[InboundMessage] | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
@@ -832,7 +861,8 @@ class AgentLoop:
         turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
-    ) -> tuple[str | None, list[str], list[dict], str, bool]:
+        provider_state: ProviderConversationState | None = None,
+    ) -> tuple[str | None, list[str], list[dict[str, Any]], str, bool]:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -847,7 +877,18 @@ class AgentLoop:
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
                 return
-            self._set_runtime_checkpoint(session, payload)
+            public_payload = dict(payload)
+            private_state = public_payload.pop("provider_state", None)
+            public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
+            if "provider_state" in payload and (
+                private_state is None
+                or isinstance(private_state, ProviderConversationState)
+            ):
+                session.provider_state = private_state
+                public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
+                    self._PROVIDER_STATE_CHECKPOINT_VERSION
+                )
+            self._set_runtime_checkpoint(session, public_payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Drain follow-up messages from the pending queue.
@@ -875,7 +916,12 @@ class AgentLoop:
                     image_paths=image_paths,
                 )
                 row: dict[str, Any] = {"role": "user", "content": user_content}
-                metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
+                metadata_value = cast(object, pending_msg.metadata)
+                metadata = (
+                    pending_msg.metadata
+                    if isinstance(metadata_value, dict)
+                    else {}
+                )
                 if pending_msg.channel != "system":
                     scope = self.workspace_scopes.for_turn(
                         channel=pending_msg.channel,
@@ -899,19 +945,24 @@ class AgentLoop:
                         pending_request,
                         effective_tools,
                     )
-                    row["content"], marker = append_runtime_context(user_content, blocks)
-                    if marker is not None:
-                        row["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: marker}
+                    row["content"], runtime_marker = append_runtime_context(
+                        user_content,
+                        blocks,
+                    )
+                    if runtime_marker is not None:
+                        row["_meta"] = {
+                            RUNTIME_CONTEXT_MESSAGE_META: runtime_marker,
+                        }
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
                 ):
-                    marker: dict[str, Any] = {"kind": "subagent_result"}
+                    subagent_marker: dict[str, Any] = {"kind": "subagent_result"}
                     task_id = metadata.get("subagent_task_id")
                     if isinstance(task_id, str) and task_id:
-                        marker["subagent_task_id"] = task_id
+                        subagent_marker["subagent_task_id"] = task_id
                         row["subagent_task_id"] = task_id
-                    row[HIDDEN_HISTORY_META] = marker
+                    row[HIDDEN_HISTORY_META] = subagent_marker
                     row["injected_event"] = "subagent_result"
                 return row
 
@@ -1035,6 +1086,7 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                provider_state=provider_state,
             ))
         finally:
             turn_scope_stack.close()
@@ -1042,6 +1094,8 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        if session is not None and not ephemeral:
+            session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(
@@ -1071,7 +1125,7 @@ class AgentLoop:
             return
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
         self.auto_compact.check_expired(
-            self._schedule_background,
+            self.schedule_background,
             self.runtime_for_session,
             active_session_keys=self._pending_queues.keys(),
         )
@@ -1174,11 +1228,11 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-        pending: asyncio.Queue | None = None
+        pending: asyncio.Queue[InboundMessage] | None = None
         try:
             async with lock, gate:
                 # Only the task that owns the session lock may publish the
@@ -1304,7 +1358,7 @@ class AgentLoop:
         if errors:
             raise BaseExceptionGroup("failed to close agent resources", errors)
 
-    def _schedule_background(self, coro) -> None:
+    def schedule_background(self, coro: Coroutine[Any, Any, Any]) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
@@ -1322,7 +1376,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        pending_queue: asyncio.Queue | None = None,
+        pending_queue: asyncio.Queue[InboundMessage] | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
@@ -1518,27 +1572,33 @@ class AgentLoop:
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
+        session = ctx.session
         self._remember_unified_session_route(
-            ctx.session,
+            session,
             msg,
             is_user_turn=ctx.original_user_text is not None,
         )
         await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:
-            self.workspace_scopes.persist_message_scope(ctx.session, msg)
+            self.workspace_scopes.persist_message_scope(session, msg)
 
-        if self._restore_runtime_checkpoint(ctx.session):
-            self.sessions.save(ctx.session)
-        if self._restore_pending_user_turn(ctx.session):
-            self.sessions.save(ctx.session)
+        if self._restore_runtime_checkpoint(session):
+            self.sessions.save(session)
+        if self._restore_pending_user_turn(session):
+            self.sessions.save(session)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
-        ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
+        session = ctx.require_session()
+        ctx.session, pending = self.auto_compact.prepare_session(
+            session,
+            ctx.session_key,
+        )
         ctx.pending_summary = pending
 
     async def _dispatch_command(self, ctx: TurnContext) -> bool:
         if ctx.kind is TurnKind.SYSTEM:
             return False
+        session = ctx.require_session()
         raw = ctx.msg.content.strip()
         _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
         is_user_turn = (
@@ -1549,7 +1609,7 @@ class AgentLoop:
         )
         cmd_ctx = CommandContext(
             msg=ctx.msg,
-            session=ctx.session,
+            session=session,
             key=ctx.session_key,
             raw=raw,
             loop=self,
@@ -1567,13 +1627,13 @@ class AgentLoop:
             # intentionally clears the session.
             if cmd_ctx.raw.lower() != "/new":
                 ctx.input_persisted_early = self._persist_user_message_early(
-                    ctx.msg, ctx.session, _command=True
+                    ctx.msg, session, _command=True
                 )
-                ctx.session.add_message(
+                session.add_message(
                     "assistant", result.content, _command=True
                 )
-                self._clear_pending_user_turn(ctx.session)
-                self.sessions.save(ctx.session)
+                self._clear_pending_user_turn(session)
+                self.sessions.save(session)
                 if not ctx.ephemeral:
                     await self.runtime_event_publisher.session_turn_persisted(
                         ctx.msg,
@@ -1585,9 +1645,10 @@ class AgentLoop:
         return False
 
     async def _build_turn(self, ctx: TurnContext) -> None:
+        session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = self.runtime_for_session(ctx.session)
+            runtime = self.runtime_for_session(session)
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(
@@ -1602,7 +1663,7 @@ class AgentLoop:
         )
         if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
-                ctx.session,
+                session,
                 runtime=runtime,
                 replay_max_messages=replay_max_messages,
             )
@@ -1617,29 +1678,91 @@ class AgentLoop:
             "max_tokens": self._replay_token_budget(runtime),
             "extend_to_user": is_subagent,
         }
-        ctx.history = ctx.session.get_history(**_hist_kwargs)
+        ctx.history = session.get_history(**_hist_kwargs)
+        stored_state = session.provider_state
+        subagent_followup_persisted = False
         if is_subagent:
             # Keep the durable internal delivery as an assistant record, but
             # present this completion to the model as fresh follow-up input.
             # Providers without assistant-prefill support drop trailing
             # assistant messages, so using the persisted record as the current
             # prompt would hide an independently dispatched subagent result.
-            if self._persist_subagent_followup(ctx.session, ctx.msg):
+            subagent_followup_persisted = self._persist_subagent_followup(
+                session,
+                ctx.msg,
+            )
+            if subagent_followup_persisted:
                 logger.debug("Subagent result persisted for session {}", ctx.session_key)
-                self.sessions.save(ctx.session)
+                # Establish a durable, replay-safe baseline before any fallible
+                # provider compatibility or prompt assembly work. A compatible
+                # staged state replaces this in a second atomic save below.
+                session.provider_state = None
+                self.sessions.save(session)
             ctx.input_persisted_early = True
-        ctx.delivery.record_runtime(ctx.runtime)
+        ctx.delivery.record_runtime(runtime)
 
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
-        ctx.initial_messages = self._build_initial_messages(ctx)
+        staged_provider_state = False
+        if stored_state is not None and runtime.provider.can_resume_conversation_state(
+            stored_state,
+            runtime.model,
+        ):
+            current_provider_message = self.context.build_current_message(
+                ctx.msg.content,
+                media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
+                runtime_context_blocks=ctx.runtime_context_blocks,
+            )
+            task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
+            already_staged = False
+            if isinstance(task_id, str) and task_id:
+                internal_meta = current_provider_message.get("_meta")
+                current_provider_message["_meta"] = {
+                    **(
+                        cast(dict[str, Any], internal_meta)
+                        if isinstance(internal_meta, dict)
+                        else {}
+                    ),
+                    _SUBAGENT_PROVIDER_TASK_META: task_id,
+                }
+                already_staged = any(
+                    isinstance(message.get("_meta"), dict)
+                    and cast(dict[str, Any], message["_meta"]).get(
+                        _SUBAGENT_PROVIDER_TASK_META
+                    )
+                    == task_id
+                    for message in stored_state.pending_messages
+                )
+            ctx.provider_state = (
+                stored_state
+                if already_staged
+                else stored_state.with_pending_messages([
+                    *stored_state.pending_messages,
+                    current_provider_message,
+                ])
+            )
+            if (
+                not ctx.ephemeral
+                and (ctx.kind is TurnKind.USER or subagent_followup_persisted)
+            ):
+                session.provider_state = ctx.provider_state
+                staged_provider_state = True
+        elif stored_state is not None:
+            session.provider_state = None
         if ctx.kind is TurnKind.USER:
             ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
-                ctx.session,
+                session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
+            if staged_provider_state and not ctx.input_persisted_early:
+                session.provider_state = stored_state
+        elif subagent_followup_persisted and staged_provider_state:
+            # Upgrade the replay-safe baseline to the resumable state before
+            # prompt assembly and the first model checkpoint.
+            self.sessions.save(session)
+        ctx.initial_messages = self._build_initial_messages(ctx)
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
@@ -1647,12 +1770,13 @@ class AgentLoop:
             ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
 
     async def _run_turn(self, ctx: TurnContext) -> None:
+        runtime = ctx.require_runtime()
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
         await ctx.delivery.running(started_at=ctx.visible_run_started_at)
         result = await self._run_agent_loop(
             ctx.initial_messages,
-            runtime=ctx.runtime,
+            runtime=runtime,
             on_progress=ctx.on_progress,
             on_stream=ctx.on_stream,
             on_stream_end=ctx.on_stream_end,
@@ -1672,6 +1796,7 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
             request_context=ctx.request_context,
+            provider_state=ctx.provider_state,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1682,6 +1807,8 @@ class AgentLoop:
             await turn_continuation.maybe_continue_turn(ctx)
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
+        runtime = ctx.require_runtime()
+        session = ctx.require_session()
         turn_continuation.prepare_save_boundary(ctx)
 
         if (
@@ -1702,26 +1829,26 @@ class AgentLoop:
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
         self._save_turn(
-            ctx.session, ctx.all_messages, ctx.save_skip,
+            session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         if not ctx.ephemeral:
-            ctx.session.enforce_file_cap(
+            session.enforce_file_cap(
                 on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
             )
-            self._schedule_background(
+            self.schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
-                    ctx.session,
-                    runtime=ctx.runtime,
+                    session,
+                    runtime=runtime,
                     replay_max_messages=replay_max_messages_for_context(
-                        ctx.runtime.context_window_tokens
+                        runtime.context_window_tokens
                     ),
                 )
             )
-        self._clear_pending_user_turn(ctx.session)
-        self._clear_runtime_checkpoint(ctx.session)
-        self.sessions.save(ctx.session)
+        self._clear_pending_user_turn(session)
+        self._clear_runtime_checkpoint(session)
+        self.sessions.save(session)
         if not ctx.ephemeral:
             await self.runtime_event_publisher.session_turn_persisted(
                 ctx.msg,
@@ -1744,7 +1871,7 @@ class AgentLoop:
             return
         ctx.outbound = self._assemble_outbound(
             ctx.msg,
-            ctx.final_content,
+            cast(str, ctx.final_content),
             ctx.stop_reason,
             ctx.had_injections,
             ctx.streamed_content,
@@ -1755,39 +1882,47 @@ class AgentLoop:
 
     def _sanitize_persisted_blocks(
         self,
-        content: list[dict[str, Any]],
+        content: list[object],
         *,
         should_truncate_text: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[object]:
         """Strip volatile multimodal payloads before writing session history."""
-        filtered: list[dict[str, Any]] = []
+        filtered: list[object] = []
         for block in content:
             if not isinstance(block, dict):
                 filtered.append(block)
                 continue
 
-            if block.get("type") == "image_url" and block.get("image_url", {}).get(
-                "url", ""
+            block_data = cast(dict[str, Any], block)
+            image_url = cast(dict[str, Any], block_data.get("image_url", {}))
+            if block_data.get("type") == "image_url" and str(
+                image_url.get("url", "")
             ).startswith("data:image/"):
-                path = (block.get("_meta") or {}).get("path", "")
-                filtered.append({"type": "text", "text": image_placeholder_text(path)})
+                internal_meta = cast(dict[str, Any], block_data.get("_meta") or {})
+                path = cast(str, internal_meta.get("path", ""))
+                filtered.append(
+                    {"type": "text", "text": image_placeholder_text(path)}
+                )
                 continue
 
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
-                text = block["text"]
+            if block_data.get("type") == "text" and isinstance(
+                block_data.get("text"),
+                str,
+            ):
+                text = cast(str, block_data["text"])
                 if should_truncate_text and len(text) > self.max_tool_result_chars:
                     text = truncate_text_fn(text, self.max_tool_result_chars)
-                filtered.append({**block, "text": text})
+                filtered.append({**block_data, "text": text})
                 continue
 
-            filtered.append(block)
+            filtered.append(block_data)
 
         return filtered
 
     def _save_turn(
         self,
         session: Session,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         skip: int,
         *,
         turn_latency_ms: int | None = None,
@@ -1799,8 +1934,10 @@ class AgentLoop:
             str(tc["id"])
             for m in session.messages
             if m.get("role") == "assistant"
-            for tc in m.get("tool_calls") or []
-            if isinstance(tc, dict) and tc.get("id")
+            for tc_value in cast(Iterable[object], m.get("tool_calls") or [])
+            if isinstance(tc_value, dict)
+            for tc in (cast(dict[str, Any], tc_value),)
+            if tc.get("id")
         }
         fulfilled_tool_call_ids = {
             str(m["tool_call_id"])
@@ -1810,9 +1947,11 @@ class AgentLoop:
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
-            internal_meta = entry.pop("_meta", None)
+            internal_meta = cast(object, entry.pop("_meta", None))
             runtime_context_meta = (
-                internal_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
+                cast(dict[str, Any], internal_meta).get(
+                    RUNTIME_CONTEXT_MESSAGE_META
+                )
                 if isinstance(internal_meta, dict)
                 else None
             )
@@ -1838,7 +1977,10 @@ class AgentLoop:
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
+                    filtered = self._sanitize_persisted_blocks(
+                        cast(list[object], content),
+                        should_truncate_text=True,
+                    )
                     if not filtered:
                         # Preserve the tool_call/result pair after block filtering.
                         filtered = [
@@ -1847,7 +1989,9 @@ class AgentLoop:
                     entry["content"] = filtered
             elif role == "user":
                 if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content)
+                    filtered = self._sanitize_persisted_blocks(
+                        cast(list[object], content),
+                    )
                     if not filtered:
                         continue
                     entry["content"] = filtered
@@ -1859,8 +2003,13 @@ class AgentLoop:
                 last_assistant_idx = len(session.messages) - 1
                 declared_tool_call_ids.update(
                     str(tc["id"])
-                    for tc in entry.get("tool_calls") or []
-                    if isinstance(tc, dict) and tc.get("id")
+                    for tc_value in cast(
+                        Iterable[object],
+                        entry.get("tool_calls") or [],
+                    )
+                    if isinstance(tc_value, dict)
+                    for tc in (cast(dict[str, Any], tc_value),)
+                    if tc.get("id")
                 )
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
@@ -1875,7 +2024,12 @@ class AgentLoop:
         """
         if not msg.content:
             return False
-        task_id = msg.metadata.get("subagent_task_id") if isinstance(msg.metadata, dict) else None
+        metadata_value = cast(object, msg.metadata)
+        task_id = (
+            msg.metadata.get("subagent_task_id")
+            if isinstance(metadata_value, dict)
+            else None
+        )
         if task_id and any(
             m.get("injected_event") == "subagent_result" and m.get("subagent_task_id") == task_id
             for m in session.messages
@@ -1921,29 +2075,44 @@ class AgentLoop:
         """Materialize an unfinished turn into session history before a new request."""
         from datetime import datetime
 
-        checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
+        checkpoint = cast(
+            object,
+            session.metadata.get(self._RUNTIME_CHECKPOINT_KEY),
+        )
         if not isinstance(checkpoint, dict):
             return False
+        checkpoint_data = cast(dict[str, Any], checkpoint)
 
-        assistant_message = checkpoint.get("assistant_message")
-        completed_tool_results = checkpoint.get("completed_tool_results") or []
-        pending_tool_calls = checkpoint.get("pending_tool_calls") or []
+        assistant_message = cast(object, checkpoint_data.get("assistant_message"))
+        completed_tool_results = cast(
+            Iterable[object],
+            checkpoint_data.get("completed_tool_results") or [],
+        )
+        pending_tool_calls = cast(
+            Iterable[object],
+            checkpoint_data.get("pending_tool_calls") or [],
+        )
 
         restored_messages: list[dict[str, Any]] = []
         if isinstance(assistant_message, dict):
-            restored = dict(assistant_message)
+            restored = dict(cast(dict[str, Any], assistant_message))
             restored.setdefault("timestamp", datetime.now().isoformat())
             restored_messages.append(restored)
         for message in completed_tool_results:
             if isinstance(message, dict):
-                restored = dict(message)
+                restored = dict(cast(dict[str, Any], message))
                 restored.setdefault("timestamp", datetime.now().isoformat())
                 restored_messages.append(restored)
         for tool_call in pending_tool_calls:
             if not isinstance(tool_call, dict):
                 continue
-            tool_id = tool_call.get("id")
-            name = ((tool_call.get("function") or {}).get("name")) or "tool"
+            tool_call_data = cast(dict[str, Any], tool_call)
+            tool_id = tool_call_data.get("id")
+            function_data = cast(
+                dict[str, Any],
+                tool_call_data.get("function") or {},
+            )
+            name = function_data.get("name") or "tool"
             restored_messages.append(
                 {
                     "role": "tool",
@@ -1965,7 +2134,36 @@ class AgentLoop:
             ):
                 overlap = size
                 break
-        session.messages.extend(restored_messages[overlap:])
+        appended_messages = restored_messages[overlap:]
+        session.messages.extend(appended_messages)
+        assistant_message_data = (
+            cast(dict[str, Any], assistant_message)
+            if isinstance(assistant_message, dict)
+            else None
+        )
+        provider_state_is_synchronized = (
+            checkpoint_data.get(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY)
+            == self._PROVIDER_STATE_CHECKPOINT_VERSION
+        )
+        phase = checkpoint_data.get("phase")
+        exact_final_response = (
+            phase == "final_response"
+            and assistant_message_data is not None
+            and assistant_message_data.get("role") == "assistant"
+            and not bool(checkpoint_data.get("completed_tool_results"))
+            and not bool(checkpoint_data.get("pending_tool_calls"))
+        )
+        exact_completed_tools = (
+            phase == "tools_completed"
+            and assistant_message_data is not None
+            and assistant_message_data.get("role") == "assistant"
+            and not bool(checkpoint_data.get("pending_tool_calls"))
+        )
+        if not (
+            provider_state_is_synchronized
+            and (exact_final_response or exact_completed_tools)
+        ):
+            session.provider_state = None
 
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
@@ -1986,6 +2184,7 @@ class AgentLoop:
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+            session.provider_state = None
             session.updated_at = datetime.now()
 
         self._clear_pending_user_turn(session)
@@ -2024,7 +2223,7 @@ class AgentLoop:
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         try:
             async with lock:
                 kwargs: dict[str, Any] = {
@@ -2055,3 +2254,11 @@ class AgentLoop:
         finally:
             await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
             self.runtime_event_publisher.clear_turn(session_key)
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the shared lock while allowing idle session entries to expire."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
