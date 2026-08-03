@@ -318,7 +318,7 @@ ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separ
   "modelPresets": {
     "primary": {
       "provider": "modelscope",
-      "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "model": "Qwen/Qwen3-32B",
       "maxTokens": 8192,
       "contextWindowTokens": 65536
     }
@@ -331,9 +331,23 @@ ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separ
 }
 ```
 
-Use the model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override with `providers.modelscope.apiBase` only if your account routes through a different host. Model IDs may optionally be prefixed with `modelscope/`; the prefix is stripped before the request is sent.
+Use an inference-enabled model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override `providers.modelscope.apiBase` only if your account routes through a different host. Chat model IDs may optionally be prefixed with `modelscope/`; nanobot strips that routing prefix before sending the request.
 
-ModelScope also provides image generation through the same provider key. Reference it as the image model in your agent config, for example `imageModel: "modelscope/MusePublic/489_ckpt_FLUX_1"`; nanobot handles the async submit/poll pattern automatically.
+ModelScope image generation reuses the same provider key but is configured under `tools.imageGeneration`, not in a model preset:
+
+```json
+{
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "modelscope",
+      "model": "Qwen/Qwen-Image-2512"
+    }
+  }
+}
+```
+
+Use the image model's exact ModelScope ID without a leading `modelscope/`; the image client sends this value unchanged and handles ModelScope's async submit/poll flow. See [Image Generation](./image-generation.md#modelscope) for supported sizes, aspect ratios, and the complete provider configuration.
 
 ### Ollama
 
