@@ -156,7 +156,10 @@ class TestConvertMessages:
         ], preserve_reasoning=True)
 
         assert items == [
-            {"type": "reasoning", "content": "think first"},
+            {
+                "type": "reasoning",
+                "content": [{"type": "output_text", "text": "think first"}],
+            },
             {
                 "type": "message",
                 "role": "assistant",
@@ -165,6 +168,32 @@ class TestConvertMessages:
                 "id": "msg_0",
             },
         ]
+
+    def test_reasoning_content_serialized_as_array_for_deepseek(self):
+        # Regression for PR #5214: DeepSeek's Responses gateway rejects
+        # reasoning items whose ``content`` is a plain string with
+        # "input: invalid type: string ..., expected a sequence" (observed
+        # after context consolidation cleared provider state and forced
+        # full-history conversion). ``content`` must be a list of parts,
+        # matching both the OpenAI Responses schema and DeepSeek's accepted
+        # wire shape.
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "Michael topped up DeepSeek with $10.",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_1|fc_1",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                }],
+            },
+        ], preserve_reasoning=True)
+
+        assert items[0]["type"] == "reasoning"
+        assert items[0]["content"] == [
+            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        ]
+        assert items[1]["type"] == "function_call"
 
     def test_assistant_empty_content_skipped(self):
         _, items = convert_messages([{"role": "assistant", "content": ""}])
@@ -823,6 +852,59 @@ class TestResponsesConversationState:
             "content": [{"type": "input_text", "text": "continue"}],
         }
         assert "lossy public transcript" not in str(items)
+
+    def test_replayed_and_delta_reasoning_items_keep_array_content(self):
+        # Regression for PR #5214: token consolidation clears
+        # ``provider_state``, so the next turn converts the full history
+        # (including assistant reasoning) instead of replaying server items.
+        # Both paths must keep reasoning ``content`` as a list - DeepSeek's
+        # Responses gateway rejects the string form with a serde error.
+        prior_items = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "content": [{"type": "output_text", "text": "prior reasoning"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "prior answer"}],
+                "status": "completed",
+                "id": "msg_0",
+            },
+        ]
+        state = build_responses_state(
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            input_items=prior_items,
+            output_items=[],
+        ).with_pending_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "think before acting",
+                "content": "answer",
+            },
+            {"role": "user", "content": "audit the tools"},
+        ])
+
+        instructions, items, replayed = prepare_responses_input(
+            [
+                {"role": "system", "content": "You are KITT."},
+                {"role": "user", "content": "audit the tools"},
+            ],
+            state=state,
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            preserve_reasoning=True,
+        )
+
+        assert instructions == "You are KITT."
+        assert replayed is True
+        reasoning_items = [item for item in items if item.get("type") == "reasoning"]
+        assert len(reasoning_items) == 2  # one replayed, one converted delta
+        for item in reasoning_items:
+            assert isinstance(item["content"], list)
+            assert item["content"][0]["type"] == "output_text"
 
 
 # ======================================================================

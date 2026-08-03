@@ -10,6 +10,7 @@ from nanobot.providers.openai_compat_provider import (
     _RESPONSES_PROBE_INTERVAL_S,
     OpenAICompatProvider,
 )
+from nanobot.providers.openai_responses.state import build_responses_state
 
 
 @pytest.fixture()
@@ -202,3 +203,107 @@ def test_unrelated_400_does_not_trigger_fallback():
 def test_server_error_does_not_trigger_fallback():
     err = _FakeAPIError(500, {"message": "internal server error"})
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
+
+
+# ======================================================================
+# DeepSeek Responses wire shape (PR #5214 root cause)
+# ======================================================================
+
+
+def _deepseek_provider(provider):
+    provider._spec = type("Spec", (), {
+        "name": "deepseek",
+        "responses_models": ("deepseek-v4-flash",),
+        "strip_model_prefix": False,
+        "strip_model_prefixes": (),
+    })()
+    provider._effective_base = "https://api.deepseek.com"
+    provider.default_model = "deepseek-v4-flash"
+    provider._extra_body = {}
+    return provider
+
+
+def test_deepseek_full_history_body_keeps_reasoning_content_as_array(provider):
+    # Full-history fixture: DeepSeek's Responses gateway rejects reasoning
+    # items whose ``content`` is a plain string ("input: invalid type: string
+    # ..., expected a sequence"); the wire body must keep it as a part list.
+    _deepseek_provider(provider)
+
+    body = provider._build_responses_body(
+        messages=[
+            {
+                "role": "assistant",
+                "reasoning_content": "Michael topped up DeepSeek with $10.",
+                "content": "All systems aligned now.",
+            },
+            {"role": "user", "content": "audit the custom tools"},
+        ],
+        tools=None,
+        model="deepseek-v4-flash",
+        max_tokens=1000,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
+    assert len(reasoning_items) == 1
+    assert reasoning_items[0]["content"] == [
+        {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+    ]
+
+
+def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
+    # Replay/consolidation fixture: after token consolidation clears
+    # provider_state the next turn converts full history on top of the
+    # replayed prior items. Both replayed and converted reasoning items must
+    # keep list content on the wire.
+    _deepseek_provider(provider)
+
+    prior_items = [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "content": [{"type": "output_text", "text": "prior reasoning"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "prior answer"}],
+            "status": "completed",
+            "id": "msg_0",
+        },
+    ]
+    state = build_responses_state(
+        provider=provider._responses_state_provider(),
+        model="deepseek-v4-flash",
+        input_items=prior_items,
+        output_items=[],
+    ).with_pending_messages([
+        {
+            "role": "assistant",
+            "reasoning_content": "think first",
+            "content": "answer",
+        },
+        {"role": "user", "content": "audit the custom tools"},
+    ])
+
+    body = provider._build_responses_body(
+        messages=[
+            {"role": "system", "content": "You are KITT."},
+            {"role": "user", "content": "audit the custom tools"},
+        ],
+        tools=None,
+        model="deepseek-v4-flash",
+        max_tokens=1000,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+        provider_context=ProviderCallContext(conversation_state=state),
+    )
+
+    reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
+    assert len(reasoning_items) == 2  # one replayed from state, one converted
+    for item in reasoning_items:
+        assert isinstance(item["content"], list)
+        assert item["content"][0]["type"] == "output_text"
