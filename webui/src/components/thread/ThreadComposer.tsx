@@ -75,6 +75,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
@@ -862,6 +863,7 @@ export function ThreadComposer({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -964,12 +966,12 @@ export function ThreadComposer({
   } = useClipboardAndDrop(addFiles);
 
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || hasTouchPrimaryPointer) return;
     const el = textareaRef.current;
     if (!el) return;
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
-  }, [disabled]);
+  }, [disabled, hasTouchPrimaryPointer]);
 
   useEffect(() => {
     if (!focusRequest || disabled) return;
@@ -1300,13 +1302,13 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  const resizeTextarea = useCallback(() => {
+  const resizeTextarea = useCallback((restoreFocus = true) => {
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
-      el.focus();
+      if (restoreFocus) el.focus();
     });
   }, []);
 
@@ -1477,13 +1479,13 @@ export function ThreadComposer({
     [cliAppMention, resizeTextarea, value],
   );
 
-  const clearComposerText = useCallback(() => {
+  const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
-    resizeTextarea();
+    resizeTextarea(restoreFocus);
   }, [resizeTextarea]);
 
   const queueGuidancePrompt = useCallback(() => {
@@ -1692,11 +1694,12 @@ export function ThreadComposer({
           }
         : options,
     );
+    if (hasTouchPrimaryPointer) textareaRef.current?.blur();
     setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
-    clearComposerText();
+    clearComposerText(!hasTouchPrimaryPointer);
     onQuotedContextChange?.(null);
   }, [
     activeCliMentionApps,
@@ -1704,6 +1707,7 @@ export function ThreadComposer({
     canSend,
     clear,
     clearComposerText,
+    hasTouchPrimaryPointer,
     handleStop,
     isStreaming,
     maxTextBytes,
