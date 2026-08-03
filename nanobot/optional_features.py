@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -179,13 +181,18 @@ def extra_installed(extra: str, deps: list[str] | None) -> bool:
     return all(requirement_installed(dep, extra) for dep in deps)
 
 
-def run_install_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def run_install_command(
+    argv: list[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=_INSTALL_TIMEOUT_SECONDS,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
@@ -234,6 +241,20 @@ def install_extra(
     failed_cmd = pip_cmd
     failed_proc = proc
     if missing_pip(proc):
+        if shutil.which("uv"):
+            uv_cmd = ["uv", "pip", "install", "--python", sys.executable, *install_args]
+            uv_env = os.environ.copy()
+            if index_url := os.environ.get("PIP_INDEX_URL", "").strip():
+                uv_env["UV_INDEX_URL"] = index_url
+            logger.info("pip missing while installing '{}'; running {}", extra, command_text(uv_cmd))
+            uv_proc = runner(uv_cmd, env=uv_env)
+            _log_completed_command(f"Optional feature '{extra}' uv install", uv_proc)
+            if uv_proc.returncode == 0:
+                importlib.invalidate_caches()
+                return InstallResult(True, label, pip_cmd)
+            output = (uv_proc.stderr or uv_proc.stdout or "").strip()
+            return InstallResult(False, label, pip_cmd, failed_cmd=uv_cmd, output=output)
+
         ensure_cmd = [sys.executable, "-m", "ensurepip", "--upgrade"]
         logger.info("pip missing while installing '{}'; running {}", extra, command_text(ensure_cmd))
         ensure_proc = runner(ensure_cmd)
