@@ -9,6 +9,7 @@ block the stop.
 
 import asyncio
 import time
+from contextlib import suppress
 
 from nanobot.cli.gateway_runtime import _close_gateway_runtime
 
@@ -160,7 +161,10 @@ async def test_duplicate_cleanup_is_idempotent() -> None:
 async def test_finished_runtime_tasks_gather_is_retrieved() -> None:
     agent = _FakeAgent()
     channels = _FakeChannels()
-    runtime_tasks = asyncio.gather(asyncio.sleep(0))
+    finished = asyncio.get_running_loop().create_future()
+    finished.set_result(None)
+    runtime_tasks = asyncio.gather(finished)
+    await asyncio.sleep(0)  # let the gather observe the finished child
 
     await _close_gateway_runtime(agent, channels, [], runtime_tasks)
 
@@ -175,6 +179,8 @@ async def test_cancelled_runtime_tasks_gather_does_not_raise() -> None:
     runtime_tasks.cancel()
 
     await _close_gateway_runtime(agent, channels, [], runtime_tasks)
+    with suppress(asyncio.CancelledError):
+        await runtime_tasks  # settle the cancelled gather without raising
 
     assert runtime_tasks.done()  # the cancelled gather was awaited without raising
     assert agent.close_calls == 1
