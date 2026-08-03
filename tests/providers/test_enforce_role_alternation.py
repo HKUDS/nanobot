@@ -48,6 +48,17 @@ class TestEnforceRoleAlternation:
         assert len(result) == 1
         assert "Hello" in result[0]["content"]
         assert "How are you?" in result[0]["content"]
+    def test_consecutive_user_list_content_merged(self):
+        msgs = [
+            {"role": "user", "content": [{"type": "text", "text": "part1"}]},
+            {"role": "user", "content": [{"type": "text", "text": "part2"}]},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert len(result) == 1
+        assert result[0]["content"] == [
+            {"type": "text", "text": "part1"},
+            {"type": "text", "text": "part2"},
+        ]
 
     def test_consecutive_assistant_messages_merged(self):
         msgs = [
@@ -112,14 +123,17 @@ class TestEnforceRoleAlternation:
         assert result[1]["content"] is None
         assert result[2]["role"] == "tool"
 
-    def test_non_string_content_uses_latest(self):
+    def test_mixed_content_merged(self):
         msgs = [
             {"role": "user", "content": [{"type": "text", "text": "A"}]},
             {"role": "user", "content": "B"},
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
         assert len(result) == 1
-        assert result[0]["content"] == "B"
+        assert result[0]["content"] == [
+            {"type": "text", "text": "A"},
+            {"type": "text", "text": "B"},
+        ]
 
     def test_original_messages_not_mutated(self):
         msgs = [

@@ -665,7 +665,21 @@ class LLMProvider(ABC):
                 if isinstance(prev_content, str) and isinstance(curr_content, str):
                     prev["content"] = (prev_content + "\n\n" + curr_content).strip()
                 else:
-                    merged[-1] = dict(msg)
+                    p_blocks = (
+                        list(prev_content)
+                        if isinstance(prev_content, list)
+                        else [{"type": "text", "text": str(prev_content)}]
+                        if prev_content
+                        else []
+                    )
+                    c_blocks = (
+                        list(curr_content)
+                        if isinstance(curr_content, list)
+                        else [{"type": "text", "text": str(curr_content)}]
+                        if curr_content
+                        else []
+                    )
+                    prev["content"] = p_blocks + c_blocks
             else:
                 merged.append(dict(msg))
 
