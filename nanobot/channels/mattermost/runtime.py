@@ -47,6 +47,7 @@ class MattermostConfig(Base):
     allow_from_match_mode: str = "id"
     allow_from: list[str] = Field(default_factory=list)
     group_policy: str = "mention"
+    group_policy_in_thread: str = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     reply_in_thread: bool = True
     include_thread_context: bool = True
@@ -244,8 +245,10 @@ class MattermostChannel(BaseChannel):
                 )
             return
 
-        if not is_dm and not self._should_respond_in_channel(message_text, channel_id):
-            return
+        if not is_dm:
+            in_thread = bool(root_id)
+            if not self._should_respond_in_channel(message_text, channel_id, in_thread=in_thread):
+                return
 
         message_text = self._strip_bot_mention(message_text)
 
@@ -360,12 +363,18 @@ class MattermostChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return True
 
-    def _should_respond_in_channel(self, text: str, chat_id: str) -> bool:
-        if self.config.group_policy == "open":
+    def _should_respond_in_channel(
+        self, text: str, chat_id: str, *, in_thread: bool = False,
+    ) -> bool:
+        policy = (
+            self.config.group_policy_in_thread if in_thread
+            else self.config.group_policy
+        )
+        if policy == "open":
             return True
-        if self.config.group_policy == "mention":
+        if policy == "mention":
             return self._is_mentioned(text)
-        if self.config.group_policy == "allowlist":
+        if policy == "allowlist":
             return chat_id in self.config.group_allow_from
         return False
 

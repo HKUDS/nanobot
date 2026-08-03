@@ -27,10 +27,18 @@
         "placeholder": "任意のチーム ID"
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "チャンネルでの動作",
         "choices": {
           "mention": "メンションのみ",
           "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "スレッドでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ (メンション不要)",
           "allowlist": "許可リスト"
         }
       },
