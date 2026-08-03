@@ -604,8 +604,14 @@ export function ThreadShell({
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
   const mentionSessions = useMemo(
-    () => sessions.filter((candidate) => candidate.key !== historyKey),
-    [historyKey, sessions],
+    () => sessions.filter((candidate) => (
+      candidate.key !== historyKey
+      && (
+        workspaceScope?.access_mode !== "restricted"
+        || candidate.workspaceScope?.project_path === workspaceScope.project_path
+      )
+    )),
+    [historyKey, sessions, workspaceScope],
   );
   const {
     messages: historical,

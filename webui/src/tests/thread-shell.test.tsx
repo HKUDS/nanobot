@@ -3767,4 +3767,42 @@ describe("ThreadShell", () => {
       "@obsidian-agent-cli",
     );
   });
+
+  it("offers only same-project sessions in restricted mode", async () => {
+    const client = makeClient();
+    const currentScope = {
+      project_path: "/projects/current",
+      access_mode: "restricted" as const,
+    };
+    const sameProject = {
+      ...session("same-project"),
+      title: "Same project",
+      workspaceScope: currentScope,
+    };
+    const otherProject = {
+      ...session("other-project"),
+      title: "Other project",
+      workspaceScope: {
+        project_path: "/projects/other",
+        access_mode: "restricted" as const,
+      },
+    };
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("current")}
+        sessions={[sameProject, otherProject]}
+        title="Current"
+        onToggleSidebar={() => {}}
+        workspaceScope={currentScope}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    expect(screen.getByRole("option", { name: /Same project/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Other project/i })).not.toBeInTheDocument();
+  });
 });

@@ -144,10 +144,12 @@ clients.
 
 The composer supports plain messages, image attachments, voice input when
 transcription is configured, slash commands, and `@` mentions for installed Apps
-or MCP presets. Mention another topic to attach a stable reference; nanobot reads
-that topic only when its history is relevant and can link it in the response. The
-model badge shows the current model or preset and links back to model settings
-when setup is incomplete.
+or MCP presets. Select another topic from the `@` menu to attach a stable
+reference; plain text that happens to start with `@` does not attach history.
+Restricted chats offer topics from the same project, while Full Access chats can
+reference any WebUI topic. Nanobot reads a referenced topic only when its history
+is relevant and can link it in the response. The model badge shows the current
+model or preset and links back to model settings when setup is incomplete.
 
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)

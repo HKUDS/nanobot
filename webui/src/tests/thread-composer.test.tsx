@@ -1579,6 +1579,95 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("attaches a session only after an explicit palette selection", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        sessions={[{
+          key: "websocket:pricing",
+          channel: "websocket",
+          chatId: "pricing",
+          createdAt: null,
+          updatedAt: null,
+          title: "收费设计",
+          preview: "讨论云存储",
+        }]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "普通文字 @收费设计", selectionStart: 10 },
+    });
+
+    expect(screen.queryByTestId("composer-session-mention-收费设计")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("普通文字 @收费设计", undefined, undefined);
+  });
+
+  it("shows stable aliases for sessions with the same title", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        sessions={["a", "b"].map((chatId) => ({
+          key: `websocket:${chatId}`,
+          channel: "websocket",
+          chatId,
+          createdAt: null,
+          updatedAt: null,
+          title: "Plan",
+          preview: "",
+        }))}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    const options = screen.getAllByRole("option", { name: /Plan @Plan/i });
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringContaining("@Plan"),
+      expect.stringContaining("@Plan-chat"),
+    ]);
+  });
+
+  it("keeps the composer and wire payload on the same eight-session limit", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        sessions={Array.from({ length: 9 }, (_, index) => ({
+          key: `websocket:topic-${index}`,
+          channel: "websocket",
+          chatId: `topic-${index}`,
+          createdAt: null,
+          updatedAt: null,
+          title: `Topic${index}`,
+          preview: "",
+        }))}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    for (let index = 0; index < 9; index += 1) {
+      const value = `${input.value}${input.value ? " " : ""}@Topic${index}`;
+      fireEvent.change(input, { target: { value, selectionStart: value.length } });
+      fireEvent.keyDown(input, { key: "Tab" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    const options = onSend.mock.calls[0]?.[2];
+    expect(options.sessionMentions).toHaveLength(8);
+    expect(options.sessionMentions.map((mention: { session_key: string }) => (
+      mention.session_key
+    ))).not.toContain("websocket:topic-8");
+  });
+
   it("keeps a selected session stable across refreshes and queued guidance", () => {
     const onSend = vi.fn();
     const target = {

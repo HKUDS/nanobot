@@ -10,10 +10,12 @@ import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.loader import ToolLoader
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.bus.events import INBOUND_META_SESSION_READ_SCOPE
 from nanobot.runtime_context import RuntimeContextBlock, append_runtime_context
 from nanobot.session.manager import SessionManager
+from nanobot.webui.transcript import append_transcript_object
 
 
 def _save_session(
@@ -52,6 +54,79 @@ def test_session_tools_are_discovered() -> None:
     names = {tool.__name__ for tool in ToolLoader().discover()}
 
     assert {"ReadSessionTool", "SearchSessionsTool"} <= names
+
+
+def test_session_tools_are_visible_only_in_an_authorized_request(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    registry = ToolRegistry()
+    registry.register(SearchSessionsTool(manager))
+    registry.register(ReadSessionTool(manager))
+
+    assert registry.get_definitions() == []
+    with _webui_request():
+        names = {
+            definition["function"]["name"]
+            for definition in registry.get_definitions()
+        }
+
+    assert names == {"read_session", "search_sessions"}
+
+
+@pytest.mark.asyncio
+async def test_search_sessions_reads_the_full_webui_transcript_after_compaction(
+    tmp_path,
+    monkeypatch,
+):
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
+    manager = SessionManager(tmp_path)
+    _save_session(
+        manager,
+        "websocket:history",
+        title="History",
+        messages=[{"role": "assistant", "content": "retained suffix"}],
+    )
+    append_transcript_object("websocket:history", {
+        "event": "user",
+        "text": "decision only in the old transcript",
+    })
+
+    with _webui_request():
+        result = _decode(await SearchSessionsTool(manager).execute(query="old transcript"))
+
+    assert [row["session_key"] for row in result["results"]] == ["websocket:history"]
+    assert result["results"][0]["excerpts"][0]["content"] == (
+        "decision only in the old transcript"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_sessions_has_no_hidden_content_scan_cutoff(tmp_path, monkeypatch):
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
+    manager = SessionManager(tmp_path)
+    for index in range(200):
+        _save_session(
+            manager,
+            f"websocket:recent-{index:03d}",
+            title=f"Recent {index}",
+            messages=[{"role": "user", "content": "ordinary"}],
+            updated_at=datetime(2025, 1, 1),
+        )
+    _save_session(
+        manager,
+        "websocket:old-target",
+        title="Old target",
+        messages=[{"role": "user", "content": "needle after two hundred sessions"}],
+        updated_at=datetime(2024, 1, 1),
+    )
+
+    with _webui_request():
+        result = _decode(await SearchSessionsTool(manager).execute(query="needle"))
+
+    assert [row["session_key"] for row in result["results"]] == ["websocket:old-target"]
 
 
 @pytest.mark.asyncio

@@ -1248,20 +1248,15 @@ export function ThreadComposer({
     ),
     [cliApps, mcpPresets, sessions],
   );
-  const sessionMentionsForText = useMemo(() => {
-    const selectedNames = new Set(
-      selectedSessionMentions.map((mention) => mention.name.toLowerCase()),
-    );
-    return [
-      ...selectedSessionMentions,
-      ...availableSessionMentions.filter(
-        (mention) => !selectedNames.has(mention.name.toLowerCase()),
-      ),
-    ];
-  }, [availableSessionMentions, selectedSessionMentions]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
     const sessionCandidates: MentionCandidate[] = availableSessionMentions
+      .filter((mention) => (
+        selectedSessionMentions.length < SESSION_MENTIONS_LIMIT
+        || selectedSessionMentions.some(
+          (selected) => selected.session_key === mention.session_key,
+        )
+      ))
       .filter((mention) => [
         mention.name,
         mention.title,
@@ -1306,7 +1301,7 @@ export function ThreadComposer({
       remaining -= extra;
     }
     return groups.flatMap((group, index) => group.slice(0, limits[index]));
-  }, [availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
+  }, [availableSessionMentions, cliAppMention, cliApps, mcpPresets, selectedSessionMentions]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
@@ -1315,9 +1310,9 @@ export function ThreadComposer({
       value,
       cliApps,
       mcpPresets,
-      sessionMentionsForText,
+      selectedSessionMentions,
     ),
-    [cliApps, mcpPresets, sessionMentionsForText, value],
+    [cliApps, mcpPresets, selectedSessionMentions, value],
   );
   const hasMentionDecorations = mentionSegments.some(
     (segment) => segment.kind !== "text",
@@ -1344,7 +1339,7 @@ export function ThreadComposer({
       if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
       seen.add(segment.mention.session_key);
       return [segment.mention];
-    });
+    }).slice(0, SESSION_MENTIONS_LIMIT);
   }, [mentionSegments]);
   useEffect(() => {
     setSelectedSessionMentions((current) => {
@@ -2755,7 +2750,7 @@ function CliAppMentionPalette({
                       {displayName}
                     </span>
                     <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
-                      {candidate.kind === "session" ? typeLabel : `@${name}`}
+                      @{name}
                     </span>
                   </span>
                   {candidate.kind !== "session" ? (

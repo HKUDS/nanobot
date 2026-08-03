@@ -216,6 +216,10 @@ class Tool(ABC):
     def create(cls, ctx: ToolContext) -> Tool:
         return cls()
 
+    def available(self) -> bool:
+        """Return whether this tool is available in the current request."""
+        return True
+
     def runtime_context_provider(self) -> RuntimeContextProvider | None:
         """Return optional per-turn prompt context owned by this tool."""
         return None

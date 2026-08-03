@@ -75,9 +75,10 @@ from nanobot.webui.metadata import (
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
-from nanobot.webui.session_mentions import (
+from nanobot.webui.session_access import (
+    SessionAccessScope,
     SessionMention,
-    normalize_session_mentions,
+    WebuiSessionAccess,
     session_mentions_runtime_context,
 )
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
@@ -294,6 +295,11 @@ class WebSocketChannel(BaseChannel):
         self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
+        self._session_access = (
+            WebuiSessionAccess(gateway.session_manager)
+            if gateway.session_manager is not None
+            else None
+        )
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
 
@@ -818,13 +824,17 @@ class WebSocketChannel(BaseChannel):
             session_mentions: list[SessionMention] = []
             if (
                 trusted_webui
-                and self.gateway.session_manager is not None
+                and self._session_access is not None
             ):
-                session_mentions = normalize_session_mentions(
+                session_mentions = await asyncio.to_thread(
+                    self._session_access.normalize_mentions,
                     envelope.get("session_mentions"),
-                    self.gateway.session_manager,
-                    current_session_key=f"{self.name}:{cid}",
-                    session_key_prefix=f"{self.name}:",
+                    SessionAccessScope(
+                        current_session_key=f"{self.name}:{cid}",
+                        session_key_prefix=f"{self.name}:",
+                        project_path=scope.project_path,
+                        restrict_to_workspace=scope.restrict_to_workspace,
+                    ),
                 )
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions

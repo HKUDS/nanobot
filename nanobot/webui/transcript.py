@@ -68,6 +68,8 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
     "file_edit",
     "turn_end",
 })
+MAX_SESSION_MENTIONS = 8
+_SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
 
 
 def rewrite_local_markdown_images(
@@ -929,6 +931,36 @@ def delete_webui_transcript(session_key: str) -> bool:
     return removed
 
 
+def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
+    """Validate session-reference metadata crossing a persistence seam."""
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        return []
+    normalized: list[dict[str, str]] = []
+    for raw_item in cast(Sequence[object], raw)[:MAX_SESSION_MENTIONS]:
+        if not isinstance(raw_item, Mapping):
+            continue
+        item = cast(Mapping[str, object], raw_item)
+        name = item.get("name")
+        session_key = item.get("session_key")
+        title = item.get("title")
+        if not isinstance(name, str) or not isinstance(session_key, str):
+            continue
+        name = name.strip()[:80]
+        session_key = session_key.strip()[:512]
+        if (
+            not name
+            or _SESSION_MENTION_NAME_RE.fullmatch(name) is None
+            or not session_key.startswith("websocket:")
+        ):
+            continue
+        normalized.append({
+            "name": name,
+            "session_key": session_key,
+            "title": title.strip()[:160] if isinstance(title, str) else "",
+        })
+    return normalized
+
+
 def build_user_transcript_event(
     chat_id: str,
     text: str,
@@ -962,11 +994,7 @@ def build_user_transcript_event(
     ]
     if presets:
         event["mcp_presets"] = presets
-    mentions = [
-        dict(cast(Mapping[str, Any], mention))
-        for mention in (session_mentions or [])
-        if isinstance(mention, Mapping)
-    ]
+    mentions = normalize_session_mentions_metadata(session_mentions)
     if mentions:
         event["session_mentions"] = mentions
     return event
@@ -2079,13 +2107,11 @@ def replay_transcript_to_ui_messages(
                     for preset in cast(list[Any], mcp_presets)
                     if isinstance(preset, dict)
                 ]
-            session_mentions = rec.get("session_mentions")
-            if isinstance(session_mentions, list) and session_mentions:
-                row["sessionMentions"] = [
-                    dict(cast(dict[str, Any], mention))
-                    for mention in cast(list[Any], session_mentions)
-                    if isinstance(mention, dict)
-                ]
+            session_mentions = normalize_session_mentions_metadata(
+                rec.get("session_mentions")
+            )
+            if session_mentions:
+                row["sessionMentions"] = session_mentions
             messages.append(row)
             continue
 
