@@ -948,8 +948,15 @@ class ExecTool(Tool):
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
-        posix_paths = re.findall(r"(?:^|[\s|>='\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s>='\"])(~[/+][^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~/ or ~+
+        posix_paths = [
+            p.rstrip(");},")
+            for p in re.findall(r"(?:^|[\s|><='\"({,:])(/[^\"'>;|<()\s]+)", command)
+            if not p.startswith("//")
+        ]
+        home_paths = [
+            p.rstrip(");},")
+            for p in re.findall(r"(?:^|[\s|><='\"({,:])(~[/+][^\"'>;|<()\s]+)", command)
+        ]
         return win_paths + posix_paths + home_paths
 
     @staticmethod
