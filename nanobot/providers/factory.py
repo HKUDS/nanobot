@@ -24,7 +24,6 @@ class ProviderSnapshot:
 @dataclass(frozen=True)
 class _ProviderSetup:
     model: str
-    provider_name: str
     provider_config: ProviderConfig | None
     spec: ProviderSpec | None
     backend: str
@@ -100,7 +99,6 @@ def _resolve_provider_setup(
 
     return _ProviderSetup(
         model=model,
-        provider_name=provider_name,
         provider_config=p,
         spec=spec,
         backend=backend,
@@ -136,7 +134,6 @@ def _make_provider_core(
         model=model,
     )
     model = setup.model
-    provider_name = setup.provider_name
     p = setup.provider_config
     spec = setup.spec
     backend = setup.backend
@@ -201,7 +198,7 @@ def _make_provider_core(
             extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
-            api_type=p.api_type if p and provider_name == "openai" else "auto",
+            api_type=p.api_type if p else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
         )
