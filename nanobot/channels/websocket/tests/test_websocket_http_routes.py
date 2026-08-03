@@ -24,6 +24,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -2201,7 +2202,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
 @pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Seed a realistic multi-channel disk state: CLI, Slack, Lark and
     # websocket sessions all live in the same ``sessions/`` directory.
@@ -2215,7 +2216,20 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "websocket:beta",
         ],
     )
-    channel = _ch(bus, session_manager=sm, port=29906)
+    project = tmp_path / "project"
+    project.mkdir()
+    scoped = sm.get_or_create("websocket:beta")
+    scoped.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "restricted",
+    }
+    sm.save(scoped)
+
+    def fail_metadata_read(_key: str) -> None:
+        raise AssertionError("the session list must use its own index metadata")
+
+    monkeypatch.setattr(sm, "read_session_metadata", fail_metadata_read)
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=29906)
     server_task = asyncio.create_task(channel.start())
     try:
         token = channel.gateway.tokens.issue_api_token(300)
@@ -2225,10 +2239,17 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             "http://127.0.0.1:29906/api/sessions", headers=auth
         )
         assert listing.status_code == 200
-        keys = {s["key"] for s in listing.json()["sessions"]}
+        sessions = listing.json()["sessions"]
+        keys = {s["key"] for s in sessions}
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+        rows = {row["key"]: row for row in sessions}
+        assert rows["websocket:beta"]["workspace_scope"]["project_path"] == str(
+            project.resolve()
+        )
+        assert rows["websocket:beta"]["workspace_scope"]["access_mode"] == "restricted"
+        assert all(not any(key.startswith("_") for key in row) for row in sessions)
     finally:
         await channel.stop()
         await server_task
@@ -2951,6 +2972,139 @@ async def test_webui_thread_resigns_assistant_media_urls(
         fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
         assert fetched.status_code == 200
         assert fetched.content == b"video"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_negotiates_gzip_across_repeated_headers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = _seed_many(tmp_path, [f"websocket:gzip-{index:03d}" for index in range(80)])
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions",
+            headers=[
+                ("Authorization", f"Bearer {token}"),
+                ("Accept-Encoding", "identity;q=0"),
+                ("Accept-Encoding", "gzip"),
+            ],
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Content-Encoding"] == "gzip"
+        assert response.headers["Vary"] == "Accept-Encoding"
+        assert len(response.json()["sessions"]) == 80
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_complete_transcript_skips_session_history_read(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:fast-thread"
+    sm = _seed_session(tmp_path, key=key)
+    for event in (
+        {"event": "user", "chat_id": "fast-thread", "text": "hi"},
+        {"event": "message", "chat_id": "fast-thread", "text": "hello back"},
+        {"event": "turn_end", "chat_id": "fast-thread"},
+    ):
+        append_transcript_object(key, event)
+
+    read_session_file = MagicMock(
+        side_effect=AssertionError("complete transcripts must not read canonical history")
+    )
+    monkeypatch.setattr(sm, "read_session_file", read_session_file)
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        workspace_path=tmp_path,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Afast-thread/webui-thread?limit=160&direction=latest",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert [message["content"] for message in response.json()["messages"]] == [
+            "hi",
+            "hello back",
+        ]
+        read_session_file.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_negotiates_gzip_for_large_payloads(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = SessionManager(tmp_path)
+    append_transcript_object(
+        "websocket:gzip-thread",
+        {
+            "event": "user",
+            "chat_id": "gzip-thread",
+            "text": "compress me " * 1_000,
+        },
+    )
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        url = (
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Agzip-thread/webui-thread?limit=80&direction=latest"
+        )
+        compressed = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "br, gzip",
+            },
+        )
+
+        assert compressed.status_code == 200
+        assert compressed.headers["Content-Encoding"] == "gzip"
+        assert compressed.headers["Vary"] == "Accept-Encoding"
+        assert int(compressed.headers["Content-Length"]) < len(compressed.content)
+        assert compressed.json()["messages"][0]["content"].startswith("compress me")
+
+        identity = await _http_get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "gzip;q=0, br",
+            },
+        )
+        assert identity.status_code == 200
+        assert "Content-Encoding" not in identity.headers
+        assert identity.json() == compressed.json()
+
+        unauthorized = await _http_get(url, headers={"Accept-Encoding": "gzip"})
+        assert unauthorized.status_code == 401
+        assert "Content-Encoding" not in unauthorized.headers
     finally:
         await channel.stop()
         await server_task

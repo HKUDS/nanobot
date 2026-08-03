@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import nanobot.webui.transcript as transcript_module
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
@@ -38,6 +39,7 @@ def test_append_stamps_created_at_ms(tmp_path, monkeypatch) -> None:
 
 def _force_small_transcript_budget(monkeypatch, *, limit: int = 520, target: int = 260) -> None:
     monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_FILE_BYTES", limit)
+    monkeypatch.setattr("nanobot.webui.transcript._ACTIVE_TRANSCRIPT_ROTATE_BYTES", limit)
     monkeypatch.setattr("nanobot.webui.transcript._TARGET_ACTIVE_TRANSCRIPT_BYTES", target)
 
 
@@ -122,6 +124,28 @@ def test_segmented_transcript_paginates_latest_and_older_without_overlap(
     ]
 
 
+def test_latest_page_reads_active_chunk_once(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:single-active-read"
+    for idx in range(1, 7):
+        _append_numbered_turn(key, "single-active-read", idx)
+
+    original = transcript_module._read_chunk_turns
+    read_chunk_ids: list[str] = []
+
+    def track_read(session_key: str, chunk_id: str) -> list[list[dict]]:
+        read_chunk_ids.append(chunk_id)
+        return original(session_key, chunk_id)
+
+    monkeypatch.setattr(transcript_module, "_read_chunk_turns", track_read)
+
+    latest = build_webui_thread_response(key, limit=4, direction="latest")
+
+    assert latest is not None
+    assert _message_contents(latest) == _numbered_turn_texts(5, 6)
+    assert read_chunk_ids == ["active"]
+
+
 def test_page_cursor_survives_active_rotation_after_latest_page(
     tmp_path,
     monkeypatch,
@@ -148,13 +172,51 @@ def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monke
     key = "websocket:manifest"
     _write_segmented_turns(tmp_path, monkeypatch, key, "manifest", 4)
 
-    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    segment_dir = webui_transcript_segments_dir(key)
+    segment_names = sorted(path.name for path in segment_dir.glob("*.jsonl"))
+    assert segment_names
+    original = transcript_module._read_transcript_file
+    segment_reads: list[str] = []
+
+    def track_read(path):
+        if path.parent == segment_dir and path.suffix == ".jsonl":
+            segment_reads.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(transcript_module, "_read_transcript_file", track_read)
+    manifest = segment_dir / "manifest.json"
     manifest.write_text("{not json", encoding="utf-8")
+
+    entries = transcript_module._read_segment_manifest_entries(key)
+
+    assert [entry["id"] for entry in entries] == [path.removesuffix(".jsonl") for path in segment_names]
+    assert segment_reads == segment_names
 
     lines = read_transcript_lines(key)
 
     assert len([line for line in lines if line.get("event") == "user"]) == 4
     assert manifest.read_text(encoding="utf-8").lstrip().startswith("{")
+
+
+def test_rotation_does_not_reread_existing_segments(tmp_path, monkeypatch) -> None:
+    key = "websocket:manifest-append"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "manifest-append", 4)
+    segment_dir = webui_transcript_segments_dir(key)
+    assert list(segment_dir.glob("*.jsonl"))
+
+    original = transcript_module._read_transcript_file
+    segment_reads: list[str] = []
+
+    def track_read(path):
+        if path.parent == segment_dir and path.suffix == ".jsonl":
+            segment_reads.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(transcript_module, "_read_transcript_file", track_read)
+    for idx in range(5, 9):
+        _append_numbered_turn(key, "manifest-append", idx)
+
+    assert segment_reads == []
 
 
 def test_delete_webui_transcript_removes_segments(tmp_path, monkeypatch) -> None:
@@ -784,6 +846,83 @@ def test_build_response_restores_session_users_for_legacy_transcript(
         ("user", "prompt two"),
         ("assistant", "assistant two"),
     ]
+
+
+def test_complete_transcript_does_not_load_session_messages(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:complete-fast-path"
+    for event in (
+        {"event": "user", "chat_id": "complete-fast-path", "text": "question"},
+        {"event": "message", "chat_id": "complete-fast-path", "text": "answer"},
+        {"event": "turn_end", "chat_id": "complete-fast-path"},
+    ):
+        append_transcript_object(key, event)
+
+    def fail_if_loaded() -> list[dict]:
+        raise AssertionError("complete transcripts must not read canonical session history")
+
+    out = build_webui_thread_response(
+        key,
+        limit=4,
+        direction="latest",
+        session_messages_loader=fail_if_loaded,
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("user", "question"),
+        ("assistant", "answer"),
+    ]
+
+
+def test_legacy_recovery_loads_session_and_builds_backfill_turns_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:lazy-legacy-recovery"
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "lazy-legacy-recovery", "text": "answer"},
+    )
+    append_transcript_object(
+        key,
+        {
+            "event": "turn_end",
+            "chat_id": "lazy-legacy-recovery",
+            "transcript_incomplete": True,
+        },
+    )
+
+    loader_calls = 0
+    backfill_calls = 0
+    original = transcript_module._session_backfill_turns
+
+    def load_session_messages() -> list[dict]:
+        nonlocal loader_calls
+        loader_calls += 1
+        return [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "answer"},
+        ]
+
+    def track_backfill(session_key: str, session_messages: list[dict]):
+        nonlocal backfill_calls
+        backfill_calls += 1
+        return original(session_key, session_messages)
+
+    monkeypatch.setattr(transcript_module, "_session_backfill_turns", track_backfill)
+
+    out = build_webui_thread_response(key, session_messages_loader=load_session_messages)
+
+    assert out is not None
+    assert loader_calls == 1
+    assert backfill_calls == 1
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("user", "question"),
+        ("assistant", "answer"),
+    ]
+    assert out["has_pending_tool_calls"] is False
 
 
 def test_build_response_restores_session_users_without_duplicating_new_transcript_users(

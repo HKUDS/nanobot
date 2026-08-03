@@ -309,8 +309,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       temperature: 0.7,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "",
       tool_hint_max_length: 40,
     },
     model_presets: [{

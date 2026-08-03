@@ -248,7 +248,7 @@ class WsTestClient:
 
 async def http_get(
     url: str,
-    headers: dict[str, str] | None = None,
+    headers: dict[str, str] | list[tuple[str, str]] | None = None,
 ) -> httpx.Response:
     """GET a local test server without loading an unused TLS trust store."""
     request = httpx.Request("GET", url, headers=headers or {})

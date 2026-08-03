@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import email.utils
+import gzip
 import hmac
 import http
 import ipaddress
@@ -15,6 +16,9 @@ from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 QueryParams = dict[str, list[str]]
+
+_JSON_GZIP_MIN_BYTES = 4 * 1024
+_JSON_GZIP_LEVEL = 5
 
 
 def strip_trailing_slash(path: str) -> str:
@@ -41,6 +45,15 @@ def case_insensitive_header(headers: Any, key: str) -> str:
     return str(value or "").strip()
 
 
+def combined_list_header(headers: Any, key: str) -> str:
+    """Combine repeated values for a comma-separated HTTP list header."""
+    try:
+        values = headers.get_all(key)
+    except (AttributeError, KeyError):
+        return case_insensitive_header(headers, key)
+    return ", ".join(str(value).strip() for value in values if str(value).strip())
+
+
 def safe_host_header(value: str) -> str:
     """Return a safe Host header value, or empty when it should not be echoed."""
     value = value.strip()
@@ -62,18 +75,46 @@ def host_for_url(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
-def http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
+def _accepts_gzip(value: str) -> bool:
+    wildcard_quality: float | None = None
+    for item in value.split(","):
+        name, *params = (part.strip() for part in item.split(";"))
+        quality = 1.0
+        for param in params:
+            key, separator, raw_value = param.partition("=")
+            if separator and key.strip().lower() == "q":
+                try:
+                    quality = float(raw_value.strip())
+                except ValueError:
+                    quality = 0.0
+                break
+        if name.lower() == "gzip":
+            return quality > 0
+        if name == "*":
+            wildcard_quality = quality
+    return wildcard_quality is not None and wildcard_quality > 0
+
+
+def http_json_response(
+    data: dict[str, Any],
+    *,
+    status: int = 200,
+    accept_encoding: str | None = None,
+) -> Response:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    headers = Headers(
-        [
-            ("Date", email.utils.formatdate(usegmt=True)),
-            ("Connection", "close"),
-            ("Content-Length", str(len(body))),
-            ("Content-Type", "application/json; charset=utf-8"),
-        ]
-    )
+    headers = [
+        ("Date", email.utils.formatdate(usegmt=True)),
+        ("Connection", "close"),
+        ("Content-Type", "application/json; charset=utf-8"),
+    ]
+    if accept_encoding is not None:
+        headers.append(("Vary", "Accept-Encoding"))
+        if len(body) >= _JSON_GZIP_MIN_BYTES and _accepts_gzip(accept_encoding):
+            body = gzip.compress(body, compresslevel=_JSON_GZIP_LEVEL, mtime=0)
+            headers.append(("Content-Encoding", "gzip"))
+    headers.append(("Content-Length", str(len(body))))
     reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, headers, body)
+    return Response(status, reason, Headers(headers), body)
 
 
 def http_response(

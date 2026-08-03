@@ -62,8 +62,6 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "nb",
       tool_hint_max_length: 40,
     },
     model_presets: [{
@@ -1761,8 +1759,6 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "nanobot",
-                bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
               model_presets: [
@@ -2089,7 +2085,10 @@ describe("App layout", () => {
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
 
     fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
-    expect(screen.getByText("Bot name")).toBeInTheDocument();
+    expect(screen.getByText("Regional")).toBeInTheDocument();
+    expect(screen.getByText("Timezone")).toBeInTheDocument();
+    expect(screen.queryByText("Bot name")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bot icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
     expect(screen.queryByText("Heartbeat")).not.toBeInTheDocument();
     expect(screen.queryByText("Dream")).not.toBeInTheDocument();
@@ -2281,8 +2280,6 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "nanobot",
-                bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
               model_presets: [

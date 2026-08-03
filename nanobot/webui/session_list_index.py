@@ -16,6 +16,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     _PROVIDER_STATE_RECORD_TYPE,  # pyright: ignore[reportPrivateUsage]
@@ -29,9 +30,16 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import model_preset_from_metadata
 
-_INDEX_VERSION = 4
+_INDEX_VERSION = 6
 _INDEX_FILENAME = ".webui_session_index.json"
 _MODEL_PRESET_FIELD = "model_preset"
+_WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
+_WORKSPACE_SCOPE_VALUE_FIELD = "_workspace_scope_value"
+WEBUI_SESSION_INDEX_INTERNAL_FIELDS = frozenset(
+    {_WORKSPACE_SCOPE_PRESENT_FIELD, _WORKSPACE_SCOPE_VALUE_FIELD}
+)
+_INDEXED_WORKSPACE_SCOPE_KEYS = ("project_path", "path", "access_mode")
+_MAX_INDEXED_WORKSPACE_SCOPE_BYTES = 4096
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
@@ -61,17 +69,21 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
         for path in session_manager.sessions_dir.glob("*.jsonl")
         if SessionManager._session_key_from_path(path) is not None  # pyright: ignore[reportPrivateUsage]
     )
+    if not paths:
+        return [], existing_rows != []
+
+    webui_dir = get_webui_dir()
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
 
     for path in paths:
         row = existing_by_file.get(path.name)
-        if row is not None and _indexed_row_matches_file(row, path):
+        if row is not None and _indexed_row_matches_file(row, path, webui_dir):
             rows.append(row)
             continue
 
         changed = True
-        scanned = _scan_session_row(session_manager, path)
+        scanned = _scan_session_row(session_manager, path, webui_dir)
         if scanned is not None:
             rows.append(scanned)
 
@@ -125,10 +137,12 @@ def _file_signature(path: Path) -> dict[str, int]:
     return {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
 
 
-def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
+def _indexed_row_matches_file(row: dict[str, Any], path: Path, webui_dir: Path) -> bool:
     if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
         return False
     if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
+        return False
+    if not isinstance(row.get(_WORKSPACE_SCOPE_PRESENT_FIELD), bool):
         return False
     if row.get("file") != path.name:
         return False
@@ -136,7 +150,7 @@ def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
         signature = _file_signature(path)
     except OSError:
         return False
-    activity_signature = _webui_activity_signature(str(row.get("key")))
+    activity_signature = _webui_activity_signature(str(row.get("key")), webui_dir)
     return (
         row.get("mtime_ns") == signature["mtime_ns"]
         and row.get("size") == signature["size"]
@@ -153,7 +167,54 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
+        _WORKSPACE_SCOPE_PRESENT_FIELD: row.get(_WORKSPACE_SCOPE_PRESENT_FIELD, False),
+        _WORKSPACE_SCOPE_VALUE_FIELD: row.get(_WORKSPACE_SCOPE_VALUE_FIELD),
         "path": str(sessions_dir / str(row.get("file", ""))),
+    }
+
+
+def indexed_workspace_scope(row: dict[str, Any]) -> tuple[bool, object]:
+    """Return the cached sidebar scope value while preserving missing vs null."""
+    return (
+        row.get(_WORKSPACE_SCOPE_PRESENT_FIELD) is True,
+        cast(object, row.get(_WORKSPACE_SCOPE_VALUE_FIELD)),
+    )
+
+
+def _indexed_workspace_scope_fields(metadata: object) -> dict[str, object]:
+    if not isinstance(metadata, dict):
+        return {
+            _WORKSPACE_SCOPE_PRESENT_FIELD: False,
+            _WORKSPACE_SCOPE_VALUE_FIELD: None,
+        }
+    metadata_data = cast(dict[str, Any], metadata)
+    if WORKSPACE_SCOPE_METADATA_KEY not in metadata_data:
+        return {
+            _WORKSPACE_SCOPE_PRESENT_FIELD: False,
+            _WORKSPACE_SCOPE_VALUE_FIELD: None,
+        }
+
+    raw_scope = metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)
+    indexed_scope: object = False
+    if raw_scope is None:
+        indexed_scope = None
+    elif isinstance(raw_scope, dict):
+        scope_data = cast(dict[object, object], raw_scope)
+        recognized = {
+            key: scope_data[key]
+            for key in _INDEXED_WORKSPACE_SCOPE_KEYS
+            if key in scope_data
+        }
+        try:
+            encoded = json.dumps(recognized, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if len(encoded.encode("utf-8")) <= _MAX_INDEXED_WORKSPACE_SCOPE_BYTES:
+                indexed_scope = cast(object, json.loads(encoded))
+    return {
+        _WORKSPACE_SCOPE_PRESENT_FIELD: True,
+        _WORKSPACE_SCOPE_VALUE_FIELD: indexed_scope,
     }
 
 
@@ -181,19 +242,18 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
     return fallback_preview
 
 
-def _webui_activity_paths(session_key: str) -> list[Path]:
+def _webui_activity_paths(session_key: str, webui_dir: Path) -> list[Path]:
     stem = SessionManager.safe_key(session_key)
-    webui_dir = get_webui_dir()
     return [
         webui_dir / f"{stem}.jsonl",
         webui_dir / f"{stem}.json",
     ]
 
 
-def _webui_activity_signature(session_key: str) -> dict[str, int]:
+def _webui_activity_signature(session_key: str, webui_dir: Path) -> dict[str, int]:
     latest_mtime_ns = 0
     total_size = 0
-    for path in _webui_activity_paths(session_key):
+    for path in _webui_activity_paths(session_key, webui_dir):
         try:
             stat = path.stat()
         except OSError:
@@ -231,9 +291,9 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
 
 
 def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
-    if is_hidden_history_message(item):
-        return None
     if item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
+        return None
+    if is_hidden_history_message(item):
         return None
     timestamp = item.get("timestamp")
     return timestamp if isinstance(timestamp, str) else None
@@ -256,9 +316,9 @@ def _visible_activity_updated_at(
     return _latest_updated_at(visible_message_at, webui_activity) or stored
 
 
-def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
+def _indexed_row_for_session(session: Session, path: Path, webui_dir: Path) -> dict[str, Any]:
     signature = _file_signature(path)
-    activity_signature = _webui_activity_signature(session.key)
+    activity_signature = _webui_activity_signature(session.key, webui_dir)
     activity_updated_at = _webui_activity_updated_at(activity_signature)
     visible_message_at = _last_visible_message_at(session.messages)
     return {
@@ -272,6 +332,7 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
+        **_indexed_workspace_scope_fields(session.metadata),
         "file": path.name,
         "mtime_ns": signature["mtime_ns"],
         "size": signature["size"],
@@ -279,11 +340,16 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     }
 
 
-def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
+def _scan_session_row(
+    session_manager: SessionManager,
+    path: Path,
+    webui_dir: Path,
+) -> dict[str, Any] | None:
     storage_key = SessionManager._session_key_from_path(path)  # pyright: ignore[reportPrivateUsage]
     if storage_key is None:
         return None
     try:
+        signature = _file_signature(path)
         with open(path, encoding="utf-8") as f:
             first_line = f.readline().strip()
             if not first_line:
@@ -330,7 +396,6 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                         continue
                     if not fallback_preview and item.get("role") == "assistant":
                         fallback_preview = text
-            signature = _file_signature(path)
             created_at_s = data.get("created_at")
             updated_at_s = data.get("updated_at")
             if not created_at_s or not updated_at_s:
@@ -338,7 +403,8 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 created_at_s = created_at_s or fallback_time
                 updated_at_s = updated_at_s or fallback_time
             key = data.get("key") or storage_key
-            activity_signature = _webui_activity_signature(key)
+            metadata = data.get("metadata", {})
+            activity_signature = _webui_activity_signature(key, webui_dir)
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
                 "key": key,
@@ -348,9 +414,10 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                     visible_message_at,
                     activity_updated_at,
                 ),
-                "title": _metadata_title(data.get("metadata", {})),
+                "title": _metadata_title(metadata),
                 "preview": preview or fallback_preview,
-                _MODEL_PRESET_FIELD: model_preset_from_metadata(data.get("metadata", {})),
+                _MODEL_PRESET_FIELD: model_preset_from_metadata(metadata),
+                **_indexed_workspace_scope_fields(metadata),
                 "file": path.name,
                 "mtime_ns": signature["mtime_ns"],
                 "size": signature["size"],
@@ -360,4 +427,4 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
         repaired = session_manager._repair(storage_key)  # pyright: ignore[reportPrivateUsage]
         if repaired is None:
             return None
-        return _indexed_row_for_session(repaired, path)
+        return _indexed_row_for_session(repaired, path, webui_dir)

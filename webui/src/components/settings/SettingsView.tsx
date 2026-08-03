@@ -234,8 +234,6 @@ interface AgentSettingsDraft {
   temperature: number;
   reasoningEffort: string;
   timezone: string;
-  botName: string;
-  botIcon: string;
   toolHintMaxLength: number;
 }
 
@@ -475,8 +473,6 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   temperature: 0.1,
   reasoningEffort: "",
   timezone: "UTC",
-  botName: "nanobot",
-  botIcon: "",
   toolHintMaxLength: 40,
 };
 
@@ -544,8 +540,6 @@ function agentDraftFromPayload(
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
     timezone: payload.agent.timezone,
-    botName: payload.agent.bot_name,
-    botIcon: payload.agent.bot_icon,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
 }
@@ -1081,11 +1075,7 @@ export function SettingsView({
 
   const runtimeDirty = useMemo(() => {
     if (!settings) return false;
-    return (
-      form.timezone !== settings.agent.timezone ||
-      form.botName !== settings.agent.bot_name ||
-      form.botIcon !== settings.agent.bot_icon
-    );
+    return form.timezone !== settings.agent.timezone;
   }, [form, settings]);
 
   const imageGenerationDirty = useMemo(() => {
@@ -1406,8 +1396,6 @@ export function SettingsView({
     try {
       const payload = await updateSettings(token, {
         timezone: form.timezone,
-        botName: form.botName,
-        botIcon: form.botIcon,
       });
       applyPayload(payload);
       if (payload.requires_restart) {
@@ -8415,23 +8403,15 @@ function RuntimeSettings({
   return (
     <div className="space-y-7">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
-          <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
-            <Input
-              value={form.botName}
-              onChange={(event) => setForm((prev) => ({ ...prev, botName: event.target.value }))}
-              className="h-8 w-[220px] rounded-full text-[13px]"
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.botIcon", "Bot icon")} description={tx("settings.help.botIcon", "Short emoji or text shown with the bot name.")}>
-            <Input
-              value={form.botIcon}
-              onChange={(event) => setForm((prev) => ({ ...prev, botIcon: event.target.value }))}
-              className="h-8 w-[120px] rounded-full text-center text-[13px]"
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.timezone", "Timezone")} description={tx("settings.help.timezone", "Used for schedules and time-aware replies.")}>
+        <SettingsSectionTitle>{tx("settings.sections.regional", "Regional")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.timezone", "Timezone")}
+            description={tx(
+              "settings.help.timezone",
+              "Used for schedules and time-aware replies.",
+            )}
+          >
             <TimezonePicker
               value={form.timezone}
               onChange={(timezone) => setForm((prev) => ({ ...prev, timezone }))}

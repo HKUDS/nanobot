@@ -1234,8 +1234,6 @@ def settings_payload(
             "temperature": effective_preset.temperature,
             "reasoning_effort": effective_preset.reasoning_effort,
             "timezone": defaults.timezone,
-            "bot_name": defaults.bot_name,
-            "bot_icon": defaults.bot_icon,
             "tool_hint_max_length": defaults.tool_hint_max_length,
         },
         "model_presets": model_presets,
@@ -1403,24 +1401,6 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("invalid timezone") from None
         if defaults.timezone != timezone:
             defaults.timezone = timezone
-            changed = True
-            restart_required = True
-
-    bot_name = _query_first_alias(query, "bot_name", "botName")
-    if bot_name is not None:
-        bot_name = bot_name.strip()
-        if not bot_name:
-            raise WebUISettingsError("bot_name is required")
-        if defaults.bot_name != bot_name:
-            defaults.bot_name = bot_name
-            changed = True
-            restart_required = True
-
-    bot_icon = _query_first_alias(query, "bot_icon", "botIcon")
-    if bot_icon is not None:
-        bot_icon = bot_icon.strip()
-        if defaults.bot_icon != bot_icon:
-            defaults.bot_icon = bot_icon
             changed = True
             restart_required = True
 

@@ -30,8 +30,6 @@ function settingsPayload(): SettingsPayload {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "nb",
       tool_hint_max_length: 40,
     },
     model_presets: [{

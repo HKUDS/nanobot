@@ -490,8 +490,6 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     timezone: string;
-    bot_name: string;
-    bot_icon: string;
     tool_hint_max_length: number;
   };
   model_presets: Array<{
@@ -1028,8 +1026,6 @@ export interface SettingsUpdate {
   modelPreset?: string | null;
   contextWindowTokens?: number;
   timezone?: string;
-  botName?: string;
-  botIcon?: string;
   toolHintMaxLength?: number;
 }
 
