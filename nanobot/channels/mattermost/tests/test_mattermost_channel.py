@@ -375,6 +375,53 @@ async def test_group_policy_allowlist():
     assert channel._should_respond_in_channel("msg", "c2") is False
 
 
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_default_open():
+    """Thread uses open policy by default, so no mention needed in threads."""
+    channel, fake = _make_channel({"groupPolicy": "mention"})
+    channel._self_username = "nanobot"
+    # In a main channel (not thread), mention is required
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=False) is False
+    assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=False) is True
+    # In a thread, no mention needed (default open policy)
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_mention():
+    """Thread can also use mention policy when configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "mention",
+    })
+    channel._self_username = "nanobot"
+    # In a thread with mention policy, mention is required
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is False
+    assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_open():
+    """Thread uses open policy when explicitly configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "open",
+    })
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_allowlist():
+    """Thread uses allowlist policy when configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "allowlist",
+        "groupAllowFrom": ["c1"],
+    })
+    assert channel._should_respond_in_channel("msg", "c1", in_thread=True) is True
+    assert channel._should_respond_in_channel("msg", "c2", in_thread=True) is False
+
+
 # ---------------------------------------------------------------------------
 # Match mode: id / username / email
 # ---------------------------------------------------------------------------

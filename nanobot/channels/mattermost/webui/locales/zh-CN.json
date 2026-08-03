@@ -27,10 +27,18 @@
         "placeholder": "可选的团队 ID"
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "频道行为",
         "choices": {
           "mention": "仅提及时",
           "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "线程行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息（无需提及）",
           "allowlist": "白名单"
         }
       },

@@ -27,10 +27,18 @@
         "placeholder": "선택적 팀 ID"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "채널 동작",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "스레드 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지 (언급 불필요)",
           "allowlist": "허용 목록"
         }
       },
