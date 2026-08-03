@@ -2405,3 +2405,16 @@ def test_markdown_to_html_code_block_special_chars_language() -> None:
 
     stripped = _strip_md_block(text)
     assert stripped == "int main() { return 0; }\n"
+def test_markdown_to_html_code_block_same_line_no_newline() -> None:
+    """
+    Locks out the regression where triple-backtick content without a newline
+    (e.g., Use ```<tag>``` here) was mistaken for a language info string and discarded.
+    """
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html, _strip_md_block
+
+    text = "Use ```<tag>``` here"
+    html = _markdown_to_telegram_html(text)
+    assert html == "Use <pre><code>&lt;tag&gt;</code></pre> here"
+
+    stripped = _strip_md_block(text)
+    assert stripped == "Use <tag> here"
