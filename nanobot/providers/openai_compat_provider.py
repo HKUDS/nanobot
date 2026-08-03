@@ -659,6 +659,8 @@ class OpenAICompatProvider(LLMProvider):
         if strip_reasoning:
             for msg in sanitized:
                 msg.pop("reasoning_content", None)
+        if self._spec and self._spec.name == "gemini":
+            sanitized = self._drop_unsigned_tool_calls(sanitized)
 
         def map_id(value: Any) -> Any:
             if not isinstance(value, str):
@@ -735,6 +737,73 @@ class OpenAICompatProvider(LLMProvider):
             ):
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
         return self._enforce_role_alternation(sanitized)
+
+    @staticmethod
+    def _gemini_thought_signature(tool_call: dict[str, Any]) -> str | None:
+        """Return Gemini's thought signature attached to a tool call, if any.
+
+        Gemini's OpenAI-compatible endpoint returns tool calls with an
+        ``extra_content`` field: ``{"google": {"thought_signature": "..."}}``.
+        nanobot preserves it through the parse -> serialize round-trip so
+        replayed calls stay valid. Calls produced by other providers (e.g.
+        after a mid-conversation model switch) carry no signature.
+        """
+        extra = tool_call.get("extra_content")
+        if not isinstance(extra, dict):
+            return None
+        google = cast(dict[str, Any], extra).get("google")
+        if not isinstance(google, dict):
+            return None
+        signature = cast(dict[str, Any], google).get("thought_signature")
+        if isinstance(signature, str) and signature:
+            return signature
+        return None
+
+    def _drop_unsigned_tool_calls(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Drop tool calls lacking a Gemini thought signature, and their results.
+
+        Gemini requires every replayed ``functionCall`` part to carry a
+        thought signature; history produced by other providers (or before
+        signature capture) contains calls without one, which Gemini rejects
+        with ``400 INVALID_ARGUMENT``. Removing the call and its matching
+        tool result keeps the conversation wire-valid; the assistant's own
+        text content is preserved.
+        """
+        dropped: set[str] = set()
+        kept: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            calls = msg.get("tool_calls")
+            if role == "assistant" and isinstance(calls, list) and calls:
+                typed_calls = cast(list[dict[str, Any]], calls)
+                kept_calls: list[dict[str, Any]] = [
+                    tc
+                    for tc in typed_calls
+                    if self._gemini_thought_signature(tc) is not None
+                ]
+                if len(kept_calls) == len(typed_calls):
+                    kept.append(msg)
+                    continue
+                dropped.update(
+                    str(tc.get("id"))
+                    for tc in typed_calls
+                    if self._gemini_thought_signature(tc) is None
+                )
+                if not kept_calls and not msg.get("content"):
+                    continue  # nothing left of this assistant turn
+                msg = dict(msg)
+                if kept_calls:
+                    msg["tool_calls"] = kept_calls
+                else:
+                    msg.pop("tool_calls", None)
+                kept.append(msg)
+            elif role == "tool" and str(msg.get("tool_call_id")) in dropped:
+                continue
+            else:
+                kept.append(msg)
+        return kept
 
     # ------------------------------------------------------------------
     # Build kwargs
