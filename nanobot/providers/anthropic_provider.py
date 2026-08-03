@@ -199,7 +199,7 @@ class AnthropicProvider(LLMProvider):
 
             if role == "system":
                 system = (
-                    cast(list[dict[str, Any]], content)
+                    cast(list[Any], content)
                     if isinstance(content, list)
                     else content
                     if isinstance(content, str)
@@ -528,7 +528,7 @@ class AnthropicProvider(LLMProvider):
             if isinstance(c, str):
                 new_msgs[-2] = {**m, "content": [{"type": "text", "text": c, "cache_control": marker}]}
             elif isinstance(c, list) and c:
-                nc = list(cast(list[dict[str, Any]], c))
+                nc = list(cast(list[Any], c))
                 if isinstance(nc[-1], dict):
                     nc[-1] = {**nc[-1], "cache_control": marker}
                 elif isinstance(nc[-1], str):
