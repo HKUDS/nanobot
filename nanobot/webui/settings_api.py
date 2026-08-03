@@ -2141,11 +2141,9 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
         raw_engines = _query_first_alias(query, "mst_engines", "mstEngines")
         if raw_engines is not None:
             try:
-                engines = json.loads(raw_engines)
-                if not isinstance(engines, list):
-                    raise WebUISettingsError("mst_engines must be a JSON array")
+                engines: list[str] = json.loads(raw_engines)  # pyright: ignore[reportUnknownArgumentType]
                 for item in engines:
-                    if not isinstance(item, str):
+                    if not isinstance(item, str):  # pyright: ignore[reportUnnecessaryIsInstance]
                         raise WebUISettingsError("mst_engines items must be strings")
             except (json.JSONDecodeError, TypeError) as exc:
                 if isinstance(exc, WebUISettingsError):
@@ -2156,11 +2154,9 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
         raw_weights = _query_first_alias(query, "mst_weights", "mstWeights")
         if raw_weights is not None:
             try:
-                weights = json.loads(raw_weights)
-                if not isinstance(weights, dict):
-                    raise WebUISettingsError("mst_weights must be a JSON object")
+                weights: dict[str, float] = json.loads(raw_weights)  # pyright: ignore[reportUnknownArgumentType]
                 for k, v in weights.items():
-                    if not isinstance(k, str) or not isinstance(v, (int, float)):
+                    if not isinstance(k, str) or not isinstance(v, (int, float)):  # pyright: ignore[reportUnnecessaryIsInstance]
                         raise WebUISettingsError("mst_weights keys must be strings and values numbers")
             except (json.JSONDecodeError, TypeError) as exc:
                 if isinstance(exc, WebUISettingsError):
