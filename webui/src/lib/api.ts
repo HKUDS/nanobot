@@ -858,8 +858,6 @@ export async function updateSettings(
     query.set("context_window_tokens", String(update.contextWindowTokens));
   }
   if (update.timezone !== undefined) query.set("timezone", update.timezone);
-  if (update.botName !== undefined) query.set("bot_name", update.botName);
-  if (update.botIcon !== undefined) query.set("bot_icon", update.botIcon);
   if (update.toolHintMaxLength !== undefined) {
     query.set("tool_hint_max_length", String(update.toolHintMaxLength));
   }
