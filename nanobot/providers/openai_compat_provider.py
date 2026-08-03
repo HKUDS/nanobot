@@ -601,11 +601,12 @@ class OpenAICompatProvider(LLMProvider):
                     {"type": "text", "text": content, "cache_control": cache_marker},
                 ]}
             if isinstance(content, list) and content:
-                nc = list(cast(list[Any], content))
-                if isinstance(nc[-1], dict):
-                    nc[-1] = {**nc[-1], "cache_control": cache_marker}
-                elif isinstance(nc[-1], str):
-                    nc[-1] = {"type": "text", "text": nc[-1], "cache_control": cache_marker}
+                nc: list[Any] = list(cast(list[Any], content))
+                last = nc[-1]
+                if isinstance(last, dict):
+                    nc[-1] = {**last, "cache_control": cache_marker}
+                elif isinstance(last, str):
+                    nc[-1] = {"type": "text", "text": last, "cache_control": cache_marker}
                 return {**msg, "content": nc}
             return msg
 
