@@ -665,15 +665,15 @@ class LLMProvider(ABC):
                 if isinstance(prev_content, str) and isinstance(curr_content, str):
                     prev["content"] = (prev_content + "\n\n" + curr_content).strip()
                 else:
-                    p_blocks = (
-                        list(prev_content)
+                    p_blocks: list[Any] = (
+                        list(cast(list[Any], prev_content))
                         if isinstance(prev_content, list)
                         else [{"type": "text", "text": str(prev_content)}]
                         if prev_content
                         else []
                     )
-                    c_blocks = (
-                        list(curr_content)
+                    c_blocks: list[Any] = (
+                        list(cast(list[Any], curr_content))
                         if isinstance(curr_content, list)
                         else [{"type": "text", "text": str(curr_content)}]
                         if curr_content
