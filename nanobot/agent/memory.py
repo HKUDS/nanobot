@@ -498,7 +498,7 @@ class MemoryStore:
                     return None
                 read_size = min(size, 4096)
                 f.seek(size - read_size)
-                data = f.read().decode("utf-8")
+                data = f.read().decode("utf-8", errors="replace")
                 lines = [line for line in data.split("\n") if line.strip()]
                 if not lines:
                     return None

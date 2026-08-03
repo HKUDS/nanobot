@@ -597,3 +597,21 @@ def test_raw_archive_handles_none_timestamp_and_missing_role(tmp_path: Path) -> 
     assert "[?] USER: message with none timestamp" in raw_history
     assert "[1720000000] ASSISTANT: message with int timestamp" in raw_history
     assert "[2026-07-28T12:00] UNKNOWN: message with missing role" in raw_history
+
+def test_read_last_entry_handles_multibyte_utf8_split_at_chunk_boundary(tmp_path: Path) -> None:
+    """_read_last_entry must decode with replacement so a multibyte UTF-8 boundary split does not return None."""
+    memory = MemoryStore(tmp_path)
+    prefix = '{"cursor": 1, "timestamp": "2026-08-02 10:00", "content": "'
+    pad_len = 903 - len(prefix.encode("utf-8"))
+    line1 = prefix + ("a" * pad_len) + "🎉" + '"}\n'
+    line1_bytes = line1.encode("utf-8")
+    line2_target_len = 5000 - len(line1_bytes)
+    line2_prefix = '{"cursor": 2, "timestamp": "2026-08-02 10:01", "content": "'
+    line2_pad = line2_target_len - len(line2_prefix.encode("utf-8")) - len('"\n'.encode("utf-8"))
+    line2 = line2_prefix + ("b" * line2_pad) + '"}\n'
+    data_bytes = line1_bytes + line2.encode("utf-8")
+    memory.history_file.parent.mkdir(parents=True, exist_ok=True)
+    memory.history_file.write_bytes(data_bytes)
+    last = memory._read_last_entry()
+    assert last is not None
+    assert last["cursor"] == 2
