@@ -374,6 +374,45 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("falls back to the assistant creation time when replay has no completion time", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-created-at",
+          role: "assistant",
+          content: "Proactive answer",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-timestamp]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
+    expect(time).not.toHaveAttribute("data-assistant-completed-at");
+  });
+
+  it("renders the creation time for user messages", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "u-created-at",
+          role: "user",
+          content: "A user message",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-created-at]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
+  });
+
   it("does not infer completion time from the assistant creation timestamp", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 0);
     const latencyMs = 13_000;

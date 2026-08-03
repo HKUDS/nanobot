@@ -253,6 +253,9 @@ export function MessageBubble({
     const hasText = userContent.trim().length > 0;
     const showDeliveryStatus =
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const createdAtLabel = formatMessageEndTime(message.createdAt);
+    const showCreatedAt = createdAtLabel.length > 0;
+    const createdAtTitle = showCreatedAt ? fmtDateTime(message.createdAt) : "";
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const messageText = slashCommand ? (
@@ -298,9 +301,19 @@ export function MessageBubble({
             {messageText}
           </p>
         ) : null}
-        {showDeliveryStatus || (hasText && showCopyAction) ? (
+        {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
           <TooltipProvider delayDuration={220} skipDelayDuration={80}>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+              {showCreatedAt ? (
+                <time
+                  data-message-created-at
+                  dateTime={new Date(message.createdAt).toISOString()}
+                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                  title={createdAtTitle}
+                >
+                  {createdAtLabel}
+                </time>
+              ) : null}
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
@@ -338,11 +351,22 @@ export function MessageBubble({
     message.role === "assistant" && !message.isStreaming
       ? formatMessageEndTime(completedAt)
       : "";
+  const assistantTimestamp =
+    typeof completedAt === "number" && Number.isFinite(completedAt)
+      ? completedAt
+      : message.createdAt;
+  const assistantTimestampLabel =
+    message.role === "assistant" && !message.isStreaming
+      ? formatMessageEndTime(assistantTimestamp)
+      : "";
   const showCompletedAt =
     completedAtLabel.length > 0
     && (!empty || hasReasoning || media.length > 0);
-  const completedAtTitle = showCompletedAt ? fmtDateTime(completedAt) : "";
-  const showAssistantFooterRow = showCopyButton || showForkButton || showCompletedAt;
+  const showAssistantTimestamp =
+    assistantTimestampLabel.length > 0
+    && (!empty || hasReasoning || media.length > 0);
+  const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
+  const showAssistantFooterRow = showCopyButton || showForkButton || showAssistantTimestamp;
   const showAssistantFooterSlot =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
@@ -414,14 +438,15 @@ export function MessageBubble({
                 <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
               </Tooltip>
             ) : null}
-            {showCompletedAt ? (
+            {showAssistantTimestamp ? (
               <time
-                data-assistant-completed-at
-                dateTime={new Date(completedAt!).toISOString()}
+                {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
+                data-message-timestamp
+                dateTime={new Date(assistantTimestamp).toISOString()}
                 className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                title={completedAtTitle}
+                title={assistantTimestampTitle}
               >
-                {completedAtLabel}
+                {assistantTimestampLabel}
               </time>
             ) : null}
           </div>
