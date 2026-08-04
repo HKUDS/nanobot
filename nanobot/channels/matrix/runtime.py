@@ -24,10 +24,12 @@ try:
     import nh3
     from mistune import HTMLRenderer, create_markdown
     from nio import (
+        Api,
         AsyncClient,
         AsyncClientConfig,
         InviteEvent,
         JoinError,
+        JoinResponse,
         KeyVerificationCancel,
         KeyVerificationEvent,
         KeyVerificationKey,
@@ -791,13 +793,15 @@ class MatrixChannel(BaseChannel):
         (notably Continuwuity) reject empty bodies with ``M_BAD_JSON``.
         Sending ``"{}"`` satisfies both strict and lenient servers.
         """
-        from nio.api import Api
-        from nio.responses import JoinResponse
-
         client = self._require_client()
         method, path = Api.join(client.access_token, room_id)
         try:
-            resp = await client._send(JoinResponse, method, path, data="{}")
+            resp = cast(
+                JoinResponse | JoinError,
+                await client._send(  # type: ignore[reportPrivateUsage, reportUnknownMemberType]
+                    JoinResponse, method, path, data="{}"
+                ),
+            )
         except Exception:
             self.logger.error("Matrix join request exception for room={}", room_id, exc_info=True)
             return False
@@ -819,9 +823,9 @@ class MatrixChannel(BaseChannel):
         if not response.rooms or not response.rooms.invite:
             return
         for room_id, invite_info in response.rooms.invite.items():
-            for event in invite_info.invite_state:
+            for event in cast(list[Any], invite_info.invite_state):
                 sender = getattr(event, "sender", None)
-                if sender and self.is_allowed(sender):
+                if sender and self.is_allowed(cast(str, sender)):
                     await self._join_room_safe(room_id)
                     break
 
