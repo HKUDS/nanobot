@@ -614,9 +614,8 @@ class AnthropicProvider(LLMProvider):
             model_name, _THINKING_DISABLE_MIN_VERSIONS
         ):
             # These models think by default, so omission would not honor an
-            # explicit request to disable thinking. Use extra_body for SDKs
-            # that predate the typed thinking parameter.
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            # explicit request to disable thinking.
+            kwargs["thinking"] = {"type": "disabled"}
         elif reasoning_effort_lower == "adaptive":
             # Adaptive thinking: model decides when and how much to think
             # Also auto-enables interleaved thinking between tool calls.
@@ -626,13 +625,8 @@ class AnthropicProvider(LLMProvider):
         elif thinking_enabled and adaptive_only:
             # Newer Claude models removed manual token budgets. Their effort
             # control is independent from the adaptive thinking mode.
-            # These fields were added as first-class SDK arguments after our
-            # minimum anthropic version; extra_body preserves wire compatibility
-            # across the declared dependency range.
-            kwargs["extra_body"] = {
-                "thinking": {"type": "adaptive"},
-                "output_config": {"effort": reasoning_effort_lower},
-            }
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": reasoning_effort_lower}
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
             budget = budget_map.get(reasoning_effort_lower, 4096)

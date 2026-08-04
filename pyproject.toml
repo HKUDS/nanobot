@@ -24,7 +24,7 @@ license-files = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
-    "anthropic>=0.45.0,<1.0.0",
+    "anthropic>=0.100.0,<1.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.12.0,<3.0.0",
     # Feishu's lark-oapi currently requires websockets<16; core supports 15 and 16.
