@@ -1,12 +1,10 @@
-"""Scoped access to persisted WebUI conversations."""
+"""Read and validate persisted conversations for WebUI and session tools."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from functools import cache
-from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from nanobot.runtime_context import (
@@ -14,10 +12,9 @@ from nanobot.runtime_context import (
     public_history_message,
     wrap_runtime_context_lines,
 )
-from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
-from nanobot.webui.session_list_index import indexed_workspace_scope, list_webui_sessions
+from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.transcript import (
     build_webui_thread_response,
     normalize_session_mentions_metadata,
@@ -44,21 +41,6 @@ class SessionMatch(TypedDict):
     title: str
     updated_at: str | None
     messages: list[SessionMessage]
-
-
-@dataclass(frozen=True)
-class SessionAccessScope:
-    current_session_key: str
-    session_key_prefix: str
-    project_path: Path | None = None
-    restrict_to_workspace: bool = False
-
-    def allows(self, session_key: object) -> bool:
-        return (
-            isinstance(session_key, str)
-            and session_key.startswith(self.session_key_prefix)
-            and session_key != self.current_session_key
-        )
 
 
 def _message_text(message: Mapping[str, Any]) -> str:
@@ -116,44 +98,21 @@ def _row_title(row: Mapping[str, Any]) -> str:
     return _text(row.get("title")) or _text(row.get("preview"))
 
 
-def _project_path(raw_scope: object, default_workspace: Path) -> Path:
-    if isinstance(raw_scope, Mapping):
-        scope = cast(Mapping[str, object], raw_scope)
-        raw_path = scope.get("project_path") or scope.get("path")
-        if isinstance(raw_path, str) and raw_path:
-            return Path(raw_path).expanduser().resolve(strict=False)
-    return default_workspace.resolve(strict=False)
-
-
 class WebuiSessionAccess:
-    """Own listing, authorization, validation, and history reads for session references."""
+    """Own listing, validation, and history reads for session references."""
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
 
-    def _allowed_project(self, raw_scope: object, scope: SessionAccessScope) -> bool:
-        if not scope.restrict_to_workspace or scope.project_path is None:
-            return True
-        return _project_path(raw_scope, self._sessions.workspace) == scope.project_path.resolve(
-            strict=False
-        )
-
-    def _allowed_row(self, row: Mapping[str, Any], scope: SessionAccessScope) -> bool:
-        key = row.get("key")
-        if not scope.allows(key):
-            return False
-        present, raw_scope = indexed_workspace_scope(cast(dict[str, Any], row))
-        return self._allowed_project(raw_scope if present else None, scope)
-
-    def _metadata(self, session_key: str, scope: SessionAccessScope) -> dict[str, Any] | None:
-        if not scope.allows(session_key):
+    def _metadata(
+        self,
+        session_key: str,
+        *,
+        exclude_session_key: str | None,
+    ) -> dict[str, Any] | None:
+        if session_key == exclude_session_key:
             return None
-        payload = self._sessions.read_session_metadata(session_key)
-        if payload is None:
-            return None
-        session_metadata = _session_metadata(payload)
-        raw_scope = session_metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
-        return payload if self._allowed_project(raw_scope, scope) else None
+        return self._sessions.read_session_metadata(session_key)
 
     def _messages(self, session_key: str) -> list[SessionMessage]:
         @cache
@@ -176,13 +135,19 @@ class WebuiSessionAccess:
             return _visible_messages(thread.get("messages"))
         return _visible_messages(load_session_messages())
 
-    def search(self, scope: SessionAccessScope, query: str, limit: int) -> list[SessionMatch]:
+    def search(
+        self,
+        query: str,
+        limit: int,
+        *,
+        exclude_session_key: str | None = None,
+    ) -> list[SessionMatch]:
         needle = query.casefold()
-        rows = [
-            row
-            for row in list_webui_sessions(self._sessions)
-            if self._allowed_row(row, scope)
-        ]
+        rows: list[dict[str, Any]] = []
+        for row in list_webui_sessions(self._sessions):
+            key = row.get("key")
+            if isinstance(key, str) and key != exclude_session_key:
+                rows.append(row)
         ranked: list[tuple[int, SessionMatch]] = []
         remaining: list[dict[str, Any]] = []
         for row in rows:
@@ -230,13 +195,13 @@ class WebuiSessionAccess:
 
     def read(
         self,
-        scope: SessionAccessScope,
         session_key: str,
         *,
         query: str,
         limit: int,
+        exclude_session_key: str | None = None,
     ) -> SessionMatch | None:
-        payload = self._metadata(session_key, scope)
+        payload = self._metadata(session_key, exclude_session_key=exclude_session_key)
         if payload is None:
             return None
         messages = self._messages(session_key)
@@ -254,7 +219,8 @@ class WebuiSessionAccess:
     def normalize_mentions(
         self,
         raw: object,
-        scope: SessionAccessScope,
+        *,
+        exclude_session_key: str | None = None,
     ) -> list[SessionMention]:
         normalized: list[SessionMention] = []
         seen_keys: set[str] = set()
@@ -263,7 +229,7 @@ class WebuiSessionAccess:
             mention = cast(SessionMention, raw_mention)
             key = mention["session_key"]
             folded_name = mention["name"].lower()
-            payload = self._metadata(key, scope)
+            payload = self._metadata(key, exclude_session_key=exclude_session_key)
             if payload is None or key in seen_keys or folded_name in seen_names:
                 continue
             normalized.append({

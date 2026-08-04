@@ -4,7 +4,6 @@ import json
 
 from nanobot.session.manager import SessionManager
 from nanobot.webui.session_access import (
-    SessionAccessScope,
     WebuiSessionAccess,
     session_mentions_runtime_context,
 )
@@ -18,7 +17,7 @@ def _save_session(manager: SessionManager, key: str, title: str) -> None:
     manager.save(session)
 
 
-def test_normalize_session_mentions_keeps_only_authorized_distinct_targets(
+def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -28,7 +27,7 @@ def test_normalize_session_mentions_keeps_only_authorized_distinct_targets(
     _save_session(manager, "websocket:other", "Other")
     _save_session(manager, "websocket:street", "Straße")
     _save_session(manager, "websocket:upper", "STRASSE")
-    _save_session(manager, "telegram:private", "Private")
+    _save_session(manager, "telegram:history", "Telegram history")
     monkeypatch.setattr(
         manager,
         "list_sessions",
@@ -45,13 +44,12 @@ def test_normalize_session_mentions_keeps_only_authorized_distinct_targets(
             {"name": "duplicate", "session_key": "websocket:pricing"},
             {"name": "PRICING", "session_key": "websocket:other"},
             {"name": "current", "session_key": "websocket:current"},
-            {"name": "bad name", "session_key": "websocket:pricing"},
             {"name": "missing", "session_key": "websocket:missing"},
             {"name": "Straße", "session_key": "websocket:street"},
             {"name": "STRASSE", "session_key": "websocket:upper"},
-            {"name": "private", "session_key": "telegram:private"},
+            {"name": "telegram", "session_key": "telegram:history"},
         ],
-        SessionAccessScope("websocket:current", "websocket:"),
+        exclude_session_key="websocket:current",
     )
 
     assert mentions == [
@@ -62,6 +60,11 @@ def test_normalize_session_mentions_keeps_only_authorized_distinct_targets(
         },
         {"name": "Straße", "session_key": "websocket:street", "title": "Straße"},
         {"name": "STRASSE", "session_key": "websocket:upper", "title": "STRASSE"},
+        {
+            "name": "telegram",
+            "session_key": "telegram:history",
+            "title": "Telegram history",
+        },
     ]
 
 
@@ -80,11 +83,9 @@ def test_session_mention_context_treats_titles_as_data() -> None:
     assert json.loads(block.content.splitlines()[2])[0]["session_key"] == "websocket:history"
 
 
-def test_restricted_scope_rejects_sessions_from_other_projects(tmp_path) -> None:
+def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
     manager = SessionManager(tmp_path)
-    project_a = tmp_path / "a"
     project_b = tmp_path / "b"
-    project_a.mkdir()
     project_b.mkdir()
     session = manager.get_or_create("websocket:other")
     session.metadata.update({
@@ -97,19 +98,27 @@ def test_restricted_scope_rejects_sessions_from_other_projects(tmp_path) -> None
     manager.save(session)
 
     access = WebuiSessionAccess(manager)
-    scope = SessionAccessScope(
-        "websocket:current",
-        "websocket:",
-        project_path=project_a,
-        restrict_to_workspace=True,
-    )
     mentions = access.normalize_mentions(
         [{"name": "other", "session_key": "websocket:other"}],
-        scope,
+        exclude_session_key="websocket:current",
     )
 
-    assert mentions == []
-    assert access.search(scope, "Other", 5) == []
+    assert mentions == [{
+        "name": "other",
+        "session_key": "websocket:other",
+        "title": "Other",
+    }]
+    assert [row["session_key"] for row in access.search(
+        "Other",
+        5,
+        exclude_session_key="websocket:current",
+    )] == ["websocket:other"]
+    assert access.read(
+        "websocket:other",
+        query="",
+        limit=5,
+        exclude_session_key="websocket:current",
+    ) is not None
 
 
 def test_persisted_session_mentions_validate_fields() -> None:
@@ -117,8 +126,13 @@ def test_persisted_session_mentions_validate_fields() -> None:
         {"name": 7, "session_key": "websocket:bad"},
         {"name": "bad name", "session_key": "websocket:bad"},
         {"name": "valid", "session_key": "websocket:valid", "title": 7},
+        {"name": "telegram", "session_key": "telegram:valid"},
     ]) == [{
         "name": "valid",
         "session_key": "websocket:valid",
+        "title": "",
+    }, {
+        "name": "telegram",
+        "session_key": "telegram:valid",
         "title": "",
     }]

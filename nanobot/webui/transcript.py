@@ -947,11 +947,7 @@ def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
             continue
         name = name.strip()[:80]
         session_key = session_key.strip()[:512]
-        if (
-            not name
-            or _SESSION_MENTION_NAME_RE.fullmatch(name) is None
-            or not session_key.startswith("websocket:")
-        ):
+        if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
             continue
         normalized.append({
             "name": name,

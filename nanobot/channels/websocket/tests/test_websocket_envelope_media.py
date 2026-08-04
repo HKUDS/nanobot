@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.bus.events import INBOUND_META_SESSION_READ_SCOPE
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
 )
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
@@ -219,13 +219,14 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
 
     channel._handle_message.assert_awaited_once()
     metadata = channel._handle_message.call_args.kwargs["metadata"]
-    assert metadata[INBOUND_META_SESSION_READ_SCOPE] == "websocket:"
     assert metadata["session_mentions"] == [{
         "name": "pricing",
         "session_key": "websocket:pricing",
         "title": "Pricing",
     }]
-    assert "_runtime_context_blocks" not in metadata
+    [block] = metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert block.source == "session_mentions"
+    assert "websocket:pricing" in block.content
 
 
 @pytest.mark.asyncio
