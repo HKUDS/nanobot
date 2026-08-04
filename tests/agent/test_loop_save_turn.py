@@ -218,6 +218,47 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
     assert session.messages == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("/neaw", 'Unknown command "/neaw". Did you mean "/new"?'),
+        (
+            "/status now",
+            'Command "/status" does not accept arguments. Did you mean "/status"?',
+        ),
+    ],
+)
+async def test_invalid_slash_command_is_rejected_without_calling_provider(
+    tmp_path: Path,
+    content: str,
+    expected: str,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-1",
+            content=content,
+        )
+    )
+
+    assert response is not None
+    assert response.content == expected
+    loop.provider.chat_with_retry.assert_not_awaited()
+    session = loop.sessions.get_or_create("websocket:chat-1")
+    persisted = [
+        (message["role"], message["content"], message.get("_command"))
+        for message in session.messages
+    ]
+    assert persisted == [
+        ("user", content, True),
+        ("assistant", response.content, True),
+    ]
+
+
 def test_clean_generated_title_strips_reasoning_tags() -> None:
     assert clean_generated_title("<think>reasoning</think> WebUI polish") == "WebUI polish"
     assert clean_generated_title("Title: <think> The user said hello") == ""
