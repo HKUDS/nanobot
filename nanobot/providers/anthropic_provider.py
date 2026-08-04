@@ -41,6 +41,10 @@ _ADAPTIVE_ONLY_MIN_VERSIONS = {
     "fable": (5, 0),
     "mythos": (5, 0),
 }
+_THINKING_DISABLE_MIN_VERSIONS = {
+    "opus": (5, 0),
+    "sonnet": (5, 0),
+}
 _SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
 
 
@@ -606,7 +610,14 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if reasoning_effort_lower == "adaptive":
+        if reasoning_effort_lower == "none" and _model_version_at_least(
+            model_name, _THINKING_DISABLE_MIN_VERSIONS
+        ):
+            # These models think by default, so omission would not honor an
+            # explicit request to disable thinking. Use extra_body for SDKs
+            # that predate the typed thinking parameter.
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        elif reasoning_effort_lower == "adaptive":
             # Adaptive thinking: model decides when and how much to think
             # Also auto-enables interleaved thinking between tool calls.
             kwargs["thinking"] = {"type": "adaptive"}

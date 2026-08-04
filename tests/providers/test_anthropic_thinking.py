@@ -142,9 +142,10 @@ def test_sonnet_5_high_uses_adaptive_effort() -> None:
 
 
 def test_sonnet_5_omits_temperature_none() -> None:
-    kw = _build(_make_provider("anthropic/claude-sonnet-5"), None)
+    kw = _build(_make_provider("anthropic/claude-sonnet-5"), "none")
     assert "temperature" not in kw
     assert "thinking" not in kw
+    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_mythos_preview_omits_temperature_but_keeps_manual_budget() -> None:
@@ -154,10 +155,24 @@ def test_mythos_preview_omits_temperature_but_keeps_manual_budget() -> None:
     assert "extra_body" not in kw
 
 
-@pytest.mark.parametrize("reasoning_effort", [None, "adaptive", "low", "medium", "high", "xhigh", "max"])
+@pytest.mark.parametrize(
+    "reasoning_effort", [None, "none", "adaptive", "low", "medium", "high", "xhigh", "max"]
+)
 def test_opus_5_omits_temperature(reasoning_effort: str | None) -> None:
     kw = _build(_make_provider("claude-opus-5"), reasoning_effort)
     assert "temperature" not in kw
+
+
+def test_opus_5_none_disables_default_thinking() -> None:
+    kw = _build(_make_provider("claude-opus-5"), "none")
+    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "thinking" not in kw
+
+
+def test_opus_5_unset_preserves_provider_default() -> None:
+    kw = _build(_make_provider("claude-opus-5"), None)
+    assert "thinking" not in kw
+    assert "extra_body" not in kw
 
 
 @pytest.mark.parametrize("reasoning_effort", ["low", "medium", "high", "xhigh", "max"])
