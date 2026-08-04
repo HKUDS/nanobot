@@ -455,20 +455,39 @@ describe("MessageBubble", () => {
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
   });
 
-  it("renders a lightweight automation source label for cron replies", () => {
+  it("places automation metadata after the timestamp and reveals its source on hover", async () => {
+    const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     const message: UIMessage = {
       id: "a-cron",
       role: "assistant",
       content: "Time to drink water.",
       source: { kind: "cron", label: "drink water" },
-      createdAt: Date.now(),
+      completedAt,
+      createdAt: completedAt - 1_000,
     };
 
-    render(<MessageBubble message={message} />);
+    const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("drink water")).toBeInTheDocument();
-    expect(screen.getByText("Triggered automatically")).toBeInTheDocument();
+    const footer = container.querySelector("[data-assistant-footer]")!;
+    const timestamp = footer.querySelector("[data-message-timestamp]")!;
+    const trigger = footer.querySelector("[data-automation-trigger]")!;
+
+    expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
+    expect(trigger).toHaveTextContent("Triggered automatically");
+    expect(trigger.previousElementSibling).toBe(timestamp);
+    expect(trigger).toHaveClass(
+      "text-[11px]",
+      "leading-none",
+      "text-muted-foreground/70",
+      "tabular-nums",
+    );
+    expect(trigger.className).not.toMatch(/(?:^|\s)(?:border|bg-)/);
+    expect(trigger.querySelector("svg")).not.toBeInTheDocument();
+    expect(screen.queryByText("drink water")).not.toBeInTheDocument();
     expect(screen.getByText("Time to drink water.")).toBeInTheDocument();
+
+    fireEvent.pointerMove(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("drink water");
   });
 
   it("renders structured CLI app attachments even without the installed catalog", () => {

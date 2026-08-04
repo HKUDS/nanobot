@@ -368,6 +368,7 @@ export function MessageBubble({
     assistantTimestampLabel.length > 0
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
+  const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
   const showAssistantFooterRow = showCopyButton || showForkButton || showAssistantTimestamp;
   const showAssistantFooterSlot =
     message.role === "assistant"
@@ -385,12 +386,6 @@ export function MessageBubble({
         <ThinkingState />
       ) : empty && message.isStreaming ? null : (
         <>
-          {automationSourceLabel ? (
-            <AutomationSourceBadge
-              label={automationSourceLabel}
-              triggerLabel={automationTriggeredLabel}
-            />
-          ) : null}
           <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
             {/* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */}
             <MarkdownText
@@ -451,6 +446,12 @@ export function MessageBubble({
                 {assistantTimestampLabel}
               </time>
             ) : null}
+            {showAutomationTrigger ? (
+              <AutomationTriggerMeta
+                label={automationTriggeredLabel}
+                sourceLabel={automationSourceLabel}
+              />
+            ) : null}
           </div>
         </TooltipProvider>
       ) : null}
@@ -476,22 +477,23 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
   );
 }
 
-function AutomationSourceBadge({ label, triggerLabel }: { label: string; triggerLabel: string }) {
+function AutomationTriggerMeta({ label, sourceLabel }: { label: string; sourceLabel: string }) {
   return (
-    <div
-      className={cn(
-        "mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1",
-        "border border-sky-500/15 bg-sky-500/[0.06]",
-        "text-[11px] font-medium leading-none text-sky-700",
-        "dark:border-sky-300/15 dark:bg-sky-300/[0.08] dark:text-sky-200/80",
-      )}
-      title={triggerLabel}
-    >
-      <Clock3 className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">{label}</span>
-      <span className="text-current/45" aria-hidden>·</span>
-      <span className="shrink-0">{triggerLabel}</span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-automation-trigger
+          tabIndex={0}
+          className={cn(
+            "shrink-0 cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
+            "focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="center">{sourceLabel}</TooltipContent>
+    </Tooltip>
   );
 }
 
