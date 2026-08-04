@@ -32,10 +32,12 @@ _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICO
 
 def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
     """Sanitize filename to avoid traversal and problematic chars."""
-    name = (name or "").strip()
-    name = Path(name).name
-    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
-    return name or fallback
+    def _clean(value: str) -> str:
+        value = (value or "").strip()
+        value = Path(value).name
+        return _SAFE_NAME_RE.sub("_", value).strip("._ ")
+
+    return _clean(name) or _clean(fallback) or "unnamed"
 
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
