@@ -166,7 +166,7 @@ def _strip_md_block(text: str) -> str:
     markdown syntax while the response is still being generated.
     """
     # Code blocks -> just the code
-    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', r'\1', text)
+    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', r'\1', text)
     # Headers -> plain text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
     # Blockquotes
@@ -232,7 +232,7 @@ def _markdown_to_telegram_html(text: str) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
+    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', save_code_block, text)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
     lines = text.split('\n')
