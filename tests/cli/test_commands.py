@@ -3,7 +3,8 @@ import json
 import re
 import shutil
 import signal
-from contextlib import suppress
+import urllib.error
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -2174,6 +2175,129 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "rerun without --no-open" in compact_output
     assert "nanobot is running in this terminal" in compact_output
     assert "Press Ctrl+C here to stop nanobot" in compact_output
+
+
+def test_webui_dev_rejects_background_before_creating_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+
+    result = runner.invoke(
+        app,
+        ["webui", "--dev", "--background", "--yes", "--config", str(config_file)],
+    )
+
+    assert result.exit_code == 1
+    assert "--dev cannot be combined with --background" in result.stdout
+    assert not config_file.exists()
+
+
+def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+
+    @contextmanager
+    def fake_dev_server(**kwargs):
+        seen["dev_kwargs"] = kwargs
+        seen["dev_running"] = True
+        try:
+            yield SimpleNamespace(url=kwargs["browser_url"])
+        finally:
+            seen["dev_running"] = False
+
+    def fake_run_gateway(_config: Config, **kwargs) -> None:
+        assert seen["dev_running"] is True
+        seen["gateway_kwargs"] = kwargs
+
+    monkeypatch.setattr("nanobot.cli.webui.run_webui_dev_server", fake_dev_server)
+    monkeypatch.setattr("nanobot.cli.webui._run_gateway", fake_run_gateway)
+
+    result = runner.invoke(
+        app,
+        [
+            "webui",
+            "--dev",
+            "--config",
+            str(config_file),
+            "--port",
+            "8899",
+            "--gateway-port",
+            "18888",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    dev_kwargs = seen["dev_kwargs"]
+    assert isinstance(dev_kwargs, dict)
+    assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
+    browser_url = dev_kwargs["browser_url"]
+    assert isinstance(browser_url, str)
+    assert browser_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
+    gateway_kwargs = seen["gateway_kwargs"]
+    assert isinstance(gateway_kwargs, dict)
+    assert gateway_kwargs == {
+        "port": 18888,
+        "open_browser_url": browser_url,
+        "open_browser_ready_url": "http://127.0.0.1:8899/webui/bootstrap",
+        "webui_static_dist": False,
+        "webui_bundle_mode": "skip",
+        "unconfigured_provider_error": None,
+    }
+    assert seen["dev_running"] is False
+    assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
+        r"\s+", " ", _strip_ansi(result.stdout)
+    )
+
+
+def test_webui_dev_waits_for_external_gateway_via_health_endpoint(monkeypatch) -> None:
+    health_results = iter((True, False))
+    health_calls: list[tuple[str, int]] = []
+
+    def fake_health(host: str, port: int) -> bool:
+        health_calls.append((host, port))
+        return next(health_results)
+
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", fake_health)
+    monkeypatch.setattr(
+        "nanobot.cli.webui._webui_endpoint_reachable",
+        lambda _url: pytest.fail("must not probe the WebSocket endpoint while waiting"),
+    )
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    cli_webui._wait_with_existing_foreground_gateway("127.0.0.1", 18888)
+
+    assert health_calls == [("127.0.0.1", 18888), ("127.0.0.1", 18888)]
+
+
+def test_browser_readiness_accepts_http_auth_response(monkeypatch) -> None:
+    def auth_required(*_args, **_kwargs):
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:8765/webui/bootstrap",
+            401,
+            "authentication required",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", auth_required)
+
+    assert cli_gateway_runtime._http_endpoint_responding(
+        "http://127.0.0.1:8765/webui/bootstrap"
+    ) is True
+
+
+def test_browser_readiness_rejects_connection_error(monkeypatch) -> None:
+    def unavailable(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", unavailable)
+
+    assert cli_gateway_runtime._http_endpoint_responding(
+        "http://127.0.0.1:8765/webui/bootstrap"
+    ) is False
 
 
 def test_webui_yes_starts_first_run_without_provider_setup(monkeypatch, tmp_path: Path) -> None:

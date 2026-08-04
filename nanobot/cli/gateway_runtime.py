@@ -25,6 +25,7 @@ from nanobot.cli.webui_support import (
     _tcp_endpoint_reachable,
     _webui_browser_url,
     _webui_channel_enabled,
+    _webui_display_url,
     _webui_endpoint_reachable,
 )
 from nanobot.config.paths import is_default_workspace
@@ -39,6 +40,20 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
+    """Return whether an HTTP endpoint responds, including with an auth error."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
 
 
 def _signal_name(signum: int) -> str:
@@ -258,6 +273,7 @@ def _run_gateway(
     *,
     port: int | None = None,
     open_browser_url: str | None = None,
+    open_browser_ready_url: str | None = None,
     webui_static_dist: bool = True,
     webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
@@ -760,10 +776,21 @@ def _run_gateway(
         import webbrowser
         from urllib.parse import urlparse
 
+        # Channels start asynchronously. When the caller supplies a backend
+        # readiness route, wait for an actual HTTP response rather than probing
+        # the WebSocket listener with an incomplete TCP connection.
+        if open_browser_ready_url:
+            for _ in range(40):  # ~4s max per listener
+                if await asyncio.to_thread(
+                    _http_endpoint_responding,
+                    open_browser_ready_url,
+                ):
+                    break
+                await asyncio.sleep(0.1)
+
         parsed = urlparse(open_browser_url)
         target_host = parsed.hostname or config.gateway.host or "127.0.0.1"
         target_port = parsed.port or port
-        # Channels start asynchronously; a short poll lets us avoid racing the bind.
         for _ in range(40):  # ~4s max
             try:
                 _reader, writer = await asyncio.open_connection(
@@ -776,11 +803,12 @@ def _run_gateway(
                 break
             except OSError:
                 await asyncio.sleep(0.1)
+        display_url = _webui_display_url(open_browser_url)
         try:
             webbrowser.open(open_browser_url)
-            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
+            console.print(f"[green]✓[/green] Opened browser at {display_url}")
         except Exception as e:
-            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
+            console.print(f"[yellow]Could not open browser ({e}); visit {display_url}[/yellow]")
 
     async def run() -> None:
         tasks: list[asyncio.Task[Any]] = []
