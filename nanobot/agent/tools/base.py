@@ -210,6 +210,7 @@ class Tool(ABC):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
+        """Return whether the loader should construct and register this tool."""
         return True
 
     @classmethod
@@ -217,7 +218,11 @@ class Tool(ABC):
         return cls()
 
     def available(self) -> bool:
-        """Return whether this tool is available in the current request."""
+        """Return whether this registered tool is exposed and callable now.
+
+        Request-aware implementations should read ``current_request_context()``
+        instead of storing mutable per-request state on the tool instance.
+        """
         return True
 
     def runtime_context_provider(self) -> RuntimeContextProvider | None:

@@ -147,6 +147,9 @@ class _LegacyErrorPrefixTool(Tool):
     def runtime_context_provider(self):
         return self._wrapped.runtime_context_provider()
 
+    def available(self) -> bool:
+        return self._wrapped.available()
+
     @property
     def read_only(self) -> bool:
         return self._wrapped.read_only

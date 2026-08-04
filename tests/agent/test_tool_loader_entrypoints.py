@@ -109,6 +109,9 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
         def concurrency_safe(self) -> bool:
             return False
 
+        def available(self) -> bool:
+            return False
+
         def cast_params(self, params: dict) -> dict:
             return {"value": str(params["value"])}
 
@@ -135,9 +138,16 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     assert tool.config_key == "api_plugin"
     assert tool.read_only is True
     assert tool.concurrency_safe is False
+    assert tool.available() is False
     assert tool.cast_params({"value": 1}) == {"value": "1"}
     assert tool.validate_params({"value": "1"}) == []
     assert tool.to_schema() == {"name": "api_plugin", "custom": True}
+    assert registry.get_definitions() == []
+
+    prepared, params, error = registry.prepare_call("api_plugin", {"value": 1})
+    assert prepared is None
+    assert params == {"value": 1}
+    assert error == "Error: Tool 'api_plugin' is unavailable"
 
     result = await tool.execute(value="1")
     assert is_tool_error_result(result) is True
