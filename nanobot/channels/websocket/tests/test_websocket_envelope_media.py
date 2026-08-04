@@ -225,9 +225,7 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
         "session_key": "websocket:pricing",
         "title": "Pricing",
     }]
-    [block] = metadata["_runtime_context_blocks"]
-    assert block.source == "session_mentions"
-    assert "websocket:pricing" in block.content
+    assert "_runtime_context_blocks" not in metadata
 
 
 @pytest.mark.asyncio

@@ -87,30 +87,26 @@ class ToolRegistry:
         """Get tool definitions with stable ordering for cache-friendly prompts.
 
         Built-in tools are sorted first as a stable prefix, then MCP tools are
-        sorted and appended.  The result is cached until the next
-        register/unregister call. Request-scoped availability is applied after
-        the cached schemas are built.
+        sorted and appended. The result is cached until the next
+        register/unregister call.
         """
-        if self._cached_definitions is None:
-            definitions = [tool.to_schema() for tool in self._tools.values()]
-            builtins: list[dict[str, Any]] = []
-            mcp_tools: list[dict[str, Any]] = []
-            for schema in definitions:
-                name = self._schema_name(schema)
-                if name.startswith("mcp_"):
-                    mcp_tools.append(schema)
-                else:
-                    builtins.append(schema)
+        if self._cached_definitions is not None:
+            return self._cached_definitions
 
-            builtins.sort(key=self._schema_name)
-            mcp_tools.sort(key=self._schema_name)
-            self._cached_definitions = builtins + mcp_tools
+        definitions = [tool.to_schema() for tool in self._tools.values()]
+        builtins: list[dict[str, Any]] = []
+        mcp_tools: list[dict[str, Any]] = []
+        for schema in definitions:
+            name = self._schema_name(schema)
+            if name.startswith("mcp_"):
+                mcp_tools.append(schema)
+            else:
+                builtins.append(schema)
 
-        return [
-            schema
-            for schema in self._cached_definitions
-            if self._tools[self._schema_name(schema)].available()
-        ]
+        builtins.sort(key=self._schema_name)
+        mcp_tools.sort(key=self._schema_name)
+        self._cached_definitions = builtins + mcp_tools
+        return self._cached_definitions
 
     def prepare_call(
         self,
@@ -127,9 +123,6 @@ class ToolRegistry:
                     f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
                 )
             )
-        if not tool.available():
-            return None, params, ToolResult.error(f"Error: Tool '{name}' is unavailable")
-
         # Compatibility for external tools that still implement the legacy
         # setter protocol. Built-ins read the authoritative ContextVar
         # directly and never copy routing state.

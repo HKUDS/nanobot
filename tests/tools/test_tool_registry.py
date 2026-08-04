@@ -9,16 +9,9 @@ from nanobot.agent.tools.registry import ToolRegistry
 
 
 class _FakeTool(Tool):
-    def __init__(
-        self,
-        name: str,
-        schema: dict[str, Any] | None = None,
-        *,
-        available: bool = True,
-    ):
+    def __init__(self, name: str, schema: dict[str, Any] | None = None):
         self._name = name
         self._schema = schema
-        self._available = available
 
     @property
     def name(self) -> str:
@@ -34,10 +27,6 @@ class _FakeTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         return kwargs
-
-    def available(self) -> bool:
-        return self._available
-
 
 def _tool_names(definitions: list[dict[str, Any]]) -> list[str]:
     names: list[str] = []
@@ -67,19 +56,6 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
-
-
-def test_unavailable_tools_are_hidden_and_cannot_be_called() -> None:
-    registry = ToolRegistry()
-    registry.register(_FakeTool("visible"))
-    registry.register(_FakeTool("hidden", available=False))
-
-    assert _tool_names(registry.get_definitions()) == ["visible"]
-    tool, params, error = registry.prepare_call("hidden", {})
-
-    assert tool is None
-    assert params == {}
-    assert error == "Error: Tool 'hidden' is unavailable"
 
 
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:

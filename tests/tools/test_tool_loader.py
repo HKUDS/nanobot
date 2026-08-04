@@ -40,10 +40,6 @@ def test_tool_default_enabled_is_true():
     assert _MinimalTool.enabled(None) is True
 
 
-def test_tool_default_available_is_true():
-    assert _MinimalTool().available() is True
-
-
 def test_tool_default_create_returns_instance():
     tool = _MinimalTool.create(None)
     assert isinstance(tool, _MinimalTool)

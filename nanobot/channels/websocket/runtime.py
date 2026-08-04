@@ -41,7 +41,6 @@ from nanobot.config.schema import Base
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
-    RuntimeContextBlock,
     webui_quote_runtime_context,
 )
 from nanobot.security.workspace_access import (
@@ -79,7 +78,6 @@ from nanobot.webui.session_access import (
     SessionAccessScope,
     SessionMention,
     WebuiSessionAccess,
-    session_mentions_runtime_context,
 )
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.transcription_ws import webui_transcription_event
@@ -859,17 +857,11 @@ class WebSocketChannel(BaseChannel):
                         session_mentions=session_mentions or None,
                     )
                 if trusted_webui:
-                    context_blocks: list[RuntimeContextBlock] = []
                     quote = webui_quote_runtime_context({
                         WEBUI_QUOTE_METADATA: envelope.get("quoted_context"),
                     })
                     if quote is not None:
-                        context_blocks.append(quote)
-                    session_context = session_mentions_runtime_context(session_mentions)
-                    if session_context is not None:
-                        context_blocks.append(session_context)
-                    if context_blocks:
-                        metadata[RUNTIME_CONTEXT_INPUT_META] = context_blocks
+                        metadata[RUNTIME_CONTEXT_INPUT_META] = [quote]
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=cid,
