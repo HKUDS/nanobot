@@ -1596,6 +1596,7 @@ describe("ThreadComposer", () => {
         onSend={vi.fn()}
         placeholder="Type your message..."
         cliApps={CLI_APPS}
+        mcpPresets={MCP_PRESETS}
         sessions={[
           ...["a", "b"].map((chatId) => session(chatId, "Plan")),
           session("blender-chat", "Blender", "3D notes"),
@@ -1606,6 +1607,10 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
+    const palette = screen.getByRole("listbox", { name: "Mentions" });
+    expect(within(palette).getAllByRole("group").map((group) => (
+      group.getAttribute("aria-label")
+    ))).toEqual(["CLI apps", "MCP services", "Nanobot conversations"]);
     const options = screen.getAllByRole("option", { name: /Plan @Plan/i });
     expect(options.map((option) => option.textContent)).toEqual([
       expect.stringContaining("@Plan"),

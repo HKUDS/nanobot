@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from nanobot.runtime_context import (
     RuntimeContextBlock,
@@ -24,24 +24,39 @@ from nanobot.webui.transcript import (
 )
 
 _VISIBLE_ROLES = {"user", "assistant"}
-_WEBUI_SESSION_PREFIX = "websocket:"
 
 
-SessionMention = dict[str, str]
-SessionMessage = dict[str, Any]
-SessionMatch = dict[str, Any]
+class SessionMention(TypedDict):
+    name: str
+    session_key: str
+    title: str
+
+
+class SessionMessage(TypedDict):
+    message_index: int
+    role: str
+    timestamp: str | int | None
+    content: str
+
+
+class SessionMatch(TypedDict):
+    session_key: str
+    title: str
+    updated_at: str | None
+    messages: list[SessionMessage]
 
 
 @dataclass(frozen=True)
 class SessionAccessScope:
     current_session_key: str
+    session_key_prefix: str
     project_path: Path | None = None
     restrict_to_workspace: bool = False
 
     def allows(self, session_key: object) -> bool:
         return (
             isinstance(session_key, str)
-            and session_key.startswith(_WEBUI_SESSION_PREFIX)
+            and session_key.startswith(self.session_key_prefix)
             and session_key != self.current_session_key
         )
 
@@ -245,7 +260,7 @@ class WebuiSessionAccess:
         seen_keys: set[str] = set()
         seen_names: set[str] = set()
         for raw_mention in normalize_session_mentions_metadata(raw):
-            mention = raw_mention
+            mention = cast(SessionMention, raw_mention)
             key = mention["session_key"]
             folded_name = mention["name"].lower()
             payload = self._metadata(key, scope)

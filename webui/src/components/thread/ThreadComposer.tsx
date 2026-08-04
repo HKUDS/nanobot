@@ -1325,14 +1325,23 @@ export function ThreadComposer({
         logoUrl: preset.logo_url ?? null,
         initials: mcpPresetInitials(preset),
       }));
-    return [
-      ...sessionCandidates.slice(0, 4),
-      ...cliCandidates.slice(0, 2),
-      ...mcpCandidates.slice(0, 2),
-      ...sessionCandidates.slice(4),
-      ...cliCandidates.slice(2),
-      ...mcpCandidates.slice(2),
-    ].slice(0, 8);
+    const groups = [
+      { candidates: cliCandidates, reserved: 2 },
+      { candidates: mcpCandidates, reserved: 2 },
+      { candidates: sessionCandidates, reserved: 4 },
+    ];
+    let remaining = 8;
+    const counts = groups.map(({ candidates, reserved }) => {
+      const count = Math.min(candidates.length, reserved);
+      remaining -= count;
+      return count;
+    });
+    for (const index of [2, 0, 1]) {
+      const extra = Math.min(remaining, groups[index].candidates.length - counts[index]);
+      counts[index] += extra;
+      remaining -= extra;
+    }
+    return groups.flatMap(({ candidates }, index) => candidates.slice(0, counts[index]));
   }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
@@ -2660,7 +2669,7 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
-  const groupedCandidates = (["session", "cli", "mcp"] as const)
+  const groupedCandidates = (["cli", "mcp", "session"] as const)
     .map((kind) => ({
       kind,
       label: kind === "session"

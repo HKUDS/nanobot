@@ -46,7 +46,7 @@ def _webui_request(
         channel="websocket",
         chat_id=session_key.removeprefix("websocket:"),
         session_key=session_key,
-        metadata={INBOUND_META_SESSION_READ_SCOPE: True},
+        metadata={INBOUND_META_SESSION_READ_SCOPE: "websocket:"},
     ))
 
 
@@ -284,3 +284,24 @@ async def test_session_tools_reject_unscoped_and_out_of_scope_sessions(tmp_path)
     assert spoofed.is_error
     assert [row["session_key"] for row in search["results"]] == ["websocket:visible"]
     assert read.is_error
+
+
+@pytest.mark.asyncio
+async def test_session_tools_use_the_scope_granted_by_the_channel(tmp_path):
+    manager = SessionManager(tmp_path)
+    _save_session(
+        manager,
+        "custom:history",
+        title="History",
+        messages=[{"role": "user", "content": "custom needle"}],
+    )
+
+    with request_context(RequestContext(
+        channel="custom",
+        chat_id="current",
+        session_key="custom:current",
+        metadata={INBOUND_META_SESSION_READ_SCOPE: "custom:"},
+    )):
+        result = _decode(await SearchSessionsTool(manager).execute(query="needle"))
+
+    assert [row["session_key"] for row in result["results"]] == ["custom:history"]

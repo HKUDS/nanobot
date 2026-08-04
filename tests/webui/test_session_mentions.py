@@ -51,7 +51,7 @@ def test_normalize_session_mentions_keeps_only_authorized_distinct_targets(
             {"name": "STRASSE", "session_key": "websocket:upper"},
             {"name": "private", "session_key": "telegram:private"},
         ],
-        SessionAccessScope("websocket:current"),
+        SessionAccessScope("websocket:current", "websocket:"),
     )
 
     assert mentions == [
@@ -99,6 +99,7 @@ def test_restricted_scope_rejects_sessions_from_other_projects(tmp_path) -> None
     access = WebuiSessionAccess(manager)
     scope = SessionAccessScope(
         "websocket:current",
+        "websocket:",
         project_path=project_a,
         restrict_to_workspace=True,
     )

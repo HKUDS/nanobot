@@ -33,19 +33,19 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def _session_scope() -> SessionAccessScope | None:
     ctx = current_request_context()
-    if ctx is None:
+    if ctx is None or not ctx.session_key:
         return None
-    session_key = ctx.session_key
+    prefix = ctx.metadata.get(INBOUND_META_SESSION_READ_SCOPE)
     if (
-        ctx.channel != "websocket"
-        or session_key is None
-        or not session_key.startswith("websocket:")
-        or ctx.metadata.get(INBOUND_META_SESSION_READ_SCOPE) is not True
+        not isinstance(prefix, str)
+        or not prefix.endswith(":")
+        or not ctx.session_key.startswith(prefix)
     ):
         return None
     workspace = current_workspace_scope()
     return SessionAccessScope(
-        current_session_key=session_key,
+        current_session_key=ctx.session_key,
+        session_key_prefix=prefix,
         project_path=workspace.project_path if workspace is not None else ctx.workspace,
         restrict_to_workspace=workspace.restrict_to_workspace if workspace is not None else False,
     )
@@ -131,20 +131,30 @@ class SearchSessionsTool(_SessionTool):
             return ToolResult.error("Error: session search is not available to this client")
         matches = await asyncio.to_thread(self._access.search, scope, query, _SEARCH_LIMIT)
         needle = query.casefold()
-        for match in matches:
-            match["session_ref"] = _session_ref(match["session_key"])
-            match["excerpts"] = [
+        result = {
+            "notice": _UNTRUSTED_NOTICE,
+            "query": query,
+            "results": [
                 {
-                    "message_index": message["message_index"],
-                    "role": message["role"],
-                    "content": _excerpt(message["content"], needle, _SEARCH_EXCERPT_CHARS),
+                    "session_key": match["session_key"],
+                    "session_ref": _session_ref(match["session_key"]),
+                    "title": match["title"],
+                    "updated_at": match["updated_at"],
+                    "excerpts": [
+                        {
+                            "message_index": message["message_index"],
+                            "role": message["role"],
+                            "content": _excerpt(
+                                message["content"], needle, _SEARCH_EXCERPT_CHARS
+                            ),
+                        }
+                        for message in match["messages"]
+                    ],
                 }
-                for message in match.pop("messages")
-            ]
-        return json.dumps(
-            {"notice": _UNTRUSTED_NOTICE, "query": query, "results": matches},
-            ensure_ascii=False,
-        )
+                for match in matches
+            ],
+        }
+        return json.dumps(result, ensure_ascii=False)
 
 
 @tool_parameters(
@@ -205,13 +215,16 @@ class ReadSessionTool(_SessionTool):
         if match is None:
             return ToolResult.error(f"Error: session not found: {session_key}")
         needle = query_text.casefold()
-        match.update({
+        result = {
             "notice": _UNTRUSTED_NOTICE,
+            "session_key": match["session_key"],
             "session_ref": _session_ref(session_key),
+            "title": match["title"],
+            "updated_at": match["updated_at"],
             "query": query_text or None,
             "messages": [
                 {**message, "content": _excerpt(message["content"], needle, _READ_MESSAGE_CHARS)}
                 for message in match["messages"]
             ],
-        })
-        return json.dumps(match, ensure_ascii=False)
+        }
+        return json.dumps(result, ensure_ascii=False)
