@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -370,6 +371,10 @@ function renderSettingsView(
 async function togglePresetEditor(name = "primary") {
   const row = await screen.findByTestId(`model-call-order-row-${name}`);
   fireEvent.click(within(row).getAllByRole("button")[0]);
+}
+
+async function openPopover(trigger: HTMLElement) {
+  await userEvent.setup().click(trigger);
 }
 
 async function chooseProviderToConfigure(label: string) {
@@ -2460,8 +2465,8 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
       target: { value: "Writer" },
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Select model" }));
-    const modelSearch = await screen.findByRole("textbox", {
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("combobox", {
       name: "Search or type model ID",
     });
     fireEvent.change(modelSearch, {
@@ -3275,24 +3280,24 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Gemini" }));
 
     expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "imagen-4.0-generate-001" }));
+    await openPopover(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
+    fireEvent.click(await screen.findByRole("option", { name: "imagen-4.0-generate-001" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
-    const modelInput = await screen.findByRole("textbox", { name: "Search or type model ID" });
+    await openPopover(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
+    const modelInput = await screen.findByRole("combobox", { name: "Search or type model ID" });
     fireEvent.change(modelInput, { target: { value: "imagen-5-preview" } });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Use “imagen-5-preview”" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Use “imagen-5-preview”" }));
     expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Gemini" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Custom" }));
     expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "imagen-5-preview" }));
-    const customProviderInput = await screen.findByRole("textbox", {
+    await openPopover(screen.getByRole("button", { name: "imagen-5-preview" }));
+    const customProviderInput = await screen.findByRole("combobox", {
       name: "Search or type model ID",
     });
     fireEvent.change(customProviderInput, { target: { value: "private/image-v2" } });
@@ -3638,7 +3643,7 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models" });
 
     await togglePresetEditor();
-    fireEvent.pointerDown(await screen.findByRole("button", { name: /Select model/i }));
+    await openPopover(await screen.findByRole("button", { name: /Select model/i }));
     expect(
       await screen.findByText("Configure this provider before loading models."),
     ).toBeInTheDocument();
@@ -3698,7 +3703,7 @@ describe("SettingsView Apps catalog", () => {
 
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
-    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    await openPopover(modelButtons[modelButtons.length - 1]);
     const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
     expect(input.value).toBe("open-codex/gpt-5.5");
 
@@ -3776,7 +3781,7 @@ describe("SettingsView Apps catalog", () => {
     const modelButtons = await screen.findAllByRole("button", {
       name: /openai-codex\/gpt-5\.5/i,
     });
-    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    await openPopover(modelButtons[modelButtons.length - 1]);
 
     expect(await screen.findByText("GPT-5.6-Sol")).toBeInTheDocument();
     expect(screen.getByText(/Latest frontier agentic coding model\./)).toBeInTheDocument();
@@ -3900,7 +3905,7 @@ describe("SettingsView Apps catalog", () => {
 
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /deepseek-chat/i });
-    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    await openPopover(modelButtons[modelButtons.length - 1]);
     await screen.findByText("deepseek-reasoner");
     fireEvent.click(screen.getAllByText("deepseek-reasoner")[0]);
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
