@@ -26,6 +26,7 @@ const PopoverContent = React.forwardRef<
       className={cn(
         floatingSurfaceClassName,
         floatingSurfaceMotionClassName,
+        "max-h-[min(var(--radix-popover-content-available-height),28rem)]",
         className,
       )}
       {...props}

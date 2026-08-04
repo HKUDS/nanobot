@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -294,51 +293,46 @@ export function WorkspaceAccessMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuRadioGroup
-          value={mode}
-          onValueChange={(value) => {
-            if (value === "restricted" || value === "full") setMode(value);
-          }}
-        >
-          <AccessMenuItem
-            value="restricted"
-            icon={<Hand className="h-4 w-4" />}
-            label={t("thread.composer.workspace.default")}
-          />
-          <AccessMenuItem
-            value="full"
-            icon={<AlertTriangle className="h-4 w-4" />}
-            label={t("thread.composer.workspace.full")}
-            disabled={!canUseFullAccess}
-            warning
-          />
-        </DropdownMenuRadioGroup>
+        <AccessMenuItem
+          icon={<Hand className="h-4 w-4" />}
+          label={t("thread.composer.workspace.default")}
+          selected={mode === "restricted"}
+          onSelect={() => setMode("restricted")}
+        />
+        <AccessMenuItem
+          icon={<AlertTriangle className="h-4 w-4" />}
+          label={t("thread.composer.workspace.full")}
+          selected={mode === "full"}
+          disabled={!canUseFullAccess}
+          warning
+          onSelect={() => setMode("full")}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 function AccessMenuItem({
-  value,
   icon,
   label,
+  selected,
   disabled,
   warning,
+  onSelect,
 }: {
-  value: WorkspaceAccessMode;
   icon: ReactNode;
   label: string;
+  selected: boolean;
   disabled?: boolean;
   warning?: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <DropdownMenuRadioItem
-      value={value}
-      indicator="check"
-      indicatorPosition="end"
+    <DropdownMenuItem
       disabled={disabled}
+      onSelect={onSelect}
       className={cn(
-        "flex h-10 items-center gap-3 rounded-xl pl-3 text-[13.5px] font-semibold",
+        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold",
         warning && "text-orange-600 focus:text-orange-600 dark:text-orange-300 dark:focus:text-orange-300",
       )}
     >
@@ -346,6 +340,7 @@ function AccessMenuItem({
         {icon}
       </span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-    </DropdownMenuRadioItem>
+      {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : null}
+    </DropdownMenuItem>
   );
 }

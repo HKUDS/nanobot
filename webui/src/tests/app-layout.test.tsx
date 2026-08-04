@@ -2020,7 +2020,7 @@ describe("App layout", () => {
     );
     fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
     expect(screen.getAllByTestId("provider-picker-logo-openai").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Auto/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Auto/ }));
     const openModelPicker = async () => {
       const modelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o/ });
       await user.click(modelButtons[modelButtons.length - 1]);
@@ -2091,9 +2091,9 @@ describe("App layout", () => {
       target: { value: "unsaved-brave-key" },
     });
     fireEvent.pointerDown(screen.getByRole("button", { name: /Brave Search/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Tavily" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tavily" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: /Tavily/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Brave Search" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
 

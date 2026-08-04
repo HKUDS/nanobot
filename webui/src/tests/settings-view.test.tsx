@@ -3211,7 +3211,7 @@ describe("SettingsView Apps catalog", () => {
       target: { value: "http://127.0.0.1:7890" },
     });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking style" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "enable_thinking" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() => {
@@ -3277,7 +3277,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(screen.queryByDisplayValue("openai/gpt-5.4-image-2")).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: "OpenRouter" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Gemini" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Gemini" }));
 
     expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
     await openPopover(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
@@ -3293,7 +3293,7 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Gemini" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Custom" }));
     expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
 
     await openPopover(screen.getByRole("button", { name: "imagen-5-preview" }));
@@ -3577,9 +3577,9 @@ describe("SettingsView Apps catalog", () => {
     if (!providerPicker) throw new Error("provider picker was not found");
     fireEvent.pointerDown(providerPicker);
 
-    expect(await screen.findByRole("menuitemradio", { name: /DeepSeek/ })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: /OpenAI Codex/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: /GitHub Copilot/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /DeepSeek/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /OpenAI Codex/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /GitHub Copilot/ })).not.toBeInTheDocument();
   });
 
   it("does not fetch model lists for unsigned OAuth providers", async () => {
@@ -4028,7 +4028,7 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "browser" });
 
     fireEvent.pointerDown(await screen.findByRole("button", { name: /DuckDuckGo/ }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Keenable" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keenable" }));
     const saveButton = screen
       .getAllByRole("button", { name: "Save" })
       .find((button) => !(button as HTMLButtonElement).disabled);

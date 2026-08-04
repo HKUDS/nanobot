@@ -86,6 +86,7 @@ describe("combobox navigation", () => {
     const input = screen.getByRole("combobox", { name: "Options" });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Available options" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open options" }));
 
     const selectedOption = screen.getByRole("option", { name: "Beta" });
@@ -107,13 +108,4 @@ describe("combobox navigation", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it("closes the listbox on Escape", () => {
-    render(<ComboboxHarness />);
-
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Options" }), {
-      key: "Escape",
-    });
-
-    expect(screen.queryByRole("listbox", { name: "Available options" })).not.toBeInTheDocument();
-  });
 });

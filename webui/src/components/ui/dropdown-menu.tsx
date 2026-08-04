@@ -50,7 +50,7 @@ const DropdownMenuSubContent = React.forwardRef<
     ref={ref}
     className={cn(
       floatingSurfaceClassName,
-      "min-w-[10rem]",
+      "max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
       className,
     )}
     {...props}
@@ -74,7 +74,7 @@ const DropdownMenuContent = React.forwardRef<
       className={cn(
         floatingSurfaceClassName,
         floatingSurfaceMotionClassName,
-        "min-w-[10rem]",
+        "max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
         className,
       )}
       {...props}
@@ -130,32 +130,20 @@ DropdownMenuCheckboxItem.displayName =
 
 const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
-    indicator?: "dot" | "check";
-    indicatorPosition?: "start" | "end";
-  }
->(({ className, children, indicator = "dot", indicatorPosition = "start", ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
       menuItemClassName,
-      indicatorPosition === "start" ? "pl-8 pr-2.5" : "pl-2.5 pr-8",
+      "pl-8 pr-2.5",
       className,
     )}
     {...props}
   >
-    <span
-      className={cn(
-        "absolute flex h-3.5 w-3.5 items-center justify-center",
-        indicatorPosition === "start" ? "left-2.5" : "right-2.5",
-      )}
-    >
+    <span className="absolute left-2.5 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
-        {indicator === "check" ? (
-          <Check className="h-3.5 w-3.5" />
-        ) : (
-          <Circle className="h-2 w-2 fill-current" />
-        )}
+        <Circle className="h-2 w-2 fill-current" />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}

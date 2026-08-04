@@ -92,8 +92,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -3999,26 +3997,14 @@ function ProviderAdvancedOptions({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="min-w-[220px]">
-                    <DropdownMenuRadioGroup
-                      value={form.apiType}
-                      onValueChange={(value) => {
-                        const option = OPENAI_API_TYPE_OPTIONS.find(
-                          (candidate) => candidate.value === value,
-                        );
-                        if (option) onChange({ apiType: option.value });
-                      }}
-                    >
-                      {OPENAI_API_TYPE_OPTIONS.map((option) => (
-                        <DropdownMenuRadioItem
-                          key={option.value}
-                          value={option.value}
-                          indicator="check"
-                          indicatorPosition="end"
-                        >
-                          {option.label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
+                    {OPENAI_API_TYPE_OPTIONS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onSelect={() => onChange({ apiType: option.value })}
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </label>
@@ -4047,22 +4033,15 @@ function ProviderAdvancedOptions({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="min-w-[220px]">
-                    <DropdownMenuRadioGroup
-                      value={form.thinkingStyle}
-                      onValueChange={(value) => onChange({ thinkingStyle: value })}
-                    >
-                      {thinkingStyleOptions.map((option) => (
-                        <DropdownMenuRadioItem
-                          key={option.value || "default"}
-                          value={option.value}
-                          indicator="check"
-                          indicatorPosition="end"
-                          className="font-mono text-[12px]"
-                        >
-                          {option.label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
+                    {thinkingStyleOptions.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value || "default"}
+                        onSelect={() => onChange({ thinkingStyle: option.value })}
+                        className="font-mono text-[12px]"
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </label>
@@ -5524,25 +5503,12 @@ function AutomationsSettings({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-40">
-                <DropdownMenuRadioGroup
-                  value={sort}
-                  onValueChange={(value) => {
-                    const option = (Object.keys(sortLabel) as AutomationSort[])
-                      .find((candidate) => candidate === value);
-                    if (option) onSortChange(option);
-                  }}
-                >
-                  {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                    <DropdownMenuRadioItem
-                      key={value}
-                      value={value}
-                      indicator="check"
-                      indicatorPosition="end"
-                    >
-                      {sortLabel[value]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
+                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                    <span>{sortLabel[value]}</span>
+                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -6155,51 +6121,27 @@ function AutomationEditDialog({
                       className="h-10 rounded-[12px]"
                     />
                   </label>
-                  <div className="block space-y-1.5">
+                  <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
                       {tx("settings.automations.fields.unit", "Unit")}
                     </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          aria-label={tx("settings.automations.fields.unit", "Unit")}
-                          className="h-10 w-full justify-between rounded-[12px] px-3 text-[13px] font-normal"
-                        >
-                          <span>{unitLabels[draft.everyUnit]}</span>
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-0"
-                      >
-                        <DropdownMenuRadioGroup
-                          value={draft.everyUnit}
-                          onValueChange={(value) => {
-                            const unit = AUTOMATION_EVERY_UNITS.find(
-                              (candidate) => candidate.value === value,
-                            );
-                            if (unit) {
-                              setDraft((prev) => ({ ...prev, everyUnit: unit.value }));
-                            }
-                          }}
-                        >
-                          {AUTOMATION_EVERY_UNITS.map((unit) => (
-                            <DropdownMenuRadioItem
-                              key={unit.value}
-                              value={unit.value}
-                              indicator="check"
-                              indicatorPosition="end"
-                            >
-                              {unitLabels[unit.value]}
-                            </DropdownMenuRadioItem>
-                          ))}
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                    <select
+                      value={draft.everyUnit}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          everyUnit: event.target.value as AutomationEveryUnit,
+                        }))
+                      }
+                      className="h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {AUTOMATION_EVERY_UNITS.map((unit) => (
+                        <option key={unit.value} value={unit.value}>
+                          {unitLabels[unit.value]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               ) : null}
 
@@ -9043,16 +8985,15 @@ function ProviderPicker({
         align="end"
         className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
-        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-          {providers.map((provider) => (
-            <DropdownMenuRadioItem
+        {providers.map((provider) => {
+          const selected = provider.name === value;
+          return (
+            <DropdownMenuItem
               key={provider.name}
-              value={provider.name}
-              indicator="check"
-              indicatorPosition="end"
+              onSelect={() => onChange(provider.name)}
               className={cn(
-                "flex cursor-default items-center gap-2 rounded-[12px] py-2 text-[13px]",
-                "focus:bg-muted/85 focus:text-foreground data-[state=checked]:bg-muted/80",
+                "flex cursor-default items-center justify-between gap-2 text-[13px]",
+                selected && "bg-muted/80 text-foreground focus:bg-muted",
               )}
             >
               <span className="flex min-w-0 items-center gap-2">
@@ -9064,9 +9005,10 @@ function ProviderPicker({
                 ) : null}
                 <span className="truncate">{provider.label}</span>
               </span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+              {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -2,7 +2,7 @@ export const floatingSurfaceVisualClassName =
   "rounded-[18px] border border-border/65 bg-popover/96 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]";
 
 export const floatingSurfaceClassName =
-  `${floatingSurfaceVisualClassName} z-50 max-h-[min(var(--radix-popper-available-height),28rem)] overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent`;
+  `${floatingSurfaceVisualClassName} z-50 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent`;
 
 export const floatingSurfaceMotionClassName =
   "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0";
