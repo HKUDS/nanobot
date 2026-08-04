@@ -1887,7 +1887,7 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("meeting in @gimp");
     const token = screen.getByTestId("composer-cli-mention-gimp");
     expect(token).toHaveTextContent("@gimp");
-    expect(token).toHaveClass("font-medium");
+    expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");

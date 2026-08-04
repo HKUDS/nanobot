@@ -22,7 +22,7 @@ export function InlineTokenHighlight({
       data-testid={testId}
       title={title}
       className={cn(
-        "relative inline font-medium transition-colors duration-150",
+        "relative inline font-[550] transition-colors duration-150",
         className,
       )}
       style={{ color }}
