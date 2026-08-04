@@ -8955,14 +8955,14 @@ function TimezonePicker({
             />
           </div>
         </div>
-        <div
-          {...navigation.listProps}
-          aria-label={tx("settings.timezone.select", "Select timezone")}
-          className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
-          data-testid="timezone-picker-list"
-        >
-          {filteredOptions.length ? (
-            filteredOptions.map((option) => {
+        {filteredOptions.length ? (
+          <div
+            {...navigation.listProps}
+            aria-label={tx("settings.timezone.select", "Select timezone")}
+            className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+            data-testid="timezone-picker-list"
+          >
+            {filteredOptions.map((option) => {
               const selected = option.name === value;
               return (
                 <ComboboxOption
@@ -8982,13 +8982,17 @@ function TimezonePicker({
                   </span>
                 </ComboboxOption>
               );
-            })
-          ) : (
-            <div className="px-3 py-5 text-center text-[12px] text-muted-foreground">
-              {tx("settings.timezone.empty", "No matching timezones.")}
-            </div>
-          )}
-        </div>
+            })}
+          </div>
+        ) : (
+          <div
+            role="status"
+            className="px-3 py-5 text-center text-[12px] text-muted-foreground"
+            data-testid="timezone-picker-list"
+          >
+            {tx("settings.timezone.empty", "No matching timezones.")}
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

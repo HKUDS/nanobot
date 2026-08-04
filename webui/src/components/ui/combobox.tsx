@@ -25,7 +25,10 @@ export function useComboboxNavigation({
   const [activeValue, setActiveValue] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setActiveValue(null);
+      return;
+    }
     setActiveValue((current) => {
       if (current && values.includes(current)) return current;
       if (selectedValue && values.includes(selectedValue)) return selectedValue;
@@ -54,23 +57,15 @@ export function useComboboxNavigation({
     if (event.nativeEvent.isComposing) return;
     switch (event.key) {
       case "ArrowDown":
-        event.preventDefault();
-        move(1);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        move(-1);
-        break;
-      case "Home":
         if (values.length) {
           event.preventDefault();
-          setActiveValue(values[0]);
+          move(1);
         }
         break;
-      case "End":
+      case "ArrowUp":
         if (values.length) {
           event.preventDefault();
-          setActiveValue(values[values.length - 1]);
+          move(-1);
         }
         break;
       case "Enter":
@@ -86,12 +81,13 @@ export function useComboboxNavigation({
     }
   };
 
+  const expanded = open && values.length > 0;
   const inputProps = {
     role: "combobox" as const,
     "aria-autocomplete": "list" as const,
-    "aria-controls": listboxId,
-    "aria-expanded": open,
-    "aria-activedescendant": activeOptionId,
+    "aria-controls": expanded ? listboxId : undefined,
+    "aria-expanded": expanded,
+    "aria-activedescendant": expanded ? activeOptionId : undefined,
     onKeyDown: onInputKeyDown,
   };
 
@@ -105,7 +101,7 @@ export function useComboboxNavigation({
     return {
       id: `${listboxId}-option-${index}`,
       role: "option" as const,
-      "aria-selected": value === selectedValue,
+      "aria-selected": value === activeValue,
       "data-highlighted": value === activeValue ? "" : undefined,
       tabIndex: -1,
       onPointerMove: () => setActiveValue(value),
@@ -126,7 +122,7 @@ const ComboboxOption = React.forwardRef<
     className={cn(
       floatingItemClassName,
       floatingItemFocusClassName,
-      "w-full cursor-default text-left data-[highlighted]:bg-muted/85 data-[highlighted]:text-foreground aria-selected:bg-muted/80",
+      "w-full cursor-default text-left data-[highlighted]:bg-muted/85 data-[highlighted]:text-foreground",
       className,
     )}
     {...props}
