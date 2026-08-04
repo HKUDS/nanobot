@@ -177,7 +177,7 @@ export function ChannelInstancesPanel({
             <article
               key={instance.id}
               className={cn(
-                "overflow-hidden rounded-[18px] border border-transparent transition-colors",
+                "overflow-hidden rounded-[18px] transition-colors",
                 expanded
                   ? "bg-background"
                   : "bg-background/70 hover:bg-muted",
@@ -230,8 +230,8 @@ export function ChannelInstancesPanel({
               </div>
 
               {expanded ? (
-                <div className="border-t border-border/60">
-                  <section className="px-4 py-4">
+                <div className="space-y-5 px-4 pb-4">
+                  <section className="pt-4">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
                         {customization.renderInstanceSummary?.(instance) ?? instance.id}
@@ -256,7 +256,7 @@ export function ChannelInstancesPanel({
                     }
                   />
                   {instanceFields.length ? (
-                    <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+                    <details className="group text-[12px] leading-5 text-muted-foreground">
                       <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
                         <span className="inline-flex items-center gap-1.5">
                           {tx("settings.channels.advanced", "Advanced")}
@@ -290,8 +290,8 @@ export function ChannelInstancesPanel({
                           <Button
                             type="submit"
                             size="sm"
-                            variant="outline"
-                            className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                            variant="secondary"
+                            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold hover:bg-muted"
                             disabled={savingFields}
                           >
                             {savingFields ? (
@@ -397,7 +397,7 @@ function ChannelInstanceAvatar({
 
   return (
     <span
-      className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background text-[10px] font-bold"
+      className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-background text-[10px] font-bold"
       style={{ color }}
       aria-hidden
     >

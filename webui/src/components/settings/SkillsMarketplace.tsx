@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   fetchMarketplaceSkillTrends,
   fetchTrendingMarketplaceSkills,
@@ -232,19 +233,12 @@ export function SkillsMarketplace({
 
       {query.trim().length < 2 ? (
         <section className="overflow-hidden rounded-[22px] bg-settings-surface">
-          <div className="flex flex-col items-start gap-2 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div>
-              <h2 className="text-[14px] font-semibold">
-                {t("settings.skills.marketplaceTrendingTitle", {
-                  defaultValue: "Trending by marketplace",
-                })}
-              </h2>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">
-                {t("settings.skills.marketplaceTrendingDescription", {
-                  defaultValue: "Each marketplace keeps its own ranking and install metrics.",
-                })}
-              </p>
-            </div>
+          <div className="flex flex-col items-start gap-2 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <h2 className="text-[14px] font-semibold">
+              {t("settings.skills.marketplaceTrendingTitle", {
+                defaultValue: "Trending by marketplace",
+              })}
+            </h2>
             {provider !== "all" ? (
               <a
                 href={providerUrl(provider)}
@@ -359,32 +353,27 @@ function ProviderFilter({
   const { t } = useTranslation();
   const providers: MarketplaceProvider[] = ["all", "skills_sh", "skillhub"];
   return (
-    <div
-      className="flex w-fit items-center gap-0.5 rounded-full bg-settings-surface p-1"
-      role="tablist"
-      aria-label={t("settings.skills.marketplaceProviderFilter", {
+    <SegmentedControl
+      value={value}
+      mode="tabs"
+      ariaLabel={t("settings.skills.marketplaceProviderFilter", {
         defaultValue: "Skill source",
       })}
-    >
-      {providers.map((provider) => (
-        <button
-          key={provider}
-          type="button"
-          role="tab"
-          aria-selected={value === provider}
-          onClick={() => onChange(provider)}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-muted-foreground transition-colors",
-            value === provider && "bg-background text-foreground shadow-sm",
-          )}
-        >
-          {provider !== "all" ? <ProviderDot provider={provider} /> : null}
-          {provider === "all"
-            ? t("settings.skills.marketplaceProviderAll", { defaultValue: "All" })
-            : providerLabel(provider)}
-        </button>
-      ))}
-    </div>
+      className="w-fit bg-settings-surface"
+      itemClassName="inline-flex h-7 items-center gap-1.5"
+      options={providers.map((provider) => ({
+        value: provider,
+        label: (
+          <>
+            {provider !== "all" ? <ProviderDot provider={provider} /> : null}
+            {provider === "all"
+              ? t("settings.skills.marketplaceProviderAll", { defaultValue: "All" })
+              : providerLabel(provider)}
+          </>
+        ),
+      }))}
+      onChange={onChange}
+    />
   );
 }
 
@@ -420,13 +409,13 @@ function MarketplaceSkillGroups({
     );
   }
   return (
-    <div>
+    <div className="space-y-5 pb-3 pt-2">
       {providers.map((provider) => {
         const providerSkills = skills.filter((skill) => skill.provider === provider);
         if (!providerSkills.length) return null;
         return (
-          <section key={provider} className="border-t border-border/45 first:border-t-0">
-            <div className="flex items-center justify-between px-5 pb-1 pt-3.5">
+          <section key={provider} className="space-y-1">
+            <div className="flex items-center justify-between px-5 py-1.5">
               <ProviderMark provider={provider} />
               <a
                 href={providerUrl(provider)}
@@ -469,7 +458,7 @@ function MarketplaceSkillList({
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
   return (
-    <div className="divide-y divide-border/45 px-3 sm:px-4">
+    <div className="space-y-1 px-3 pb-3 sm:px-4">
       {skills.map((skill) => (
         <MarketplaceSkillRow
           key={skill.id}
@@ -679,7 +668,7 @@ function TrendSparkline({ values }: { values?: number[] }) {
 
 function TrendingSkeleton() {
   return (
-    <div className="divide-y divide-border/45 px-5" aria-hidden>
+    <div className="space-y-1 px-5 pb-3" aria-hidden>
       {Array.from({ length: 5 }, (_, index) => (
         <div key={index} className="flex items-center gap-3 py-4">
           <div className="h-3 w-5 animate-pulse rounded bg-muted" />

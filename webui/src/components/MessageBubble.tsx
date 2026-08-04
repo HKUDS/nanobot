@@ -266,7 +266,6 @@ export function MessageBubble({
   onForkFromHere,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
-  const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
   const mentionCliApps = useMemo(
     () => mergeCliMentionApps(cliApps, message.cliApps),
     [cliApps, message.cliApps],
@@ -277,7 +276,7 @@ export function MessageBubble({
   );
 
   if (message.kind === "trace") {
-    return <TraceGroup message={message} animClass={baseAnim} />;
+    return <TraceGroup message={message} />;
   }
 
   if (message.role === "user") {
@@ -314,12 +313,7 @@ export function MessageBubble({
       />
     );
     return (
-      <div
-        className={cn(
-          "group ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5",
-          baseAnim,
-        )}
-      >
+      <div className="group ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
         {hasImages ? <UserImages images={images} align="right" /> : null}
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" />
@@ -410,7 +404,7 @@ export function MessageBubble({
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
   return (
-    <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
+    <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
         <ReasoningBubble
           text={reasoning}
@@ -836,7 +830,6 @@ export function ReasoningBubble({
 
 interface TraceGroupProps {
   message: UIMessage;
-  animClass: string;
 }
 
 /**
@@ -844,13 +837,13 @@ interface TraceGroupProps {
  * collapsed because tool traces are supporting evidence, not the answer.
  * A single click expands the exact calls when the user wants details.
  */
-export function TraceGroup({ message, animClass }: TraceGroupProps) {
+export function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("w-full", animClass)}>
+    <div className="w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

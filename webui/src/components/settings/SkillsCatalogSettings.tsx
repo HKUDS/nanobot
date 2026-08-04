@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
@@ -36,9 +37,6 @@ import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const { t } = useTranslation();
-  const availableCount = skills.filter(
-    (skill) => skill.enabled !== false && skill.available,
-  ).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [view, setView] = useState<"installed" | "discover">("installed");
   const [installingSkill, setInstallingSkill] = useState("");
@@ -80,51 +78,28 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
 
   return (
     <div className="space-y-7">
-      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
-          {t("settings.skills.description", {
-            defaultValue:
-              "Review installed skills or discover new capabilities from the skills.sh catalog.",
-          })}
-        </p>
-        <span className="text-[12px] font-medium text-muted-foreground">
-          {t("settings.skills.caption", {
-            available: availableCount,
-            total: skills.length,
-            defaultValue: "{{available}} available · {{total}} total",
-          })}
-        </span>
-      </section>
-
-      <div
-        className="inline-flex rounded-[12px] bg-muted/65 p-1"
-        role="tablist"
-        aria-label={t("settings.skills.views", { defaultValue: "Skills views" })}
-      >
-        {(["installed", "discover"] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            role="tab"
-            aria-selected={view === item}
-            onClick={() => setView(item)}
-            className={cn(
-              "inline-flex items-center rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
-              view === item
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {item === "installed"
-              ? t("settings.skills.installedTab", { defaultValue: "Installed" })
-              : t("settings.skills.discoverTab", { defaultValue: "Discover" })}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        value={view}
+        mode="tabs"
+        ariaLabel={t("settings.skills.views", { defaultValue: "Skills views" })}
+        className="w-fit text-[13px]"
+        itemClassName="px-3.5"
+        options={[
+          {
+            value: "installed",
+            label: t("settings.skills.installedTab", { defaultValue: "Installed" }),
+          },
+          {
+            value: "discover",
+            label: t("settings.skills.discoverTab", { defaultValue: "Discover" }),
+          },
+        ]}
+        onChange={setView}
+      />
 
       {view === "installed" ? (
         <section className="overflow-hidden rounded-[22px] bg-settings-surface">
-          <div className="flex flex-col gap-3 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-[320px]">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -142,13 +117,11 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
               />
             </div>
-            <div
-              className={cn(
-                "flex max-w-full items-center gap-1 overflow-x-auto rounded-[10px] bg-muted/65 p-1",
-                "scrollbar-thin scrollbar-track-transparent sm:w-auto",
-              )}
-            >
-              {([
+            <SegmentedControl
+              value={installedFilter}
+              className="sm:w-auto"
+              itemClassName="px-2.5 text-[11px]"
+              options={([
                 ["all", t("settings.skills.filterAll", { defaultValue: "All" }), skills.length],
                 [
                   "enabled",
@@ -160,28 +133,22 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                   t("settings.skills.filterDisabled", { defaultValue: "Disabled" }),
                   disabledCount,
                 ],
-              ] as const).map(([filter, label, count]) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => setInstalledFilter(filter)}
-                  className={cn(
-                    "shrink-0 whitespace-nowrap rounded-[8px] px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    installedFilter === filter
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
-                </button>
-              ))}
-            </div>
+              ] as const).map(([value, label, count]) => ({
+                value,
+                label: (
+                  <>
+                    {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
+                  </>
+                ),
+              }))}
+              onChange={setInstalledFilter}
+            />
           </div>
           {groupedSkills.length ? (
-            <div className="pb-2">
+            <div className="space-y-5 px-3 pb-3 pt-2 sm:px-4">
               {groupedSkills.map((group) => (
-                <section key={group.key}>
-                  <div className="flex items-center gap-2 bg-muted/20 px-5 py-2.5">
+                <section key={group.key} className="space-y-1">
+                  <div className="flex items-center gap-2 px-2 py-1.5">
                     <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                       {group.label}
                     </h2>
@@ -189,7 +156,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                       {group.skills.length}
                     </span>
                   </div>
-                  <div className="divide-y divide-border/40 px-3 sm:px-4">
+                  <div className="space-y-1">
                     {group.skills.map((skill) => (
                       <SkillCatalogRow
                         key={`${skill.source}:${skill.name}`}
@@ -254,8 +221,8 @@ function SkillCatalogRow({
       onClick={() => onSelect(skill)}
       className={cn(
         "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left",
-        "transition-[background-color,box-shadow] duration-150",
-        "hover:bg-muted/70 hover:shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]",
+        "transition-colors duration-150",
+        "hover:bg-muted/70",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -475,17 +442,9 @@ function SkillDetailSheet({
             ) : (
               <div className="mt-6 space-y-5">
                 <div className="flex min-h-16 items-start justify-between gap-3 border-y border-border/45 px-1 py-3.5">
-                  <div>
-                    <p className="text-[13px] font-medium text-foreground">
-                      {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
-                    </p>
-                    <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                      {t("settings.skills.enabledDescription", {
-                        defaultValue:
-                          "Allow the agent to load this skill when its requirements are ready.",
-                      })}
-                    </p>
-                  </div>
+                  <p className="text-[13px] font-medium text-foreground">
+                    {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
+                  </p>
                   <button
                     type="button"
                     role="switch"

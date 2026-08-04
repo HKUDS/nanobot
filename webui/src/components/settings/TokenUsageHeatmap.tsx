@@ -232,7 +232,7 @@ export function TokenUsageHeatmap({
                   <TooltipContent
                     side="top"
                     align="center"
-                    className="rounded-[10px] border-border/45 bg-popover px-2.5 py-1.5 text-[11px] font-normal text-popover-foreground shadow-lg"
+                    className="px-2.5 py-1.5 text-[11px] font-normal"
                   >
                     <span className="block">{label}</span>
                     {breakdown ? (

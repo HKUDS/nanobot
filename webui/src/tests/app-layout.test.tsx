@@ -234,6 +234,8 @@ import {
 import App from "@/App";
 
 describe("App layout", () => {
+  let restoreTimezoneResolvedOptions: (() => void) | null = null;
+
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
@@ -271,6 +273,8 @@ describe("App layout", () => {
   });
 
   afterEach(() => {
+    restoreTimezoneResolvedOptions?.();
+    restoreTimezoneResolvedOptions = null;
     vi.useRealTimers();
   });
 
@@ -509,6 +513,9 @@ describe("App layout", () => {
     expect(screen.getByText("cron")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
     expect(screen.getByText("Needs setup")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Review the instruction skills this agent can load during a conversation."),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
@@ -534,6 +541,11 @@ describe("App layout", () => {
       "true",
     );
     expect(screen.getByText("Setup required")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Allow the agent to load this skill when its requirements are ready.",
+      ),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("brew install gh")).toBeInTheDocument();
     expect(screen.queryByText("Unavailable reason")).not.toBeInTheDocument();
     expect(screen.queryByText("Missing CLI")).not.toBeInTheDocument();
@@ -737,6 +749,9 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("heading", { name: "Trending by marketplace" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Each marketplace keeps its own ranking and install metrics."),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(screen.getAllByText("SkillHub")).toHaveLength(2);
@@ -1994,6 +2009,11 @@ describe("App layout", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Appearance" }));
     expect(screen.getByText("Brand logos")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Switch between light and dark appearance."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Choose the language used by the WebUI.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stored only in this browser.")).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Settings: Appearance" })).toBeInTheDocument();
     fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Appearance" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
@@ -2079,6 +2099,14 @@ describe("App layout", () => {
     expect(screen.getByRole("button", { name: "openai/gpt-5.4-image-2" })).toBeInTheDocument();
     expect(screen.getByText("Save directory")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(
+      screen.queryByText(
+        "Expose generate_image in chats when a configured image provider is available.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Choose a model supported by the selected image provider."),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
     expect(screen.getByText("Search provider")).toBeInTheDocument();
@@ -2086,6 +2114,12 @@ describe("App layout", () => {
     expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
     expect(screen.getByTestId("provider-picker-logo-brave")).toBeInTheDocument();
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Choose the backend used by the web search tool."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Results returned by each web_search call."),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-brave-key" },
@@ -2098,8 +2132,14 @@ describe("App layout", () => {
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
 
     fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
-    expect(screen.getByText("Regional")).toBeInTheDocument();
+    expect(screen.queryByText("Regional")).not.toBeInTheDocument();
     expect(screen.getByText("Timezone")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Used for schedules and time-aware replies."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Restart nanobot to apply runtime changes."),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Bot name")).not.toBeInTheDocument();
     expect(screen.queryByText("Bot icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
@@ -2107,16 +2147,16 @@ describe("App layout", () => {
     expect(screen.queryByText("Dream")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
     expect(screen.getByText("Default workspace")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "UTC" }));
-    const timezoneSearch = await screen.findByPlaceholderText("Search timezone");
-    expect(timezoneSearch).toBeInTheDocument();
-    fireEvent.change(timezoneSearch, {
-      target: { value: "Shanghai" },
-    });
-    await user.click(screen.getByRole("option", { name: /Asia\/Shanghai/ }));
-    expect(screen.getByRole("button", { name: "Asia/Shanghai" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    expect(screen.getByText(detectedTimezone)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Select timezone" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: detectedTimezone })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Connect SDKs and agents through a local /v1 endpoint."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("The API uses this local port.")).not.toBeInTheDocument();
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
@@ -2128,6 +2168,61 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
+  });
+
+  it("detects and saves the system timezone without showing a timezone control", async () => {
+    const resolvedOptionsSpy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({
+        locale: "en-US",
+        calendar: "gregory",
+        numberingSystem: "latn",
+        timeZone: "Asia/Shanghai",
+      });
+    restoreTimezoneResolvedOptions = () => resolvedOptionsSpy.mockRestore();
+    const initialSettings = baseSettingsPayload();
+    const savedSettings = {
+      ...initialSettings,
+      agent: { ...initialSettings.agent, timezone: "Asia/Shanghai" },
+    };
+    mockFetchRoutes({
+      "/api/settings": initialSettings,
+      "/api/settings/update?timezone=Asia%2FShanghai": savedSettings,
+    });
+    const fetchMock = vi.mocked(fetch);
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+
+    render(<App />);
+
+    expect(await screen.findByText("Asia/Shanghai")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/update?timezone=Asia%2FShanghai",
+        expect.any(Object),
+      ),
+    );
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).startsWith("/api/settings/update?timezone="),
+      ),
+    ).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Regional" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Used for schedules and time-aware replies."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
+    const systemSection = screen.getByRole("heading", { name: "System" }).closest("section");
+    expect(systemSection).not.toBeNull();
+    const system = within(systemSection as HTMLElement);
+    const timezoneLabel = system.getByText("Timezone");
+    const restartButton = system.getByRole("button", { name: "Restart nanobot" });
+    expect(
+      timezoneLabel.compareDocumentPosition(restartButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      system.queryByText("Restart nanobot to apply runtime changes."),
+    ).not.toBeInTheDocument();
   });
 
   it("falls back to Overview for the retired Files settings URL", async () => {
@@ -2211,6 +2306,7 @@ describe("App layout", () => {
     fireEvent.click(appsButton);
 
     expect(await screen.findByRole("heading", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.queryByText("Add tools to nanobot, then @ them in chat.")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(

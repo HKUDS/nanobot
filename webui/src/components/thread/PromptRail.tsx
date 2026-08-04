@@ -10,6 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
+import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
@@ -203,8 +204,7 @@ export function PromptRail({
               data-testid={previewVisible ? "prompt-rail-preview" : undefined}
               className={cn(
                 "pointer-events-none absolute left-10 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
-                "bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
-                "dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
+                floatingSurfaceElevationClassName,
                 "transition-[opacity,transform] duration-150",
                 previewVisible
                   ? "translate-x-0 scale-100 opacity-100"

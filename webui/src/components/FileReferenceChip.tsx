@@ -111,9 +111,8 @@ export function FileReferenceChip({
           collisionPadding={12}
           className={cn(
             "max-w-[min(38rem,calc(100vw-2rem))] rounded-[10px]",
-            "border-border/60 bg-popover/95 px-2.5 py-1.5",
+            "px-2.5 py-1.5",
             "break-all font-mono text-[11px] leading-snug text-popover-foreground",
-            "shadow-lg backdrop-blur",
           )}
         >
           {fullPath}

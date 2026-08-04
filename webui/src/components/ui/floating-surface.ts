@@ -1,5 +1,14 @@
+export const floatingSurfaceElevationClassName =
+  "bg-popover text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.10)] dark:shadow-[0_12px_28px_rgba(0,0,0,0.32)]";
+
 export const floatingSurfaceVisualClassName =
-  "rounded-[18px] border border-border/65 bg-popover/96 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]";
+  `rounded-[18px] p-1.5 ${floatingSurfaceElevationClassName}`;
+
+export const modalOverlayClassName =
+  "fixed inset-0 z-50 bg-black/45 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0";
+
+export const modalSurfaceClassName =
+  "bg-background text-foreground shadow-[0_12px_36px_rgba(15,23,42,0.12)] dark:bg-popover dark:shadow-[0_18px_44px_rgba(0,0,0,0.32)]";
 
 export const floatingSurfaceClassName =
   `${floatingSurfaceVisualClassName} z-50 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent`;

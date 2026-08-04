@@ -113,6 +113,38 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("does not replay an entrance animation when persisted messages mount", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "u-persisted",
+        role: "user",
+        content: "Earlier question",
+        createdAt: Date.now(),
+      },
+      {
+        id: "a-persisted",
+        role: "assistant",
+        content: "Earlier answer",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t-persisted",
+        role: "tool",
+        kind: "trace",
+        content: "Earlier tool call",
+        createdAt: Date.now(),
+      },
+    ];
+
+    for (const message of messages) {
+      const { container, unmount } = render(<MessageBubble message={message} />);
+      for (const className of ["animate-in", "fade-in-0", "slide-in-from-bottom-1"]) {
+        expect(container.firstElementChild).not.toHaveClass(className);
+      }
+      unmount();
+    }
+  });
+
   it("renders failed delivery details on focus without persistent accepted chrome", async () => {
     const message: UIMessage = {
       id: "u-delivery",
