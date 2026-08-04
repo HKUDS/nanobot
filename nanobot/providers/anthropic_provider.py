@@ -32,7 +32,8 @@ def _gen_tool_id() -> str:
 _VALID_TOOL_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _CLAUDE_MODEL_VERSION = re.compile(
-    r"claude-(?P<family>[a-z]+)-(?P<major>\d+)(?:-(?P<minor>\d+))?"
+    r"claude-(?P<family>[a-z]+)-(?P<major>\d+)"
+    r"(?:-(?P<minor>\d{1,2})(?=-|$))?"
 )
 _ADAPTIVE_ONLY_MIN_VERSIONS = {
     "opus": (4, 7),
@@ -617,8 +618,13 @@ class AnthropicProvider(LLMProvider):
         elif thinking_enabled and adaptive_only:
             # Newer Claude models removed manual token budgets. Their effort
             # control is independent from the adaptive thinking mode.
-            kwargs["thinking"] = {"type": "adaptive"}
-            kwargs["output_config"] = {"effort": reasoning_effort_lower}
+            # These fields were added as first-class SDK arguments after our
+            # minimum anthropic version; extra_body preserves wire compatibility
+            # across the declared dependency range.
+            kwargs["extra_body"] = {
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": reasoning_effort_lower},
+            }
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
             budget = budget_map.get(reasoning_effort_lower, 4096)
