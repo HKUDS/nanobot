@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -59,6 +59,22 @@ class MattermostConfig(Base):
     send_progress: bool = True
     send_tool_hints: bool = True
     dm: MattermostDMConfig = Field(default_factory=MattermostDMConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _inherit_thread_policy(cls, data: Any) -> Any:
+        """Preserve the existing group policy unless a thread override is set."""
+        if not isinstance(data, dict):
+            return data
+        raw = cast(dict[str, Any], data)
+        if "groupPolicyInThread" in raw or "group_policy_in_thread" in raw:
+            return raw
+        values = dict(raw)
+        values["group_policy_in_thread"] = values.get(
+            "groupPolicy",
+            values.get("group_policy", "mention"),
+        )
+        return values
 
 
 def _server_url_to_ws_url(server_url: str) -> str:
