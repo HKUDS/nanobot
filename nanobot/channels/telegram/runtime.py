@@ -736,13 +736,13 @@ class TelegramChannel(BaseChannel):
         the message as delivered, so raise once the wait runs out. None means the
         channel is stopped: nothing left to deliver.
         """
-        if self._app is not None:
+        if self._app_ready.is_set() and self._app is not None:
             return self._app
         if not self._running:
             return None
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._app_ready.wait(), APP_RESTART_SEND_WAIT_SECONDS)
-        if self._app is None:
+        if not self._app_ready.is_set() or self._app is None:
             raise RuntimeError("Telegram application is restarting; message not delivered")
         return self._app
 
