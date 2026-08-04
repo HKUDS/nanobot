@@ -46,7 +46,6 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[8.5rem] min-w-[8.5rem]";
-const ACTION_MENU_ITEM_CLASS = "grid w-[7.75rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-2";
 
 interface ChatListProps {
   sessions: ChatSummary[];
@@ -337,7 +336,6 @@ export const ChatList = memo(function ChatList({
                             >
                               <DropdownMenuItem
                                 onSelect={() => onTogglePin(s.key)}
-                                className={ACTION_MENU_ITEM_CLASS}
                               >
                                 {isPinned ? (
                                   <PinOff className="h-4 w-4 shrink-0" />
@@ -348,14 +346,12 @@ export const ChatList = memo(function ChatList({
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onSelect={() => onRequestRename(s.key, title)}
-                                className={ACTION_MENU_ITEM_CLASS}
                               >
                                 <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onSelect={() => onToggleArchive(s.key)}
-                                className={ACTION_MENU_ITEM_CLASS}
                               >
                                 {isArchived ? (
                                   <ArchiveRestore className="h-4 w-4 shrink-0" />
@@ -365,13 +361,10 @@ export const ChatList = memo(function ChatList({
                                 {isArchived ? t("chat.unarchive") : t("chat.archive")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
+                                tone="destructive"
                                 onSelect={() => {
                                   window.setTimeout(() => onRequestDelete(s.key, title), 0);
                                 }}
-                                className={cn(
-                                  ACTION_MENU_ITEM_CLASS,
-                                  "text-destructive focus:text-destructive",
-                                )}
                               >
                                 <Trash2 className="h-4 w-4 shrink-0" />
                                 {t("chat.delete")}
@@ -472,7 +465,7 @@ function ProjectGroupHeader({
             portalContainer={actionMenuPortalContainer}
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <DropdownMenuItem onSelect={onRequestRename} className={ACTION_MENU_ITEM_CLASS}>
+            <DropdownMenuItem onSelect={onRequestRename}>
               <Pencil className="h-4 w-4 shrink-0" />
               {t("chat.rename")}
             </DropdownMenuItem>

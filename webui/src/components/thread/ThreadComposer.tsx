@@ -51,6 +51,10 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
+  floatingItemClassName,
+  floatingSurfaceVisualClassName,
+} from "@/components/ui/floating-surface";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -2688,10 +2692,9 @@ function CliAppMentionPalette({
       aria-label={t("thread.composer.mentions.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
       className={cn(
-        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[22px] border",
+        floatingSurfaceVisualClassName,
+        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden",
         layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
-        "border-border/70 bg-popover p-2 text-popover-foreground shadow-[0_20px_60px_rgba(15,23,42,0.12)]",
-        "dark:border-white/10 dark:shadow-[0_24px_60px_rgba(0,0,0,0.42)]",
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
@@ -2728,7 +2731,8 @@ function CliAppMentionPalette({
                     onChoose(candidate);
                   }}
                   className={cn(
-                    "flex min-h-10 w-full items-center gap-2.5 rounded-[13px] px-2.5 py-1.5 text-left transition-colors",
+                    floatingItemClassName,
+                    "flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
                     selected
                       ? "bg-foreground/[0.055] text-foreground"
                       : "text-foreground/90 hover:bg-foreground/[0.04]",
@@ -2836,10 +2840,9 @@ function SlashCommandPalette({
       aria-label={t("thread.composer.slash.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
       className={cn(
-        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[18px] border",
+        floatingSurfaceVisualClassName,
+        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden",
         layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
-        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.16)]",
-        "dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]",
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
@@ -2868,7 +2871,8 @@ function SlashCommandPalette({
                 onChoose(command);
               }}
               className={cn(
-                "flex min-h-[44px] w-full items-center gap-3 rounded-[13px] px-3 py-2 text-left transition-colors",
+                floatingItemClassName,
+                "flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left transition-colors",
                 selected
                   ? "bg-foreground/[0.065] text-foreground dark:bg-white/[0.09]"
                   : "text-foreground/86 hover:bg-foreground/[0.045] dark:hover:bg-white/[0.065]",
