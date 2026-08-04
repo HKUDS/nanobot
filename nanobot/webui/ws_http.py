@@ -61,6 +61,9 @@ from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
 )
 from nanobot.webui.http_utils import (
+    is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
+)
+from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
 from nanobot.webui.http_utils import (
@@ -263,6 +266,8 @@ class GatewayHTTPHandler:
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
+        if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
+            return True
         return self.tokens.check_api_token(request)
 
     # -- Main dispatch ------------------------------------------------------
@@ -272,6 +277,11 @@ class GatewayHTTPHandler:
         got, _ = _parse_request_path(request.path)
         started = time.perf_counter()
         response: Any | None = None
+        setattr(
+            request,
+            "_nanobot_trusted_proxy_authenticated",
+            _is_trusted_proxy_authenticated_request(connection, request.headers, self.config),
+        )
 
         try:
             response = await self._dispatch_resolved(connection, request, got)
@@ -372,11 +382,30 @@ class GatewayHTTPHandler:
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
-        if secret:
-            if not _issue_route_secret_matches(request.headers, secret):
-                return _http_error(401, "Unauthorized")
-        elif not is_local_browser:
-            return _http_error(403, "bootstrap is localhost-only")
+        is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
+            connection,
+            request.headers,
+            self.config,
+        )
+        if not is_proxy_authenticated:
+            if secret:
+                if not _issue_route_secret_matches(request.headers, secret):
+                    return _http_error(401, "Unauthorized")
+            elif not is_local_browser:
+                return _http_error(403, "bootstrap is localhost-only")
+
+        if is_proxy_authenticated:
+            payload = {
+                "ws_path": _normalize_config_path(self.config.path),
+                "ws_url": self._bootstrap_ws_url(request),
+                "limits": self.ingress.bootstrap_limits(
+                    max_frame_bytes=self.config.max_message_bytes,
+                ),
+                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+                "runtime_surface": self._runtime_surface,
+                "runtime_capabilities": self._capabilities,
+            }
+            return _http_json_response(payload)
 
         api_token_allowed = bool(secret) or is_local_browser
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
@@ -412,6 +441,8 @@ class GatewayHTTPHandler:
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
+        if self.config.public_ws_url:
+            return self.config.public_ws_url
         host = _safe_host_header(_case_insensitive_header(headers, "Host"))
         if not host:
             host = _host_for_url(self.config.host, self.config.port)

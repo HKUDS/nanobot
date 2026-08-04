@@ -70,7 +70,7 @@ type BootState =
       status: "ready";
       client: NanobotClient;
       token: string;
-      tokenExpiresAt: number;
+      tokenExpiresAt: number | null;
       modelName: string | null;
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
@@ -733,7 +733,9 @@ export default function App() {
         ? toRuntimeSurface(boot.runtime_surface)
         : fallbackSurface;
       const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-      const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
+      const tokenExpiresAt = boot.expires_in
+        ? bootstrapTokenExpiresAt(boot.expires_in)
+        : null;
       if (runtimeHost.socketFactory) {
         client.updateUrl(url, runtimeHost.socketFactory);
       } else {
@@ -744,7 +746,7 @@ export default function App() {
         current.status === "ready" && current.client === client
           ? {
               ...current,
-              token: boot.api_token,
+              token: boot.api_token ?? "",
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
               ingressLimits: boot.limits ?? current.ingressLimits,
@@ -752,7 +754,7 @@ export default function App() {
             }
           : current,
       );
-      return { token: boot.api_token, url };
+      return { token: boot.api_token ?? "", url };
     },
     [],
   );
@@ -787,8 +789,10 @@ export default function App() {
           setState({
             status: "ready",
             client,
-            token: boot.api_token,
-            tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
+            token: boot.api_token ?? "",
+            tokenExpiresAt: boot.expires_in
+              ? bootstrapTokenExpiresAt(boot.expires_in)
+              : null,
             modelName: boot.model_name ?? null,
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
@@ -813,7 +817,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (state.status !== "ready") return;
+    if (state.status !== "ready" || state.tokenExpiresAt === null) return;
     const client = state.client;
     const timer = window.setTimeout(async () => {
       try {

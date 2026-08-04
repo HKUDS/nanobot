@@ -87,13 +87,8 @@ export async function fetchBootstrap(
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as BootstrapResponse;
-  if (!body.token || !body.ws_path) {
-    throw new Error("bootstrap response missing token or ws_path");
-  }
-  if (!body.api_token) {
-    throw new BootstrapAuthRequiredError(
-      "bootstrap authentication required: missing api_token",
-    );
+  if (!body.ws_path) {
+    throw new Error("bootstrap response missing ws_path");
   }
   return body;
 }
@@ -107,10 +102,10 @@ export async function fetchBootstrap(
  */
 export function deriveWsUrl(
   wsPath: string,
-  token: string,
+  token: string | null | undefined,
   wsUrl?: string | null,
 ): string {
-  const query = `?token=${encodeURIComponent(token)}`;
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
   const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
   if (typeof window !== "undefined" && window.location.port === "5173") {
     const host = window.location.hostname.includes(":")
@@ -127,6 +122,7 @@ export function deriveWsUrl(
     return `${scheme}://${authority}${path}${query}`;
   }
   if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
+    if (!token) return wsUrl;
     const join = wsUrl.includes("?") ? "&" : "?";
     return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
   }
