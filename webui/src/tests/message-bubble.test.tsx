@@ -226,7 +226,7 @@ describe("MessageBubble", () => {
     const command = screen.getByTestId("message-slash-command");
     expect(command).toHaveTextContent("/model");
     expect(command).toHaveClass(
-      "font-semibold",
+      "font-medium",
       "transition-colors",
       "duration-150",
     );
@@ -301,7 +301,7 @@ describe("MessageBubble", () => {
     const skill = screen.getByTestId("message-skill-reference-github");
     expect(skill).toHaveTextContent(/^github$/);
     expect(skill).toHaveClass(
-      "font-semibold",
+      "font-medium",
       "transition-colors",
       "duration-150",
     );
@@ -445,7 +445,7 @@ describe("MessageBubble", () => {
     const token = screen.getByTestId("message-cli-mention-zoom");
     expect(token).toHaveTextContent("@zoom");
     expect(token).toHaveAttribute("title", "CLI app: Zoom");
-    expect(token).toHaveClass("font-semibold");
+    expect(token).toHaveClass("font-medium");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
