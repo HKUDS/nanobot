@@ -91,9 +91,8 @@ export function UserMessageText({
             testId={`message-skill-reference-${segment.name.toLowerCase()}`}
             title={t("message.skill", { name: segment.name })}
             color={INLINE_TOKEN_HIGHLIGHT_COLOR}
-            className="font-medium"
           >
-            {segment.text}
+            {segment.name}
           </InlineTokenHighlight>
         );
         return (

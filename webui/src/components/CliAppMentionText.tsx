@@ -191,6 +191,7 @@ export function SessionMentionToken({
     <a
       href={`#/chat/${encodeURIComponent(mention.session_key)}`}
       className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
     >
       {token}
     </a>

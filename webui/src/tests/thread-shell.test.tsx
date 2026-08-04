@@ -868,7 +868,7 @@ describe("ThreadShell", () => {
       expectSendMessageWithTurn(client, "skill-reference", "Use $github for this"),
     );
     expect(screen.getByTestId("message-skill-reference-github"))
-      .toHaveTextContent("$github");
+      .toHaveTextContent(/^github$/);
   });
 
   it("clears the old thread when the active session is removed", async () => {

@@ -226,12 +226,12 @@ describe("MessageBubble", () => {
     const command = screen.getByTestId("message-slash-command");
     expect(command).toHaveTextContent("/model");
     expect(command).toHaveClass(
-      "font-medium",
-      "transition-[color,text-shadow]",
+      "font-semibold",
+      "transition-colors",
       "duration-150",
     );
-    expect(command).not.toHaveClass("font-mono", "font-semibold");
-    expect(command.getAttribute("style")).toContain("text-shadow");
+    expect(command).not.toHaveClass("font-mono");
+    expect(command.getAttribute("style")).not.toContain("text-shadow");
     expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(command.parentElement).toHaveTextContent("/model gpt-5");
@@ -299,16 +299,17 @@ describe("MessageBubble", () => {
     );
 
     const skill = screen.getByTestId("message-skill-reference-github");
-    expect(skill).toHaveTextContent("$github");
+    expect(skill).toHaveTextContent(/^github$/);
     expect(skill).toHaveClass(
-      "font-medium",
-      "transition-[color,text-shadow]",
+      "font-semibold",
+      "transition-colors",
       "duration-150",
     );
+    expect(skill.getAttribute("style")).not.toContain("text-shadow");
     expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
-    expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @zoom");
   });
 
   it("highlights well-formed skill references and leaves a bare marker plain", () => {
@@ -321,13 +322,13 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent("$unknown");
+    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^unknown$/);
     expect(screen.getByTestId("message-skill-reference-blocked-skill"))
-      .toHaveTextContent("$blocked-skill");
+      .toHaveTextContent(/^blocked-skill$/);
     const references = screen.getAllByTestId(/^message-skill-reference-/);
     expect(references).toHaveLength(2);
     expect(references[0].parentElement)
-      .toHaveTextContent("Try $unknown or $blocked-skill and $");
+      .toHaveTextContent("Try unknown or blocked-skill and $");
   });
 
   it("renders fork control in completed assistant action rows", () => {
@@ -444,10 +445,11 @@ describe("MessageBubble", () => {
     const token = screen.getByTestId("message-cli-mention-zoom");
     expect(token).toHaveTextContent("@zoom");
     expect(token).toHaveAttribute("title", "CLI app: Zoom");
+    expect(token).toHaveClass("font-semibold");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
-    expect(token.getAttribute("style")).toContain("text-shadow");
+    expect(token.getAttribute("style")).not.toContain("text-shadow");
     expect(screen.getByTestId("message-cli-mention-logo-zoom")).toBeInTheDocument();
     expect(screen.queryByTestId("message-cli-mention-krita")).not.toBeInTheDocument();
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
@@ -531,6 +533,9 @@ describe("MessageBubble", () => {
     expect(token).toHaveTextContent("@收费设计");
     expect(token).toHaveAttribute("title", "Session: 收费设计");
     expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Apricing");
+    expect(token.closest("a")?.getAttribute("style")).toContain(
+      "text-decoration-color: var(--inline-token-highlight)",
+    );
   });
 
   it("copies completed assistant replies from the action row", async () => {

@@ -23,6 +23,9 @@ describe("MarkdownTextRenderer", () => {
     const link = screen.getByRole("link", { name: "收费设计" });
     expect(link).toHaveAttribute("href", "#/chat/websocket%3Apricing");
     expect(link).not.toHaveAttribute("target");
+    expect(link.getAttribute("style")).toContain(
+      "text-decoration-color: var(--inline-token-highlight)",
+    );
   });
 
   it("does not link non-WebUI session references", () => {

@@ -618,6 +618,7 @@ export default function MarkdownTextRenderer({
             <a
               href={sessionHref}
               className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
             >
               <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
                 {markdownChildren}

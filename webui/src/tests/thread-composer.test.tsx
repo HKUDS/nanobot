@@ -1887,12 +1887,12 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("meeting in @gimp");
     const token = screen.getByTestId("composer-cli-mention-gimp");
     expect(token).toHaveTextContent("@gimp");
-    expect(token.className).not.toContain("font-semibold");
+    expect(token).toHaveClass("font-semibold");
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
     expect(token.getAttribute("style")).toContain("color: #5C5543");
-    expect(token.getAttribute("style")).toContain("text-shadow");
+    expect(token.getAttribute("style")).not.toContain("text-shadow");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");

@@ -32,7 +32,7 @@
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: 221 70% 50%;
+    --inline-token-highlight: #ef8e30;
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -66,7 +66,7 @@
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;
-    --inline-token-highlight: 217 92% 72%;
+    --inline-token-highlight: #ef8e30;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-accent: var(--background);
