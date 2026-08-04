@@ -75,6 +75,64 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.apps.description",
   "settings.apps.caption",
   "settings.apps.restartRequired",
+  "settings.skills.views",
+  "settings.skills.installedTab",
+  "settings.skills.discoverTab",
+  "settings.skills.customGroup",
+  "settings.skills.builtinGroup",
+  "settings.skills.otherGroup",
+  "settings.skills.searchInstalled",
+  "settings.skills.filterAll",
+  "settings.skills.filterEnabled",
+  "settings.skills.filterDisabled",
+  "settings.skills.noMatching",
+  "settings.skills.statusDisabled",
+  "settings.skills.statusEnabled",
+  "settings.skills.statusNeedsSetup",
+  "settings.skills.showLess",
+  "settings.skills.showMore",
+  "settings.skills.enabledControl",
+  "settings.skills.enabledDescription",
+  "settings.skills.enableSkill",
+  "settings.skills.disableSkill",
+  "settings.skills.updateFailed",
+  "settings.skills.deleteTitle",
+  "settings.skills.deleteDescription",
+  "settings.skills.deleteAction",
+  "settings.skills.deleteFailed",
+  "settings.skills.deleteConfirmTitle",
+  "settings.skills.deleteConfirmDescription",
+  "settings.skills.deleteConfirmAction",
+  "settings.skills.instructionsTitle",
+  "settings.skills.setupRequired",
+  "settings.skills.setupDescription",
+  "settings.skills.copySetupCommand",
+  "settings.skills.checkAgain",
+  "settings.skills.marketplaceSearchFailed",
+  "settings.skills.marketplaceInstallFailed",
+  "settings.skills.marketplaceSearchPlaceholder",
+  "settings.skills.marketplaceSearchLabel",
+  "settings.skills.marketplaceSearching",
+  "settings.skills.marketplaceProviderFilter",
+  "settings.skills.marketplaceProviderAll",
+  "settings.skills.marketplaceTrendingTitle",
+  "settings.skills.marketplaceTrendingDescription",
+  "settings.skills.marketplaceViewAll",
+  "settings.skills.marketplaceTrendingUnavailable",
+  "settings.skills.marketplaceEmpty",
+  "settings.skills.marketplaceConfirmTitle",
+  "settings.skills.marketplaceConfirmDescription",
+  "settings.skills.marketplaceConfirmInstall",
+  "settings.skills.marketplaceOpen",
+  "settings.skills.marketplaceOpenProvider",
+  "settings.skills.marketplaceInstalls24h",
+  "settings.skills.marketplaceInstalls",
+  "settings.skills.marketplaceNpxRequired",
+  "settings.skills.marketplaceInstalling",
+  "settings.skills.marketplaceInstalled",
+  "settings.skills.marketplaceInstall",
+  "settings.skills.marketplaceNoTrend",
+  "settings.skills.marketplaceTrendLabel",
   "settings.nanobotFeatures.disable",
   "settings.nanobotFeatures.ready",
   "settings.nanobotFeatures.missingDependency",
@@ -177,6 +235,72 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.validation.needs_setup",
   "settings.channels.validation.unsupported",
   "settings.channels.validationFailed",
+];
+const LOCALIZED_NEW_SURFACE_KEYS = [
+  "chat.activity.running",
+  "chat.activity.complete",
+  "chat.activity.updated",
+  "chat.pin",
+  "chat.unpin",
+  "chat.rename",
+  "chat.renameProjectTitle",
+  "chat.renameProjectDescription",
+  "chat.renameProjectPlaceholder",
+  "chat.renameSave",
+  "chat.archive",
+  "chat.unarchive",
+  "chat.showArchived",
+  "chat.hideArchived",
+  "chat.groups.pinned",
+  "chat.groups.projects",
+  "chat.groups.today",
+  "chat.groups.yesterday",
+  "chat.groups.earlier",
+  "chat.groups.archived",
+  "thread.promptNavigator.railAria",
+  "thread.composer.mentions.cliTitle",
+  "thread.composer.mentions.mcpTitle",
+  "message.openLink",
+  "message.openAttachment",
+  "message.skill",
+  "settings.channels.connectionChecks",
+  "settings.channels.open",
+];
+const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
+  "settings.help.provider",
+  "settings.help.configPath",
+  "settings.help.selectedPreset",
+  "settings.help.maxResults",
+  "settings.help.timeout",
+  "settings.help.jinaReader",
+  "settings.help.imageGeneration",
+  "settings.help.imageProvider",
+  "settings.help.imageProviderStatus",
+  "settings.help.imageModel",
+  "settings.help.defaultAspectRatio",
+  "settings.help.timezone",
+  "settings.help.securityManagedControls",
+  "settings.help.selectedModelProvider",
+  "settings.help.selectedModelValue",
+  "settings.help.cliAppsCatalog",
+  "settings.help.cliAppsFilter",
+  "settings.help.logs",
+  "settings.help.diagnostics",
+  "settings.help.localServiceAccessNative",
+  "settings.help.webuiDefaultAccessNative",
+  "settings.status.savedRestart",
+  "settings.status.restartAfterSaving",
+  "settings.status.savedRestartApply",
+  "settings.status.imageProviderRestart",
+  "settings.status.hostRestartAfterSaving",
+  "settings.status.hostRestartPending",
+  "settings.status.hostApiUnavailable",
+  "settings.status.logsOpened",
+  "settings.status.logsOpenFailed",
+  "settings.status.diagnosticsExported",
+  "settings.status.diagnosticsExportFailed",
+  "settings.image.missingCredential",
+  "settings.oauth.signInHelp",
 ];
 const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
 const PREBOOT_SCRIPT = INDEX_HTML.match(
@@ -421,6 +545,7 @@ describe("webui i18n", () => {
         ...LOCALIZED_SETTINGS_COPY_KEYS,
         ...LOCALIZED_WORKSPACE_COPY_KEYS,
         ...LOCALIZED_CHANNEL_SHELL_KEYS,
+        ...LOCALIZED_NEW_SURFACE_KEYS,
       ].filter(
         (key) => current.get(key) === english.get(key),
       );
@@ -432,11 +557,29 @@ describe("webui i18n", () => {
   it("keeps Simplified Chinese settings overview copy localized", () => {
     const settings = resources["zh-CN"].common.settings;
 
-    expect(settings.nav.browser).toBe("网页");
-    expect(settings.sections.webSearch).toBe("网页搜索");
-    expect(settings.byok.tabs.webSearch).toBe("网页搜索");
-    expect(settings.overview.webSearch).toBe("网页搜索");
+    expect(settings.nav.browser).toBe("网络");
+    expect(settings.sections.webSearch).toBe("网络搜索");
+    expect(settings.byok.tabs.webSearch).toBe("网络搜索");
+    expect(settings.overview.webSearch).toBe("网络搜索");
     expect(settings.overview.workspace).toBe("工作区");
+    expect(settings.skills.installedTab).toBe("已安装");
+    expect(settings.skills.discoverTab).toBe("发现");
+    expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
+    expect(settings.skills.marketplaceProviderAll).toBe("全部");
+    expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
+    expect(settings.skills.marketplaceTrendingTitle).toBe("各市场热门技能");
+  });
+
+  it("keeps Indonesian and Vietnamese settings free of copied Spanish help text", () => {
+    const spanish = flattenResource(resources.es.common);
+
+    for (const locale of ["id", "vi"] as const) {
+      const current = flattenResource(resources[locale].common);
+      const copied = ACCIDENTALLY_SPANISH_SETTINGS_KEYS.filter(
+        (key) => current.get(key) === spanish.get(key),
+      );
+      expect({ locale, copied }).toEqual({ locale, copied: [] });
+    }
   });
 
   it("keeps Brazilian Portuguese settings overview copy localized", () => {
@@ -445,11 +588,11 @@ describe("webui i18n", () => {
     const chat = resources["pt-BR"].common.chat;
 
     expect(sidebar.settings).toBe("Configurações");
-    expect(chat.newChat).toBe("Nova conversa");
+    expect(chat.newChat).toBe("Novo tópico");
     expect(settings.nav.browser).toBe("Web");
     expect(settings.sections.webSearch).toBe("Busca na web");
     expect(settings.byok.tabs.webSearch).toBe("Busca na web");
     expect(settings.overview.webSearch).toBe("Busca na web");
-    expect(settings.overview.workspace).toBe("Workspace");
+    expect(settings.overview.workspace).toBe("Espaço de trabalho");
   });
 });

@@ -137,7 +137,6 @@ export function ChannelLogo({
     return (
       <span
         className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] border border-border/45 bg-background"
-        style={{ boxShadow: `inset 0 0 0 1px ${color}22` }}
       >
         <img
           src={logoUrl}
@@ -156,7 +155,7 @@ export function ChannelLogo({
     return (
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background"
-        style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+        style={{ color }}
         aria-hidden
       >
         <Icon className="h-5 w-5" strokeWidth={2.25} />
@@ -167,7 +166,7 @@ export function ChannelLogo({
   return (
     <span
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background text-[11px] font-bold"
-      style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+      style={{ color }}
       aria-hidden
     >
       {initials}

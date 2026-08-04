@@ -1,4 +1,5 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
+# pyright: reportMissingModuleSource=false, reportMissingTypeStubs=false
 
 from __future__ import annotations
 
@@ -14,8 +15,9 @@ from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -44,7 +46,10 @@ from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 if TYPE_CHECKING:
-    from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
+    from lark_oapi.api.im.v1.model import (  # pyright: ignore[reportMissingTypeStubs]
+        MentionEvent,
+        P2ImMessageReceiveV1,
+    )
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 _LOGIN_CONSOLE = Console()
@@ -53,6 +58,20 @@ _LARK_RUNTIME_LOCK = threading.Lock()
 
 def _identity_timestamp() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _as_json_object(value: Any) -> dict[str, Any] | None:
+    """Narrow untyped SDK/JSON objects at the channel boundary."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def _as_json_list(value: Any) -> list[Any] | None:
+    """Narrow untyped SDK/JSON arrays at the channel boundary."""
+    return cast(list[Any], value) if isinstance(value, list) else None
+
+
+def _ignore_event(_: Any) -> None:
+    """Consume SDK events that intentionally have no channel action."""
 
 
 def _load_lark_runtime() -> tuple[Any, str, str]:
@@ -69,9 +88,12 @@ def _load_lark_runtime() -> tuple[Any, str, str]:
     # close the same loop.
     with _LARK_RUNTIME_LOCK:
         ws_client_already_imported = "lark_oapi.ws.client" in sys.modules
-        import lark_oapi as lark
-        import lark_oapi.ws.client as lark_ws_client
-        from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+        import lark_oapi as lark  # pyright: ignore[reportMissingTypeStubs]
+        import lark_oapi.ws.client as lark_ws_client  # pyright: ignore[reportMissingTypeStubs]
+        from lark_oapi.core.const import (  # pyright: ignore[reportMissingTypeStubs]
+            FEISHU_DOMAIN,
+            LARK_DOMAIN,
+        )
 
         if (
             not ws_client_already_imported
@@ -106,7 +128,7 @@ def fetch_feishu_app_identity(
 
     try:
         lark, feishu_domain, lark_domain = _load_lark_runtime()
-        from lark_oapi.api.application.v6.model.get_application_request import (
+        from lark_oapi.api.application.v6.model.get_application_request import (  # pyright: ignore[reportMissingTypeStubs]
             GetApplicationRequest,
         )
 
@@ -151,9 +173,9 @@ MSG_TYPE_MAP = {
 }
 
 
-def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
+def _extract_share_card_content(content_json: dict[str, Any], msg_type: str) -> str:
     """Extract text representation from share cards and interactive messages."""
-    parts = []
+    parts: list[str] = []
 
     if msg_type == "share_chat":
         parts.append(f"[shared chat: {content_json.get('chat_id', '')}]")
@@ -171,9 +193,9 @@ def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
     return "\n".join(parts) if parts else f"[{msg_type}]"
 
 
-def _extract_interactive_content(content: dict) -> list[str]:
+def _extract_interactive_content(content: str | dict[str, Any]) -> list[str]:
     """Recursively extract text and links from interactive card content."""
-    parts = []
+    parts: list[str] = []
 
     if isinstance(content, str):
         try:
@@ -189,8 +211,9 @@ def _extract_interactive_content(content: dict) -> list[str]:
     if isinstance(user_dsl, str) and user_dsl.strip():
         try:
             dsl = json.loads(user_dsl)
-            if isinstance(dsl, dict):
-                parts.extend(_extract_interactive_content(dsl))
+            dsl_object = _as_json_object(dsl)
+            if dsl_object is not None:
+                parts.extend(_extract_interactive_content(dsl_object))
                 if parts:
                     return parts
         except (json.JSONDecodeError, TypeError):
@@ -198,8 +221,9 @@ def _extract_interactive_content(content: dict) -> list[str]:
 
     if "title" in content:
         title = content["title"]
-        if isinstance(title, dict):
-            title_content = title.get("content", "") or title.get("text", "")
+        title_object = _as_json_object(title)
+        if title_object is not None:
+            title_content = title_object.get("content", "") or title_object.get("text", "")
             if title_content:
                 parts.append(f"title: {title_content}")
         elif isinstance(title, str):
@@ -207,34 +231,39 @@ def _extract_interactive_content(content: dict) -> list[str]:
 
     # Top-level elements: flat list or nested list format
     elements = content.get("elements")
-    if isinstance(elements, list):
-        if elements and isinstance(elements[0], list):
+    elements_list = _as_json_list(elements)
+    if elements_list is not None:
+        if elements_list and isinstance(elements_list[0], list):
             # Nested list: [[{tag:"text",text:"..."}], ...]
-            for row in elements:
-                if isinstance(row, list):
-                    for element in row:
+            for row in elements_list:
+                row_list = _as_json_list(row)
+                if row_list is not None:
+                    for element in row_list:
                         parts.extend(_extract_element_content(element))
         else:
             # Flat list: [{tag:"markdown",content:"..."}, ...]
-            for element in elements:
+            for element in elements_list:
                 parts.extend(_extract_element_content(element))
 
     # Body elements (schema 2.0)
     body = content.get("body", {})
-    if isinstance(body, dict):
-        body_elements = body.get("elements")
-        if isinstance(body_elements, list):
+    body_object = _as_json_object(body)
+    if body_object is not None:
+        body_elements = _as_json_list(body_object.get("elements"))
+        if body_elements is not None:
             for element in body_elements:
                 parts.extend(_extract_element_content(element))
 
     card = content.get("card", {})
-    if card:
-        parts.extend(_extract_interactive_content(card))
+    card_object = _as_json_object(card)
+    if card_object:
+        parts.extend(_extract_interactive_content(card_object))
 
     header = content.get("header", {})
-    if header:
-        header_title = header.get("title", {})
-        if isinstance(header_title, dict):
+    header_object = _as_json_object(header)
+    if header_object is not None:
+        header_title = _as_json_object(header_object.get("title", {}))
+        if header_title is not None:
             header_text = header_title.get("content", "") or header_title.get("text", "")
             if header_text:
                 parts.append(f"title: {header_text}")
@@ -242,12 +271,15 @@ def _extract_interactive_content(content: dict) -> list[str]:
     return parts
 
 
-def _extract_element_content(element: dict) -> list[str]:
+def _extract_element_content(element: Any) -> list[str]:
     """Extract content from a single card element."""
-    parts = []
+    parts: list[str] = []
 
-    if not isinstance(element, dict):
+    element_object = _as_json_object(element)
+    if element_object is None:
         return parts
+
+    element = element_object
 
     tag = element.get("tag", "")
 
@@ -263,16 +295,18 @@ def _extract_element_content(element: dict) -> list[str]:
 
     elif tag == "div":
         text = element.get("text", {})
-        if isinstance(text, dict):
-            text_content = text.get("content", "") or text.get("text", "")
+        text_object = _as_json_object(text)
+        if text_object is not None:
+            text_content = text_object.get("content", "") or text_object.get("text", "")
             if text_content:
                 parts.append(text_content)
         elif isinstance(text, str):
             parts.append(text)
-        for field in element.get("fields", []):
-            if isinstance(field, dict):
-                field_text = field.get("text", {})
-                if isinstance(field_text, dict):
+        for field in _as_json_list(element.get("fields")) or []:
+            field_object = _as_json_object(field)
+            if field_object is not None:
+                field_text = _as_json_object(field_object.get("text", {}))
+                if field_text is not None:
                     c = field_text.get("content", "")
                     if c:
                         parts.append(c)
@@ -287,25 +321,33 @@ def _extract_element_content(element: dict) -> list[str]:
 
     elif tag == "button":
         text = element.get("text", {})
-        if isinstance(text, dict):
-            c = text.get("content", "")
+        text_object = _as_json_object(text)
+        if text_object is not None:
+            c = text_object.get("content", "")
             if c:
                 parts.append(c)
-        url = element.get("url", "") or element.get("multi_url", {}).get("url", "")
+        multi_url: Any = element.get("multi_url") or {}
+        multi_url_object = _as_json_object(multi_url)
+        url = element.get("url", "") or (
+            multi_url_object.get("url", "") if multi_url_object is not None else ""
+        )
         if url:
             parts.append(f"link: {url}")
 
     elif tag == "img":
-        alt = element.get("alt", {})
-        parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
+        alt = _as_json_object(element.get("alt", {}))
+        parts.append(alt.get("content", "[image]") if alt is not None else "[image]")
 
     elif tag == "note":
-        for ne in element.get("elements", []):
+        for ne in _as_json_list(element.get("elements")) or []:
             parts.extend(_extract_element_content(ne))
 
     elif tag == "column_set":
-        for col in element.get("columns", []):
-            for ce in col.get("elements", []):
+        for col in _as_json_list(element.get("columns")) or []:
+            col_object = _as_json_object(col)
+            if col_object is None:
+                continue
+            for ce in _as_json_list(col_object.get("elements")) or []:
                 parts.extend(_extract_element_content(ce))
 
     elif tag == "plain_text":
@@ -314,36 +356,44 @@ def _extract_element_content(element: dict) -> list[str]:
             parts.append(content)
 
     elif tag == "table":
-        columns = [
-            (column["name"], str(column.get("display_name") or column["name"]))
-            for column in (element.get("columns") or [])
-            if isinstance(column, dict) and column.get("name")
-        ]
-        rows = element.get("rows", [])
+        columns: list[tuple[str, str]] = []
+        for column in _as_json_list(element.get("columns")) or []:
+            column_object = _as_json_object(column)
+            if column_object is None:
+                continue
+            name = column_object.get("name")
+            if isinstance(name, str) and name:
+                columns.append((name, str(column_object.get("display_name") or name)))
+        rows = _as_json_list(element.get("rows")) or []
         if columns:
             parts.append(" | ".join(header for _, header in columns))
-        if isinstance(rows, list):
+        if rows:
             for row in rows:
-                if not isinstance(row, dict):
+                row_object = _as_json_object(row)
+                if row_object is None:
                     continue
-                values = []
+                values: list[str] = []
                 for name, _ in columns:
-                    value = row.get(name)
+                    value = row_object.get(name)
                     if isinstance(value, list):
-                        value = " ".join(str(item).strip() for item in value if item is not None)
+                        value = " ".join(
+                            str(item).strip()
+                            for item in cast(list[Any], value)
+                            if item is not None
+                        )
                     values.append("" if value is None else str(value).strip())
                 row_text = " | ".join(values).strip()
                 if row_text:
                     parts.append(row_text)
 
     else:
-        for ne in element.get("elements", []):
+        for ne in _as_json_list(element.get("elements")) or []:
             parts.extend(_extract_element_content(ne))
 
     return parts
 
 
-def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
+def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]:
     """Extract text and image keys from Feishu post (rich text) message.
 
     Handles three payload shapes:
@@ -352,37 +402,48 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
     - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
     """
 
-    def _parse_block(block: dict) -> tuple[str | None, list[str]]:
-        if not isinstance(block, dict) or not isinstance(block.get("content"), list):
+    def _parse_block(block: dict[str, Any]) -> tuple[str | None, list[str]]:
+        content = _as_json_list(block.get("content"))
+        if content is None:
             return None, []
-        texts, images = [], []
-        if title := block.get("title"):
+        texts: list[str] = []
+        images: list[str] = []
+        title = block.get("title")
+        if isinstance(title, str) and title:
             texts.append(title)
-        for row in block["content"]:
-            if not isinstance(row, list):
+        for row in content:
+            row_items = _as_json_list(row)
+            if row_items is None:
                 continue
-            for el in row:
-                if not isinstance(el, dict):
+            for el in row_items:
+                element = _as_json_object(el)
+                if element is None:
                     continue
-                tag = el.get("tag")
+                tag = element.get("tag")
                 if tag in ("text", "a"):
-                    texts.append(el.get("text", ""))
+                    text = element.get("text", "")
+                    if isinstance(text, str):
+                        texts.append(text)
                 elif tag == "at":
-                    texts.append(f"@{el.get('user_name', 'user')}")
+                    user = element.get("user_name", "user")
+                    texts.append(f"@{user if isinstance(user, str) and user else 'user'}")
                 elif tag == "code_block":
-                    lang = el.get("language", "")
-                    code_text = el.get("text", "")
+                    lang = element.get("language", "")
+                    code_text = element.get("text", "")
+                    if not isinstance(lang, str):
+                        lang = ""
+                    if not isinstance(code_text, str):
+                        code_text = ""
                     texts.append(f"\n```{lang}\n{code_text}\n```\n")
-                elif tag == "img" and (key := el.get("image_key")):
+                elif tag == "img" and isinstance((key := element.get("image_key")), str):
                     images.append(key)
         return (" ".join(texts).strip() or None), images
 
     # Unwrap optional {"post": ...} envelope
     root = content_json
-    if isinstance(root, dict) and isinstance(root.get("post"), dict):
-        root = root["post"]
-    if not isinstance(root, dict):
-        return "", []
+    post = _as_json_object(root.get("post"))
+    if post is not None:
+        root = post
 
     # Direct format
     if "content" in root:
@@ -393,19 +454,23 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
     # Localized: prefer known locales, then fall back to any dict child
     for key in ("zh_cn", "en_us", "ja_jp"):
         if key in root:
-            text, imgs = _parse_block(root[key])
+            block = _as_json_object(root[key])
+            if block is None:
+                continue
+            text, imgs = _parse_block(block)
             if text or imgs:
                 return text or "", imgs
     for val in root.values():
-        if isinstance(val, dict):
-            text, imgs = _parse_block(val)
+        block = _as_json_object(val)
+        if block is not None:
+            text, imgs = _parse_block(block)
             if text or imgs:
                 return text or "", imgs
 
     return "", []
 
 
-def _extract_post_text(content_json: dict) -> str:
+def _extract_post_text(content_json: dict[str, Any]) -> str:  # pyright: ignore[reportUnusedFunction]
     """Extract plain text from Feishu post (rich text) message content.
 
     Legacy wrapper for _extract_post_content, returns only text.
@@ -429,11 +494,18 @@ _REGISTRATION_PATH = "/oauth/v1/app/registration"
 _ONBOARD_REQUEST_TIMEOUT_S = 10
 
 
+class _RegistrationStart(TypedDict):
+    device_code: str
+    qr_url: str
+    interval: int
+    expire_in: int
+
+
 def _accounts_base_url(domain: str) -> str:
     return _ONBOARD_ACCOUNTS_URLS.get(domain, _ONBOARD_ACCOUNTS_URLS["feishu"])
 
 
-def _post_registration(base_url: str, body: dict[str, str]) -> dict:
+def _post_registration(base_url: str, body: dict[str, str]) -> dict[str, Any]:
     """POST form-encoded data to the registration endpoint, return parsed JSON.
 
     The registration endpoint returns JSON even on HTTP errors (e.g. poll
@@ -449,7 +521,8 @@ def _post_registration(base_url: str, body: dict[str, str]) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
-        return resp.json()
+        parsed = resp.json()
+        return _as_json_object(parsed) or {}
     except json.JSONDecodeError:
         resp.raise_for_status()
         return {}
@@ -459,7 +532,7 @@ def _init_registration(domain: str = "feishu") -> None:
     """Verify the environment supports client_secret auth. Raises RuntimeError if not."""
     base_url = _accounts_base_url(domain)
     res = _post_registration(base_url, {"action": "init"})
-    methods = res.get("supported_auth_methods") or []
+    methods = _as_json_list(res.get("supported_auth_methods")) or []
     if "client_secret" not in methods:
         raise RuntimeError(
             f"Feishu / Lark registration does not support client_secret auth. "
@@ -467,7 +540,7 @@ def _init_registration(domain: str = "feishu") -> None:
         )
 
 
-def _begin_registration(domain: str = "feishu") -> dict:
+def _begin_registration(domain: str = "feishu") -> _RegistrationStart:
     """Start the device-code flow. Returns device_code, qr_url, interval, expire_in."""
     base_url = _accounts_base_url(domain)
     res = _post_registration(base_url, {
@@ -477,16 +550,18 @@ def _begin_registration(domain: str = "feishu") -> dict:
         "request_user_info": "open_id",
     })
     device_code = res.get("device_code")
-    if not device_code:
+    if not isinstance(device_code, str) or not device_code:
         raise RuntimeError("Feishu / Lark registration did not return a device_code")
     qr_url = res.get("verification_uri_complete", "")
-    if not qr_url:
+    if not isinstance(qr_url, str) or not qr_url:
         raise RuntimeError("Feishu / Lark registration did not return a login URL")
+    interval = res.get("interval")
+    expire_in = res.get("expire_in")
     return {
         "device_code": device_code,
         "qr_url": qr_url,
-        "interval": res.get("interval") or 5,
-        "expire_in": res.get("expire_in") or 600,
+        "interval": interval if isinstance(interval, int) else 5,
+        "expire_in": expire_in if isinstance(expire_in, int) else 600,
     }
 
 
@@ -496,7 +571,7 @@ def _poll_registration(
     interval: int,
     expire_in: int,
     domain: str = "feishu",
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Poll until the user scans the QR code, or timeout/denial.
 
     Returns dict with app_id, app_secret, domain on success, None on failure.
@@ -535,7 +610,7 @@ def poll_registration_once(
     *,
     device_code: str,
     domain: str = "feishu",
-) -> dict:
+) -> dict[str, Any]:
     """Poll the Feishu/Lark device-code flow once.
 
     This non-blocking shape is used by WebUI. The CLI keeps using
@@ -549,7 +624,7 @@ def poll_registration_once(
         "tp": "ob_app",
     })
 
-    user_info = res.get("user_info") or {}
+    user_info = _as_json_object(res.get("user_info")) or {}
     tenant_brand = user_info.get("tenant_brand")
     if tenant_brand == "lark":
         current_domain = "lark"
@@ -628,9 +703,7 @@ def sync_saved_feishu_identity_boundary(
     from nanobot.config.loader import load_config, save_config
 
     full_config = load_config()
-    feishu_cfg = getattr(full_config.channels, "feishu", None) or {}
-    if not isinstance(feishu_cfg, dict):
-        feishu_cfg = {}
+    feishu_cfg = _as_json_object(getattr(full_config.channels, "feishu", None)) or {}
 
     defaults = feishu_default_config()
     previous_identity_key = ""
@@ -662,7 +735,7 @@ def sync_saved_feishu_identity_boundary(
 
 
 def save_registration_result(
-    result: dict,
+    result: dict[str, Any],
     *,
     instance_id: str = DEFAULT_INSTANCE_ID,
     name: str | None = None,
@@ -671,9 +744,7 @@ def save_registration_result(
     from nanobot.config.loader import load_config, save_config
 
     full_config = load_config()
-    feishu_cfg = getattr(full_config.channels, "feishu", None) or {}
-    if not isinstance(feishu_cfg, dict):
-        feishu_cfg = {}
+    feishu_cfg = _as_json_object(getattr(full_config.channels, "feishu", None)) or {}
     defaults = feishu_default_config()
     app_id = str(result["app_id"]).strip()
     domain = str(result.get("domain", "feishu") or "feishu").strip().lower()
@@ -796,7 +867,7 @@ def refresh_saved_feishu_identities(
 def qr_register(
     *,
     initial_domain: str = "feishu",
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Run the Feishu / Lark scan-to-create QR registration flow.
 
     Returns on success:
@@ -840,7 +911,7 @@ def _print_qr_code(url: str) -> None:
 def _qr_register_inner(
     *,
     initial_domain: str,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Run init → begin → poll. Raises on network/protocol errors."""
     _LOGIN_CONSOLE.print("[cyan]Preparing Feishu/Lark login...[/cyan]")
     _init_registration(initial_domain)
@@ -922,7 +993,7 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
         self._bot_open_id: str | None = None
-        self._background_tasks: set[asyncio.Task] = set()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
 
     # ------------------------------------------------------------------
@@ -1049,12 +1120,12 @@ class FeishuChannel(BaseChannel):
         builder = self._register_optional_event(
             builder,
             "register_p2_im_chat_member_bot_added_v1",
-            lambda _: None,
+            _ignore_event,
         )
         builder = self._register_optional_event(
             builder,
             "register_p2_im_chat_member_bot_deleted_v1",
-            lambda _: None,
+            _ignore_event,
         )
         event_handler = builder.build()
 
@@ -1113,9 +1184,11 @@ class FeishuChannel(BaseChannel):
             if response.success():
                 import json
 
-                data = json.loads(response.raw.content)
-                bot = (data.get("data") or data).get("bot") or data.get("bot") or {}
-                return bot.get("open_id")
+                data = _as_json_object(json.loads(response.raw.content)) or {}
+                wrapped = _as_json_object(data.get("data")) or data
+                bot = _as_json_object(wrapped.get("bot")) or _as_json_object(data.get("bot")) or {}
+                open_id = bot.get("open_id")
+                return open_id if isinstance(open_id, str) else None
             self.logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
             return None
         except Exception as e:
@@ -1205,7 +1278,7 @@ class FeishuChannel(BaseChannel):
         if "@_all" in raw_content:
             return True
 
-        for mention in getattr(message, "mentions", None) or []:
+        for mention in cast(list[Any], getattr(message, "mentions", None) or []):
             if self._is_bot_mention_event(mention):
                 return True
         return False
@@ -1299,7 +1372,7 @@ class FeishuChannel(BaseChannel):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._remove_reaction_sync, message_id, reaction_id)
 
-    def _on_background_task_done(self, task: asyncio.Task) -> None:
+    def _on_background_task_done(self, task: asyncio.Task[Any]) -> None:
         """Callback: remove from tracking set and log unhandled exceptions."""
         self._background_tasks.discard(task)
         if task.cancelled():
@@ -1309,7 +1382,7 @@ class FeishuChannel(BaseChannel):
         except Exception as exc:
             self.logger.warning("Background task failed: {}", exc)
 
-    def _on_reaction_added(self, message_id: str, task: asyncio.Task) -> None:
+    def _on_reaction_added(self, message_id: str, task: asyncio.Task[Any]) -> None:
         """Callback: store reaction_id after background add-reaction completes."""
         if task.cancelled():
             return
@@ -1362,7 +1435,7 @@ class FeishuChannel(BaseChannel):
         return text
 
     @classmethod
-    def _parse_md_table(cls, table_text: str) -> dict | None:
+    def _parse_md_table(cls, table_text: str) -> dict[str, Any] | None:
         """Parse a markdown table into a Feishu table element."""
         lines = [_line.strip() for _line in table_text.strip().split("\n") if _line.strip()]
         if len(lines) < 3:
@@ -1386,26 +1459,39 @@ class FeishuChannel(BaseChannel):
             ],
         }
 
-    def _build_card_elements(self, content: str) -> list[dict]:
+    def _build_card_elements(self, content: str) -> list[dict[str, Any]]:
         """Split content into div/markdown + table elements for Feishu card."""
-        elements, last_end = [], 0
-        for m in self._TABLE_RE.finditer(content):
-            before = content[last_end : m.start()]
+        protected = content
+        code_blocks: list[str] = []
+        for m in self._CODE_BLOCK_RE.finditer(content):
+            code_blocks.append(m.group(1))
+            protected = protected.replace(m.group(1), f"\x00CODE{len(code_blocks) - 1}\x00", 1)
+
+        elements: list[dict[str, Any]] = []
+        last_end = 0
+        for m in self._TABLE_RE.finditer(protected):
+            before = protected[last_end : m.start()]
             if before.strip():
                 elements.extend(self._split_headings(before))
             elements.append(
                 self._parse_md_table(m.group(1)) or {"tag": "markdown", "content": m.group(1)}
             )
             last_end = m.end()
-        remaining = content[last_end:]
+        remaining = protected[last_end:]
         if remaining.strip():
             elements.extend(self._split_headings(remaining))
+
+        for i, cb in enumerate(code_blocks):
+            for el in elements:
+                if el.get("tag") == "markdown":
+                    el["content"] = el["content"].replace(f"\x00CODE{i}\x00", cb)
+
         return elements or [{"tag": "markdown", "content": content}]
 
     @staticmethod
     def _split_elements_by_table_limit(
-        elements: list[dict], max_tables: int = 1
-    ) -> list[list[dict]]:
+        elements: list[dict[str, Any]], max_tables: int = 1
+    ) -> list[list[dict[str, Any]]]:
         """Split card elements into groups with at most *max_tables* table elements each.
 
         Feishu cards have a hard limit of one table per card (API error 11310).
@@ -1414,8 +1500,8 @@ class FeishuChannel(BaseChannel):
         """
         if not elements:
             return [[]]
-        groups: list[list[dict]] = []
-        current: list[dict] = []
+        groups: list[list[dict[str, Any]]] = []
+        current: list[dict[str, Any]] = []
         table_count = 0
         for el in elements:
             if el.get("tag") == "table":
@@ -1432,15 +1518,15 @@ class FeishuChannel(BaseChannel):
             groups.append(current)
         return groups or [[]]
 
-    def _split_headings(self, content: str) -> list[dict]:
+    def _split_headings(self, content: str) -> list[dict[str, Any]]:
         """Split content by headings, converting headings to div elements."""
         protected = content
-        code_blocks = []
+        code_blocks: list[str] = []
         for m in self._CODE_BLOCK_RE.finditer(content):
             code_blocks.append(m.group(1))
             protected = protected.replace(m.group(1), f"\x00CODE{len(code_blocks) - 1}\x00", 1)
 
-        elements = []
+        elements: list[dict[str, Any]] = []
         last_end = 0
         for m in self._HEADING_RE.finditer(protected):
             before = protected[last_end : m.start()].strip()
@@ -1548,10 +1634,10 @@ class FeishuChannel(BaseChannel):
         Each line becomes a paragraph (row) in the post body.
         """
         lines = content.strip().split("\n")
-        paragraphs: list[list[dict]] = []
+        paragraphs: list[list[dict[str, Any]]] = []
 
         for line in lines:
-            elements: list[dict] = []
+            elements: list[dict[str, Any]] = []
             last_end = 0
 
             for m in cls._MD_LINK_RE.finditer(line):
@@ -1743,7 +1829,7 @@ class FeishuChannel(BaseChannel):
         return candidate
 
     async def _download_and_save_media(
-        self, msg_type: str, content_json: dict, message_id: str | None = None
+        self, msg_type: str, content_json: dict[str, Any], message_id: str | None = None
     ) -> tuple[str | None, str]:
         """
         Download media from Feishu and save to local disk.
@@ -2191,6 +2277,7 @@ class FeishuChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
@@ -2206,6 +2293,10 @@ class FeishuChannel(BaseChannel):
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
+        if stream_end and merge_next:
+            if not delta:
+                return
+            stream_end = False
         if stream_end:
             message_id = meta.get("message_id")
             # Only finalize the OnIt -> DONE reaction transition on the truly
@@ -2276,8 +2367,11 @@ class FeishuChannel(BaseChannel):
                 fallback_msg_id = self._thread_reply_target(meta)
                 if fallback_msg_id:
                     await loop.run_in_executor(
-                        None, lambda: self._reply_message_sync(
-                            fallback_msg_id, "interactive", card,
+                        None, partial(
+                            self._reply_message_sync,
+                            fallback_msg_id,
+                            "interactive",
+                            card,
                             reply_in_thread=self._should_use_reply_in_thread(meta),
                         ),
                     )
@@ -2533,6 +2627,9 @@ class FeishuChannel(BaseChannel):
             return
         try:
             event = data.event
+            if event is None or event.message is None or event.sender is None:
+                self.logger.warning("Ignoring incomplete Feishu message event")
+                return
             message = event.message
             sender = event.sender
 
@@ -2549,6 +2646,20 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+            if not all(isinstance(value, str) and value for value in (
+                message_id,
+                sender_id,
+                chat_id,
+                chat_type,
+                msg_type,
+            )):
+                self.logger.warning("Ignoring Feishu message event with missing routing fields")
+                return
+            message_id = cast(str, message_id)
+            sender_id = cast(str, sender_id)
+            chat_id = cast(str, chat_id)
+            chat_type = cast(str, chat_type)
+            msg_type = cast(str, msg_type)
 
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 self.logger.debug("skipping group message (not mentioned)")
@@ -2586,17 +2697,19 @@ class FeishuChannel(BaseChannel):
             task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
 
             # Parse content
-            content_parts = []
-            media_paths = []
+            content_parts: list[str] = []
+            media_paths: list[str] = []
 
             try:
-                content_json = json.loads(message.content) if message.content else {}
+                raw_content = message.content if isinstance(message.content, str) else ""
+                content_json = _as_json_object(json.loads(raw_content)) if raw_content else {}
             except json.JSONDecodeError:
                 content_json = {}
+            content_json = content_json or {}
 
             if msg_type == "text":
                 text = content_json.get("text", "")
-                if text:
+                if isinstance(text, str) and text:
                     mentions = getattr(message, "mentions", None)
                     text = self._strip_leading_bot_mention(text, mentions)
                     text = self._resolve_mentions(text, mentions)
@@ -2646,9 +2759,12 @@ class FeishuChannel(BaseChannel):
                 content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
 
             # Extract reply context (parent/root message IDs)
-            parent_id = getattr(message, "parent_id", None) or None
-            root_id = getattr(message, "root_id", None) or None
-            thread_id = getattr(message, "thread_id", None) or None
+            parent_id = getattr(message, "parent_id", None)
+            root_id = getattr(message, "root_id", None)
+            thread_id = getattr(message, "thread_id", None)
+            parent_id = parent_id if isinstance(parent_id, str) else None
+            root_id = root_id if isinstance(root_id, str) else None
+            thread_id = thread_id if isinstance(thread_id, str) else None
 
             # Prepend quoted message text when the user replied to another message
             if parent_id and self._client:

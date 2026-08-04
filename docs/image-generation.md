@@ -2,7 +2,7 @@
 
 nanobot can generate and edit images through the `generate_image` tool. Enable the tool in WebUI Settings, then ask for an image normally in chat; the agent decides when to call it and can keep iterating on generated images in the same conversation.
 
-The feature is disabled by default. Open **Settings → Image**, choose a configured provider and model, enable image generation, save, and restart when prompted. If that screen is not available in your installed version, use the manual config below.
+The feature is disabled by default. Open **Settings → Image**, choose a configured provider and model, enable image generation, and save. The running gateway applies the change immediately. If that screen is not available in your installed version, use the manual config below.
 
 ## Quick Setup
 
@@ -11,7 +11,7 @@ The feature is disabled by default. Open **Settings → Image**, choose a config
 1. Add the image provider credential under **Settings → Models** if it is not already configured.
 2. Open **Settings → Image**.
 3. Select the provider and image model, then enable image generation.
-4. Save, restart when prompted, and ask for a simple test image.
+4. Save and ask for a simple test image. If the gateway cannot apply the change live, WebUI will prompt you to restart it.
 
 **Manual config**
 
@@ -70,6 +70,9 @@ Provider settings reuse normal provider config fields:
 | `providers.<name>.apiBase` | Optional custom base URL |
 | `providers.<name>.extraHeaders` | Headers merged into provider requests |
 | `providers.<name>.extraBody` | Extra JSON fields merged into provider request bodies |
+| `providers.<name>.proxy` | Explicit trusted HTTP proxy for provider requests and returned image URL downloads |
+
+For providers that return image URLs, direct downloads use DNS pinning. When an explicit provider `proxy` is configured, nanobot rejects malformed URLs and locally identifiable private/internal targets on the initial URL and every redirect. Hostnames unavailable to local DNS are delegated to that trusted proxy, which owns final DNS resolution and network egress. Process-wide proxy environment variables are not used for these downloads.
 
 Both camelCase and snake_case config keys are accepted, but docs use camelCase to match `config.json`.
 
@@ -394,7 +397,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 
 | Symptom | Check |
 |---------|-------|
-| `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
+| `generate_image` is not available | Enable image generation in **Settings → Image** and save. For manual config changes, restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
 | `unsupported image generation provider` | Use `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu`, or `modelscope` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |

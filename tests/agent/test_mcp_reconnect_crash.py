@@ -27,8 +27,10 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security import network as security_network
 
-_IDLE_TIMEOUT_SECONDS = 0.25
-_IDLE_EXPIRY_GRACE_SECONDS = 0.25
+# Leave enough headroom for reconnect handshakes on slower CI hosts; each test
+# still waits beyond this deadline explicitly before exercising recovery.
+_IDLE_TIMEOUT_SECONDS = 1.0
+_IDLE_EXPIRY_GRACE_SECONDS = 0.5
 _TOOL_TIMEOUT_SECONDS = 10
 
 

@@ -2,21 +2,21 @@
 
 <!-- Meta description: Create, run, and manage nanobot scheduled automations, local triggers, and heartbeat-backed background checks. -->
 
-Automations are agent turns that run later in a linked chat/session. Use them
+Automations are agent turns that run later in a linked topic. Use them
 when nanobot should do work without someone actively typing: reminders,
 recurring checks, nightly summaries, CI follow-ups, local script reports, or
 webhook-driven events.
 
-Create automations from the chat, channel, or WebUI session where the result
-should appear. That lets nanobot keep the right session history, workspace, and
-reply target.
+Create automations from the chat channel or WebUI topic where the
+result should appear. That lets nanobot keep the right session history,
+workspace, and reply target.
 
 ## Choose an Automation Type
 
 | Type | Starts from | Best for | Created with |
 |---|---|---|---|
-| Scheduled automation | Time, interval, or cron expression | Recurring reminders, scheduled summaries, one-time future tasks | Ask nanobot in the target session to schedule it with the `cron` tool |
-| Local trigger | A local `nanobot trigger ...` command | CI jobs, webhooks, shell scripts, generated reports | `/trigger <name>` in the target session |
+| Scheduled automation | Time, interval, or cron expression | Recurring reminders, scheduled summaries, one-time future tasks | Ask nanobot in the target topic to schedule it with the `cron` tool |
+| Local trigger | A local `nanobot trigger ...` command | CI jobs, webhooks, shell scripts, generated reports | `/trigger <name>` in the target topic |
 | Heartbeat | Protected system schedule | Quiet recurring checks that should only report useful results | Edit `<workspace>/HEARTBEAT.md` |
 
 The two user-created automation types are scheduled automations and local
@@ -26,21 +26,21 @@ protected from normal automation edits.
 ## Before You Create One
 
 Keep `nanobot gateway` running. The gateway owns background delivery for chat
-apps, WebUI sessions, scheduled automations, local triggers, heartbeat, and
+apps, WebUI topics, scheduled automations, local triggers, heartbeat, and
 Dream jobs.
 
 Use the same workspace and config for the gateway and any process that sends
 local trigger messages. If you run multiple nanobot instances, pass the matching
 `--config` or `--workspace` option to `nanobot trigger`.
 
-Create each automation from the target session. An automation without a linked
-chat/session cannot be enabled or run from the WebUI because nanobot would not
-know where to deliver the turn.
+Create each automation from the target topic. An automation without a linked
+topic cannot be enabled or run from the WebUI because nanobot would not know
+where to deliver the turn.
 
 ## Scheduled Automations
 
 Scheduled automations are created by the agent's `cron` tool. In practice, ask
-nanobot from the target chat or WebUI session:
+nanobot from the target chat or WebUI topic:
 
 ```text
 Every weekday at 9am, check open pull requests and summarize blockers here.
@@ -68,7 +68,7 @@ report, use heartbeat instead of a user-created scheduled automation.
 Local triggers let a local script or external service send a message into a
 specific nanobot session later.
 
-Create the trigger from the chat or WebUI session where future messages should
+Create the trigger from the chat or WebUI topic where future messages should
 arrive:
 
 ```text
@@ -120,7 +120,7 @@ Heartbeat is enabled by default when `nanobot gateway` starts. Configure it in
 Use the WebUI Automations view to:
 
 - filter by all, active, paused, needs-attention, or system jobs;
-- search by task name, message, trigger command, linked chat, schedule, or
+- search by task name, message, trigger command, linked topic, schedule, or
   status;
 - sort by next run, last run, updated time, or name;
 - run scheduled automations now;
@@ -138,7 +138,7 @@ Automation delivery is workspace-local. Scheduled jobs and local trigger
 deliveries use the same workspace as the gateway.
 
 Local trigger messages are written to a durable queue. If the gateway is not
-running yet, the message waits in that workspace. If the linked session is
+running yet, the message waits in that workspace. If the linked topic is
 already running a turn, the trigger waits until the session becomes idle instead
 of being injected into the active turn.
 
@@ -154,7 +154,7 @@ queue is not a distributed multi-consumer queue.
 
 ## Common Patterns
 
-For a nightly report, ask from the target session:
+For a nightly report, ask from the target topic:
 
 ```text
 Every night at 9pm, review today's workspace changes and summarize anything I should handle tomorrow.
@@ -181,7 +181,7 @@ generate-report | nanobot trigger <trigger-id>
 ## Troubleshooting
 
 If an automation does not run, check that `nanobot gateway` is running, the
-automation is enabled, and it was created from a linked chat/session.
+automation is enabled, and it was created from a linked topic.
 
 If a local trigger waits forever, confirm the command uses the same workspace or
 config as the gateway.

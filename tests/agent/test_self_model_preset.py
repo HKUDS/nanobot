@@ -4,10 +4,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.model_selection import model_preset_from_metadata
 
 
 def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
@@ -285,6 +287,78 @@ def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
     assert result == "Error: model_preset 'missing' not found. Available: default, fast."
     assert loop.model_preset is None
     assert loop.model == "base-model"
+
+
+def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
+    presets = {
+        "default": ModelPresetConfig(model="base-model"),
+        "fast": ModelPresetConfig(model="openai/gpt-4.1"),
+    }
+    loop = _make_loop(tmp_path, presets=presets)
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key="cli:one",
+        metadata={"source": "self-tool"},
+    )):
+        result = tool._modify("model_preset", "fast")
+
+    assert "for the next turn" in result
+    assert model_preset_from_metadata(
+        loop.sessions.get_or_create("cli:one").metadata
+    ) == "fast"
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+
+
+def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    loop.set_session_model_preset = MagicMock(
+        side_effect=ValueError("No API key configured for provider 'openai'.")
+    )
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key="cli:one",
+    )):
+        result = tool._modify("model_preset", "broken")
+
+    assert result == "Error: No API key configured for provider 'openai'."
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("model", "other-model"),
+        ("context_window_tokens", 8_192),
+    ],
+)
+def test_self_tool_rejects_instance_runtime_changes_in_session(
+    tmp_path,
+    key: str,
+    value: object,
+) -> None:
+    loop = _make_loop(tmp_path)
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+    session = loop.sessions.get_or_create("cli:one")
+
+    with request_context(RequestContext(
+        channel="cli",
+        chat_id="one",
+        session_key=session.key,
+        runtime=loop.runtime_for_session(session),
+    )):
+        result = tool._modify(key, value)
+
+    other_runtime = loop.runtime_for_session(loop.sessions.get_or_create("cli:two"))
+    assert "instance-wide and disabled" in result
+    assert "model_preset" in result
+    assert other_runtime.model == "base-model"
+    assert other_runtime.context_window_tokens == 1000
 
 
 def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:

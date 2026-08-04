@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -7,7 +8,7 @@ import pytest
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.loop import AgentLoop, TurnState
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
@@ -19,7 +20,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -30,7 +31,11 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.keys import (
+    LAST_CHANNEL_METADATA_KEY,
+    UNIFIED_SESSION_KEY,
+)
+from nanobot.session.manager import Session
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
@@ -45,7 +50,6 @@ from nanobot.session.webui_turns import (
     maybe_generate_webui_title,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
-from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _mk_loop() -> AgentLoop:
@@ -54,6 +58,16 @@ def _mk_loop() -> AgentLoop:
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
     return loop
+
+
+def _provider_state() -> ProviderConversationState:
+    return ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
 
 
 def _runtime_message(content, blocks: list[RuntimeContextBlock]) -> dict:
@@ -75,7 +89,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     WebuiTurnCoordinator(
         bus=loop.bus,
         sessions=loop.sessions,
-        schedule_background=lambda coro: loop._schedule_background(coro),
+        schedule_background=lambda coro: loop.schedule_background(coro),
     ).subscribe(loop.runtime_events)
     return loop
 
@@ -204,6 +218,47 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
     assert session.messages == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("/neaw", 'Unknown command "/neaw". Did you mean "/new"?'),
+        (
+            "/status now",
+            'Command "/status" does not accept arguments. Did you mean "/status"?',
+        ),
+    ],
+)
+async def test_invalid_slash_command_is_rejected_without_calling_provider(
+    tmp_path: Path,
+    content: str,
+    expected: str,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-1",
+            content=content,
+        )
+    )
+
+    assert response is not None
+    assert response.content == expected
+    loop.provider.chat_with_retry.assert_not_awaited()
+    session = loop.sessions.get_or_create("websocket:chat-1")
+    persisted = [
+        (message["role"], message["content"], message.get("_command"))
+        for message in session.messages
+    ]
+    assert persisted == [
+        ("user", content, True),
+        ("assistant", response.content, True),
+    ]
+
+
 def test_clean_generated_title_strips_reasoning_tags() -> None:
     assert clean_generated_title("<think>reasoning</think> WebUI polish") == "WebUI polish"
     assert clean_generated_title("Title: <think> The user said hello") == ""
@@ -310,55 +365,6 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     loop.provider.chat_with_retry.assert_not_awaited()
 
 
-def test_webui_title_update_uses_captured_llm_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bus = MessageBus()
-    sessions = SessionManager(tmp_path)
-    scheduled: list[object] = []
-    captured: dict[str, object] = {}
-
-    async def fake_title_after_turn(**kwargs: object) -> bool:
-        captured.update(kwargs)
-        return False
-
-    monkeypatch.setattr(
-        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
-        fake_title_after_turn,
-    )
-    coordinator = WebuiTurnCoordinator(
-        bus=bus,
-        sessions=sessions,
-        schedule_background=lambda coro: scheduled.append(coro),
-    )
-    provider = MagicMock()
-    msg = InboundMessage(
-        channel="websocket",
-        sender_id="u1",
-        chat_id="chat1",
-        content="say hello",
-        metadata={"webui": True},
-    )
-
-    coordinator.capture_title_context(
-        "websocket:chat1",
-        msg,
-        LLMRuntime.capture(provider, "turn-model", context_window_tokens=32_768),
-    )
-    asyncio.run(coordinator.handle_turn_end(
-        msg,
-        session_key="websocket:chat1",
-        latency_ms=None,
-    ))
-
-    assert len(scheduled) == 1
-    asyncio.run(scheduled[0])  # type: ignore[arg-type]
-
-    assert captured["provider"] is provider
-    assert captured["model"] == "turn-model"
-
-
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
     loop = _mk_loop()
     session = Session(key="test:runtime-only")
@@ -447,7 +453,6 @@ def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_pat
         [],
         user_text,
         channel="cli",
-        chat_id="direct",
     )
     assert "_meta" not in messages[-1]
 
@@ -472,7 +477,6 @@ def test_build_and_save_preserves_multimodal_user_block_starting_with_runtime_ta
         user_text,
         media=[str(image)],
         channel="cli",
-        chat_id="direct",
     )
 
     loop._save_turn(session, messages, skip=1)
@@ -542,6 +546,7 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     loop = _mk_loop()
     session = Session(
         key="test:checkpoint",
+        provider_state=_provider_state(),
         metadata={
             AgentLoop._RUNTIME_CHECKPOINT_KEY: {
                 "assistant_message": {
@@ -587,6 +592,104 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
     assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+    assert session.provider_state is None
+
+
+def test_restore_final_response_checkpoint_preserves_matching_provider_state() -> None:
+    loop = _mk_loop()
+    state = _provider_state()
+    session = Session(
+        key="test:final-checkpoint",
+        provider_state=state,
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "final_response",
+                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
+                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+                ),
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "finished",
+                },
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "finished"
+    assert session.provider_state is state
+    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+
+
+def test_restore_legacy_final_checkpoint_discards_unproven_provider_state() -> None:
+    loop = _mk_loop()
+    session = Session(
+        key="test:legacy-final-checkpoint",
+        provider_state=_provider_state(),
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "final_response",
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "finished",
+                },
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "finished"
+    assert session.provider_state is None
+
+
+def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() -> None:
+    loop = _mk_loop()
+    tool_result = {
+        "role": "tool",
+        "tool_call_id": "call_done",
+        "name": "read_file",
+        "content": "compacted result",
+    }
+    state = _provider_state().with_pending_messages([tool_result])
+    session = Session(
+        key="test:completed-tools-checkpoint",
+        provider_state=state,
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "phase": "tools_completed",
+                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
+                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+                ),
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"},
+                        }
+                    ],
+                },
+                "completed_tool_results": [tool_result],
+                "pending_tool_calls": [],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.messages[-1]["content"] == "compacted result"
+    assert session.provider_state is state
 
 
 def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
@@ -665,6 +768,55 @@ def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={
+            "items": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "private-checkpoint-blob",
+                }
+            ]
+        },
+    )
+    loop.provider.can_resume_conversation_state.return_value = True
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", provider_state=state)
+    )
+    session = loop.sessions.get_or_create("cli:private-checkpoint")
+
+    await loop._run_agent_loop(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "question"},
+        ],
+        runtime=loop.llm_runtime(),
+        session=session,
+    )
+
+    assert session.provider_state is not None
+    checkpoint = session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY]
+    assert "provider_state" not in checkpoint
+    assert checkpoint[AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] == (
+        AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
+    )
+    assert "private-checkpoint-blob" not in json.dumps(session.metadata)
+
+    public_payload = loop.sessions.read_session_file(session.key)
+    assert public_payload is not None
+    assert "private-checkpoint-blob" not in json.dumps(public_payload)
+    raw = loop.sessions._get_session_path(session.key).read_text(encoding="utf-8")
+    assert "private-checkpoint-blob" in raw
+
+
+@pytest.mark.asyncio
 async def test_process_message_persists_user_message_before_turn_completes(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
@@ -682,10 +834,232 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     assert persisted.updated_at >= persisted.created_at
 
 
-# 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
-# at the top of ``_process_message`` and filters ``msg.media`` down to
-# paths that magic-byte-sniff as images, so the test fixture needs real
-# bytes on disk (not just placeholder paths).
+@pytest.mark.asyncio
+async def test_subagent_followup_stages_provider_state_before_turn_runs(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    session = loop.sessions.get_or_create("cli:subagent-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1]["role"] == "user"
+    assert persisted.provider_state.pending_messages[-1]["content"] == "subagent result"
+
+
+@pytest.mark.asyncio
+async def test_subagent_followup_state_is_durable_before_prompt_assembly(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("prompt boom"),
+    )
+    session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-prompt-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="prompt boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-prompt-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-prompt-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1]["content"] == (
+        "subagent result"
+    )
+
+
+@pytest.mark.asyncio
+async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.return_value = True
+    build_initial_messages = loop._build_initial_messages
+    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("prompt boom"),
+    )
+    session = loop.sessions.get_or_create("cli:subagent-redelivery")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-redelivery",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+
+    with pytest.raises(RuntimeError, match="prompt boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-redelivery")
+    persisted = loop.sessions.get_or_create("cli:subagent-redelivery")
+    assert persisted.provider_state is not None
+    assert [
+        message.get("content")
+        for message in persisted.provider_state.pending_messages
+    ].count("subagent result") == 1
+    loop._build_initial_messages = build_initial_messages  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("provider boom"),
+    )
+    with pytest.raises(RuntimeError, match="provider boom"):
+        await loop._process_message(msg)
+
+    provider_state = loop._run_agent_loop.await_args.kwargs["provider_state"]
+    assert provider_state is not None
+    pending_results = [
+        message
+        for message in provider_state.pending_messages
+        if message.get("content") == "subagent result"
+    ]
+    assert len(pending_results) == 1
+    assert LLMProvider._sanitize_empty_content(pending_results) == [
+        {"role": "user", "content": "subagent result"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_subagent_followup_clears_state_before_compatibility_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.can_resume_conversation_state.side_effect = RuntimeError(
+        "compatibility boom"
+    )
+    session = loop.sessions.get_or_create("cli:subagent-compat-crash")
+    session.provider_state = _provider_state()
+    loop.sessions.save(session)
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:subagent-compat-crash",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+    with pytest.raises(RuntimeError, match="compatibility boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("cli:subagent-compat-crash")
+    persisted = loop.sessions.get_or_create("cli:subagent-compat-crash")
+    assert persisted.messages[-1]["content"] == "subagent result"
+    assert persisted.provider_state is None
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="feishu",
+        sender_id="u1",
+        chat_id="oc_123",
+        content="persist my route",
+        session_key_override=UNIFIED_SESSION_KEY,
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate(UNIFIED_SESSION_KEY)
+    persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
+
+
+@pytest.mark.parametrize(
+    ("msg", "is_user_turn"),
+    [
+        (
+            InboundMessage(
+                channel="cli",
+                sender_id="u1",
+                chat_id="direct",
+                content="cli input",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="system",
+                sender_id="system",
+                chat_id="discord:automation",
+                content="system event",
+            ),
+            False,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="subagent",
+                chat_id="subagent-result",
+                content="subagent result",
+            ),
+            True,
+        ),
+        (
+            InboundMessage(
+                channel="discord",
+                sender_id="u1",
+                chat_id="automation",
+                content="scheduled turn",
+                metadata={CRON_TRIGGER_META: {"job_id": "job-1"}},
+            ),
+            True,
+        ),
+    ],
+)
+def test_unified_session_route_ignores_non_user_destinations(
+    tmp_path: Path,
+    msg: InboundMessage,
+    is_user_turn: bool,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
+
+    loop._remember_unified_session_route(session, msg, is_user_turn=is_user_turn)
+
+    assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
+
+
+# 1x1 PNG used by the media-persistence tests. Attachment preparation filters
+# ``msg.media`` down to paths that magic-byte-sniff as images, so the test
+# fixture needs real bytes on disk (not just placeholder paths).
 _PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n"
     b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -1018,7 +1392,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 
 
 @pytest.mark.asyncio
-async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
+async def test_process_message_keeps_delivery_chat_for_thread_session(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
@@ -1052,12 +1426,11 @@ async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path:
 
     assert result is not None
     assert result.chat_id == "thread-777"
-    assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
     assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
 
 
 @pytest.mark.asyncio
-async def test_process_message_uses_explicit_session_metadata_for_goal_context(
+async def test_process_message_uses_explicit_session_for_goal_context(
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
@@ -1102,10 +1475,10 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
 
     assert result is not None
     assert result.content == "ok"
-    kwargs = loop.context.build_messages.call_args.kwargs
-    assert kwargs["chat_id"] == "chat-with-goal"
-    assert kwargs["session_metadata"] is system_session.metadata
-    assert GOAL_STATE_KEY not in kwargs["session_metadata"]
+    kwargs = loop._run_agent_loop.call_args.kwargs
+    assert kwargs["session"] is system_session
+    assert kwargs["session_key"] == "system"
+    assert GOAL_STATE_KEY not in kwargs["session"].metadata
 
 
 @pytest.mark.asyncio
@@ -1216,6 +1589,9 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
     session.metadata[AgentLoop._PENDING_USER_TURN_KEY] = True
+    session.provider_state = _provider_state().with_pending_messages([
+        {"role": "user", "content": "old question"},
+    ])
     loop.sessions.save(session)
 
     loop._run_agent_loop = AsyncMock(return_value=(
@@ -1249,6 +1625,7 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
         {"role": "assistant", "content": "new answer"},
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+    assert session.provider_state is None
 
 
 @pytest.mark.asyncio
@@ -1306,7 +1683,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 
     first_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="keep progress")
     task = asyncio.create_task(loop._process_message(first_msg))
-    loop._active_tasks[first_msg.session_key] = [task]
+    loop._active_tasks[first_msg.session_key] = {task}
     await asyncio.wait_for(checkpoint_saved.wait(), timeout=1.0)
 
     stop_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="/stop")
@@ -1371,7 +1748,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 
     runtime = loop.llm_runtime()
     seen: dict[str, object] = {}
-    record_runtime = MagicMock(wraps=loop._runtime_events().record_turn_runtime)
+    record_runtime = MagicMock(wraps=loop.runtime_event_publisher.record_turn_runtime)
     loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
     async def fake_run_agent_loop(initial_messages, **kwargs):
@@ -1424,6 +1801,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     # rewritten with volatile ``[Message Time: ...]`` prefixes.
     assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
+    assert non_system[2]["role"] == "user"
     assert non_system[2]["content"].count("subagent result") == 1
     assert non_system[2]["content"] == "subagent result"
 
@@ -1486,27 +1864,26 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_system_subagent_followup_uses_common_turn_state_machine(tmp_path: Path) -> None:
+async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
         return_value=False
     )
-    visited: list[TurnState] = []
+    visited: list[str] = []
 
-    for state in (
-        TurnState.RESTORE,
-        TurnState.COMPACT,
-        TurnState.COMMAND,
-        TurnState.BUILD,
-        TurnState.RUN,
-        TurnState.SAVE,
-        TurnState.RESPOND,
+    for name in (
+        "_restore_turn",
+        "_compact_session",
+        "_dispatch_command",
+        "_build_turn",
+        "_run_turn",
+        "_persist_turn",
+        "_prepare_outbound",
     ):
-        name = f"_state_{state.name.lower()}"
         original = getattr(loop, name)
 
-        async def record(ctx, *, _original=original, _state=state):
-            visited.append(_state)
+        async def record(ctx, *, _original=original, _name=name):
+            visited.append(_name)
             return await _original(ctx)
 
         setattr(loop, name, record)
@@ -1522,25 +1899,33 @@ async def test_system_subagent_followup_uses_common_turn_state_machine(tmp_path:
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._process_message(
-        InboundMessage(
-            channel="system",
-            sender_id="subagent",
-            chat_id="cli:test",
-            content="subagent result",
-            metadata={"subagent_task_id": "sub-1"},
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    try:
+        await loop._process_message(
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="cli:test",
+                content="subagent result",
+                metadata={"subagent_task_id": "sub-1"},
+            )
         )
-    )
+    finally:
+        logger.remove(sink_id)
 
     assert visited == [
-        TurnState.RESTORE,
-        TurnState.COMPACT,
-        TurnState.COMMAND,
-        TurnState.BUILD,
-        TurnState.RUN,
-        TurnState.SAVE,
-        TurnState.RESPOND,
+        "_restore_turn",
+        "_compact_session",
+        "_dispatch_command",
+        "_build_turn",
+        "_run_turn",
+        "_persist_turn",
+        "_prepare_outbound",
     ]
+    logged = "".join(logs)
+    for stage in ("restore", "compact", "command", "build", "run", "save", "respond"):
+        assert f"Stage {stage} completed in" in logged
 
 
 @pytest.mark.asyncio
@@ -1580,10 +1965,11 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     ]
 
 
-def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
+def test_subagent_followup_uses_user_model_input_and_assistant_history(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="cli:merge")
     session.add_message("assistant", "previous assistant")
+    history = session.get_history(max_messages=0)
 
     inserted = loop._persist_subagent_followup(
         session,
@@ -1600,16 +1986,16 @@ def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_pat
 
     builder = ContextBuilder(tmp_path)
     projected = builder.build_messages(
-        history=session.get_history(max_messages=0),
-        current_message="",
-        current_role="assistant",
+        history=history,
+        current_message="subagent result",
         channel="cli",
-        chat_id="merge",
     )
 
     non_system = [m for m in projected if m.get("role") != "system"]
     assert len(non_system) == 2
+    assert non_system[-1]["role"] == "user"
     assert "subagent result" in non_system[-1]["content"]
+    assert session.messages[-1]["role"] == "assistant"
     assert session.messages[-1]["content"] == "subagent result"
     assert session.messages[-1]["injected_event"] == "subagent_result"
 

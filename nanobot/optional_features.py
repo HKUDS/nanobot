@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from packaging.requirements import Requirement
@@ -87,8 +89,8 @@ def optional_dependency_groups() -> dict[str, list[str] | None]:
     deps = project.get("optional-dependencies", {})
     if isinstance(deps, dict) and deps:
         return {
-            name: list(values)
-            for name, values in deps.items()
+            name: list(cast(list[str], values))
+            for name, values in cast(dict[str, object], deps).items()
             if name != "dev" and name not in _HIDDEN_OPTIONAL_FEATURES and isinstance(values, list)
         }
     return {
@@ -153,13 +155,13 @@ def _extra_dependencies_installed(
     normalized = canonicalize_name(requested_extra)
     provided = {
         canonicalize_name(value)
-        for value in (dist.metadata.get_all("Provides-Extra") or [])
+        for value in cast(list[str], dist.metadata.get_all("Provides-Extra") or [])
     }
     if provided and normalized not in provided:
         return False
 
     matched = False
-    for raw in dist.requires or []:
+    for raw in cast(list[str], dist.requires or []):
         req = Requirement(raw)
         if req.marker and not req.marker.evaluate({"extra": requested_extra}):
             continue
@@ -179,13 +181,18 @@ def extra_installed(extra: str, deps: list[str] | None) -> bool:
     return all(requirement_installed(dep, extra) for dep in deps)
 
 
-def run_install_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def run_install_command(
+    argv: list[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=_INSTALL_TIMEOUT_SECONDS,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
@@ -234,6 +241,20 @@ def install_extra(
     failed_cmd = pip_cmd
     failed_proc = proc
     if missing_pip(proc):
+        if shutil.which("uv"):
+            uv_cmd = ["uv", "pip", "install", "--python", sys.executable, *install_args]
+            uv_env = os.environ.copy()
+            if index_url := os.environ.get("PIP_INDEX_URL", "").strip():
+                uv_env["UV_INDEX_URL"] = index_url
+            logger.info("pip missing while installing '{}'; running {}", extra, command_text(uv_cmd))
+            uv_proc = runner(uv_cmd, env=uv_env)
+            _log_completed_command(f"Optional feature '{extra}' uv install", uv_proc)
+            if uv_proc.returncode == 0:
+                importlib.invalidate_caches()
+                return InstallResult(True, label, pip_cmd)
+            output = (uv_proc.stderr or uv_proc.stdout or "").strip()
+            return InstallResult(False, label, pip_cmd, failed_cmd=uv_cmd, output=output)
+
         ensure_cmd = [sys.executable, "-m", "ensurepip", "--upgrade"]
         logger.info("pip missing while installing '{}'; running {}", extra, command_text(ensure_cmd))
         ensure_proc = runner(ensure_cmd)
@@ -259,7 +280,7 @@ def read_config_data(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        return cast(dict[str, Any], json.load(f))
 
 
 def write_config_data(path: Path, data: dict[str, Any]) -> None:
@@ -312,7 +333,7 @@ def channel_enabled(
     if default_enabled is None:
         default_enabled = plugin.default_enabled if plugin is not None else channel_default_enabled(name)
     if section is None:
-        return default_enabled
+        return bool(default_enabled)
     if plugin is None:
         from nanobot.channels.registry import load_channel_plugin
 
@@ -421,7 +442,7 @@ def optional_features_payload(
         dependencies = _feature_dependencies(name, channel_plugin, extras)
         has_dependencies = bool(dependencies)
         installed = extra_installed(name, dependencies) if has_dependencies else True
-        feature = {
+        feature: dict[str, Any] = {
             "name": name,
             "display_name": (
                 channel_plugin.display_name
@@ -502,7 +523,7 @@ def optional_features_payload(
             })
         features.append(feature)
 
-    payload = {
+    payload: dict[str, Any] = {
         "features": features,
         "enabled_count": sum(1 for feature in features if feature["enabled"]),
     }
@@ -520,13 +541,16 @@ def with_channel_runtime_status(
     for status in runtime_status.values():
         if not isinstance(status, dict):
             continue
-        owner = status.get("owner")
+        status_object = cast(dict[str, Any], status)
+        owner = status_object.get("owner")
         if isinstance(owner, str):
-            statuses_by_owner.setdefault(owner, []).append(status)
+            statuses_by_owner.setdefault(owner, []).append(status_object)
 
     features: list[dict[str, Any]] = []
-    for original in payload.get("features", []):
-        feature = dict(original)
+    for raw_feature in cast(list[object], payload.get("features", [])):
+        if not isinstance(raw_feature, dict):
+            continue
+        feature = cast(dict[str, Any], raw_feature).copy()
         if feature.get("type") != "channel":
             features.append(feature)
             continue
@@ -546,9 +570,11 @@ def with_channel_runtime_status(
                 str(status.get("instance_id", "default")): status
                 for status in owner_statuses
             }
-            decorated_instances = []
-            for original_instance in instances:
-                instance = dict(original_instance)
+            decorated_instances: list[dict[str, Any]] = []
+            for original_instance in cast(list[object], instances):
+                if not isinstance(original_instance, dict):
+                    continue
+                instance = cast(dict[str, Any], original_instance).copy()
                 desired_instance = bool(instance.get("enabled"))
                 status = by_instance.get(str(instance.get("id", "default")))
                 if desired_instance and status is None:

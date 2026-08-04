@@ -17,7 +17,7 @@ from email.parser import BytesParser
 from email.utils import parseaddr
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import Field
@@ -188,7 +188,9 @@ class EmailChannel(BaseChannel):
                         self.logger.exception("Error delivering email from {}", sender)
                         continue
 
-                    uid = str((item.get("metadata") or {}).get("uid") or "")
+                    metadata = item.get("metadata")
+                    metadata_data = cast(dict[str, Any], metadata) if isinstance(metadata, dict) else {}
+                    uid = str(metadata_data.get("uid") or "")
                     if uid and should_apply_post_action:
                         post_actions_uids.add(uid)
 
@@ -312,7 +314,7 @@ class EmailChannel(BaseChannel):
             raise
 
     def _validate_config(self) -> bool:
-        missing = []
+        missing: list[str] = []
         if not self.config.imap_host:
             missing.append("imap_host")
         if not self.config.imap_username:
@@ -427,7 +429,7 @@ class EmailChannel(BaseChannel):
         messages: list[dict[str, Any]],
         skipped_uids: set[str],
         cycle_uids: set[str],
-    ) -> None:
+    ) -> list[dict[str, Any]] | None:
         """Fetch messages by arbitrary IMAP search criteria."""
         mailbox = self.config.imap_mailbox or "INBOX"
 
@@ -765,8 +767,10 @@ class EmailChannel(BaseChannel):
     @staticmethod
     def _extract_message_bytes(fetched: list[Any]) -> bytes | None:
         for item in fetched:
-            if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
-                return bytes(item[1])
+            if isinstance(item, tuple):
+                fetched_item = cast(tuple[Any, ...], item)
+                if len(fetched_item) >= 2 and isinstance(fetched_item[1], (bytes, bytearray)):
+                    return bytes(fetched_item[1])
         return None
 
     @staticmethod
@@ -837,8 +841,8 @@ class EmailChannel(BaseChannel):
         """
         spf_pass = False
         dkim_pass = False
-        for ar_header in parsed_msg.get_all("Authentication-Results") or []:
-            ar_lower = ar_header.lower()
+        for ar_header in cast(list[Any], parsed_msg.get_all("Authentication-Results") or []):
+            ar_lower = str(ar_header).lower()
             if re.search(r"\bspf\s*=\s*pass\b", ar_lower):
                 spf_pass = True
             if re.search(r"\bdkim\s*=\s*pass\b", ar_lower):

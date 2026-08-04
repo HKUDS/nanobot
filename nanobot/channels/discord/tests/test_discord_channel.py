@@ -755,6 +755,36 @@ async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_merge_next_keeps_one_message(monkeypatch) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    times = iter([1.0, 3.0, 5.0])
+    monkeypatch.setattr("nanobot.channels.discord.runtime.time.monotonic", lambda: next(times, 5.0))
+
+    await owner.send_delta(
+        "123",
+        "first-",
+        stream_id="s1",
+        stream_end=True,
+        merge_next=True,
+    )
+    await owner.send_delta("123", "second", stream_id="s1")
+    await owner.send_delta("123", "", stream_id="s1", stream_end=True)
+
+    assert target.sent_payloads == [{"content": "first-"}]
+    assert target.sent_messages[0].edits == [
+        {"content": "first-second"},
+        {"content": "first-second"},
+    ]
+    assert owner._stream_bufs == {}
+
+
+@pytest.mark.asyncio
 async def test_send_delta_stream_end_splits_oversized_reply(monkeypatch) -> None:
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(owner, intents=None)

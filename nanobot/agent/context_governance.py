@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -23,10 +23,10 @@ from nanobot.utils.helpers import (
 from nanobot.utils.runtime import ensure_nonempty_tool_result
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.providers.base import LLMProvider
 
 SNIP_SAFETY_BUFFER = 1024
-MICROCOMPACT_KEEP_RECENT = 10
 MICROCOMPACT_MIN_CHARS = 500
 INFLIGHT_COMPACT_TARGET_RATIO = 0.85
 COMPACTABLE_TOOLS = frozenset({
@@ -50,8 +50,9 @@ def _tool_call_name_is_valid(tool_call: Any) -> bool:
     """
     if not isinstance(tool_call, dict):
         return False
-    fn = tool_call.get("function")
-    name = fn.get("name") if isinstance(fn, dict) else tool_call.get("name")
+    tool_call_data = cast(dict[str, Any], tool_call)
+    fn = tool_call_data.get("function")
+    name = cast(dict[str, Any], fn).get("name") if isinstance(fn, dict) else tool_call_data.get("name")
     return isinstance(name, str) and bool(name)
 
 
@@ -59,7 +60,7 @@ def _tool_call_name_is_valid(tool_call: Any) -> bool:
 class ContextGovernanceConfig:
     provider: LLMProvider
     model: str
-    tools: Any
+    tools: ToolRegistry
     workspace: Path | None
     session_key: str | None
     max_tool_result_chars: int
@@ -200,7 +201,7 @@ class ContextGovernor:
                 if updated is not None:
                     updated.append(msg)
                 continue
-            kept = [tc for tc in calls if _tool_call_name_is_valid(tc)]
+            kept = [tc for tc in cast(list[Any], calls) if _tool_call_name_is_valid(tc)]
             if len(kept) == len(calls):
                 if updated is not None:
                     updated.append(msg)
@@ -239,9 +240,11 @@ class ContextGovernor:
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
-                        declared.add(str(tc["id"]))
+                for tc in cast(list[Any], msg.get("tool_calls") or []):
+                    if isinstance(tc, dict):
+                        tool_call = cast(dict[str, Any], tc)
+                        if tool_call.get("id"):
+                            declared.add(str(tool_call["id"]))
             if role == "tool":
                 tid = msg.get("tool_call_id")
                 tid_str = str(tid) if tid else ""
@@ -267,13 +270,17 @@ class ContextGovernor:
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
+                for tc in cast(list[Any], msg.get("tool_calls") or []):
+                    if isinstance(tc, dict):
                         name = ""
-                        func = tc.get("function")
-                        if isinstance(func, dict):
-                            name = func.get("name", "")
-                        declared.append((idx, str(tc["id"]), name))
+                        tool_call = cast(dict[str, Any], tc)
+                        if tool_call.get("id"):
+                            func = tool_call.get("function")
+                            if isinstance(func, dict):
+                                func_data = cast(dict[str, Any], func)
+                                raw_name = func_data.get("name", "")
+                                name = raw_name if isinstance(raw_name, str) else str(raw_name)
+                            declared.append((idx, str(tool_call["id"]), name))
             elif role == "tool":
                 tid = msg.get("tool_call_id")
                 if tid:
@@ -498,14 +505,7 @@ class ContextGovernor:
                 continue
             compactable.append((idx, str(tool_call_id)))
 
-        if not compactable:
-            return []
-        primary_count = max(0, len(compactable) - MICROCOMPACT_KEEP_RECENT)
-        primary = compactable[:primary_count]
-        # Hard overflow beats the keep-recent preference. Return recent results
-        # after stale ones so the newest result is naturally last.
-        fallback = compactable[primary_count:]
-        return primary + fallback
+        return compactable
 
     def _compact_tool_result_at(self, messages: list[dict[str, Any]], idx: int) -> None:
         messages[idx]["content"] = self._tool_result_compaction_message(messages[idx])

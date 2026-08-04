@@ -21,7 +21,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
@@ -168,10 +168,10 @@ class WeixinChannel(BaseChannel):
         self._processed_ids: OrderedDict[str, None] = OrderedDict()
         self._state_dir: Path | None = None
         self._token: str = ""
-        self._poll_task: asyncio.Task | None = None
+        self._poll_task: asyncio.Task[None] | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._session_pause_until: float = 0.0
-        self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._typing_tickets: dict[str, dict[str, Any]] = {}
         self._context_token_at: dict[str, float] = {}
         self._pending_tool_hints: dict[str, list[str]] = {}
@@ -201,14 +201,14 @@ class WeixinChannel(BaseChannel):
         if not state_file.exists():
             return False
         try:
-            data = json.loads(state_file.read_text())
+            data = cast(dict[str, Any], json.loads(state_file.read_text()))
             self._token = data.get("token", "")
             self._get_updates_buf = data.get("get_updates_buf", "")
             context_tokens = data.get("context_tokens", {})
             if isinstance(context_tokens, dict):
                 self._context_tokens = {
                     str(user_id): str(token)
-                    for user_id, token in context_tokens.items()
+                    for user_id, token in cast(dict[object, object], context_tokens).items()
                     if str(user_id).strip() and str(token).strip()
                 }
             else:
@@ -216,8 +216,8 @@ class WeixinChannel(BaseChannel):
             typing_tickets = data.get("typing_tickets", {})
             if isinstance(typing_tickets, dict):
                 self._typing_tickets = {
-                    str(user_id): ticket
-                    for user_id, ticket in typing_tickets.items()
+                    str(user_id): cast(dict[str, Any], ticket)
+                    for user_id, ticket in cast(dict[object, object], typing_tickets).items()
                     if str(user_id).strip() and isinstance(ticket, dict)
                 }
             else:
@@ -230,9 +230,30 @@ class WeixinChannel(BaseChannel):
             self.logger.error("Failed to load Weixin account state", exc_info=True)
             return False
 
-    def _save_state(self) -> None:
+    def _save_state(self, *, force: bool = False) -> None:
         state_file = self._get_state_dir() / "account.json"
         with suppress(Exception):
+            if not force and state_file.exists():
+                persisted: object = None
+                try:
+                    persisted = json.loads(state_file.read_text())
+                except Exception:
+                    persisted = None
+                persisted_token = ""
+                if isinstance(persisted, dict):
+                    persisted_mapping = cast(dict[str, object], persisted)
+                    persisted_token = str(persisted_mapping.get("token", "") or "")
+                configured_token_is_authoritative: bool = bool(self.config.token) and (
+                    self._token == self.config.token
+                )
+                if (
+                    persisted_token
+                    and persisted_token != self._token
+                    and not configured_token_is_authoritative
+                ):
+                    # A concurrent QR login may have committed a newer token.
+                    # Never let an older runtime snapshot overwrite it.
+                    return
             data = {
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
@@ -276,18 +297,22 @@ class WeixinChannel(BaseChannel):
         if isinstance(err, httpx.TimeoutException | httpx.TransportError):
             return True
         if isinstance(err, httpx.HTTPStatusError):
-            status_code = err.response.status_code if err.response is not None else 0
+            status_code = (
+                err.response.status_code
+                if cast(object, err.response) is not None
+                else 0
+            )
             return status_code >= 500
         return False
 
     async def _api_get(
         self,
         endpoint: str,
-        params: dict | None = None,
+        params: dict[str, Any] | None = None,
         *,
         auth: bool = True,
         extra_headers: dict[str, str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         assert self._client is not None
         url = f"{self.config.base_url}/{endpoint}"
         hdrs = self._make_headers(auth=auth)
@@ -295,17 +320,17 @@ class WeixinChannel(BaseChannel):
             hdrs.update(extra_headers)
         resp = await self._client.get(url, params=params, headers=hdrs)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     async def _api_get_with_base(
         self,
         *,
         base_url: str,
         endpoint: str,
-        params: dict | None = None,
+        params: dict[str, Any] | None = None,
         auth: bool = True,
         extra_headers: dict[str, str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """GET helper that allows overriding base_url for QR redirect polling."""
         assert self._client is not None
         url = f"{base_url.rstrip('/')}/{endpoint}"
@@ -314,15 +339,15 @@ class WeixinChannel(BaseChannel):
             hdrs.update(extra_headers)
         resp = await self._client.get(url, params=params, headers=hdrs)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     async def _api_post(
         self,
         endpoint: str,
-        body: dict | None = None,
+        body: dict[str, Any] | None = None,
         *,
         auth: bool = True,
-    ) -> dict:
+    ) -> dict[str, Any]:
         assert self._client is not None
         url = f"{self.config.base_url}/{endpoint}"
         payload = body or {}
@@ -330,7 +355,7 @@ class WeixinChannel(BaseChannel):
             payload["base_info"] = BASE_INFO
         resp = await self._client.post(url, json=payload, headers=self._make_headers(auth=auth))
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     # ------------------------------------------------------------------
     # QR Code Login  (matches login-qr.ts)
@@ -343,8 +368,8 @@ class WeixinChannel(BaseChannel):
             params={"bot_type": "3"},
             auth=False,
         )
-        qrcode_img_content = data.get("qrcode_img_content", "")
-        qrcode_id = data.get("qrcode", "")
+        qrcode_img_content = cast(str, data.get("qrcode_img_content", ""))
+        qrcode_id = cast(str, data.get("qrcode", ""))
         if not qrcode_id:
             raise RuntimeError(f"Failed to get QR code from WeChat API: {data}")
         return qrcode_id, (qrcode_img_content or qrcode_id)
@@ -371,7 +396,7 @@ class WeixinChannel(BaseChannel):
                         continue
                     raise
 
-                if not isinstance(status_data, dict):
+                if not isinstance(cast(object, status_data), dict):
                     await asyncio.sleep(1)
                     continue
 
@@ -431,15 +456,73 @@ class WeixinChannel(BaseChannel):
         if isinstance(err, httpx.TimeoutException | httpx.TransportError):
             return True
         if isinstance(err, httpx.HTTPStatusError):
-            status_code = err.response.status_code if err.response is not None else 0
+            status_code = (
+                err.response.status_code
+                if cast(object, err.response) is not None
+                else 0
+            )
             if status_code >= 500:
                 return True
         return False
 
+    @property
+    def connect_base_url(self) -> str:
+        """Base URL currently selected for the interactive connection flow."""
+        return self.config.base_url
+
+    def connect_reset_pending_credentials(self) -> None:
+        """Clear only in-memory credentials while a replacement QR login is pending."""
+        self._token = ""
+        self._get_updates_buf = ""
+
+    def connect_load_state(self) -> bool:
+        """Load an existing account for the interactive connection flow."""
+        return self._load_state()
+
+    def connect_open_client(self) -> None:
+        """Open the short-lived HTTP client used by WebUI QR login."""
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60, connect=30),
+            follow_redirects=True,
+        )
+        self._running = True
+
+    async def connect_fetch_qr_code(self) -> tuple[str, str]:
+        return await self._fetch_qr_code()
+
+    async def connect_poll_qr_code(
+        self,
+        *,
+        base_url: str,
+        qrcode_id: str,
+    ) -> dict[str, Any]:
+        return await self._api_get_with_base(
+            base_url=base_url,
+            endpoint="ilink/bot/get_qrcode_status",
+            params={"qrcode": qrcode_id},
+            auth=False,
+        )
+
+    def connect_poll_error_is_retryable(self, err: Exception) -> bool:
+        return self._is_retryable_qr_poll_error(err)
+
+    def connect_commit_account(self, *, token: str, base_url: str) -> None:
+        self._token = token
+        if base_url:
+            self.config.base_url = base_url
+        self._save_state(force=True)
+
+    async def connect_close_client(self) -> None:
+        self._running = False
+        if self._client is not None:
+            with suppress(Exception):
+                await self._client.aclose()
+            self._client = None
+
     @staticmethod
     def _print_qr_code(url: str) -> None:
         try:
-            import qrcode as qr_lib
+            import qrcode as qr_lib  # pyright: ignore[reportMissingModuleSource]
 
             qr = qr_lib.QRCode(border=1)
             qr.add_data(url)
@@ -551,6 +634,8 @@ class WeixinChannel(BaseChannel):
         remaining = self._session_pause_remaining_s()
         if remaining > 0:
             await asyncio.sleep(remaining)
+            if not self.config.token:
+                self._load_state()
             return
 
         body: dict[str, Any] = {
@@ -596,7 +681,7 @@ class WeixinChannel(BaseChannel):
             self._save_state()
 
         # Process messages (WeixinMessage[] from types.ts)
-        msgs: list[dict] = data.get("msgs", []) or []
+        msgs = cast(list[dict[str, Any]], data.get("msgs", []) or [])
         for msg in msgs:
             try:
                 await self._process_message(msg)
@@ -607,7 +692,7 @@ class WeixinChannel(BaseChannel):
     # Inbound message processing  (matches inbound.ts + process-message.ts)
     # ------------------------------------------------------------------
 
-    async def _process_message(self, msg: dict) -> None:
+    async def _process_message(self, msg: dict[str, Any]) -> None:
         """Process a single WeixinMessage from getUpdates."""
         # Skip bot's own messages (message_type 2 = BOT)
         if msg.get("message_type") == MESSAGE_TYPE_BOT:
@@ -679,7 +764,7 @@ class WeixinChannel(BaseChannel):
             self._save_state()
 
         # Parse item_list (WeixinMessage.item_list — types.ts:161)
-        item_list: list[dict] = msg.get("item_list") or []
+        item_list = cast(list[dict[str, Any]], msg.get("item_list") or [])
         content_parts: list[str] = []
         media_paths: list[str] = []
         has_top_level_downloadable_media = False
@@ -688,12 +773,16 @@ class WeixinChannel(BaseChannel):
             item_type = item.get("type", 0)
 
             if item_type == ITEM_TEXT:
-                text = (item.get("text_item") or {}).get("text", "")
+                text_item = cast(dict[str, Any], item.get("text_item") or {})
+                text = cast(str, text_item.get("text", ""))
                 if text:
                     # Handle quoted/ref messages (inbound.ts:86-98)
-                    ref = item.get("ref_msg")
+                    ref = cast(dict[str, Any] | None, item.get("ref_msg"))
                     if ref:
-                        ref_item = ref.get("message_item")
+                        ref_item = cast(
+                            dict[str, Any] | None,
+                            ref.get("message_item"),
+                        )
                         # If quoted message is media, just pass the text
                         if ref_item and ref_item.get("type", 0) in (
                             ITEM_IMAGE,
@@ -705,9 +794,13 @@ class WeixinChannel(BaseChannel):
                         else:
                             parts: list[str] = []
                             if ref.get("title"):
-                                parts.append(ref["title"])
+                                parts.append(cast(str, ref["title"]))
                             if ref_item:
-                                ref_text = (ref_item.get("text_item") or {}).get("text", "")
+                                ref_text_item = cast(
+                                    dict[str, Any],
+                                    ref_item.get("text_item") or {},
+                                )
+                                ref_text = cast(str, ref_text_item.get("text", ""))
                                 if ref_text:
                                     parts.append(ref_text)
                             if parts:
@@ -718,7 +811,7 @@ class WeixinChannel(BaseChannel):
                         content_parts.append(text)
 
             elif item_type == ITEM_IMAGE:
-                image_item = item.get("image_item") or {}
+                image_item = cast(dict[str, Any], item.get("image_item") or {})
                 if _has_downloadable_media_locator(image_item.get("media")):
                     has_top_level_downloadable_media = True
                 file_path = await self._download_media_item(image_item, "image")
@@ -729,9 +822,9 @@ class WeixinChannel(BaseChannel):
                     content_parts.append("[image]")
 
             elif item_type == ITEM_VOICE:
-                voice_item = item.get("voice_item") or {}
+                voice_item = cast(dict[str, Any], item.get("voice_item") or {})
                 # Voice-to-text provided by WeChat (inbound.ts:101-103)
-                voice_text = voice_item.get("text", "")
+                voice_text = cast(str, voice_item.get("text", ""))
                 if voice_text:
                     content_parts.append(f"[voice] {voice_text}")
                 else:
@@ -749,10 +842,10 @@ class WeixinChannel(BaseChannel):
                         content_parts.append("[voice]")
 
             elif item_type == ITEM_FILE:
-                file_item = item.get("file_item") or {}
+                file_item = cast(dict[str, Any], item.get("file_item") or {})
                 if _has_downloadable_media_locator(file_item.get("media")):
                     has_top_level_downloadable_media = True
-                file_name = file_item.get("file_name", "unknown")
+                file_name = cast(str, file_item.get("file_name", "unknown"))
                 file_path = await self._download_media_item(
                     file_item,
                     "file",
@@ -765,7 +858,7 @@ class WeixinChannel(BaseChannel):
                     content_parts.append(f"[file: {file_name}]")
 
             elif item_type == ITEM_VIDEO:
-                video_item = item.get("video_item") or {}
+                video_item = cast(dict[str, Any], item.get("video_item") or {})
                 if _has_downloadable_media_locator(video_item.get("media")):
                     has_top_level_downloadable_media = True
                 file_path = await self._download_media_item(video_item, "video")
@@ -783,8 +876,8 @@ class WeixinChannel(BaseChannel):
             for item in item_list:
                 if item.get("type", 0) != ITEM_TEXT:
                     continue
-                ref = item.get("ref_msg") or {}
-                candidate = ref.get("message_item") or {}
+                ref = cast(dict[str, Any], item.get("ref_msg") or {})
+                candidate = cast(dict[str, Any], ref.get("message_item") or {})
                 if candidate.get("type", 0) in (ITEM_IMAGE, ITEM_VOICE, ITEM_FILE, ITEM_VIDEO):
                     ref_media_item = candidate
                     break
@@ -792,13 +885,19 @@ class WeixinChannel(BaseChannel):
             if ref_media_item:
                 ref_type = ref_media_item.get("type", 0)
                 if ref_type == ITEM_IMAGE:
-                    image_item = ref_media_item.get("image_item") or {}
+                    image_item = cast(
+                        dict[str, Any],
+                        ref_media_item.get("image_item") or {},
+                    )
                     file_path = await self._download_media_item(image_item, "image")
                     if file_path:
                         content_parts.append(f"[image]\n[Image: source: {file_path}]")
                         media_paths.append(file_path)
                 elif ref_type == ITEM_VOICE:
-                    voice_item = ref_media_item.get("voice_item") or {}
+                    voice_item = cast(
+                        dict[str, Any],
+                        ref_media_item.get("voice_item") or {},
+                    )
                     file_path = await self._download_media_item(voice_item, "voice")
                     if file_path:
                         transcription = await self.transcribe_audio(file_path)
@@ -808,14 +907,20 @@ class WeixinChannel(BaseChannel):
                             content_parts.append(f"[voice]\n[Audio: source: {file_path}]")
                         media_paths.append(file_path)
                 elif ref_type == ITEM_FILE:
-                    file_item = ref_media_item.get("file_item") or {}
-                    file_name = file_item.get("file_name", "unknown")
+                    file_item = cast(
+                        dict[str, Any],
+                        ref_media_item.get("file_item") or {},
+                    )
+                    file_name = cast(str, file_item.get("file_name", "unknown"))
                     file_path = await self._download_media_item(file_item, "file", file_name)
                     if file_path:
                         content_parts.append(f"[file: {file_name}]\n[File: source: {file_path}]")
                         media_paths.append(file_path)
                 elif ref_type == ITEM_VIDEO:
-                    video_item = ref_media_item.get("video_item") or {}
+                    video_item = cast(
+                        dict[str, Any],
+                        ref_media_item.get("video_item") or {},
+                    )
                     file_path = await self._download_media_item(video_item, "video")
                     if file_path:
                         content_parts.append(f"[video]\n[Video: source: {file_path}]")
@@ -848,13 +953,13 @@ class WeixinChannel(BaseChannel):
 
     async def _download_media_item(
         self,
-        typed_item: dict,
+        typed_item: dict[str, Any],
         media_type: str,
         filename: str | None = None,
     ) -> str | None:
         """Download + AES-decrypt a media item. Returns local path or None."""
         try:
-            media = typed_item.get("media") or {}
+            media = cast(dict[str, Any], typed_item.get("media") or {})
             encrypt_query_param = str(media.get("encrypt_query_param", "") or "")
             full_url = str(media.get("full_url", "") or "").strip()
 
@@ -865,8 +970,8 @@ class WeixinChannel(BaseChannel):
             # image_item.aeskey is a raw hex string (16 bytes as 32 hex chars).
             # media.aes_key is always base64-encoded.
             # For images, prefer image_item.aeskey; for others use media.aes_key.
-            raw_aeskey_hex = typed_item.get("aeskey", "")
-            media_aes_key_b64 = media.get("aes_key", "")
+            raw_aeskey_hex = cast(str, typed_item.get("aeskey", ""))
+            media_aes_key_b64 = cast(str, media.get("aes_key", ""))
 
             aes_key_b64: str = ""
             if raw_aeskey_hex:
@@ -1160,7 +1265,7 @@ class WeixinChannel(BaseChannel):
                 await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
 
         typing_keepalive_stop = asyncio.Event()
-        typing_keepalive_task: asyncio.Task | None = None
+        typing_keepalive_task: asyncio.Task[None] | None = None
         if typing_ticket:
             typing_keepalive_task = asyncio.create_task(
                 self._typing_keepalive_loop(msg.chat_id, typing_ticket, typing_keepalive_stop)
@@ -1183,7 +1288,7 @@ class WeixinChannel(BaseChannel):
                 except httpx.HTTPStatusError as http_err:
                     status_code = (
                         http_err.response.status_code
-                        if http_err.response is not None
+                        if cast(object, http_err.response) is not None
                         else 0
                     )
                     if status_code >= 500:
@@ -1192,7 +1297,7 @@ class WeixinChannel(BaseChannel):
                             "Server error ({} {}) sending media {}",
                             status_code,
                             http_err.response.reason_phrase
-                            if http_err.response is not None
+                            if cast(object, http_err.response) is not None
                             else "",
                             media_path,
                         )
@@ -1243,6 +1348,7 @@ class WeixinChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Deliver a streamed reply to WeChat.
 
@@ -1256,6 +1362,10 @@ class WeixinChannel(BaseChannel):
             return
         is_end = stream_end or bool(meta.get("_stream_end"))
         buffer_key = stream_id or chat_id
+        if is_end and merge_next:
+            if delta:
+                self._stream_buffers.setdefault(buffer_key, []).append(delta)
+            return
         # Accumulate intermediate deltas. The stream_end message's own content
         # (present when the manager coalesces deltas into the end message) is
         # folded into `full` below instead of appended here, so a send retry
@@ -1337,7 +1447,7 @@ class WeixinChannel(BaseChannel):
         """Send a text message matching the exact protocol from send.ts."""
         client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
 
-        item_list: list[dict] = []
+        item_list: list[dict[str, Any]] = []
         if text:
             item_list.append({"type": ITEM_TEXT, "text_item": {"text": text}})
 
@@ -1491,7 +1601,9 @@ class WeixinChannel(BaseChannel):
 
         # Send each media item as its own message (matching reference plugin)
         client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
-        item_list: list[dict] = [{"type": item_type, item_key: media_item}]
+        item_list: list[dict[str, Any]] = [
+            {"type": item_type, item_key: media_item}
+        ]
 
         weixin_msg: dict[str, Any] = {
             "from_user_id": "",
@@ -1560,7 +1672,8 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
     with suppress(ImportError):
         from Crypto.Cipher import AES
 
-        cipher = AES.new(key, AES.MODE_ECB)
+        aes_module = cast(Any, AES)
+        cipher = aes_module.new(key, aes_module.MODE_ECB)
         return cipher.encrypt(padded)
 
     try:
@@ -1590,7 +1703,8 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
     with suppress(ImportError):
         from Crypto.Cipher import AES
 
-        cipher = AES.new(key, AES.MODE_ECB)
+        aes_module = cast(Any, AES)
+        cipher = aes_module.new(key, aes_module.MODE_ECB)
         decrypted = cipher.decrypt(data)
 
     if decrypted is None:

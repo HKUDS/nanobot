@@ -3,17 +3,25 @@
 import asyncio
 import json
 import types
+from collections.abc import Callable, Iterable, Sized
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Literal, NamedTuple, get_args, get_origin
+from typing import Any, Literal, NamedTuple, TypeVar, cast, get_args, get_origin
 
 try:
     import questionary
 except ModuleNotFoundError:  # pragma: no cover - exercised in environments without wizard deps
     questionary = None
 from loguru import logger
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -22,10 +30,12 @@ from nanobot.cli.models import (
     get_model_context_limit,
     get_model_suggestions,
 )
-from nanobot.config.loader import get_config_path, load_config
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 from nanobot.config.schema import Config, ModelPresetConfig
 
 console = Console()
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 @dataclass
@@ -44,6 +54,8 @@ class _QuickStartProviderInfo(NamedTuple):
     default_api_base: str
     backend: str
     is_direct: bool
+    is_oauth: bool
+    default_model: str
 
 
 class _QuickStartEndpointChoice(NamedTuple):
@@ -73,6 +85,7 @@ _BACK_PRESSED = object()  # Sentinel value for back navigation
 _MODEL_PRESET_CACHE: set[str] = set()
 
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
+_QUICK_START_OAUTH_PROVIDERS = {"openai_codex"}
 
 _CLEAR_CHOICE = "Clear value"
 _QUICK_START_MENU_CHOICE = "[Q] Quick Start"
@@ -114,14 +127,14 @@ _CHANNEL_LOGIN_CHOICE = "Login with QR/link"
 _CHANNEL_ADVANCED_CHOICE = "Edit advanced settings"
 
 
-def _get_questionary():
+def _get_questionary() -> Any:
     """Return questionary or raise a clear error when wizard deps are unavailable."""
     if questionary is None:
         raise RuntimeError(
             "Interactive onboarding requires the optional 'questionary' dependency. "
             "Install project dependencies and rerun with --wizard."
         )
-    return questionary
+    return cast(Any, questionary)
 
 
 def _select_with_back(
@@ -142,7 +155,6 @@ def _select_with_back(
     import shutil
 
     from prompt_toolkit.application import Application
-    from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
@@ -165,8 +177,8 @@ def _select_with_back(
     visible_count = min(len(choices), max(1, terminal_lines - 3))
 
     # Build menu items (uses closure over selected_index)
-    def get_menu_text():
-        items = []
+    def get_menu_text() -> list[tuple[str, str]]:
+        items: list[tuple[str, str]] = []
         start, end = _choice_viewport(selected_index, len(choices), visible_count)
         for i in range(start, end):
             choice = choices[i]
@@ -177,14 +189,14 @@ def _select_with_back(
         return items
 
     # Create layout
-    menu_control = FormattedTextControl(get_menu_text, show_cursor=False)
+    menu_control = FormattedTextControl(cast(Any, get_menu_text), show_cursor=False)
     menu_window = Window(content=menu_control, height=visible_count, always_hide_cursor=True)
 
-    def get_prompt_text():
+    def get_prompt_text() -> list[tuple[str, str]]:
         suffix = f" ({selected_index + 1}/{len(choices)})" if len(choices) > visible_count else ""
         return [("class:question", f"{prompt}{suffix}")]
 
-    prompt_control = FormattedTextControl(get_prompt_text, show_cursor=False)
+    prompt_control = FormattedTextControl(cast(Any, get_prompt_text), show_cursor=False)
     prompt_window = Window(content=prompt_control, height=1, always_hide_cursor=True)
 
     layout = Layout(HSplit([prompt_window, menu_window]))
@@ -192,35 +204,36 @@ def _select_with_back(
     # Key bindings
     bindings = KeyBindings()
 
+    # KeyBindings consumes these handlers through decorator registration.
     @bindings.add(Keys.Up)
-    def _up(event):
+    def _up(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         nonlocal selected_index
         selected_index = (selected_index - 1) % len(choices)
         event.app.invalidate()
 
     @bindings.add(Keys.Down)
-    def _down(event):
+    def _down(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         nonlocal selected_index
         selected_index = (selected_index + 1) % len(choices)
         event.app.invalidate()
 
     @bindings.add(Keys.Enter)
-    def _enter(event):
+    def _enter(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = choices[selected_index]
         event.app.exit()
 
     @bindings.add("escape")
-    def _escape(event):
+    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = _BACK_PRESSED
         event.app.exit()
 
     @bindings.add(Keys.Left)
-    def _left(event):
+    def _left(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = _BACK_PRESSED
         event.app.exit()
 
     @bindings.add(Keys.ControlC)
-    def _ctrl_c(event):
+    def _ctrl_c(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         state["result"] = None
         event.app.exit()
 
@@ -230,7 +243,7 @@ def _select_with_back(
         "question": f"fg:{_UI_TEXT}",
     })
 
-    app = Application(layout=layout, key_bindings=bindings, style=style)
+    app = Application[object](layout=layout, key_bindings=bindings, style=style)
     app.ttimeoutlen = 0.05
     app.timeoutlen = 0.05
     try:
@@ -263,7 +276,7 @@ class FieldTypeInfo(NamedTuple):
     inner_type: Any
 
 
-def _get_field_type_info(field_info) -> FieldTypeInfo:
+def _get_field_type_info(field_info: FieldInfo) -> FieldTypeInfo:
     """Extract field type info from Pydantic field."""
     annotation = field_info.annotation
     if annotation is None:
@@ -280,10 +293,11 @@ def _get_field_type_info(field_info) -> FieldTypeInfo:
             args = get_args(annotation)
 
     _simple_types: dict[type, str] = {bool: "bool", int: "int", float: "float"}
+    origin_name = getattr(origin, "__name__", None)
 
-    if origin is list or (hasattr(origin, "__name__") and origin.__name__ == "List"):
+    if origin is list or origin_name == "List":
         return FieldTypeInfo("list", args[0] if args else str)
-    if origin is dict or (hasattr(origin, "__name__") and origin.__name__ == "Dict"):
+    if origin is dict or origin_name == "Dict":
         return FieldTypeInfo("dict", None)
     for py_type, name in _simple_types.items():
         if annotation is py_type:
@@ -295,7 +309,7 @@ def _get_field_type_info(field_info) -> FieldTypeInfo:
     return FieldTypeInfo("str", None)
 
 
-def _get_field_display_name(field_key: str, field_info) -> str:
+def _get_field_display_name(field_key: str, field_info: FieldInfo | None) -> str:
     """Get display name for a field."""
     if field_info and field_info.description:
         return field_info.description
@@ -344,22 +358,30 @@ def _format_value(value: Any, rich: bool = True, field_name: str = "") -> str:
         masked = _mask_value(value)
         return f"[dim]{masked}[/dim]" if rich else masked
     if isinstance(value, BaseModel):
-        parts = []
+        model_parts: list[str] = []
         for fname, _finfo in type(value).model_fields.items():
             fval = getattr(value, fname, None)
             formatted = _format_value(fval, rich=False, field_name=fname)
             if formatted != "[not set]":
-                parts.append(f"{fname}={formatted}")
-        return ", ".join(parts) if parts else ("[dim]not set[/dim]" if rich else "[not set]")
+                model_parts.append(f"{fname}={formatted}")
+        return (
+            ", ".join(model_parts)
+            if model_parts
+            else ("[dim]not set[/dim]" if rich else "[not set]")
+        )
     if isinstance(value, list):
-        return ", ".join(str(v) for v in value)
+        return ", ".join(str(v) for v in cast(list[Any], value))
     if isinstance(value, dict):
         # Handle dicts containing BaseModel instances
-        parts = []
-        for k, v in value.items():
+        mapping_parts: list[str] = []
+        for k, v in cast(dict[Any, Any], value).items():
             formatted = _format_value(v, rich=False, field_name=str(k))
-            parts.append(f"{k}: {formatted}")
-        return ", ".join(parts) if parts else ("[dim]not set[/dim]" if rich else "[not set]")
+            mapping_parts.append(f"{k}: {formatted}")
+        return (
+            ", ".join(mapping_parts)
+            if mapping_parts
+            else ("[dim]not set[/dim]" if rich else "[not set]")
+        )
     return str(value)
 
 
@@ -368,13 +390,13 @@ def _format_value_for_input(value: Any, field_type: str) -> str:
     if value is None or value == "":
         return ""
     if field_type == "list" and isinstance(value, list):
-        return ",".join(str(v) for v in value)
+        return ",".join(str(v) for v in cast(list[Any], value))
     if field_type == "dict" and isinstance(value, dict):
         return json.dumps(value)
     return str(value)
 
 
-def _validate_field_constraint(value: Any, field_info) -> str | None:
+def _validate_field_constraint(value: Any, field_info: FieldInfo | None) -> str | None:
     """Validate a value against Pydantic Field constraints.
 
     Returns an error message string if validation fails, None if valid.
@@ -383,7 +405,8 @@ def _validate_field_constraint(value: Any, field_info) -> str | None:
     if field_info is None or not hasattr(field_info, "metadata"):
         return None
 
-    for m in field_info.metadata:
+    for metadata in field_info.metadata:
+        m = metadata
         if hasattr(m, "ge") and isinstance(value, (int, float)):
             if value < m.ge:
                 return f"Value must be >= {m.ge}"
@@ -397,16 +420,16 @@ def _validate_field_constraint(value: Any, field_info) -> str | None:
             if value >= m.lt:
                 return f"Value must be < {m.lt}"
         if hasattr(m, "min_length") and hasattr(value, "__len__"):
-            if len(value) < m.min_length:
+            if len(cast(Sized, value)) < m.min_length:
                 return f"Length must be >= {m.min_length}"
         if hasattr(m, "max_length") and hasattr(value, "__len__"):
-            if len(value) > m.max_length:
+            if len(cast(Sized, value)) > m.max_length:
                 return f"Length must be <= {m.max_length}"
 
     return None
 
 
-def _get_constraint_hint(field_info) -> str:
+def _get_constraint_hint(field_info: FieldInfo | None) -> str:
     """Derive a human-readable constraint hint from field metadata.
 
     Returns a string like " - 0-10" or " - >= 0" to append to field display names.
@@ -416,7 +439,8 @@ def _get_constraint_hint(field_info) -> str:
 
     ge_val = None
     le_val = None
-    for m in field_info.metadata:
+    for metadata in field_info.metadata:
+        m = metadata
         if hasattr(m, "ge"):
             ge_val = m.ge
         if hasattr(m, "le"):
@@ -434,7 +458,11 @@ def _get_constraint_hint(field_info) -> str:
 # --- Rich UI Components ---
 
 
-def _show_config_panel(display_name: str, model: BaseModel, fields: list) -> None:
+def _show_config_panel(
+    display_name: str,
+    model: BaseModel,
+    fields: list[tuple[str, FieldInfo]],
+) -> None:
     """Display current configuration as a rich table."""
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Field", style=_UI_ACCENT)
@@ -499,20 +527,19 @@ def _input_bool(display_name: str, current: bool | None) -> bool | None:
     ).ask()
 
 
-def _input_back_key_bindings():
+def _input_back_key_bindings() -> KeyBindings:
     """Return key bindings that make Escape behave like a local back action."""
-    from prompt_toolkit.key_binding import KeyBindings
-
     bindings = KeyBindings()
 
+    # KeyBindings consumes this handler through decorator registration.
     @bindings.add("escape")
-    def _escape(event):
+    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         event.app.exit(result=_BACK_PRESSED)
 
     return bindings
 
 
-def _ask_prompt(prompt):
+def _ask_prompt(prompt: Any) -> Any:
     """Ask a questionary prompt with responsive Escape handling."""
     app = getattr(prompt, "application", None)
     if app is not None:
@@ -523,7 +550,12 @@ def _ask_prompt(prompt):
     return prompt.ask()
 
 
-def _input_text(display_name: str, current: Any, field_type: str, field_info=None) -> Any:
+def _input_text(
+    display_name: str,
+    current: Any,
+    field_type: str,
+    field_info: FieldInfo | None = None,
+) -> Any:
     """Get text input and parse based on field type."""
     default = _format_value_for_input(current, field_type)
 
@@ -586,7 +618,10 @@ def _input_secret(display_name: str) -> str | None | object:
 
 
 def _input_with_existing(
-    display_name: str, current: Any, field_type: str, field_info=None
+    display_name: str,
+    current: Any,
+    field_type: str,
+    field_info: FieldInfo | None = None,
 ) -> Any:
     """Handle input with 'keep existing' option for non-empty values."""
     has_existing = current is not None and current != "" and current != {} and current != []
@@ -619,8 +654,6 @@ def _input_model_with_autocomplete(
     """Get model input with autocomplete suggestions.
 
     """
-    from prompt_toolkit.completion import Completer, Completion
-
     default = str(current) if current else ""
 
     class DynamicModelCompleter(Completer):
@@ -629,7 +662,12 @@ def _input_model_with_autocomplete(
         def __init__(self, provider_name: str):
             self.provider = provider_name
 
-        def get_completions(self, document, _complete_event):
+        def get_completions(
+            self,
+            document: Document,
+            complete_event: CompleteEvent,
+        ) -> Iterable[Completion]:
+            _ = complete_event
             text = document.text_before_cursor
             suggestions = get_model_suggestions(text, provider=self.provider, limit=50)
             for model in suggestions:
@@ -730,7 +768,7 @@ def _handle_model_field(
         return
     if new_value is not None and new_value != current_value:
         setattr(working_model, field_name, new_value)
-        _try_auto_fill_context_window(working_model, new_value)
+        _try_auto_fill_context_window(working_model, cast(str, new_value))
 
 
 def _handle_context_window_field(
@@ -789,7 +827,11 @@ def _handle_fallback_models_field(
     """Handle the 'fallback_models' field with preset-aware list management."""
     from nanobot.config.schema import InlineFallbackConfig
 
-    items: list[Any] = list(current_value) if isinstance(current_value, list) else []
+    items: list[Any] = (
+        list(cast(list[Any], current_value))
+        if isinstance(current_value, list)
+        else []
+    )
     preset_names = sorted(_MODEL_PRESET_CACHE)
 
     while True:
@@ -883,11 +925,11 @@ def _is_str_or_none(annotation: Any) -> bool:
 
 
 def _configure_pydantic_model(
-    model: BaseModel,
+    model: _ModelT,
     display_name: str,
     *,
     skip_fields: set[str] | None = None,
-) -> BaseModel | None:
+) -> _ModelT | None:
     """Configure a Pydantic model interactively.
 
     Returns the updated model when the user selects "Done" or navigates back.
@@ -896,7 +938,7 @@ def _configure_pydantic_model(
     skip_fields = skip_fields or set()
     working_model = model.model_copy(deep=True)
 
-    fields = [
+    fields: list[tuple[str, FieldInfo]] = [
         (name, info)
         for name, info in type(working_model).model_fields.items()
         if name not in skip_fields
@@ -906,7 +948,7 @@ def _configure_pydantic_model(
         return working_model
 
     def get_choices() -> list[str]:
-        items = []
+        items: list[str] = []
         for fname, finfo in fields:
             value = getattr(working_model, fname, None)
             display = _get_field_display_name(fname, finfo)
@@ -1052,6 +1094,10 @@ def _sync_preset_cache(config: Config) -> None:
     _MODEL_PRESET_CACHE.update(config.model_presets.keys())
 
 
+def _validate_nonempty_name(text: str) -> bool | str:
+    return True if text and text.strip() else "Name cannot be empty"
+
+
 def _configure_model_presets(config: Config) -> None:
     """Configure model presets (CRUD)."""
     _sync_preset_cache(config)
@@ -1094,7 +1140,7 @@ def _configure_model_presets(config: Config) -> None:
             if answer == "[+] Add new preset":
                 name_input = _get_questionary().text(
                     "Preset name:",
-                    validate=lambda t: True if t and t.strip() else "Name cannot be empty",
+                    validate=_validate_nonempty_name,
                 ).ask()
                 if not name_input:
                     continue
@@ -1213,7 +1259,7 @@ def _configure_providers(config: Config) -> None:
 
     def get_provider_choices() -> list[str]:
         """Build provider choices with config status indicators."""
-        choices = []
+        choices: list[str] = []
         for name, display in _get_provider_names().items():
             provider = getattr(config.providers, name, None)
             if provider and provider.api_key:
@@ -1422,7 +1468,7 @@ _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
     "Tools": ("Tools Settings", "Configure web search, shell exec, and other tools", {"mcp_servers"}),
 }
 
-_SETTINGS_GETTER = {
+_SETTINGS_GETTER: dict[str, Callable[[Config], BaseModel]] = {
     "Agent Settings": lambda c: c.agents.defaults,
     "Channel Common": lambda c: c.channels,
     "API Server": lambda c: c.api,
@@ -1430,7 +1476,7 @@ _SETTINGS_GETTER = {
     "Tools": lambda c: c.tools,
 }
 
-_SETTINGS_SETTER = {
+_SETTINGS_SETTER: dict[str, Callable[[Config, BaseModel], None]] = {
     "Agent Settings": lambda c, v: setattr(c.agents, "defaults", v),
     "Channel Common": lambda c, v: setattr(c, "channels", v),
     "API Server": lambda c, v: setattr(c, "api", v),
@@ -1444,7 +1490,7 @@ def _configure_general_settings(config: Config, section: str) -> None:
     meta = _SETTINGS_SECTIONS.get(section)
     if not meta:
         return
-    display_name, subtitle, skip = meta
+    display_name, _subtitle, skip = meta
     model = _SETTINGS_GETTER[section](config)
     updated = _configure_pydantic_model(model, display_name, skip_fields=skip)
     if updated is not None:
@@ -1490,7 +1536,7 @@ def _show_summary(config: Config) -> None:
     console.print()
 
     # Providers
-    provider_rows = []
+    provider_rows: list[tuple[str, str]] = []
     for name, display in _get_provider_names().items():
         provider = getattr(config.providers, name, None)
         status = (
@@ -1502,12 +1548,12 @@ def _show_summary(config: Config) -> None:
     _print_summary_panel(provider_rows, "LLM Providers")
 
     # Channels
-    channel_rows = []
+    channel_rows: list[tuple[str, str]] = []
     for name, display in _get_channel_names().items():
         channel = getattr(config.channels, name, None)
         if channel:
             enabled = (
-                channel.get("enabled", False)
+                cast(dict[str, Any], channel).get("enabled", False)
                 if isinstance(channel, dict)
                 else getattr(channel, "enabled", False)
             )
@@ -1518,7 +1564,7 @@ def _show_summary(config: Config) -> None:
     _print_summary_panel(channel_rows, "Chat Channels")
 
     # Model Presets
-    preset_rows = []
+    preset_rows: list[tuple[str, str]] = []
     for name, preset in config.model_presets.items():
         preset_rows.append((name, f"{preset.model} - ctx {preset.context_window_tokens}"))
     _print_summary_panel(preset_rows, "Model Presets")
@@ -1557,7 +1603,7 @@ def _set_primary_quick_start_preset(config: Config, provider_name: str, model: s
 
 def _show_quick_start_progress(active_step: int) -> None:
     """Render a compact step tracker for Quick Start."""
-    parts = []
+    parts: list[str] = []
     for idx, label in enumerate(_QUICK_START_STEPS, 1):
         if idx < active_step:
             parts.append(f"[{_UI_SUCCESS}]{idx}. {label}[/]")
@@ -1576,7 +1622,11 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
 
     result: dict[str, _QuickStartProviderInfo] = {}
     for spec in PROVIDERS:
-        if spec.name == "custom" or spec.is_oauth or spec.is_transcription_only:
+        if (
+            spec.name == "custom"
+            or spec.is_transcription_only
+            or (spec.is_oauth and spec.name not in _QUICK_START_OAUTH_PROVIDERS)
+        ):
             continue
         result[spec.name] = _QuickStartProviderInfo(
             display_name=spec.display_name or spec.name,
@@ -1584,6 +1634,8 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
             default_api_base=spec.default_api_base,
             backend=spec.backend,
             is_direct=spec.is_direct,
+            is_oauth=spec.is_oauth,
+            default_model=spec.builtin_models[0].id if spec.builtin_models else "",
         )
     return result
 
@@ -1599,7 +1651,76 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
 
 def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
     """Return whether Quick Start should ask for an API key."""
-    return provider_name == "custom" or not (info and info.is_local)
+    return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
+
+
+def _quick_start_codex_proxy(config: Config) -> str | None:
+    """Resolve only the Codex proxy without validating unrelated provider secrets."""
+    proxy_config = Config()
+    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
+    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+
+
+def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
+    """Authenticate an OAuth provider supported by Quick Start."""
+    if provider_name != "openai_codex":
+        console.print(f"[red]OAuth login is not supported for {provider_name}[/red]")
+        return False
+
+    try:
+        # oauth-cli-kit does not publish type information.
+        from oauth_cli_kit import (  # pyright: ignore[reportMissingTypeStubs]
+            get_token,
+            login_oauth_interactive,
+        )
+    except ImportError:
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        return False
+
+    try:
+        proxy = _quick_start_codex_proxy(config)
+    except ValueError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        return False
+
+    token = None
+    with suppress(Exception):
+        token = get_token(proxy=proxy)
+    if not getattr(token, "access", None):
+        console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
+        try:
+            token = login_oauth_interactive(
+                print_fn=lambda message: console.print(message, markup=False),
+                prompt_fn=lambda prompt: _get_questionary().text(prompt).ask() or "",
+                proxy=proxy,
+            )
+        except Exception as exc:
+            console.print(f"[red]OAuth login failed: {escape(str(exc))}[/red]")
+            return False
+
+    if not getattr(token, "access", None):
+        console.print("[red]OAuth login failed[/red]")
+        return False
+
+    account = getattr(token, "account_id", None)
+    suffix = f"  [dim]{escape(str(account))}[/dim]" if account else ""
+    console.print(f"[green]Authenticated with OpenAI Codex[/green]{suffix}")
+    return True
+
+
+def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> bool:
+    """Return whether Quick Start can load a usable OAuth token."""
+    if provider_name != "openai_codex":
+        return False
+    try:
+        # oauth-cli-kit does not publish type information.
+        from oauth_cli_kit import get_token  # pyright: ignore[reportMissingTypeStubs]
+
+        proxy = _quick_start_codex_proxy(config)
+        token = get_token(proxy=proxy)
+    except Exception:
+        return False
+    return bool(getattr(token, "access", None))
 
 
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
@@ -1680,7 +1801,10 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
                 continue
             if api_base_result is None:
                 return False
-            api_base, base_was_prompted = api_base_result
+            api_base, base_was_prompted = cast(
+                tuple[str, bool],
+                api_base_result,
+            )
 
         api_key: str | None = None
         if _quick_start_requires_api_key(provider_name, provider_info):
@@ -1703,20 +1827,31 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
                 continue
             if api_base_result is None:
                 return False
-            api_base, base_was_prompted = api_base_result
+            api_base, base_was_prompted = cast(
+                tuple[str, bool],
+                api_base_result,
+            )
 
         provider_config = getattr(config.providers, provider_name, None)
         if provider_config is None:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
-        model = _input_model_with_autocomplete("Model ID", "", provider_name)
+        model = _input_model_with_autocomplete(
+            "Model ID",
+            provider_info.default_model if provider_info else "",
+            provider_name,
+        )
         if model is _BACK_PRESSED:
             continue
-        model = (model or "").strip()
+        model = cast(str, model or "").strip()
         if not model:
             console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
             return False
+
+        if provider_info and provider_info.is_oauth:
+            if not _quick_start_oauth_login(config, provider_name):
+                return False
 
         if api_key is not None:
             provider_config.api_key = api_key
@@ -1767,7 +1902,7 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
         console.print("[red]No configuration class found for websocket[/red]")
         return False
 
-    current = getattr(config.channels, "websocket", None) or {}
+    current: Any = getattr(config.channels, "websocket", None) or {}
     model = config_cls.model_validate(current)
     if hasattr(model, "enabled"):
         setattr(model, "enabled", True)
@@ -1784,17 +1919,27 @@ def _show_quick_start_summary(config: Config) -> None:
     _show_quick_start_progress(3)
     preset = config.model_presets.get("primary")
     provider_label = "AI provider"
-    has_api_key = True
+    credentials_ready = True
+    credential_name = "API key"
     if preset:
         provider_config = getattr(config.providers, preset.provider, None)
-        provider_label, _is_gateway, is_local, _api_base = _get_provider_info().get(
-            preset.provider, (preset.provider, False, False, "")
-        )
-        has_api_key = is_local or bool(provider_config and provider_config.api_key)
+        provider_info = _get_quick_start_provider_info().get(preset.provider)
+        if provider_info:
+            provider_label = provider_info.display_name
+            if provider_info.is_oauth:
+                credential_name = "OAuth login"
+                credentials_ready = _quick_start_oauth_is_authenticated(config, preset.provider)
+            else:
+                credentials_ready = provider_info.is_local or bool(
+                    provider_config and provider_config.api_key
+                )
+        else:
+            provider_label = _get_provider_names().get(preset.provider, preset.provider)
+            credentials_ready = bool(provider_config and provider_config.api_key)
 
     status = "Ready"
-    if not has_api_key:
-        status = f"{provider_label} API key missing"
+    if not credentials_ready:
+        status = f"{provider_label} {credential_name} missing"
 
     rows = [
         ("Status", status),
@@ -1904,7 +2049,7 @@ def _configure_advanced_settings(config: Config) -> None:
         if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
             break
 
-        _advanced_dispatch = {
+        _advanced_dispatch: dict[str, Callable[[], None]] = {
             "[P] LLM Provider": lambda: _configure_providers(config),
             "[M] Model Presets": lambda: _configure_model_presets(config),
             "[C] Chat Channel": lambda: _configure_channels(config),
@@ -1915,9 +2060,9 @@ def _configure_advanced_settings(config: Config) -> None:
             "[T] Tools": lambda: _configure_general_settings(config, "Tools"),
             "[V] View Configuration Summary": lambda: _show_summary(config),
         }
-        action_fn = _advanced_dispatch.get(answer)
+        action_fn = _advanced_dispatch.get(cast(str, answer))
         if action_fn:
-            last_choice = answer
+            last_choice = cast(str, answer)
             action_fn()
 
 

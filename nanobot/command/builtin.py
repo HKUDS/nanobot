@@ -9,15 +9,19 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
-from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
-from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
+
+if TYPE_CHECKING:
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import Session
+    from nanobot.utils.gitstore import CommitInfo
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -180,13 +184,28 @@ def builtin_command_palette() -> list[dict[str, str | bool]]:
     return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 
 
+def builtin_command_starts_agent_turn(text: str) -> bool:
+    """Return whether WebUI ingress should expect a normal agent lifecycle."""
+    normalized = normalize_command_text(text)
+    command, separator, args = normalized.partition(" ")
+    spec = next(
+        (item for item in BUILTIN_COMMAND_SPECS if item.command == command.lower()),
+        None,
+    )
+    if spec is None or (separator and not spec.accepts_args):
+        return True
+    if spec.lifecycle == "agent_turn":
+        return True
+    return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
+
+
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-    total = await loop._cancel_active_tasks(ctx.key)
+    total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     # Also drain pending queue to prevent mid-turn injection deadlock
-    pending = loop._pending_queues.pop(ctx.key, None)
+    pending = loop._pending_queues.pop(ctx.key, None)  # pyright: ignore[reportPrivateUsage]
     if pending is not None:
         while not pending.empty():
             try:
@@ -213,14 +232,14 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
     async def _do_restart():
         await asyncio.sleep(1)
         argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]
-        mode = getattr(ctx.loop, "restart_mode", "auto") or "auto"
+        mode = ctx.loop.restart_mode or "auto"
         if mode == "auto":
             mode = "spawn" if sys.platform == "win32" else "exec"
         if mode == "exec":
             os.execv(sys.executable, argv)
             return
         if mode == "spawn":
-            kwargs = {}
+            kwargs: dict[str, Any] = {}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             subprocess.Popen(argv, **kwargs)
@@ -237,7 +256,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.llm_runtime()
+    runtime = ctx.runtime or loop.runtime_for_session(session)
     ctx_est = 0
     with suppress(Exception):
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
@@ -245,21 +264,20 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             runtime=runtime,
         )
     if ctx_est <= 0:
-        ctx_est = loop._last_usage.get("prompt_tokens", 0)
+        ctx_est = loop._last_usage.get("prompt_tokens", 0)  # pyright: ignore[reportPrivateUsage]
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):
         from nanobot.utils.searchusage import fetch_search_usage
-        web_cfg = getattr(loop, "web_config", None)
-        search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
-        if search_cfg is not None:
-            provider = getattr(search_cfg, "provider", "duckduckgo")
-            api_key = getattr(search_cfg, "api_key", "") or None
-            usage = await fetch_search_usage(provider=provider, api_key=api_key)
-            search_usage_text = usage.format()
-    active_tasks = loop._active_tasks.get(ctx.key, [])
+        search_cfg = loop.web_config.search
+        usage = await fetch_search_usage(
+            provider=search_cfg.provider,
+            api_key=search_cfg.api_key or None,
+        )
+        search_usage_text = usage.format()
+    active_tasks = loop._active_tasks.get(ctx.key, [])  # pyright: ignore[reportPrivateUsage]
     task_count = sum(1 for t in active_tasks if not t.done())
     with suppress(Exception):
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
@@ -268,7 +286,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
             version=__version__, model=runtime.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,
+            start_time=loop._start_time, last_usage=loop._last_usage,  # pyright: ignore[reportPrivateUsage]
             context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
@@ -283,16 +301,18 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
     loop = ctx.loop
-    await loop._cancel_active_tasks(ctx.key)
+    await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
+    runtime = None
+    if snapshot:
+        runtime = ctx.runtime or loop.runtime_for_session(session)
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot:
-        runtime = ctx.runtime or loop.llm_runtime()
-        loop._schedule_background(
-            loop.consolidator.archive(
+    if snapshot and runtime is not None:
+        loop.schedule_background(
+            loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
                 snapshot,
                 runtime=runtime,
                 session_key=ctx.key,
@@ -309,26 +329,31 @@ def _format_preset_names(names: list[str]) -> str:
     return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
 
 
-def _model_preset_names(loop) -> list[str]:
+def _model_preset_names(loop: AgentLoop) -> list[str]:
     names = set(loop.model_presets)
     names.add("default")
     return ["default", *sorted(name for name in names if name != "default")]
-
-
-def _active_model_preset_name(loop) -> str:
-    return loop.model_preset or "default"
 
 
 def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop) -> str:
+def _model_command_status(loop: AgentLoop, session: Session) -> str:
     names = _model_preset_names(loop)
-    active = _active_model_preset_name(loop)
+    try:
+        runtime = loop.runtime_for_session(session, recover_removed=False)
+    except (KeyError, ValueError) as exc:
+        return "\n".join([
+            "## Model",
+            f"- Current selection error: {_command_error_message(exc)}",
+            f"- Available presets: {_format_preset_names(names)}",
+            "- Switch with `/model <preset>`.",
+        ])
+    active = runtime.model_preset or "default"
     return "\n".join([
         "## Model",
-        f"- Current model: `{loop.model}`",
+        f"- Current model: `{runtime.model}`",
         f"- Current preset: `{active}`",
         f"- Available presets: {_format_preset_names(names)}",
     ])
@@ -341,10 +366,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
+        session = ctx.session or loop.sessions.get_or_create(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
-            content=_model_command_status(loop),
+            content=_model_command_status(loop, session),
             metadata=metadata,
         )
 
@@ -359,7 +385,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = parts[0]
     try:
-        runtime = loop.set_model_preset(name)
+        runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -375,11 +401,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     max_tokens = runtime.generation.max_tokens
     lines = [
         f"Switched model preset to `{runtime.model_preset}`.",
+        "- Scope: current session",
         f"- Model: `{runtime.model}`",
         f"- Context window: {runtime.context_window_tokens}",
     ]
-    if max_tokens is not None:
-        lines.append(f"- Max output tokens: {max_tokens}")
+    lines.append(f"- Max output tokens: {max_tokens}")
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -396,16 +422,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        async def _silent(*_args, **_kwargs):
-            pass
-
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.agent.memory import DreamRunProgress, MemoryStore
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
+        progress = DreamRunProgress()
         content = ""
         resp = None
         diff_body = ""
@@ -421,25 +445,29 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 return
             prompt, last_cursor = result
             key = dream_session_key()
+            dream_runtime = loop.dream_runtime()
             resp = await loop.process_direct(
                 prompt,
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=_silent,
+                on_progress=progress,
+                runtime=dream_runtime,
             )
             elapsed = time.monotonic() - t0
-            # Ground truth: the real file delta, not the LLM's self-report.
+            # The real file delta grounds the audit record; clean completion
+            # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            productive = bool(diff_body) or (
-                not store.git.is_initialized()
-                and MemoryStore.dream_run_completed(resp)
+            completed = MemoryStore.dream_run_completed(
+                resp,
+                had_tool_errors=progress.had_tool_errors,
             )
-            if productive:
+            if completed:
                 store.set_last_dream_cursor(last_cursor)
-                content = f"Dream completed in {elapsed:.1f}s."
-            elif MemoryStore.dream_run_completed(resp):
-                content = f"Dream completed in {elapsed:.1f}s; no memory changes."
+                if diff_body:
+                    content = f"Dream completed in {elapsed:.1f}s."
+                else:
+                    content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s; "
@@ -614,7 +642,12 @@ def _format_changed_files(diff: str) -> str:
 _DREAM_COMMIT_PREFIX = "dream:"
 
 
-def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
+def _format_dream_log_content(
+    commit: CommitInfo,
+    diff: str,
+    *,
+    requested_sha: str | None = None,
+) -> str:
     files_line = _format_changed_files(diff)
     lines = [
         "## Dream Update",
@@ -642,7 +675,7 @@ def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = 
     return "\n".join(lines)
 
 
-def _format_dream_restore_list(commits: list) -> str:
+def _format_dream_restore_list(commits: list[CommitInfo]) -> str:
     lines = [
         "## Dream Restore",
         "",
@@ -780,14 +813,20 @@ _HISTORY_MAX_COUNT = 50
 _HISTORY_MAX_CONTENT_CHARS = 200
 
 
-def _format_history_message(msg: dict) -> str | None:
+def _format_history_message(msg: dict[str, Any]) -> str | None:
     """Format a single history message for display. Returns None to skip."""
     role = msg.get("role")
     if role not in ("user", "assistant"):
         return None
     content = msg.get("content") or ""
     if isinstance(content, list):
-        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        parts = [
+            text
+            for block in cast(list[object], content)
+            if (item := cast(dict[str, Any], block) if isinstance(block, dict) else None)
+            and item.get("type") == "text"
+            and isinstance(text := item.get("text"), str)
+        ]
         content = " ".join(parts)
     content = str(content).strip()
     if not content:
@@ -837,6 +876,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
     """Mark this turn as an explicit sustained-goal request."""
+    from nanobot.agent.goal_permission import goal_mutation_permission
+
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -897,7 +938,7 @@ async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
     else:
         lines = [f"Available skills ({len(skills)}):", ""]
         for entry in skills:
-            desc = loop.context.skills._get_skill_description(entry["name"])
+            desc = loop.context.skills.get_skill_description(entry["name"])
             lines.append(f"- **{entry['name']}** — {desc}")
         content = "\n".join(lines)
     return OutboundMessage(
@@ -925,15 +966,9 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     from nanobot.triggers.local_store import LocalTriggerStore
 
     loop = ctx.loop
-    workspace = getattr(loop, "workspace", None)
-    if workspace is None:
-        workspace = getattr(getattr(loop, "context", None), "workspace", None)
-    if workspace is None:
-        raise RuntimeError("workspace unavailable for trigger creation")
-
-    store = getattr(loop, "local_trigger_store", None)
+    store = loop.local_trigger_store
     if store is None:
-        store = LocalTriggerStore(workspace)
+        store = LocalTriggerStore(loop.workspace)
 
     from nanobot.session.keys import UNIFIED_SESSION_KEY
 

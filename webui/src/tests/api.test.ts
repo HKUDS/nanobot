@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   configureChannel,
+  completeProviderOAuth,
   createModelConfiguration,
+  createProviderSettings,
+  deleteSkill,
+  deleteModelConfiguration,
   deleteSession,
   fetchFilePreview,
   fetchFilePreviewAvailability,
@@ -11,6 +15,7 @@ import {
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
+  fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -18,19 +23,23 @@ import {
   fetchSidebarState,
   fetchSkillDetail,
   fetchSkills,
+  fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
+  installMarketplaceSkill,
   listSessions,
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  migrateModelConfigurations,
   disableNanobotFeature,
   enableNanobotFeature,
   runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  searchMarketplaceSkills,
   startApiService,
   stopApiService,
   cancelChannelConnect,
@@ -39,11 +48,13 @@ import {
   updateAutomation,
   updateSidebarState,
   updateImageGenerationSettings,
+  updateModelCallOrder,
   updateModelConfiguration,
   updateMcpServerTools,
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSkillEnabled,
   updateWebSearchSettings,
   validateChannel,
 } from "@/lib/api";
@@ -72,6 +83,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });
@@ -89,6 +101,25 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("aborts a WebUI thread request when its caller signal is aborted", async () => {
+    let requestSignal: AbortSignal | null = null;
+    vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      requestSignal = init?.signal ?? null;
+      requestSignal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }));
+    const controller = new AbortController();
+
+    const request = fetchWebuiThread("tok", "websocket:chat-1", {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -281,6 +312,78 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("encodes marketplace search queries and provider", async () => {
+    await searchMarketplaceSkills("tok", "React & testing");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/search?q=React+%26+testing&provider=all",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches a provider marketplace leaderboard", async () => {
+    await fetchTrendingMarketplaceSkills("tok", "skillhub");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trending?provider=skillhub",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches skills.sh trend history independently", async () => {
+    await fetchMarketplaceSkillTrends("tok", [
+      "vercel-labs/skills/find-skills",
+      "acme/skills/react",
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills&id=acme%2Fskills%2Freact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("encodes provider install coordinates", async () => {
+    await installMarketplaceSkill(
+      "tok",
+      "skillhub",
+      "@tencent/skills",
+      "ima-skills",
+      "1.1.8",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/install?provider=skillhub&source=%40tencent%2Fskills&skill=ima-skills&version=1.1.8",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("updates and deletes installed skills with encoded names", async () => {
+    await updateSkillEnabled("tok", "custom skill", false);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/update?name=custom+skill&enabled=false",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await deleteSkill("tok", "custom skill");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/delete?name=custom+skill",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("percent-encodes websocket keys when deleting a session", async () => {
     await deleteSession("tok", "websocket:chat-1");
 
@@ -310,13 +413,11 @@ describe("webui API helpers", () => {
       provider: "openrouter",
       contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
-      botName: "nanobot",
-      botIcon: "nb",
       toolHintMaxLength: 120,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -339,10 +440,14 @@ describe("webui API helpers", () => {
       label: "Fast writing",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
+      maxTokens: 4096,
+      contextWindowTokens: 128000,
+      temperature: 0.4,
+      reasoningEffort: "high",
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/create?label=Fast+writing&provider=openai&model=openai%2Fgpt-4.1-mini",
+      "/api/settings/model-configurations/create?label=Fast+writing&provider=openai&model=openai%2Fgpt-4.1-mini&max_tokens=4096&context_window_tokens=128000&temperature=0.4&reasoning_effort=high",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -355,11 +460,45 @@ describe("webui API helpers", () => {
       label: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
+      maxTokens: 8192,
       contextWindowTokens: 65536,
+      temperature: 0,
+      reasoningEffort: null,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&context_window_tokens=65536",
+      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&max_tokens=8192&context_window_tokens=65536&temperature=0&reasoning_effort=",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes model preset deletion and migration", async () => {
+    await deleteModelConfiguration("tok", "spare");
+    await migrateModelConfigurations("tok");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/settings/model-configurations/delete?name=spare",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/settings/model-configurations/migrate",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes model call order as an ordered JSON array", async () => {
+    await updateModelCallOrder("tok", ["backup", "primary"]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/model-call-order/update?order=%5B%22backup%22%2C%22primary%22%5D",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -424,9 +563,68 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      "/api/settings/provider/update?provider=openrouter",
       expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            apiKey: "sk-or-test",
+            apiBase: "https://openrouter.ai/api/v1",
+          })),
+        },
+      }),
+    );
+  });
+
+  it("serializes OAuth provider advanced settings", async () => {
+    await updateProviderSettings("tok", {
+      provider: "xai_grok",
+      proxy: "http://127.0.0.1:7890",
+      extraBody: '{"service_tier":"priority"}',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=xai_grok",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            proxy: "http://127.0.0.1:7890",
+            extraBody: '{"service_tier":"priority"}',
+          })),
+        },
+      }),
+    );
+  });
+
+  it("serializes custom provider creation with advanced settings", async () => {
+    await createProviderSettings("tok", {
+      name: "Company Gateway",
+      apiKey: "sk-company",
+      apiBase: "https://gateway.example/v1",
+      extraHeaders: '{"X-Tenant":"engineering"}',
+      extraBody: '{"service_tier":"priority"}',
+      extraQuery: '{"api-version":"2026-01-01"}',
+      proxy: "http://127.0.0.1:7890",
+      thinkingStyle: "enable_thinking",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/create",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            name: "Company Gateway",
+            apiKey: "sk-company",
+            apiBase: "https://gateway.example/v1",
+            extraHeaders: '{"X-Tenant":"engineering"}',
+            extraBody: '{"service_tier":"priority"}',
+            extraQuery: '{"api-version":"2026-01-01"}',
+            proxy: "http://127.0.0.1:7890",
+            thinkingStyle: "enable_thinking",
+          })),
+        },
       }),
     );
   });
@@ -448,6 +646,55 @@ describe("webui API helpers", () => {
       "/api/settings/provider/oauth-login?provider=openai_codex",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await loginProviderOAuth("tok", "openai_codex", "", true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await completeProviderOAuth("tok", "xai_grok", "flow-123");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await completeProviderOAuth(
+      "tok",
+      "xai_grok",
+      "flow-123",
+      "secret",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-OAuth-Code": "secret",
+        },
+      }),
+    );
+
+    await completeProviderOAuth(
+      "tok",
+      "openai_codex",
+      "flow-codex",
+      "http://localhost:1455/auth/callback?code=secret&state=test",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-OAuth-Callback":
+            "http://localhost:1455/auth/callback?code=secret&state=test",
+        },
       }),
     );
 
@@ -797,6 +1044,7 @@ describe("webui API helpers", () => {
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
+            model_preset: "fast",
             run_started_at: 1_700_000_000,
           },
         ],
@@ -808,6 +1056,7 @@ describe("webui API helpers", () => {
         key: "websocket:chat-1",
         title: "优化 WebUI 标题",
         preview: "",
+        modelPreset: "fast",
         runStartedAt: 1_700_000_000,
       },
     ]);

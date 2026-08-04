@@ -20,6 +20,70 @@ def _runtime(provider: MagicMock, model: str = "test-model") -> LLMRuntime:
 
 
 @pytest.mark.asyncio
+async def test_run_inline_returns_result_without_announcement(tmp_path):
+    """Inline subagents return directly instead of injecting a follow-up."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+        stop_reason="done",
+        final_content="review result",
+        error=None,
+        tool_events=[],
+    ))
+    manager._announce_result = AsyncMock()
+
+    result = await manager.run_inline(
+        task="review this",
+        session_key="test:c1",
+        runtime=_runtime(provider),
+    )
+
+    assert result == "review result"
+    manager._announce_result.assert_not_awaited()
+    assert manager._running_tasks == {}
+    assert manager._task_statuses == {}
+    assert manager._session_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_run_inline_returns_structured_error(tmp_path):
+    """Inline subagent failures remain tool errors for the parent runner."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.registry import is_tool_error_result
+    from nanobot.bus.queue import MessageBus
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+        stop_reason="error",
+        final_content=None,
+        error="subagent failed",
+        tool_events=[],
+    ))
+
+    result = await manager.run_inline(
+        task="review this",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    )
+
+    assert result == "subagent failed"
+    assert is_tool_error_result(result)
+    assert manager._running_tasks == {}
+    assert manager._session_tasks == {}
+
+
+@pytest.mark.asyncio
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
@@ -200,6 +264,120 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
 
+@pytest.mark.asyncio
+async def test_spawn_tool_waits_for_inline_result():
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    class Manager:
+        max_concurrent_subagents = 1
+
+        def __init__(self):
+            self.inline = AsyncMock(return_value="review result")
+            self.spawn = AsyncMock(return_value="started")
+
+        def get_running_count(self):
+            return 0
+
+        async def run_inline(self, **kwargs):
+            return await self.inline(**kwargs)
+
+    manager = Manager()
+    tool = SpawnTool(manager)
+    runtime = _runtime(MagicMock())
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=runtime,
+    )):
+        result = await tool.execute(task="review this", wait=True)
+
+    assert result == "review result"
+    manager.inline.assert_awaited_once()
+    manager.spawn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=1,
+    )
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def fake_run(spec):
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    manager.runner.run = AsyncMock(side_effect=fake_run)
+    tool = SpawnTool(manager)
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    )):
+        first = asyncio.create_task(tool.execute(task="first", wait=True))
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        second = await tool.execute(task="second", wait=True)
+
+        assert "concurrency limit reached" in second
+        assert manager.get_running_count() == 1
+        release.set()
+        assert await first == "done"
+
+    assert manager.get_running_count() == 0
+    assert manager._session_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    entered = asyncio.Event()
+
+    async def fake_run(spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager.runner.run = AsyncMock(side_effect=fake_run)
+    inline = asyncio.create_task(manager.run_inline(
+        task="wait",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+    assert await manager.cancel_by_session("test:c1") == 1
+    with pytest.raises(asyncio.CancelledError):
+        await inline
+    assert manager._running_tasks == {}
+    assert manager._task_statuses == {}
+    assert manager._session_tasks == {}
+
+
 def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
     """Direct SubagentManager construction should use the agent default concurrency limit."""
     from nanobot.agent.subagent import SubagentManager
@@ -326,6 +504,7 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
             usage={},
             had_injections=False,
             tools_used=[],
+            provider_state=None,
         )
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
@@ -411,6 +590,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
             usage={},
             had_injections=False,
             tools_used=[],
+            provider_state=None,
         )
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
@@ -460,6 +640,7 @@ async def test_drain_pending_timeout(tmp_path):
             usage={},
             had_injections=False,
             tools_used=[],
+            provider_state=None,
         )
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)

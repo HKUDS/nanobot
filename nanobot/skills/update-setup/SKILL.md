@@ -1,15 +1,20 @@
 ---
 name: update-setup
-description: One-time setup wizard for the nanobot upgrade skill. Triggers: setup update, configure update, 切设置更新, 初始化更新.
+description: "One-time setup wizard for the nanobot upgrade skill. Triggers: setup update, configure update, 设置更新, 初始化更新."
 ---
 
 # Update Setup
 
-Generate a personalized upgrade skill for this workspace.
+Generate a personalized upgrade skill in Nanobot's agent workspace.
+
+Use the absolute `<agent-workspace>/skills/update/SKILL.md` path, where
+`<agent-workspace>` is shown in the system prompt. Never substitute a project-relative
+path. If the write is rejected, ask the user to select the agent workspace or enable
+Full Access before rerunning setup.
 
 ## Step 1: Check Existing
 
-Use `read_file` to check if `skills/update/SKILL.md` already exists in the workspace.
+Use `read_file` to check if `<agent-workspace>/skills/update/SKILL.md` already exists.
 
 If it exists, ask the user: "An upgrade skill already exists. Reconfigure?" Wait for the user's reply. If no, stop here.
 
@@ -32,7 +37,7 @@ likely install method. Do not treat them as confirmation.
 
 ## Step 3: Confirm Required Inputs
 
-CRITICAL: Do not write `skills/update/SKILL.md` until the install method is
+CRITICAL: Do not write `<agent-workspace>/skills/update/SKILL.md` until the install method is
 explicitly confirmed by the user. The install method must come from a user
 answer or confirmation, not from inference alone. If you cannot get a clear
 answer, stop and ask the user to rerun this setup when they know how nanobot was
@@ -101,7 +106,7 @@ contains spaces.
 
 Build the skill content. If proxy is configured, add `export http_proxy=URL` and `export https_proxy=URL` lines before the upgrade command.
 
-Use `write_file` to write `skills/update/SKILL.md` with this content:
+Use `write_file` to write `<agent-workspace>/skills/update/SKILL.md` with this content:
 
 ```
 ---
@@ -120,4 +125,5 @@ description: "Upgrade nanobot to the latest version. Triggers: upgrade nanobot, 
 
 ## Step 5: Confirm
 
-Tell the user: "Upgrade skill created. Say 'upgrade nanobot' when you want to update."
+Only after `write_file` succeeds, tell the user:
+"Upgrade skill created. Say 'upgrade nanobot' when you want to update."

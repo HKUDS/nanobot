@@ -149,6 +149,24 @@ Defaults:
 
 The schema accepts both camelCase and snake_case keys, but saves config with camelCase aliases.
 
+### Agent-Owned State vs Effective Project Context
+
+Runtime code distinguishes the configured agent workspace from the effective
+project workspace carried by a session scope. They are often the same path, but
+a WebUI chat may select a separate project:
+
+| Concern | Path owner |
+|---|---|
+| Sessions, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
+| Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
+| Workspace access mode and project metadata | Session workspace scope |
+
+`ContextBuilder` combines project instructions with agent-owned profile and
+memory. Filesystem and search tools use the project as their ordinary boundary
+and receive only capability-specific read access to built-in/agent skills and
+the exact agent history file. Keep those cross-root capabilities read-only and
+explicit; do not treat the entire agent workspace as an allowed root.
+
 ## Memory and Sessions
 
 Session history is the near-term conversation replay. Memory is the longer-term workspace state.

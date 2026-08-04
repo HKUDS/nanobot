@@ -52,3 +52,22 @@ def test_dream_config_uses_model_override_name_and_accepts_legacy_model() -> Non
     assert cfg.model_override == "openrouter/sonnet"
     assert dumped["modelOverride"] == "openrouter/sonnet"
     assert "model" not in dumped
+
+
+def test_dream_config_ignores_retired_noop_fields() -> None:
+    cfg = DreamConfig.model_validate(
+        {
+            "maxBatchSize": 99,
+            "maxIterations": 99,
+            "annotateLineAges": False,
+        }
+    )
+
+    dumped = cfg.model_dump(by_alias=True)
+
+    assert not hasattr(cfg, "max_batch_size")
+    assert not hasattr(cfg, "max_iterations")
+    assert not hasattr(cfg, "annotate_line_ages")
+    assert "maxBatchSize" not in dumped
+    assert "maxIterations" not in dumped
+    assert "annotateLineAges" not in dumped

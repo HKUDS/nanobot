@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
+from nanobot.bus.runtime_events import SessionTurnPersisted
+from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META, RuntimeContextProvider
 from nanobot.sdk.types import (
     SessionInfo,
     SessionSnapshot,
@@ -66,7 +67,7 @@ class SessionClient:
 
     def get(self, session_key: str) -> SessionSnapshot | None:
         """Return a display-safe snapshot without creating a new session on disk."""
-        cached = self._loop.sessions._cached(session_key)
+        cached = self._loop.sessions.get_cached(session_key)
         if cached is not None:
             return snapshot_from_session(cached)
         payload = self._loop.sessions.read_session_file(session_key)
@@ -90,7 +91,7 @@ class SessionClient:
 
     def export(self, session_key: str) -> SessionSnapshot | None:
         """Return a trusted full snapshot, including model-only runtime context."""
-        cached = self._loop.sessions._cached(session_key)
+        cached = self._loop.sessions.get_cached(session_key)
         if cached is not None:
             return snapshot_from_session(cached, include_runtime_context=True)
         payload = self._loop.sessions.read_session_file(session_key)
@@ -193,10 +194,24 @@ class RuntimeClient:
         """Current runtime workspace."""
         return self._loop.workspace
 
+    def add_context_provider(
+        self,
+        provider: RuntimeContextProvider,
+    ) -> Callable[[], None]:
+        """Register per-turn model context and return an unsubscribe callback."""
+        return self._loop.register_runtime_context_provider(provider)
+
+    def on_session_turn_persisted(
+        self,
+        handler: Callable[[SessionTurnPersisted], Awaitable[None] | None],
+    ) -> Callable[[], None]:
+        """Register a persisted-turn callback and return an unsubscribe callback."""
+        return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
+
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Run token/replay-window consolidation for one session."""
         session = self._loop.sessions.get_or_create(session_key)
-        runtime = self._loop.llm_runtime()
+        runtime = self._loop.runtime_for_session(session)
         await self._loop.consolidator.maybe_consolidate_by_tokens(
             session,
             runtime=runtime,
@@ -208,7 +223,8 @@ class RuntimeClient:
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
         """Run idle-session compaction for one session and return the summary."""
-        runtime = self._loop.llm_runtime()
+        session = self._loop.sessions.get_or_create(session_key)
+        runtime = self._loop.runtime_for_session(session)
         return await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,

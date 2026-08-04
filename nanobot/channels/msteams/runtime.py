@@ -23,7 +23,8 @@ import time
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Generator, cast
 from urllib.parse import urlparse
 
 try:  # pragma: no cover - Windows fallback path
@@ -47,9 +48,11 @@ MSTEAMS_AVAILABLE = (
 
 if TYPE_CHECKING:
     import jwt
+    from jwt.algorithms import RSAAlgorithm
 
 if MSTEAMS_AVAILABLE:
     import jwt
+    from jwt.algorithms import RSAAlgorithm
 
 MSTEAMS_REF_TTL_DAYS = 30
 MSTEAMS_WEBCHAT_HOST = "webchat.botframework.com"
@@ -182,9 +185,10 @@ class MSTeamsChannel(BaseChannel):
                 auth_header = self.headers.get("Authorization", "")
                 if channel.config.validate_inbound_auth:
                     try:
+                        loop = cast(asyncio.AbstractEventLoop, channel._loop)
                         fut = asyncio.run_coroutine_threadsafe(
                             channel._validate_inbound_auth(auth_header, payload),
-                            channel._loop,
+                            loop,
                         )
                         fut.result(timeout=15)
                     except Exception as e:
@@ -195,9 +199,10 @@ class MSTeamsChannel(BaseChannel):
                         self.wfile.write(b'{"error":"unauthorized"}')
                         return
                 try:
+                    loop = cast(asyncio.AbstractEventLoop, channel._loop)
                     fut = asyncio.run_coroutine_threadsafe(
                         channel._handle_activity(payload),
-                        channel._loop,
+                        loop,
                     )
                     fut.result(timeout=15)
                 except Exception as e:
@@ -269,7 +274,7 @@ class MSTeamsChannel(BaseChannel):
             "text": msg.content or " ",
         }
         if use_thread_reply:
-            payload["replyToId"] = ref.activity_id
+            payload["replyToId"] = cast(str, ref.activity_id)
 
         try:
             resp = await self._http.post(base_url, headers=headers, json=payload)
@@ -285,10 +290,10 @@ class MSTeamsChannel(BaseChannel):
         if activity.get("type") != "message":
             return
 
-        conversation = activity.get("conversation") or {}
-        from_user = activity.get("from") or {}
-        recipient = activity.get("recipient") or {}
-        channel_data = activity.get("channelData") or {}
+        conversation = cast(dict[str, Any], activity.get("conversation") or {})
+        from_user = cast(dict[str, Any], activity.get("from") or {})
+        recipient = cast(dict[str, Any], activity.get("recipient") or {})
+        channel_data = cast(dict[str, Any], activity.get("channelData") or {})
 
         sender_id = str(from_user.get("aadObjectId") or from_user.get("id") or "").strip()
         conversation_id = str(conversation.get("id") or "").strip()
@@ -336,7 +341,16 @@ class MSTeamsChannel(BaseChannel):
                 bot_id=str(recipient.get("id") or "") or None,
                 activity_id=activity_id or None,
                 conversation_type=conversation_type or None,
-                tenant_id=str((channel_data.get("tenant") or {}).get("id") or "") or None,
+                tenant_id=(
+                    str(
+                        cast(
+                            dict[str, Any],
+                            channel_data.get("tenant") or {},
+                        ).get("id")
+                        or ""
+                    )
+                    or None
+                ),
                 updated_at=time.time(),
             )
             self._save_refs_locked()
@@ -361,7 +375,7 @@ class MSTeamsChannel(BaseChannel):
         text = self._strip_possible_bot_mention(text)
         text = self._normalize_html_whitespace(text)
 
-        channel_data = activity.get("channelData") or {}
+        channel_data = cast(dict[str, Any], activity.get("channelData") or {})
         reply_to_id = str(activity.get("replyToId") or "").strip()
         normalized_preview = html.unescape(text).replace("&rsquo", "’").strip()
         normalized_preview = normalized_preview.replace("\xa0", " ")
@@ -473,15 +487,15 @@ class MSTeamsChannel(BaseChannel):
             raise ValueError("missing token kid")
 
         jwks = await self._get_botframework_jwks()
-        keys = jwks.get("keys") or []
+        keys = cast(list[dict[str, Any]], jwks.get("keys") or [])
         jwk = next((key for key in keys if key.get("kid") == kid), None)
         if not jwk:
             raise ValueError(f"signing key not found for kid={kid}")
 
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+        public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
         claims = jwt.decode(
             token,
-            key=public_key,
+            key=cast(Any, public_key),
             algorithms=["RS256"],
             audience=self.config.app_id,
             issuer="https://api.botframework.com",
@@ -509,9 +523,10 @@ class MSTeamsChannel(BaseChannel):
 
         resp = await self._http.get(self._botframework_openid_config_url)
         resp.raise_for_status()
-        self._botframework_openid_config = resp.json()
+        openid_config = cast(dict[str, Any], resp.json())
+        self._botframework_openid_config = openid_config
         self._botframework_openid_config_expires_at = now + 3600
-        return self._botframework_openid_config
+        return openid_config
 
     async def _get_botframework_jwks(self) -> dict[str, Any]:
         """Fetch and cache Bot Framework JWKS."""
@@ -530,36 +545,38 @@ class MSTeamsChannel(BaseChannel):
 
         resp = await self._http.get(jwks_uri)
         resp.raise_for_status()
-        self._botframework_jwks = resp.json()
+        jwks = cast(dict[str, Any], resp.json())
+        self._botframework_jwks = jwks
         self._botframework_jwks_expires_at = now + 3600
-        return self._botframework_jwks
+        return jwks
 
     @staticmethod
-    def _safe_float(value: Any) -> float | None:
+    def _safe_float(value: object) -> float | None:
         try:
-            out = float(value)
+            out = float(cast(Any, value))
             if out > 0:
                 return out
         except (TypeError, ValueError):
             return None
         return None
 
-    def _normalize_ref_record(self, value: Any) -> ConversationRef | None:
+    def _normalize_ref_record(self, value: object) -> ConversationRef | None:
         """Normalize a stored ref record from legacy/current schema."""
         if not isinstance(value, dict):
             return None
-        service_url = str(value.get("service_url") or "").strip()
-        conversation_id = str(value.get("conversation_id") or "").strip()
+        record = cast(dict[str, Any], value)
+        service_url = str(record.get("service_url") or "").strip()
+        conversation_id = str(record.get("conversation_id") or "").strip()
         if not service_url or not conversation_id:
             return None
         return ConversationRef(
             service_url=service_url,
             conversation_id=conversation_id,
-            bot_id=str(value.get("bot_id") or "") or None,
-            activity_id=str(value.get("activity_id") or "") or None,
-            conversation_type=str(value.get("conversation_type") or "") or None,
-            tenant_id=str(value.get("tenant_id") or "") or None,
-            updated_at=self._safe_float(value.get("updated_at")),
+            bot_id=str(record.get("bot_id") or "") or None,
+            activity_id=str(record.get("activity_id") or "") or None,
+            conversation_type=str(record.get("conversation_type") or "") or None,
+            tenant_id=str(record.get("tenant_id") or "") or None,
+            updated_at=self._safe_float(cast(object, record.get("updated_at"))),
         )
 
     def _load_refs_raw(self) -> tuple[dict[str, Any], dict[str, Any], bool]:
@@ -570,17 +587,19 @@ class MSTeamsChannel(BaseChannel):
 
         if self._refs_path.exists():
             try:
-                loaded = json.loads(self._refs_path.read_text(encoding="utf-8"))
+                loaded: object = json.loads(self._refs_path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
-                    main_data = loaded
+                    main_data = cast(dict[str, Any], loaded)
             except Exception as e:
                 self.logger.warning("Failed to load conversation refs: {}", e)
 
         if meta_exists:
             try:
-                loaded_meta = json.loads(self._refs_meta_path.read_text(encoding="utf-8"))
+                loaded_meta: object = json.loads(
+                    self._refs_meta_path.read_text(encoding="utf-8")
+                )
                 if isinstance(loaded_meta, dict):
-                    meta_data = loaded_meta
+                    meta_data = cast(dict[str, Any], loaded_meta)
             except Exception as e:
                 self.logger.warning("Failed to load conversation refs metadata: {}", e)
 
@@ -599,10 +618,11 @@ class MSTeamsChannel(BaseChannel):
             if not ref:
                 continue
 
-            meta_entry = meta_data.get(key) if isinstance(meta_data, dict) else None
-            meta_ts = None
+            meta_entry = cast(object, meta_data.get(key))
+            meta_ts: float | None = None
             if isinstance(meta_entry, dict):
-                meta_ts = self._safe_float(meta_entry.get("updated_at"))
+                meta_record = cast(dict[str, Any], meta_entry)
+                meta_ts = self._safe_float(cast(object, meta_record.get("updated_at")))
             elif meta_entry is not None:
                 meta_ts = self._safe_float(meta_entry)
 
@@ -623,7 +643,7 @@ class MSTeamsChannel(BaseChannel):
         return self._load_refs_from_disk()
 
     @contextmanager
-    def _refs_file_lock(self):
+    def _refs_file_lock(self) -> Generator[None, None, None]:
         """Cross-process lock while merging and writing refs state."""
         self._refs_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fp = self._refs_lock_path.open("a+", encoding="utf-8")
@@ -742,7 +762,7 @@ class MSTeamsChannel(BaseChannel):
             if persist:
                 self._save_refs_locked()
 
-    def _write_json_atomically(self, path, data: dict[str, Any]) -> None:
+    def _write_json_atomically(self, path: Path, data: dict[str, Any]) -> None:
         """Write refs JSON atomically to reduce corruption risk during crashes."""
         payload = json.dumps(data, indent=2)
         tmp_path: str | None = None
@@ -816,7 +836,8 @@ class MSTeamsChannel(BaseChannel):
         }
         resp = await self._http.post(token_url, data=data)
         resp.raise_for_status()
-        payload = resp.json()
-        self._token = payload["access_token"]
+        payload = cast(dict[str, Any], resp.json())
+        token = cast(str, payload["access_token"])
+        self._token = token
         self._token_expires_at = now + int(payload.get("expires_in", 3600))
-        return self._token
+        return token

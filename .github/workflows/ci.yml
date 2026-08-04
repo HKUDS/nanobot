@@ -5,10 +5,28 @@ on:
     branches: [main]
     paths-ignore:
       - docs/**
+      - .agent/**
+      - .github/ISSUE_TEMPLATE/**
+      - AGENTS.md
+      - CLAUDE.md
+      - COMMUNICATION.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - webui/README.md
   pull_request:
     branches: [main]
     paths-ignore:
       - docs/**
+      - .agent/**
+      - .github/ISSUE_TEMPLATE/**
+      - AGENTS.md
+      - CLAUDE.md
+      - COMMUNICATION.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - webui/README.md
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,8 +36,46 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      python_required: ${{ steps.paths.outputs.python_required }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Python-relevant changes
+        id: paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python_required=true
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            diff_range="${BASE_SHA}...${HEAD_SHA}"
+          else
+            diff_range="${BASE_SHA}..${HEAD_SHA}"
+          fi
+
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null &&
+            changed_files="$(git diff --name-only --no-renames "$diff_range")" &&
+            [[ -n "$changed_files" ]] &&
+            ! grep -qvE '^(webui/|nanobot/channels/[^/]+/webui/|docs/)' <<< "$changed_files"; then
+            python_required=false
+          fi
+
+          echo "python_required=$python_required" >> "$GITHUB_OUTPUT"
+
   test:
     name: Python (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.python_required == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -30,14 +86,18 @@ jobs:
             os: ubuntu-latest
             python-version: "3.11"
             coverage: false
+            pytest_args: ""
           - name: latest, 3.14 + coverage
             os: ubuntu-latest
             python-version: "3.14"
             coverage: true
+            pytest_args: ""
           - name: Windows, 3.14
             os: windows-latest
             python-version: "3.14"
             coverage: false
+            # Keep each test file in one worker while using both hosted-runner cores.
+            pytest_args: "-n 2 --dist loadfile"
 
     steps:
       - uses: actions/checkout@v4
@@ -60,11 +120,18 @@ jobs:
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
 
+      - name: Verify dependency consistency
+        run: uv pip check
+
       # Channel requirements live in manifests rather than uv.lock. Avoid a
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
         run: uv run --no-sync ruff check nanobot tests conftest.py
+
+      - name: Type check with BasedPyright (strict)
+        if: matrix.coverage
+        run: uv run --no-sync basedpyright
 
       - name: Run tests with coverage
         if: matrix.coverage
@@ -77,6 +144,7 @@ jobs:
         if: ${{ !matrix.coverage }}
         run: >-
           uv run --no-sync python -m pytest
+          ${{ matrix.pytest_args }}
           --durations=25 --durations-min=1.0
 
   webui:

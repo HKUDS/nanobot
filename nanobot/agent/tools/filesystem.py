@@ -1,5 +1,7 @@
 """File system tools: read, write, edit, list."""
 
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
+
 import difflib
 import mimetypes
 import os
@@ -8,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
@@ -37,7 +40,7 @@ class _FsTool(Tool):
         return FileToolsConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.file.enable
 
     def __init__(
@@ -51,6 +54,7 @@ class _FsTool(Tool):
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
+        extra_read_allowed_files: list[Path] | None = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -60,6 +64,7 @@ class _FsTool(Tool):
             *(extra_allowed_dirs or []),
             *(extra_read_allowed_dirs or []),
         ]
+        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
         self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
         self._extra_write_allowed_files = list(extra_write_allowed_files or [])
         self._restrict_to_workspace = (
@@ -75,20 +80,24 @@ class _FsTool(Tool):
         self._fallback_file_states = FileStates()
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
+        agent_workspace = Path(ctx.workspace)
+        resolved_agent_workspace = agent_workspace.expanduser().resolve(strict=False)
         restrict = (
             ctx.config.restrict_to_workspace
             or ctx.config.exec.sandbox
         )
         sandbox_restricts = bool(ctx.config.exec.sandbox)
-        allowed_dir = Path(ctx.workspace) if restrict else None
-        extra_read = [BUILTIN_SKILLS_DIR]
+        allowed_dir = agent_workspace if restrict else None
+        # Agent-owned skills stay available from project scopes. History is a narrower
+        # capability: expose only the append-only log, not the surrounding memory directory.
         return cls(
-            workspace=Path(ctx.workspace),
+            workspace=agent_workspace,
             allowed_dir=allowed_dir,
-            extra_read_allowed_dirs=extra_read,
+            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
+            extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
             file_states=ctx.file_state_store,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             sandbox_restricts_workspace=sandbox_restricts,
@@ -119,16 +128,20 @@ class _FsTool(Tool):
         extra_allowed_files: list[Path] | None,
         *,
         include_media_dir: bool,
+        extra_files_require_allowed_root: bool = False,
     ) -> Path:
         access = current_tool_workspace(
             self._workspace,
             restrict_to_workspace=self._restrict_to_workspace,
             sandbox_restricts_workspace=self._sandbox_restricts_workspace,
         )
+        allowed_root = self._effective_allowed_root(access.allowed_root)
+        if extra_files_require_allowed_root and allowed_root is None:
+            extra_allowed_files = None
         return resolve_workspace_path(
             path,
             access.project_path,
-            self._effective_allowed_root(access.allowed_root),
+            allowed_root,
             extra_allowed_dirs,
             extra_allowed_files,
             include_media_dir=include_media_dir,
@@ -138,8 +151,9 @@ class _FsTool(Tool):
         return self._resolve_with_extra(
             path,
             self._extra_read_allowed_dirs,
-            None,
+            self._extra_read_allowed_files,
             include_media_dir=True,
+            extra_files_require_allowed_root=True,
         )
 
     def _resolve_write(self, path: str) -> Path:
@@ -215,12 +229,10 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
         offset=IntegerSchema(
-            1,
             description="Line number to start reading from (1-indexed, default 1)",
             minimum=1,
         ),
         limit=IntegerSchema(
-            2000,
             description="Maximum number of lines to read (default 2000)",
             minimum=1,
         ),
@@ -252,6 +264,8 @@ class ReadFileTool(_FsTool):
             "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
             "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Uploaded non-image attachments are referenced by path; read them "
+            "with this tool only when their contents are needed. "
             "Use find_files/list_dir first when the path is uncertain. "
             "Read the relevant range before editing so replacements or patches "
             "are based on current content. "
@@ -357,11 +371,25 @@ class ReadFileTool(_FsTool):
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
-                # Binary file - return error message
-                mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                if mime and mime.startswith("image/"):
-                    return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-                return ToolResult.error(f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported.")
+                # Match the former eager extractor for known text formats while
+                # keeping arbitrary binary files on the guarded error path.
+                from nanobot.utils.document import _is_text_extension
+
+                if _is_text_extension(fp.suffix.lower()):
+                    text_content = raw.decode("latin-1")
+                else:
+                    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        return build_image_content_blocks(
+                            raw,
+                            mime,
+                            str(fp),
+                            f"(Image file: {path})",
+                        )
+                    return ToolResult.error(
+                        f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                        "Only supported text files and images can be read."
+                    )
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
@@ -383,7 +411,8 @@ class ReadFileTool(_FsTool):
             result = "\n".join(numbered)
 
             if len(result) > self._MAX_CHARS:
-                trimmed, chars = [], 0
+                trimmed: list[str] = []
+                chars = 0
                 for line in numbered:
                     chars += len(line) + 1
                     if chars > self._MAX_CHARS:
@@ -779,13 +808,11 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         new_text=StringSchema("The text to replace with"),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
         occurrence=IntegerSchema(
-            1,
             description="Optional 1-based occurrence to replace when old_text appears multiple times.",
             minimum=1,
             nullable=True,
         ),
         line_hint=IntegerSchema(
-            1,
             description=(
                 "Optional exact 1-based target line copied from read_file. "
                 "The selected old_text match must cover this line."
@@ -794,7 +821,6 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
             nullable=True,
         ),
         expected_replacements=IntegerSchema(
-            1,
             description="Optional guard for the number of replacements that must be made.",
             minimum=1,
             nullable=True,
@@ -1025,7 +1051,6 @@ class EditFileTool(_FsTool):
         path=StringSchema("The directory path to list"),
         recursive=BooleanSchema(description="Recursively list all files (default false)"),
         max_entries=IntegerSchema(
-            200,
             description="Maximum entries to return (default 200)",
             minimum=1,
         ),

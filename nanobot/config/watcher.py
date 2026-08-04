@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from watchfiles import Change, awatch
+from watchfiles import Change, awatch  # pyright: ignore[reportUnknownVariableType]
 
 
 async def watch_config_file(config_path: Path, on_change: Callable[[], None]) -> None:

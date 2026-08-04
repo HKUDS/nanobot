@@ -12,6 +12,7 @@ export default {
       docsUrl: chatAppGuideUrl("telegram"),
       fields: [
         { key: "channels.telegram.token" },
+        { key: "channels.telegram.proxy" },
         { key: "channels.telegram.allowFrom" },
         { key: "channels.telegram.groupPolicy" },
       ],

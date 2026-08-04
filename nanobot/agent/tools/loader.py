@@ -1,15 +1,21 @@
 """Tool discovery and registration via package scanning."""
+
+# pyright: reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import importlib
 import pkgutil
 from importlib.metadata import entry_points
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.context import RequestContext, ToolContext
 
 _SKIP_MODULES = frozenset({
     "base", "schema", "registry", "context", "loader", "config",
@@ -83,7 +89,7 @@ class ToolLoader:
         self._plugins = plugins
         return plugins
 
-    def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+    def load(self, ctx: ToolContext, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
         registered: list[str] = []
         builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
@@ -157,7 +163,7 @@ class _LegacyErrorPrefixTool(Tool):
     def config_key(self) -> str:
         return getattr(self._wrapped, "config_key", "")
 
-    def set_context(self, ctx: Any) -> None:
+    def set_context(self, ctx: RequestContext) -> None:
         set_context = getattr(self._wrapped, "set_context", None)
         if callable(set_context):
             set_context(ctx)

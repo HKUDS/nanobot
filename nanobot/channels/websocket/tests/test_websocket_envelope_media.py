@@ -15,10 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.events import INBOUND_META_SESSION_READ_SCOPE
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
 )
+from nanobot.session import webui_turns as wth
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -38,7 +41,7 @@ def _data_url(mime: str, payload: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
 
 
-def _make_channel() -> WebSocketChannel:
+def _make_channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -46,7 +49,7 @@ def _make_channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=parsed,
         bus=bus,
-        session_manager=None,
+        session_manager=session_manager,
         static_dist_path=None,
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
@@ -57,6 +60,19 @@ def _make_channel() -> WebSocketChannel:
     channel = WebSocketChannel(cfg, bus, gateway=gateway)
     channel._handle_message = AsyncMock()  # type: ignore[method-assign]
     return channel
+
+
+@pytest.fixture(autouse=True)
+def isolate_websocket_turn_state() -> None:
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
+    yield
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
 # -- max_message_bytes bump ----------------------------------------------------
@@ -95,6 +111,28 @@ async def test_message_without_media_backward_compatible() -> None:
 
 
 @pytest.mark.asyncio
+async def test_webui_message_acceptance_echoes_turn_id() -> None:
+    channel = _make_channel()
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "hello",
+        "webui": True,
+        "turn_id": "turn-accepted",
+    }
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    assert json.loads(mock_conn.send.await_args.args[0]) == {
+        "event": "message_accepted",
+        "chat_id": "abc123",
+        "turn_id": "turn-accepted",
+    }
+
+
+@pytest.mark.asyncio
 async def test_message_text_policy_is_independent_from_transport_limit() -> None:
     channel = _make_channel()
     mock_conn = AsyncMock()
@@ -102,6 +140,7 @@ async def test_message_text_policy_is_independent_from_transport_limit() -> None
         "type": "message",
         "chat_id": "abc123",
         "content": "你" * 22_000,
+        "turn_id": "turn-text-policy",
     }
 
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
@@ -113,6 +152,7 @@ async def test_message_text_policy_is_independent_from_transport_limit() -> None
         "chat_id": "abc123",
         "detail": "message_rejected",
         "reason": "text_too_large",
+        "turn_id": "turn-text-policy",
     }
 
 
@@ -151,6 +191,43 @@ async def test_message_forwards_normalized_cli_app_attachments() -> None:
         "logo_url": "https://example.invalid/drawio.svg",
         "brand_color": "#F08705",
     }]
+
+
+@pytest.mark.asyncio
+async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    target = manager.get_or_create("websocket:pricing")
+    target.metadata.update({"title": "Pricing", "title_user_edited": True})
+    target.add_message("user", "Discuss cloud storage")
+    manager.save(target)
+    channel = _make_channel(manager)
+    mock_conn = AsyncMock()
+    channel._webui_connections.add(mock_conn)
+    envelope = {
+        "type": "message",
+        "chat_id": "current",
+        "content": "Use @pricing",
+        "webui": True,
+        "session_mentions": [{
+            "name": "pricing",
+            "session_key": "websocket:pricing",
+            "title": "Untrusted title",
+        }],
+    }
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    metadata = channel._handle_message.call_args.kwargs["metadata"]
+    assert metadata[INBOUND_META_SESSION_READ_SCOPE] == "websocket:"
+    assert metadata["session_mentions"] == [{
+        "name": "pricing",
+        "session_key": "websocket:pricing",
+        "title": "Pricing",
+    }]
+    [block] = metadata["_runtime_context_blocks"]
+    assert block.source == "session_mentions"
+    assert "websocket:pricing" in block.content
 
 
 @pytest.mark.asyncio
@@ -235,6 +312,7 @@ async def test_message_rejected_when_more_than_four_images(tmp_path) -> None:
         "chat_id": "abc123",
         "content": "hi",
         "media": [{"data_url": _tiny_png_data_url()}] * 5,
+        "turn_id": "turn-attachments",
     }
 
     with patch(
@@ -246,8 +324,10 @@ async def test_message_rejected_when_more_than_four_images(tmp_path) -> None:
     mock_conn.send.assert_awaited_once()
     err = json.loads(mock_conn.send.call_args[0][0])
     assert err["event"] == "error"
+    assert err["chat_id"] == "abc123"
     assert err["detail"] == "attachment_rejected"
     assert err["reason"] == "too_many_images"
+    assert err["turn_id"] == "turn-attachments"
 
 
 @pytest.mark.asyncio

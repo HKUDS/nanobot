@@ -17,6 +17,10 @@
         "placeholder": "123456:ABC...",
         "help": "BotFather で作成します。"
       },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
+      },
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "* または Telegram ユーザー ID",

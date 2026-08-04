@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,13 +7,174 @@ import {
   ThreadMessages,
   unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import type { UIMessage } from "@/lib/types";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
 describe("ThreadMessages", () => {
+  it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
+    const completed: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "latest answer", createdAt: 2 },
+    ];
+    const { rerender } = render(
+      <ThreadMessages messages={completed} isStreaming={false} />,
+    );
+
+    expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          ...completed,
+          { id: "u2", role: "user", content: "next question", createdAt: 3 },
+        ]}
+        isStreaming
+      />,
+    );
+
+    expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
+  });
+
+  it("still defers historical non-tail answers on their initial render", () => {
+    render(
+      <ThreadMessages
+        messages={[
+          { id: "u1", role: "user", content: "old question", createdAt: 1 },
+          { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
+          { id: "u2", role: "user", content: "latest question", createdAt: 3 },
+        ]}
+        isStreaming={false}
+      />,
+    );
+
+    expect(screen.getByText("historical answer").closest(".thread-render-unit")).not.toBeNull();
+  });
+
+  it("preserves an answer's markdown tree across completion and the next prompt", async () => {
+    await preloadMarkdownText();
+    const turnId = "turn-1";
+    const streaming: UIMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "question",
+        createdAt: 1,
+        turnId,
+        turnPhase: "prompt",
+      },
+      {
+        id: "live-answer",
+        role: "assistant",
+        content: "stable final answer",
+        createdAt: 2,
+        isStreaming: true,
+        turnId,
+        turnPhase: "answer",
+      },
+    ];
+    const { container, rerender } = render(
+      <ThreadMessages messages={streaming} isStreaming />,
+    );
+    await waitFor(
+      () => expect(container.querySelector(".markdown-content")).not.toBeNull(),
+      { timeout: 3_000 },
+    );
+    const paragraph = screen.getByText("stable final answer").closest("p");
+    expect(paragraph).not.toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          streaming[0],
+          {
+            ...streaming[1],
+            id: "canonical-answer",
+            isStreaming: false,
+          },
+        ]}
+        isStreaming={false}
+      />,
+    );
+
+    expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          streaming[0],
+          {
+            ...streaming[1],
+            id: "canonical-answer",
+            isStreaming: false,
+          },
+          {
+            id: "u2",
+            role: "user",
+            content: "next question",
+            createdAt: 3,
+            turnId: "turn-2",
+            turnPhase: "prompt",
+          },
+        ]}
+        isStreaming
+      />,
+    );
+
+    expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+  });
+
+  it("offers a follow-up action for text selected within one completed answer", async () => {
+    const onQuoteSelection = vi.fn();
+    render(
+      <ThreadMessages
+        messages={[{
+          id: "a1",
+          role: "assistant",
+          content: "The selected answer excerpt",
+          createdAt: 1,
+        }]}
+        isStreaming={false}
+        onQuoteSelection={onQuoteSelection}
+      />,
+    );
+
+    const textNode = screen.getByText("The selected answer excerpt").firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 4);
+    range.setEnd(textNode, 19);
+    vi.spyOn(range, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      right: 240,
+      top: 100,
+      bottom: 120,
+      width: 140,
+      height: 20,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => "selected answer",
+      removeAllRanges,
+    } as unknown as Selection);
+
+    document.dispatchEvent(new Event("selectionchange"));
+    const action = await screen.findByRole("button", { name: "Ask about this" });
+    fireEvent.click(action);
+
+    await waitFor(() => expect(onQuoteSelection).toHaveBeenCalledWith("selected answer"));
+    expect(removeAllRanges).toHaveBeenCalled();
+  });
+
   it("groups consecutive reasoning and tool rows into one timeline before the answer", () => {
     const messages: UIMessage[] = [
       {
@@ -791,6 +952,34 @@ describe("ThreadMessages", () => {
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+  });
+
+  it("does not count failed optimistic messages in assistant fork indices", () => {
+    const onForkFromMessage = vi.fn();
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "one", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer one", createdAt: 2 },
+      {
+        id: "u-failed",
+        role: "user",
+        content: "not persisted",
+        deliveryStatus: "failed",
+        createdAt: 3,
+      },
+      { id: "u2", role: "user", content: "two", createdAt: 4 },
+      { id: "a2", role: "assistant", content: "answer two", createdAt: 5 },
+    ];
+
+    render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming={false}
+        onForkFromMessage={onForkFromMessage}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Fork" }).at(-1)!);
+    expect(onForkFromMessage).toHaveBeenCalledWith(2);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {

@@ -7,12 +7,13 @@ import uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
     ToolContext,
@@ -37,6 +38,12 @@ from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
 
+class _SubagentOrigin(TypedDict):
+    channel: str
+    chat_id: str
+    session_key: str | None
+
+
 @dataclass(slots=True)
 class SubagentStatus:
     """Real-time status of a running subagent."""
@@ -47,8 +54,8 @@ class SubagentStatus:
     started_at: float          # time.monotonic()
     phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
     iteration: int = 0
-    tool_events: list = field(default_factory=list)   # [{name, status, detail}, ...]
-    usage: dict = field(default_factory=dict)          # token usage
+    tool_events: list[dict[str, str]] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str | None = None
     error: str | None = None
 
@@ -146,7 +153,7 @@ class SubagentManager:
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
-        self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -236,7 +243,11 @@ class SubagentManager:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        origin: _SubagentOrigin = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+        }
 
         status = SubagentStatus(
             task_id=task_id,
@@ -262,7 +273,7 @@ class SubagentManager:
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
-        def _cleanup(_: asyncio.Task) -> None:
+        def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
@@ -275,21 +286,85 @@ class SubagentManager:
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
+    async def run_inline(
+        self,
+        task: str,
+        label: str | None = None,
+        origin_channel: str = "cli",
+        origin_chat_id: str = "direct",
+        session_key: str | None = None,
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+        *,
+        runtime: LLMRuntime | None = None,
+    ) -> str:
+        """Run a subagent synchronously and return its result to the caller."""
+        if runtime is None:
+            runtime = self._compat_spawn_runtime()
+        if temperature is not None:
+            runtime = runtime.with_generation_overrides(temperature=temperature)
+        task_id = str(uuid.uuid4())[:8]
+        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        origin: _SubagentOrigin = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+        }
+        status = SubagentStatus(
+            task_id=task_id,
+            label=display_label,
+            task_description=task,
+            started_at=time.monotonic(),
+        )
+        self._task_statuses[task_id] = status
+        logger.info("Running inline subagent [{}]: {}", task_id, display_label)
+        inline_task = asyncio.create_task(
+            self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                status,
+                runtime,
+                origin_message_id,
+                workspace_scope,
+                announce=False,
+            )
+        )
+        self._running_tasks[task_id] = inline_task
+        if session_key:
+            self._session_tasks.setdefault(session_key, set()).add(task_id)
+        try:
+            result = await inline_task
+            if status.phase == "error" or status.stop_reason in {"error", "tool_error"}:
+                return ToolResult.error(result)
+            return result
+        finally:
+            self._running_tasks.pop(task_id, None)
+            self._task_statuses.pop(task_id, None)
+            if session_key and (ids := self._session_tasks.get(session_key)):
+                ids.discard(task_id)
+                if not ids:
+                    del self._session_tasks[session_key]
+
     async def _run_subagent(
         self,
         task_id: str,
         task: str,
         label: str,
-        origin: dict[str, str],
+        origin: _SubagentOrigin,
         status: SubagentStatus,
         runtime: LLMRuntime,
         origin_message_id: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
-    ) -> None:
+        *,
+        announce: bool = True,
+    ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
-        async def _on_checkpoint(payload: dict) -> None:
+        async def _on_checkpoint(payload: dict[str, Any]) -> None:
             status.phase = payload.get("phase", status.phase)
             status.iteration = payload.get("iteration", status.iteration)
 
@@ -299,7 +374,8 @@ class SubagentManager:
             if workspace_scope is not None:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
-            tools = self._build_tools(workspace=root, tools_config=cfg)
+            # Construct from the agent workspace; the bound scope below supplies the project cwd.
+            tools = self._build_tools(tools_config=cfg)
             system_prompt = self._build_subagent_prompt(workspace=root)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -346,27 +422,43 @@ class SubagentManager:
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
-                await self._announce_result(
-                    task_id, label, task,
-                    self._format_partial_progress(result),
-                    origin, "error", origin_message_id,
-                )
+                final_result = self._format_partial_progress(result)
+                final_status = "error"
             elif result.stop_reason == "error":
-                await self._announce_result(
-                    task_id, label, task,
-                    result.error or "Error: subagent execution failed.",
-                    origin, "error", origin_message_id,
-                )
+                final_result = result.error or "Error: subagent execution failed."
+                final_status = "error"
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
+                final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+            if announce:
+                await self._announce_result(
+                    task_id,
+                    label,
+                    task,
+                    final_result,
+                    origin,
+                    final_status,
+                    origin_message_id,
+                )
+            return final_result
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            final_result = f"Error: {e}"
+            if announce:
+                await self._announce_result(
+                    task_id,
+                    label,
+                    task,
+                    final_result,
+                    origin,
+                    "error",
+                    origin_message_id,
+                )
+            return final_result
 
     async def _announce_result(
         self,
@@ -374,7 +466,7 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
+        origin: _SubagentOrigin,
         status: str,
         origin_message_id: str | None = None,
     ) -> None:
@@ -414,7 +506,7 @@ class SubagentManager:
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
     @staticmethod
-    def _format_partial_progress(result) -> str:
+    def _format_partial_progress(result: AgentRunResult) -> str:
         completed = [e for e in result.tool_events if e["status"] == "ok"]
         failure = next((e for e in reversed(result.tool_events) if e["status"] == "error"), None)
         lines: list[str] = []
@@ -438,14 +530,17 @@ class SubagentManager:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
-        root = workspace or self.workspace
+        agent_workspace = self.workspace.expanduser().resolve()
+        project_workspace = workspace.expanduser().resolve() if workspace else agent_workspace
         skills_summary = SkillsLoader(
-            root,
+            self.workspace,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
-            workspace=str(root),
+            workspace=str(project_workspace),
+            agent_workspace=str(agent_workspace),
+            history_log=str(agent_workspace / "memory" / "history.jsonl"),
             skills_summary=skills_summary or "",
         )
 
@@ -457,6 +552,7 @@ class SubagentManager:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self._exec_session_manager.terminate_by_owner(session_key)
         return len(tasks)
 
     async def close(self) -> None:

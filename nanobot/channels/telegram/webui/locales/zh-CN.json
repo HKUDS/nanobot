@@ -17,6 +17,10 @@
         "placeholder": "123456:ABC...",
         "help": "使用 BotFather 创建。"
       },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
+      },
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "* 或 Telegram 用户 ID",

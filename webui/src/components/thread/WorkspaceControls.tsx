@@ -9,7 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  floatingItemClassName,
+  floatingItemFocusClassName,
+} from "@/components/ui/floating-surface";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type {
   WorkspaceAccessMode,
   WorkspaceScopePayload,
@@ -134,8 +143,8 @@ export function WorkspaceProjectPicker({
 
   return (
     <div className="flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
           <button
             type="button"
             disabled={disabled}
@@ -151,16 +160,21 @@ export function WorkspaceProjectPicker({
             <span className="truncate">{projectLabel}</span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
+        </PopoverTrigger>
+        <PopoverContent
           align="start"
           side="bottom"
           sideOffset={8}
-          className="w-[min(25rem,calc(100vw-2rem))] rounded-[22px]"
+          className="w-[min(25rem,calc(100vw-2rem))]"
         >
-          <DropdownMenuItem
-            onSelect={() => applyProjectPath(defaultScope.project_path, defaultScope.project_name)}
-            className="flex min-h-[48px] cursor-default gap-3 rounded-[16px] px-3 py-2.5 focus:bg-muted/55"
+          <button
+            type="button"
+            onClick={() => applyProjectPath(defaultScope.project_path, defaultScope.project_name)}
+            className={cn(
+              floatingItemClassName,
+              floatingItemFocusClassName,
+              "flex min-h-[48px] w-full cursor-default gap-3 px-3 py-2.5 focus:bg-muted/55",
+            )}
           >
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/80">
               <Folder className="h-4 w-4" />
@@ -174,14 +188,9 @@ export function WorkspaceProjectPicker({
               </span>
             </span>
             {!currentProjectScope ? <Check className="h-4 w-4 text-foreground/80" /> : null}
-          </DropdownMenuItem>
+          </button>
           <div className="my-1 h-px bg-border/45" />
-          <div
-            className="space-y-1.5 px-1.5 py-1.5"
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") event.stopPropagation();
-            }}
-          >
+          <div className="space-y-1.5 px-1.5 py-1.5">
             <form
               className="flex items-center gap-2"
               onSubmit={(event) => {
@@ -217,8 +226,8 @@ export function WorkspaceProjectPicker({
               </p>
             ) : null}
           </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -239,6 +248,13 @@ export function WorkspaceAccessMenu({
   const { t } = useTranslation();
   const mode = scope.access_mode;
   const isFull = mode === "full";
+  const accessLabel = t(
+    isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default",
+  );
+  const shortAccessLabel = t(
+    isFull ? "thread.composer.workspace.fullShort" : "thread.composer.workspace.defaultShort",
+  );
+  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${accessLabel}`;
 
   const setMode = (value: WorkspaceAccessMode) => {
     if (value === "full" && !canUseFullAccess) return;
@@ -252,9 +268,10 @@ export function WorkspaceAccessMenu({
         <Button
           type="button"
           variant="ghost"
-          aria-label={t("thread.composer.workspace.accessAria")}
+          aria-label={accessAriaLabel}
+          title={accessLabel}
           className={cn(
-            "min-w-0 max-w-[min(7rem,30vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none sm:max-w-[min(12.5rem,42vw)]",
+            "thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none",
             isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
             isFull
               ? "bg-transparent text-orange-600 hover:bg-orange-500/8 dark:text-orange-300 dark:hover:bg-orange-400/10"
@@ -262,14 +279,17 @@ export function WorkspaceAccessMenu({
           )}
         >
           {isFull ? (
-            <AlertTriangle className={cn("mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+            <AlertTriangle className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
           ) : (
-            <Hand className={cn("mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+            <Hand className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
           )}
-          <span className={cn("min-w-0 truncate", isFull && "hidden sm:inline")}>
-            {t(isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default")}
+          <span aria-hidden className="thread-composer-access-label-full min-w-0 truncate">
+            {accessLabel}
           </span>
-          <ChevronDown className={cn("ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />
+          <span aria-hidden className="thread-composer-access-label-short hidden min-w-0 truncate">
+            {shortAccessLabel}
+          </span>
+          <ChevronDown className={cn("thread-composer-access-chevron ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
@@ -312,7 +332,7 @@ function AccessMenuItem({
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        "flex h-10 items-center gap-3 rounded-xl px-3 text-[13.5px] font-semibold",
+        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold",
         warning && "text-orange-600 focus:text-orange-600 dark:text-orange-300 dark:focus:text-orange-300",
       )}
     >

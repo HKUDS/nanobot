@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+@supports (content-visibility: auto) {
+  .apps-catalog-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.25rem;
+  }
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
@@ -25,44 +32,48 @@
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: 221 70% 50%;
+    --inline-token-highlight: #ef8e30;
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 40 8% 90.5%;
+    --settings-canvas: var(--background);
+    --settings-surface: 60 6% 96.7%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
   .dark {
     color-scheme: dark;
-    --background: 0 0% 12%;
+    --background: 0 0% 19%;
     --foreground: 240 4% 96%;
-    --card: 0 0% 14%;
+    --card: 0 0% 22%;
     --card-foreground: 240 4% 96%;
-    --popover: 0 0% 14%;
+    --popover: var(--card);
     --popover-foreground: 240 4% 96%;
     --primary: 240 5% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14%;
+    --secondary: var(--card);
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 16%;
+    --muted: var(--card);
     --muted-foreground: 0 0% 65%;
-    --accent: 0 0% 18%;
+    --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 22%;
-    --input: 0 0% 22%;
+    --border: 0 0% 28%;
+    --input: var(--border);
     --ring: 0 0% 83.1%;
-    --inline-token-highlight: 217 92% 72%;
-    --sidebar: 0 0% 10.5%;
+    --inline-token-highlight: #ef8e30;
+    --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 0 0% 20%;
+    --sidebar-border: var(--border);
+    --settings-canvas: var(--background);
+    --settings-surface: var(--card);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -117,6 +128,38 @@
 }
 
 @layer utilities {
+  .composer-model-badge {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .composer-model-badge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: rgb(236 141 49);
+    opacity: 0;
+    transition: opacity 600ms ease-in-out;
+  }
+
+  .composer-model-badge[data-fallback="true"]::before {
+    opacity: 1;
+  }
+
+  .composer-model-badge > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-model-badge::before {
+      transition-duration: 150ms;
+    }
+  }
+
   .host-drag-region {
     -webkit-app-region: drag;
   }
@@ -196,7 +239,7 @@
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
 
-  /* Markdown body styles, ported from agent-chat-ui's markdown-styles.css. */
+  /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
   }
@@ -211,6 +254,7 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
+    line-height: var(--cjk-line-height);
   }
 
   .markdown-content .contains-task-list {
@@ -294,6 +338,30 @@
       animation: none;
       content: "";
     }
+    .markdown-content-streaming > :last-child::after,
+    .streaming-text-fallback::after {
+      animation: none;
+    }
+  }
+
+  /**
+   * The composer is one persistent grid item in both landing and thread
+   * layouts. On desktop, the landing's trailing flexible row holds it at the
+   * visual center; collapsing only that row lets the same element dock at the
+   * bottom without a remount or a transform clone.
+   */
+  .thread-layout {
+    grid-template-rows: minmax(min-content, 1fr) auto 0fr;
+    transition:
+      grid-template-rows 900ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .thread-layout[data-layout="thread"] {
+    grid-template-rows: minmax(0, 1fr) auto 0fr;
+  }
+  @media (min-width: 640px) {
+    .thread-layout[data-layout="hero"] {
+      grid-template-rows: minmax(min-content, 1fr) auto 1fr;
+    }
   }
 
   @keyframes composer-status-strip-enter {
@@ -334,6 +402,39 @@
   }
   .composer-status-strip[data-state="exit"] {
     animation: composer-status-strip-exit 180ms ease-in both;
+  }
+  .composer-status-drawer {
+    --composer-status-drawer-duration: 600ms;
+    --composer-status-drawer-easing: ease-out;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    pointer-events: none;
+    transition:
+      grid-template-rows var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] {
+    grid-template-rows: 1fr;
+    pointer-events: auto;
+  }
+  .composer-status-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .composer-status-drawer-content {
+    opacity: 0;
+    transform: translateY(8px);
+    transform-origin: bottom center;
+    transition:
+      opacity var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing),
+      transform var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
+    opacity: 1;
+    transform: translateY(0);
   }
   @keyframes run-pulse-dot {
     0%,
@@ -398,6 +499,16 @@
     }
     .composer-status-strip[data-state] {
       animation: none;
+    }
+    .composer-status-drawer {
+      transition-duration: 220ms;
+    }
+    .composer-status-drawer-content {
+      transform: translateY(2px);
+      transition-duration: 140ms, 220ms;
+    }
+    .thread-layout {
+      transition-duration: 360ms;
     }
     .run-pulse-icon,
     .run-pulse-icon * {
@@ -571,6 +682,13 @@
     container-type: inline-size;
   }
 
+  @supports (content-visibility: auto) {
+    .thread-render-unit {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 12rem;
+    }
+  }
+
   .thread-prompt-rail {
     display: none;
     left: 1.75rem;
@@ -586,5 +704,166 @@
     .thread-prompt-rail {
       display: none;
     }
+  }
+}
+
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/*
+ * Composer controls compress against their actual container, not the viewport.
+ * Permission state has priority over the model label; both retain their full
+ * accessible names and title text when their visible labels are shortened.
+ */
+.thread-composer-surface {
+  container-name: thread-composer;
+  container-type: inline-size;
+}
+
+.thread-composer-footer-actions {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+
+.thread-composer-model-badge {
+  flex-shrink: 1;
+}
+
+.thread-composer-model-label-fade {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active
+  > .composer-model-pill {
+  transform: scale(0.98);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms
+    cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-model-badge:active > .composer-model-pill {
+    transform: none !important;
+  }
+
+  .composer-model-pill-track[data-settling="true"],
+  .composer-model-pill-dock {
+    transition: none;
+    will-change: auto;
+  }
+
+  .composer-model-pill-viewport {
+    animation: none;
+  }
+}
+
+@container thread-composer (max-width: 21rem) {
+  .thread-composer-footer {
+    column-gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+
+  .thread-composer-footer-primary,
+  .thread-composer-footer-actions {
+    gap: 0.25rem;
+  }
+
+  .thread-composer-access {
+    max-width: 6.5rem;
+    padding-inline: 0.5rem;
+    font-size: 0.71875rem;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0.25rem;
+  }
+
+  .thread-composer-access-chevron {
+    margin-left: 0.25rem;
+  }
+
+  .thread-composer-access-label-full {
+    display: none;
+  }
+
+  .thread-composer-access-label-short {
+    display: inline;
+  }
+}
+
+@container thread-composer (max-width: 19rem) {
+  .thread-composer-model-badge {
+    width: 2rem;
+    flex: none;
+  }
+
+  .thread-composer-model-badge .composer-model-pill {
+    width: 100%;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .thread-composer-model-label {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 16rem) {
+  .thread-composer-access {
+    width: 2rem;
+    flex: none;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0;
+  }
+
+  .thread-composer-access-label-short,
+  .thread-composer-access-chevron {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 15rem) {
+  .thread-composer-action.touch-target,
+  .thread-composer-access.touch-target {
+    width: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    min-height: 2rem;
   }
 }

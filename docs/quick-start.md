@@ -16,7 +16,7 @@ Git is only needed for a source install. The published package already contains 
 
 ## 1. Install nanobot
 
-The recommended installer keeps nanobot out of the system Python environment and opens the setup wizard when installation finishes.
+The recommended installer keeps nanobot out of the system Python environment. On a fresh local desktop, it starts the WebUI when installation finishes.
 
 **macOS / Linux**
 
@@ -34,30 +34,33 @@ The installer chooses an active virtual environment, `uv`, `pipx`, or a managed 
 
 If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
-## 2. Complete Quick Start
+## 2. Configure Your Model
 
-The installer opens `nanobot onboard --wizard`. Choose **Quick Start** and follow the prompts:
+Keep the installer terminal open. The browser opens the local WebUI; go to **Settings → Models** and:
 
 1. Choose the provider or endpoint that owns your credential.
-2. Enter its API key or base URL when requested.
-3. Enter a model ID that the same provider can run.
-4. Let Quick Start enable the local WebUI.
-5. Set a WebUI password and review the summary.
+2. Enter its API key or base URL when required.
+3. Create or select a model preset using a model ID that provider can run.
+4. Save the configuration.
 
-Quick Start creates or updates:
+The WebUI launcher creates or updates:
 
 | Path | Purpose |
 |---|---|
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
 | `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
 
-If the installer did not open the wizard, run it yourself:
+If the installer did not open the browser, run:
+
+```bash
+nanobot webui
+```
+
+SSH, headless, existing-config, and older-release installs retain the terminal setup path:
 
 ```bash
 nanobot onboard --wizard
 ```
-
-Current source versions also provide `nanobot webui`. When run without a usable model, that launcher offers the same Quick Start flow before starting the browser.
 
 ## 3. Check the Setup
 
@@ -75,11 +78,7 @@ Most other providers can say `not set`. This command validates local setup but d
 
 ## 4. Get the First Reply
 
-```bash
-nanobot gateway
-```
-
-Quick Start has already prepared the local WebSocket channel. Leave the gateway terminal open and visit `http://127.0.0.1:8765`; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. On current source versions, you can run `nanobot webui` instead to perform the local WebUI checks, start the gateway, and open the browser automatically.
+If the installer-started WebUI is no longer running, run `nanobot webui` again. Leave that terminal open; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it.
 
 Send:
 
@@ -131,20 +130,20 @@ After the first reply works, add one capability and test again:
 
 ## Other Install Methods
 
-Use one method, then continue at [Complete Quick Start](#2-complete-quick-start).
+Use one method, then continue at [Configure Your Model](#2-configure-your-model).
 
 **uv**
 
 ```bash
 uv tool install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
 **pip in a virtual environment**
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
 If pip reports `externally-managed-environment`, use the recommended installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment. Do not force a system-wide install.
@@ -157,7 +156,7 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 python -m pip install .
-nanobot onboard --wizard
+nanobot webui
 ```
 
 On Windows, if `python -m pip install .` reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install.
@@ -172,7 +171,7 @@ pipx run --spec nanobot-ai nanobot --version
 ~/.nanobot/venv/bin/python -m nanobot --version
 ```
 
-On Windows, the managed-environment form is `& "$HOME\.nanobot\venv\Scripts\python.exe" -m nanobot --version`. Replace `--version` with `onboard --wizard`, `gateway`, or any other arguments you need. Use plain `python -m nanobot` only when that Python executable belongs to the environment where nanobot was installed.
+On Windows, the managed-environment form is `& "$HOME\.nanobot\venv\Scripts\python.exe" -m nanobot --version`. Replace `--version` with `webui`, `onboard --wizard`, or any other arguments you need. Use plain `python -m nanobot` only when that Python executable belongs to the environment where nanobot was installed.
 
 ## Manual Configuration Fallback
 

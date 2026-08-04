@@ -8,6 +8,7 @@ from nanobot.channels.telegram.validation import validate
 SETUP_SPEC = ChannelSetupSpec(
     fields={
         "token": field("secret"),
+        "proxy": field("secret"),
         "allowFrom": field("list"),
         "groupPolicy": field("enum", choices=GROUP_POLICIES, default="mention"),
     },

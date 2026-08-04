@@ -17,6 +17,10 @@
         "placeholder": "123456:ABC...",
         "help": "Créalo con BotFather."
       },
+      "proxy": {
+        "label": "Proxy de red",
+        "placeholder": "http://127.0.0.1:7890"
+      },
       "allowFrom": {
         "label": "Usuarios permitidos",
         "placeholder": "* o ID de usuario de Telegram",

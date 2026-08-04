@@ -26,6 +26,10 @@ from nanobot.webui.media_api import (
 from nanobot.webui.transcript import rewrite_local_markdown_images
 
 
+def _default_media_dir(channel: str | None) -> Path:
+    return get_media_dir(channel)
+
+
 class WebUIMediaGateway:
     """Own media URL signing and WebUI markdown/media augmentation."""
 
@@ -40,7 +44,7 @@ class WebUIMediaGateway:
     ) -> None:
         self.workspace_path = workspace_path
         self.logger = logger
-        self._media_dir = media_dir or (lambda channel=None: get_media_dir(channel))
+        self._media_dir: Callable[[str | None], Path] = media_dir or _default_media_dir
         self.secret = secret or secrets.token_bytes(32)
         self.attachment_limits = attachment_limits or AttachmentIngressLimits()
 

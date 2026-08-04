@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,14 +9,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
-from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
+from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
@@ -31,6 +34,24 @@ PNG_BYTES = (
     b"\x00\x00\x00\x0bIDATx\xdacd\xfc\xff\x1f\x00\x03\x03"
     b"\x02\x00\xef\xbf\xa7\xdb\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+def _make_directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"directory junction unavailable: {result.stderr or result.stdout}")
+        return
+
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
 
 
 def test_workspace_scope_defaults_match_legacy_config(tmp_path: Path) -> None:
@@ -119,6 +140,101 @@ async def test_filesystem_tool_uses_current_restricted_workspace_scope(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_path: Path) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
+    history_file = agent_workspace / "memory" / "history.jsonl"
+    private_memory_file = agent_workspace / "memory" / "private.txt"
+    private_file = agent_workspace / "private.txt"
+    project_file = project / "project.txt"
+    skill_file.parent.mkdir(parents=True)
+    history_file.parent.mkdir(parents=True)
+    project.mkdir()
+    skill_file.write_text("global skill", encoding="utf-8")
+    history_file.write_text('{"content":"global history"}\n', encoding="utf-8")
+    private_memory_file.write_text("private memory", encoding="utf-8")
+    private_file.write_text("private", encoding="utf-8")
+    project_file.write_text("project", encoding="utf-8")
+
+    ctx = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True),
+        workspace=str(agent_workspace),
+    )
+    read_tool = ReadFileTool.create(ctx)
+    grep_tool = GrepTool.create(ctx)
+    write_tool = WriteFileTool.create(ctx)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        project_result = await read_tool.execute(path="project.txt")
+        skill_result = await read_tool.execute(path=str(skill_file))
+        history_result = await grep_tool.execute(
+            pattern="global history",
+            path=str(history_file),
+            output_mode="content",
+        )
+        private_memory_result = await read_tool.execute(path=str(private_memory_file))
+        private_result = await read_tool.execute(path=str(private_file))
+        write_result = await write_tool.execute(path=str(skill_file), content="changed")
+        history_write_result = await write_tool.execute(path=str(history_file), content="changed")
+    finally:
+        reset_workspace_scope(token)
+
+    assert "project" in project_result
+    assert "global skill" in skill_result
+    assert "global history" in history_result
+    assert "outside allowed directory" in private_memory_result
+    assert "outside allowed directory" in private_result
+    assert "outside allowed directory" in write_result
+    assert "outside allowed directory" in history_write_result
+    assert skill_file.read_text(encoding="utf-8") == "global skill"
+    assert history_file.read_text(encoding="utf-8") == '{"content":"global history"}\n'
+
+
+@pytest.mark.asyncio
+async def test_restricted_project_reads_history_from_linked_agent_workspace(
+    tmp_path: Path,
+) -> None:
+    real_agent_workspace = tmp_path / "real-agent"
+    linked_agent_workspace = tmp_path / "agent-link"
+    project = tmp_path / "project"
+    history_file = real_agent_workspace / "memory" / "history.jsonl"
+    history_file.parent.mkdir(parents=True)
+    project.mkdir()
+    history_file.write_text('{"content":"linked history"}\n', encoding="utf-8")
+    _make_directory_link(linked_agent_workspace, real_agent_workspace)
+
+    ctx = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True),
+        workspace=str(linked_agent_workspace),
+    )
+    grep_tool = GrepTool.create(ctx)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=linked_agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        result = await grep_tool.execute(
+            pattern="linked history",
+            path=str(history_file.resolve()),
+            output_mode="content",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "linked history" in result
+
+
+@pytest.mark.asyncio
 async def test_filesystem_write_tool_full_scope_allows_outside_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
@@ -141,7 +257,10 @@ async def test_filesystem_write_tool_full_scope_allows_outside_project(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> None:
+async def test_exec_tool_uses_scope_project_as_default_cwd(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
     project = tmp_path / "project"
     project.mkdir()
     tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=False, timeout=5)
@@ -154,7 +273,7 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
     try:
         result = await tool.execute(
             command=(
-                'python -c "from pathlib import Path; '
+                f'{cmd_python} -c "from pathlib import Path; '
                 "Path('scoped-marker.txt').write_text('ok')\""
             )
         )
@@ -166,7 +285,10 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Path) -> None:
+async def test_exec_full_scope_allows_explicit_cwd_outside_project(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     project.mkdir()
@@ -181,7 +303,7 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
     try:
         result = await tool.execute(
             command=(
-                'python -c "from pathlib import Path; '
+                f'{cmd_python} -c "from pathlib import Path; '
                 "Path('outside-marker.txt').write_text('ok')\""
             ),
             working_dir=str(outside),

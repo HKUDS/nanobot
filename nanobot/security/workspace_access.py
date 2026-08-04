@@ -6,7 +6,7 @@ import os
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 WorkspaceAccessMode = Literal["restricted", "full"]
 WORKSPACE_SCOPE_METADATA_KEY = "workspace_scope"
@@ -158,9 +158,10 @@ class WorkspaceScopeResolver:
         metadata = getattr(msg, "metadata", None)
         if not isinstance(metadata, dict):
             return
-        raw = metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
+        metadata_data = cast(dict[str, Any], metadata)
+        raw = metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)
         if isinstance(raw, dict):
-            session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(raw)
+            session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(cast(dict[str, Any], raw))
 
 
 def workspace_sandbox_status(
@@ -261,8 +262,9 @@ def validate_workspace_scope_payload(
         )
     if not isinstance(raw, dict):
         raise WorkspaceScopeError("workspace_scope must be an object")
+    scope_data = cast(dict[str, Any], raw)
 
-    raw_path = raw.get("project_path") or raw.get("path")
+    raw_path = scope_data.get("project_path") or scope_data.get("path")
     if raw_path is None or raw_path == "":
         raw_path = str(Path(default_workspace).expanduser().resolve(strict=False))
     if not isinstance(raw_path, str):
@@ -277,7 +279,7 @@ def validate_workspace_scope_payload(
     if not project.is_dir():
         raise WorkspaceScopeError("project_path must be an existing directory")
 
-    raw_mode = raw.get("access_mode")
+    raw_mode = scope_data.get("access_mode")
     if raw_mode is None:
         raw_mode = default_access_mode(default_restrict_to_workspace)
     if not isinstance(raw_mode, str):
@@ -300,8 +302,9 @@ def workspace_scope_from_metadata(
             source_channel=source_channel,
         )
     try:
+        metadata_data = cast(dict[str, Any], metadata)
         return validate_workspace_scope_payload(
-            metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
+            metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY),
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
             source_channel=source_channel,
@@ -323,8 +326,9 @@ def resolve_effective_workspace_scope(
     source_channel: str | None = None,
 ) -> WorkspaceScope:
     if isinstance(message_metadata, dict) and WORKSPACE_SCOPE_METADATA_KEY in message_metadata:
+        message_metadata_data = cast(dict[str, Any], message_metadata)
         return workspace_scope_from_metadata(
-            message_metadata,
+            message_metadata_data,
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
             source_channel=source_channel,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass
@@ -28,7 +28,7 @@ class SearchUsageInfo:
 
     def format(self) -> str:
         """Return a human-readable multi-line string for /status output."""
-        lines = [f"🔍 Web Search: {self.provider}"]
+        lines: list[str] = [f"🔍 Web Search: {self.provider}"]
 
         if not self.supported:
             lines.append("   Usage tracking: not available for this provider")
@@ -44,7 +44,7 @@ class SearchUsageInfo:
             lines.append(f"   Usage: {self.used} requests")
 
         # Tavily breakdown
-        breakdown_parts = []
+        breakdown_parts: list[str] = []
         if self.search_used is not None:
             breakdown_parts.append(f"Search: {self.search_used}")
         if self.extract_used is not None:
@@ -109,7 +109,7 @@ async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
                 headers={"Authorization": f"Bearer {key}"},
             )
             r.raise_for_status()
-        data: dict[str, Any] = r.json()
+        data = cast(dict[str, Any], r.json())
         return _parse_tavily_usage(data)
     except httpx.HTTPStatusError as e:
         return SearchUsageInfo(
@@ -145,7 +145,8 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
       }
     }
     """
-    account = data.get("account") or {}
+    raw_account = data.get("account")
+    account = cast(dict[str, Any], raw_account) if isinstance(raw_account, dict) else {}
     used = _optional_int(account.get("plan_usage"))
     limit = _optional_int(account.get("plan_limit"))
 

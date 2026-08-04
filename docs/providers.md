@@ -63,11 +63,11 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers and OpenAI Codex. |
+| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, OpenAI Codex, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex`, including Codex OAuth token exchange/refresh and Codex Responses API requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Common Provider Patterns
 
@@ -99,6 +99,39 @@ Gateway-style setup for model IDs served through OpenRouter.
 ```
 
 Use the model ID exactly as OpenRouter lists it.
+
+### Eden AI Gateway
+
+Eden AI exposes an OpenAI-compatible chat-completions endpoint at
+`https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use
+the full `provider/model` identifier listed by Eden AI:
+
+```json
+{
+  "providers": {
+    "edenai": {
+      "apiKey": "${EDENAI_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "edenai",
+      "model": "anthropic/claude-sonnet-4-5",
+      "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged, including its provider prefix. Use
+Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
+to choose a currently available model. The WebUI can also load that catalog
+after the Eden AI API key is saved under **Settings → Models**.
 
 ### OpenCode Zen and Go
 
@@ -229,7 +262,9 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 }
 ```
 
-`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account.
+`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it.
+
+DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` automatically uses DeepSeek's native Responses API, while `deepseek-v4-pro` remains on Chat Completions.
 
 ### Custom OpenAI-Compatible Endpoint
 
@@ -301,6 +336,53 @@ Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase
 If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
 
 This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
+
+### ModelScope
+
+ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separate async image generation API. Both are covered by the built-in `modelscope` provider.
+
+Create a ModelScope [access token](https://modelscope.cn/my/myaccesstoken), then choose a model whose page exposes API-Inference. The example below uses [`Qwen/Qwen3-32B`](https://modelscope.cn/models/Qwen/Qwen3-32B); hosted availability and quotas are controlled by ModelScope. See the official [API-Inference guide](https://modelscope.cn/docs/model-service/API-Inference/intro) for current service details.
+
+```json
+{
+  "providers": {
+    "modelscope": {
+      "apiKey": "${MODELSCOPE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "modelscope",
+      "model": "Qwen/Qwen3-32B",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Use an inference-enabled model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override `providers.modelscope.apiBase` only if your account routes through a different host. Chat model IDs may optionally be prefixed with `modelscope/`; nanobot strips that routing prefix before sending the request.
+
+ModelScope image generation reuses the same provider key but is configured under `tools.imageGeneration`, not in a model preset:
+
+```json
+{
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "modelscope",
+      "model": "Qwen/Qwen-Image-2512"
+    }
+  }
+}
+```
+
+Use the image model's exact ModelScope ID without a leading `modelscope/`; the image client sends this value unchanged and handles ModelScope's async submit/poll flow. The example uses [`Qwen/Qwen-Image-2512`](https://modelscope.cn/models/Qwen/Qwen-Image-2512). See [Image Generation](./image-generation.md#modelscope) for supported sizes, aspect ratios, and the complete provider configuration.
 
 ### Ollama
 
@@ -433,13 +515,32 @@ For OpenAI Codex:
 nanobot provider login openai-codex --set-main
 ```
 
+For an eligible X Premium / Grok subscription:
+
+```bash
+nanobot provider login xai-grok --set-main
+```
+
+This selects `xai-grok/grok-4.5`. The provider reads xAI's model catalog and
+exposes the hosted `x_search` tool only when the selected model advertises
+`supportsBackendSearch`; otherwise the model runs without hosted X Search.
+When enabled, Grok can search current X posts and return inline source links
+without invoking a local nanobot tool. Credentials are stored under the
+active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
+`config.json` and not in Grok Build's credential file.
+
+The login is xAI subscription OAuth, not X Developer OAuth. It follows the
+public client contract documented and implemented by
+[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md);
+xAI may change that upstream contract independently of nanobot.
+
 For GitHub Copilot:
 
 ```bash
 nanobot provider login github-copilot --set-main
 ```
 
-Each command authenticates the selected provider and makes its current default model active. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
+Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, cast
 
 from loguru import logger
 
@@ -31,9 +31,19 @@ class AutoCompact:
                     now: datetime | None = None) -> bool:
         if self._ttl <= 0 or not ts:
             return False
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
-        return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
+        try:
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+            current = now or datetime.now()
+            if getattr(ts, "tzinfo", None) is not None or current.tzinfo is not None:
+                idle_seconds = current.timestamp() - ts.timestamp()
+            else:
+                idle_seconds = (current - ts).total_seconds()
+        except (OSError, OverflowError, TypeError, ValueError):
+            # list_sessions() forwards raw persisted metadata; an unusable value
+            # must not escape the idle scan and stop the agent loop.
+            return False
+        return idle_seconds >= self._ttl * 60
 
     def _has_compactable_idle_tail(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
@@ -65,8 +75,8 @@ class AutoCompact:
 
     def check_expired(
         self,
-        schedule_background: Callable[[Coroutine], None],
-        resolve_runtime: Callable[[], LLMRuntime],
+        schedule_background: Callable[[Coroutine[Any, Any, None]], None],
+        resolve_runtime: Callable[[Session], LLMRuntime],
         active_session_keys: Collection[str] = (),
     ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
@@ -79,7 +89,12 @@ class AutoCompact:
                 continue
             updated_at = info.get("updated_at")
             if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
-                runtime = resolve_runtime()
+                session = self.sessions.get_or_create(key)
+                try:
+                    runtime = resolve_runtime(session)
+                except (KeyError, ValueError):
+                    # Invalid session selections remain recoverable through /model.
+                    continue
                 self._archiving.add(key)
                 schedule_background(self._archive(key, runtime=runtime))
 
@@ -98,8 +113,8 @@ class AutoCompact:
                 meta = session.metadata.get("_last_summary")
                 if isinstance(meta, dict):
                     self._summaries[key] = (
-                        meta["text"],
-                        datetime.fromisoformat(meta["last_active"]),
+                        cast(str, meta["text"]),
+                        datetime.fromisoformat(cast(str, meta["last_active"])),
                     )
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
@@ -119,7 +134,21 @@ class AutoCompact:
         if entry:
             return session, self._format_summary(entry[0], entry[1])
         # Cold path: summary persisted in session metadata (process restarted).
+        # Persisted metadata may outlive schema changes; a malformed summary must
+        # not abort turn preparation.
         meta = session.metadata.get("_last_summary")
         if isinstance(meta, dict):
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
+            summary_meta = cast(dict[str, object], meta)
+            text = summary_meta.get("text")
+            if isinstance(text, str) and text:
+                raw_last_active = summary_meta.get("last_active")
+                try:
+                    last_active = (
+                        datetime.fromisoformat(raw_last_active)
+                        if isinstance(raw_last_active, str)
+                        else session.updated_at
+                    )
+                except ValueError:
+                    last_active = session.updated_at
+                return session, self._format_summary(text, last_active)
         return session, None

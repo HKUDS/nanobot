@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pkgutil
-from functools import cache
-from importlib.metadata import entry_points
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -17,21 +15,6 @@ from nanobot.channels.plugin import (
 
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
-
-
-@cache
-def _warn_legacy_channel_entry_points() -> None:
-    # TODO: Remove this legacy entry-point detection and warning after the migration window.
-    names = sorted({entry_point.name for entry_point in entry_points(group="nanobot.channels")})
-    if not names:
-        return
-    logger.warning(
-        "Legacy channel entry points were detected but will not be loaded: {}. "
-        "The '{}' entry-point group is no longer supported; use a built-in channel or "
-        "migrate it into nanobot/channels/<channel>/.",
-        ", ".join(names),
-        "nanobot.channels",
-    )
 
 
 def _channel_package_names() -> list[str]:
@@ -48,7 +31,6 @@ def discover_plugins(
     enabled_names: set[str] | None = None,
 ) -> dict[str, ChannelPlugin]:
     """Load dependency-free descriptors from self-contained channel packages."""
-    _warn_legacy_channel_entry_points()
     plugins: dict[str, ChannelPlugin] = {}
     for name in _channel_package_names():
         if enabled_names is not None and name not in enabled_names:

@@ -6,6 +6,14 @@ export function webuiManualChunk(id: string): string | undefined {
   if (id.includes("node_modules/refractor/lang/")) {
     return;
   }
+  // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
+  // outside the core markdown chunk so ordinary replies do not download them.
+  if (
+    id.includes("node_modules/streamdown/dist/mermaid-")
+    || id.includes("node_modules/streamdown/dist/highlighted-body-")
+  ) {
+    return;
+  }
   // Refractor reaches this HAST helper through hastscript. Keeping it with
   // Refractor prevents syntax-highlight <-> markdown-vendor circular chunks.
   if (
@@ -16,7 +24,8 @@ export function webuiManualChunk(id: string): string | undefined {
     return "syntax-highlight";
   }
   if (
-    id.includes("node_modules/react-markdown")
+    id.includes("node_modules/streamdown")
+    || id.includes("node_modules/remend")
     || id.includes("node_modules/remark-")
     || id.includes("node_modules/rehype-")
     || id.includes("node_modules/unified")
@@ -48,16 +57,10 @@ export default defineConfig(({ mode }) => {
       dedupe: ["react", "react-dom", "lucide-react", "react-i18next", "qrcode"],
     },
     optimizeDeps: {
-      // Keep dev reloads stable for dependencies that can rewrite generated
-      // optimizer chunk filenames while a browser tab is still running. Do not
-      // exclude the markdown/remark/rehype chain: Vite's pre-bundling is needed
-      // there for CommonJS interop such as style-to-js.
-      exclude: [
-        "@radix-ui/react-dialog",
-        "react-syntax-highlighter/dist/esm/prism-async-light",
-        "react-syntax-highlighter/dist/esm/styles/prism/one-dark",
-        "react-syntax-highlighter/dist/esm/styles/prism/one-light",
-      ],
+      // Radix Dialog can rewrite its optimized chunk while a dev tab is open.
+      // Syntax highlighting must remain pre-bundled because Refractor's core
+      // still uses CommonJS internally.
+      exclude: ["@radix-ui/react-dialog"],
     },
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),

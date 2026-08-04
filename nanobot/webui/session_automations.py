@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from nanobot.cron.types import CronJob
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.session.manager import _message_preview_text
+from nanobot.session.manager import _message_preview_text  # pyright: ignore[reportPrivateUsage]
 from nanobot.triggers.local_types import LocalTrigger
 
 AutomationJob = CronJob | LocalTrigger
@@ -140,7 +140,7 @@ def _serialize_job(
             session_manager=session_manager,
         )
 
-    payload = {
+    payload: dict[str, Any] = {
         "id": job.id,
         "name": job.name,
         "enabled": job.enabled,
@@ -195,7 +195,7 @@ def _serialize_trigger(
     session_manager: _SessionManagerLike | None = None,
 ) -> dict[str, Any]:
     command = f'nanobot trigger {trigger.id} "message"'
-    payload = {
+    payload: dict[str, Any] = {
         "id": trigger.id,
         "name": trigger.name,
         "enabled": trigger.enabled,
@@ -209,7 +209,7 @@ def _serialize_trigger(
         },
         "payload": {
             "kind": "local_trigger",
-            "message": command,
+            "message": trigger.last_message or command,
             "command": command,
         },
         "state": {
@@ -325,9 +325,10 @@ def _session_preview(messages: Any) -> str:
     if not isinstance(messages, list):
         return ""
     fallback_preview = ""
-    for message in messages:
-        if not isinstance(message, dict):
+    for message_value in cast(list[object], messages):
+        if not isinstance(message_value, dict):
             continue
+        message = cast(dict[str, Any], message_value)
         if is_hidden_history_message(message):
             continue
         text = _message_preview_text(message)

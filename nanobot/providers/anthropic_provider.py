@@ -9,8 +9,8 @@ import re
 import secrets
 import string
 from collections import deque
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any, cast
 
 from loguru import logger
 
@@ -30,6 +30,36 @@ def _gen_tool_id() -> str:
 
 
 _VALID_TOOL_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+_CLAUDE_MODEL_VERSION = re.compile(
+    r"claude-(?P<family>[a-z]+)-(?P<major>\d+)"
+    r"(?:-(?P<minor>\d{1,2})(?=-|$))?"
+)
+_ADAPTIVE_ONLY_MIN_VERSIONS = {
+    "opus": (4, 7),
+    "sonnet": (5, 0),
+    "fable": (5, 0),
+    "mythos": (5, 0),
+}
+_THINKING_DISABLE_MIN_VERSIONS = {
+    "opus": (5, 0),
+    "sonnet": (5, 0),
+}
+_SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
+
+
+def _model_version_at_least(
+    model_name: str,
+    minimum_versions: dict[str, tuple[int, int]],
+) -> bool:
+    match = _CLAUDE_MODEL_VERSION.search(model_name.lower())
+    if match is None:
+        return False
+    minimum = minimum_versions.get(match.group("family"))
+    if minimum is None:
+        return False
+    version = (int(match.group("major")), int(match.group("minor") or 0))
+    return version >= minimum
 
 
 def _sanitize_tool_id(tid: str) -> str:
@@ -198,7 +228,13 @@ class AnthropicProvider(LLMProvider):
             content = msg.get("content")
 
             if role == "system":
-                system = content if isinstance(content, (str, list)) else str(content or "")
+                system = (
+                    cast(list[dict[str, Any]], content)
+                    if isinstance(content, list)
+                    else content
+                    if isinstance(content, str)
+                    else str(content or "")
+                )
                 continue
 
             if role == "tool":
@@ -206,7 +242,7 @@ class AnthropicProvider(LLMProvider):
                 if raw and raw[-1]["role"] == "user":
                     prev_c = raw[-1]["content"]
                     if isinstance(prev_c, list):
-                        prev_c.append(block)
+                        cast(list[Any], prev_c).append(block)
                     else:
                         raw[-1]["content"] = [
                             {"type": "text", "text": prev_c or ""}, block,
@@ -264,41 +300,49 @@ class AnthropicProvider(LLMProvider):
         blocks: list[dict[str, Any]] = []
         content = msg.get("content")
 
-        for tb in msg.get("thinking_blocks") or []:
-            if isinstance(tb, dict) and tb.get("type") == "thinking":
-                blocks.append({
-                    "type": "thinking",
-                    "thinking": tb.get("thinking", ""),
-                    "signature": tb.get("signature", ""),
-                })
+        for tb in cast(Iterable[object], msg.get("thinking_blocks") or []):
+            if isinstance(tb, dict):
+                thinking_block = cast(dict[str, Any], tb)
+                if thinking_block.get("type") == "thinking":
+                    blocks.append({
+                        "type": "thinking",
+                        "thinking": thinking_block.get("thinking", ""),
+                        "signature": thinking_block.get("signature", ""),
+                    })
 
         if isinstance(content, str) and content:
             blocks.append({"type": "text", "text": content})
         elif isinstance(content, list):
-            for item in content:
+            for item in cast(list[object], content):
                 if isinstance(item, dict):
-                    if not item.get("type"):
+                    content_block = cast(dict[str, Any], item)
+                    if not content_block.get("type"):
                         # Anthropic requires every content block to declare a "type".
                         # A tool that returned a bare dict lands here; coerce it to
                         # a text block instead of emitting one that the API rejects.
                         blocks.append({
                             "type": "text",
-                            "text": AnthropicProvider._stringify_typeless_block(item),
+                            "text": AnthropicProvider._stringify_typeless_block(content_block),
                         })
                     else:
-                        blocks.append(item)
+                        blocks.append(content_block)
                 else:
                     blocks.append({"type": "text", "text": str(item)})
 
-        for tc in msg.get("tool_calls") or []:
+        for tc in cast(Iterable[object], msg.get("tool_calls") or []):
             if not isinstance(tc, dict):
                 continue
-            func = tc.get("function", {})
+            tool_call = cast(dict[str, Any], tc)
+            func = cast(dict[str, Any], tool_call.get("function", {}))
             args = func.get("arguments", "{}")
-            raw_id = tc.get("id") or _gen_tool_id()
+            raw_id = tool_call.get("id") or _gen_tool_id()
             blocks.append({
                 "type": "tool_use",
-                "id": map_tool_id(raw_id) if map_tool_id is not None else _sanitize_tool_id(raw_id),
+                "id": (
+                    map_tool_id(raw_id)
+                    if map_tool_id is not None
+                    else _sanitize_tool_id(cast(str, raw_id))
+                ),
                 "name": func.get("name", ""),
                 "input": tool_arguments_object_for_replay(args),
             })
@@ -314,26 +358,27 @@ class AnthropicProvider(LLMProvider):
             return str(content)
 
         result: list[dict[str, Any]] = []
-        for item in content:
+        for item in cast(list[object], content):
             if not isinstance(item, dict):
                 result.append({"type": "text", "text": str(item)})
                 continue
-            if item.get("type") == "image_url":
-                converted = AnthropicProvider._convert_image_block(item)
+            content_block = cast(dict[str, Any], item)
+            if content_block.get("type") == "image_url":
+                converted = AnthropicProvider._convert_image_block(content_block)
                 if converted:
                     result.append(converted)
                 continue
-            if not item.get("type"):
+            if not content_block.get("type"):
                 # Anthropic requires every content block to declare a "type".
                 # A tool that returned a bare dict (or a list of dicts) lands
                 # here; coerce it to a text block instead of emitting a block
                 # the API rejects with "content.0.type: Field required".
                 result.append({
                     "type": "text",
-                    "text": AnthropicProvider._stringify_typeless_block(item),
+                    "text": AnthropicProvider._stringify_typeless_block(content_block),
                 })
                 continue
-            result.append(item)
+            result.append(content_block)
         return result or "(empty)"
 
     @staticmethod
@@ -343,7 +388,8 @@ class AnthropicProvider(LLMProvider):
     @staticmethod
     def _convert_image_block(block: dict[str, Any]) -> dict[str, Any] | None:
         """Convert OpenAI image_url block to Anthropic image block."""
-        url = (block.get("image_url") or {}).get("url", "")
+        image_url = cast(dict[str, Any], block.get("image_url") or {})
+        url = cast(str, image_url.get("url", ""))
         if not url:
             return None
         m = re.match(r"data:(image/\w+);base64,(.+)", url, re.DOTALL)
@@ -367,10 +413,13 @@ class AnthropicProvider(LLMProvider):
         content = msg.get("content")
         if not isinstance(content, list):
             return False
-        return any(
-            isinstance(block, dict) and block.get("type") == "tool_use"
-            for block in content
-        )
+        for block in cast(list[object], content):
+            if (
+                isinstance(block, dict)
+                and cast(dict[str, Any], block).get("type") == "tool_use"
+            ):
+                return True
+        return False
 
     @staticmethod
     def _merge_consecutive(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -402,7 +451,7 @@ class AnthropicProvider(LLMProvider):
                 if isinstance(cur_c, str):
                     cur_c = [{"type": "text", "text": cur_c}]
                 if isinstance(cur_c, list):
-                    prev_c.extend(cur_c)
+                    cast(list[Any], prev_c).extend(cast(list[Any], cur_c))
                 merged[-1]["content"] = prev_c
             else:
                 merged.append(msg)
@@ -446,7 +495,7 @@ class AnthropicProvider(LLMProvider):
     def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         if not tools:
             return None
-        result = []
+        result: list[dict[str, Any]] = []
         for tool in tools:
             func = tool.get("function", tool)
             entry: dict[str, Any] = {
@@ -506,7 +555,7 @@ class AnthropicProvider(LLMProvider):
             if isinstance(c, str):
                 new_msgs[-2] = {**m, "content": [{"type": "text", "text": c, "cache_control": marker}]}
             elif isinstance(c, list) and c:
-                nc = list(c)
+                nc = list(cast(list[dict[str, Any]], c))
                 nc[-1] = {**nc[-1], "cache_control": marker}
                 new_msgs[-2] = {**m, "content": nc}
 
@@ -543,13 +592,13 @@ class AnthropicProvider(LLMProvider):
             )
 
         max_tokens = max(1, max_tokens)
-        thinking_enabled = bool(reasoning_effort) and reasoning_effort.lower() != "none"
-
-        # Several Anthropic models (opus-4-7, opus-4-8, sonnet-5, fable) deprecated the
-        # `temperature` parameter — the API returns 400 if it is present.
-        _model_lower = model_name.lower()
-        omit_temperature = any(
-            m in _model_lower for m in ("opus-4-7", "opus-4-8", "sonnet-5", "fable")
+        reasoning_effort_lower = reasoning_effort.lower() if reasoning_effort else None
+        thinking_enabled = reasoning_effort_lower not in (None, "", "none")
+        adaptive_only = _model_version_at_least(model_name, _ADAPTIVE_ONLY_MIN_VERSIONS)
+        # Mythos Preview rejects sampling parameters but still accepts manual
+        # thinking budgets, so it is not part of the adaptive-only capability.
+        omit_temperature = (
+            adaptive_only or model_name.lower() in _SAMPLING_DEPRECATED_MODELS
         )
 
         kwargs: dict[str, Any] = {
@@ -561,16 +610,26 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if reasoning_effort == "adaptive":
+        if reasoning_effort_lower == "none" and _model_version_at_least(
+            model_name, _THINKING_DISABLE_MIN_VERSIONS
+        ):
+            # These models think by default, so omission would not honor an
+            # explicit request to disable thinking.
+            kwargs["thinking"] = {"type": "disabled"}
+        elif reasoning_effort_lower == "adaptive":
             # Adaptive thinking: model decides when and how much to think
-            # Supported on claude-sonnet-4-6 and claude-opus-4-6.
             # Also auto-enables interleaved thinking between tool calls.
             kwargs["thinking"] = {"type": "adaptive"}
             if not omit_temperature:
                 kwargs["temperature"] = 1.0
+        elif thinking_enabled and adaptive_only:
+            # Newer Claude models removed manual token budgets. Their effort
+            # control is independent from the adaptive thinking mode.
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": reasoning_effort_lower}
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
-            budget = budget_map.get(reasoning_effort.lower(), 4096)
+            budget = budget_map.get(reasoning_effort_lower, 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
             if not omit_temperature:
@@ -683,7 +742,7 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         try:
-            response = await self._client.messages.create(**kwargs)
+            response = cast(Any, await self._client.messages.create(**kwargs))
             return self._parse_response(response)
         except Exception as e:
             if self._is_streaming_required_error(e):

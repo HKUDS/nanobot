@@ -8,6 +8,7 @@ export default {
     "./index.html",
     "./src/**/*.{ts,tsx}",
     "../nanobot/channels/*/webui/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
   ],
   theme: {
     container: {
@@ -91,6 +92,10 @@ export default {
           accent: "hsl(var(--sidebar-accent))",
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
+        },
+        settings: {
+          canvas: "hsl(var(--settings-canvas))",
+          surface: "hsl(var(--settings-surface))",
         },
       },
       keyframes: {

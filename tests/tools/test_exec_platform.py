@@ -230,8 +230,8 @@ class TestSpawnWindows:
         assert "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }" in command
 
     @pytest.mark.asyncio
-    async def test_powershell_configures_utf8_output(self):
-        """PowerShell should emit UTF-8 for captured output and redirections."""
+    async def test_powershell_configures_utf8_io(self):
+        """PowerShell should use UTF-8 for captured output, native input, and redirections."""
         env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -242,7 +242,10 @@ class TestSpawnWindows:
 
         command = mock_exec.call_args[0][-1]
         assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in command
-        assert "$OutputEncoding =" not in command
+        assert (
+            "if ($PSVersionTable.PSVersion.Major -lt 6) { "
+            "$OutputEncoding = [Console]::OutputEncoding }"
+        ) in command
         assert "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'" in command
 
     @pytest.mark.asyncio
@@ -472,6 +475,37 @@ class TestSandboxPlatform:
         mock_wrap.assert_called_once()
         spawned_cmd = mock_spawn.call_args[0][0]
         assert "bwrap" in spawned_cmd
+
+    @pytest.mark.asyncio
+    async def test_bwrap_receives_configured_bind_roots(self, tmp_path):
+        """Configured bwrap bind roots should be forwarded to the sandbox wrapper."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"sandboxed", b"")
+        mock_proc.returncode = 0
+        tool_bin = tmp_path / "tool-bin"
+        tool_cache = tmp_path / "tool-cache"
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch("nanobot.agent.tools.shell.wrap_command", return_value="bwrap -- sh -c ls") as mock_wrap,
+            patch.object(ExecTool, "_spawn", return_value=mock_proc),
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            tool = ExecTool(
+                sandbox="bwrap",
+                working_dir="/workspace",
+                sandbox_ro_binds=[str(tool_bin)],
+                sandbox_rw_binds=[str(tool_cache)],
+            )
+            await tool.execute(command="ls")
+
+        kwargs = mock_wrap.call_args.kwargs
+        assert kwargs["sandbox_ro_binds"] == [
+            str(tool_bin.resolve(strict=False))
+        ]
+        assert kwargs["sandbox_rw_binds"] == [
+            str(tool_cache.resolve(strict=False))
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +823,20 @@ class TestWindowsRealExec:
         data = (tmp_path / "marker.txt").read_bytes()
         assert b"\x00" not in data
         assert data.decode("utf-8-sig").strip() == "file café λ 你好"
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_native_pipeline_input_is_utf8(self):
+        python = sys.executable.replace("'", "''")
+        result = await ExecTool(timeout=180).execute(
+            command=(
+                f"[string][char]0x4F1A | & '{python}' "
+                '-c "import sys; print(sys.stdin.buffer.read().hex())"'
+            ),
+            shell="powershell",
+        )
+
+        assert "e4bc9a0d0a" in result
+        assert "Exit code: 0" in result
 
     @pytest.mark.asyncio
     async def test_windows_powershell_session_output_is_utf8(self):

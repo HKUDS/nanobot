@@ -7,7 +7,7 @@ import os
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -71,7 +71,7 @@ def consume_restart_notice_from_env() -> RestartNotice | None:
         except (TypeError, ValueError):
             parsed = None
         if isinstance(parsed, dict):
-            metadata = parsed
+            metadata = cast(dict[str, Any], parsed)
     return RestartNotice(
         channel=channel,
         chat_id=chat_id,
