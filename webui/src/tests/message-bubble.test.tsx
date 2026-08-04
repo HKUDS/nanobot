@@ -347,7 +347,7 @@ describe("MessageBubble", () => {
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the assistant completion time in the former latency slot", () => {
+  it("shows the assistant completion time in the former latency slot", async () => {
     const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     const { container } = render(
       <MessageBubble
@@ -366,13 +366,18 @@ describe("MessageBubble", () => {
     const time = container.querySelector("[data-assistant-completed-at]");
     expect(time).toHaveTextContent(formatMessageEndTime(completedAt));
     expect(time).toHaveAttribute("dateTime", new Date(completedAt).toISOString());
-    expect(time).toHaveAttribute("title", fmtDateTime(completedAt));
+    expect(time).not.toHaveAttribute("title");
+    expect(time).toHaveAttribute("tabIndex", "0");
     expect(time).toHaveClass(
+      "cursor-help",
       "text-[11px]",
       "leading-none",
       "text-muted-foreground/70",
       "tabular-nums",
     );
+
+    fireEvent.pointerMove(time!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(completedAt));
   });
 
   it("falls back to the assistant creation time when replay has no completion time", () => {
@@ -391,11 +396,11 @@ describe("MessageBubble", () => {
     const time = container.querySelector("[data-message-timestamp]");
     expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
     expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
-    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
+    expect(time).not.toHaveAttribute("title");
     expect(time).not.toHaveAttribute("data-assistant-completed-at");
   });
 
-  it("renders the creation time for user messages", () => {
+  it("renders the creation time for user messages", async () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     const { container } = render(
       <MessageBubble
@@ -411,7 +416,11 @@ describe("MessageBubble", () => {
     const time = container.querySelector("[data-message-created-at]");
     expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
     expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
-    expect(time).toHaveAttribute("title", fmtDateTime(createdAt));
+    expect(time).not.toHaveAttribute("title");
+    expect(time).toHaveAttribute("tabIndex", "0");
+
+    fireEvent.pointerMove(time!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(createdAt));
   });
 
   it("does not infer completion time from the assistant creation timestamp", () => {

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
 import {
@@ -77,6 +78,42 @@ function ForkArrowIcon({ className }: { className?: string }) {
       <path d="m21 3-7.536 7.536A5 5 0 0 0 12 14.07V21" />
       <path d="m3 3 7.536 7.536A5 5 0 0 1 12 14.07V15" />
     </svg>
+  );
+}
+
+type MessageTimestampProps = Omit<
+  ComponentPropsWithoutRef<"time">,
+  "dateTime" | "title"
+> & {
+  timestamp: number;
+  tooltipLabel: string;
+};
+
+function MessageTimestamp({
+  timestamp,
+  tooltipLabel,
+  className,
+  children,
+  ...props
+}: MessageTimestampProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <time
+          {...props}
+          dateTime={new Date(timestamp).toISOString()}
+          tabIndex={0}
+          className={cn(
+            "cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
+            "focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            className,
+          )}
+        >
+          {children}
+        </time>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="center">{tooltipLabel}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -307,14 +344,13 @@ export function MessageBubble({
           <TooltipProvider delayDuration={220} skipDelayDuration={80}>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               {showCreatedAt ? (
-                <time
+                <MessageTimestamp
                   data-message-created-at
-                  dateTime={new Date(message.createdAt).toISOString()}
-                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                  title={createdAtTitle}
+                  timestamp={message.createdAt}
+                  tooltipLabel={createdAtTitle}
                 >
                   {createdAtLabel}
-                </time>
+                </MessageTimestamp>
               ) : null}
               <UserDeliveryStatus
                 status={message.deliveryStatus}
@@ -436,15 +472,14 @@ export function MessageBubble({
               </Tooltip>
             ) : null}
             {showAssistantTimestamp ? (
-              <time
+              <MessageTimestamp
                 {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
                 data-message-timestamp
-                dateTime={new Date(assistantTimestamp).toISOString()}
-                className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                title={assistantTimestampTitle}
+                timestamp={assistantTimestamp}
+                tooltipLabel={assistantTimestampTitle}
               >
                 {assistantTimestampLabel}
-              </time>
+              </MessageTimestamp>
             ) : null}
             {showAutomationTrigger ? (
               <AutomationTriggerMeta
