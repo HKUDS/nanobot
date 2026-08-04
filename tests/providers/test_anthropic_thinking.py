@@ -147,6 +147,13 @@ def test_sonnet_5_omits_temperature_none() -> None:
     assert "thinking" not in kw
 
 
+def test_mythos_preview_omits_temperature_but_keeps_manual_budget() -> None:
+    kw = _build(_make_provider("claude-mythos-preview"), "high", max_tokens=4096)
+    assert "temperature" not in kw
+    assert kw["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+    assert "extra_body" not in kw
+
+
 @pytest.mark.parametrize("reasoning_effort", [None, "adaptive", "low", "medium", "high", "xhigh", "max"])
 def test_opus_5_omits_temperature(reasoning_effort: str | None) -> None:
     kw = _build(_make_provider("claude-opus-5"), reasoning_effort)

@@ -41,12 +41,7 @@ _ADAPTIVE_ONLY_MIN_VERSIONS = {
     "fable": (5, 0),
     "mythos": (5, 0),
 }
-_SAMPLING_DEPRECATED_MIN_VERSIONS = {
-    "opus": (4, 7),
-    "sonnet": (5, 0),
-    "fable": (5, 0),
-    "mythos": (5, 0),
-}
+_SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
 
 
 def _model_version_at_least(
@@ -596,8 +591,10 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort_lower = reasoning_effort.lower() if reasoning_effort else None
         thinking_enabled = reasoning_effort_lower not in (None, "", "none")
         adaptive_only = _model_version_at_least(model_name, _ADAPTIVE_ONLY_MIN_VERSIONS)
-        omit_temperature = _model_version_at_least(
-            model_name, _SAMPLING_DEPRECATED_MIN_VERSIONS
+        # Mythos Preview rejects sampling parameters but still accepts manual
+        # thinking budgets, so it is not part of the adaptive-only capability.
+        omit_temperature = (
+            adaptive_only or model_name.lower() in _SAMPLING_DEPRECATED_MODELS
         )
 
         kwargs: dict[str, Any] = {
