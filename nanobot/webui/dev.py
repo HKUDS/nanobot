@@ -7,7 +7,7 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +29,13 @@ class WebUIDevServer:
     """A running Vite development server owned by the foreground CLI."""
 
     process: subprocess.Popen[Any]
+
+    def ensure_running(self) -> None:
+        """Raise when Vite exits while the foreground command still owns it."""
+        if (returncode := self.process.poll()) is not None:
+            raise WebUIDevError(
+                f"WebUI development server exited unexpectedly (code {returncode})"
+            )
 
     def stop(self, *, timeout_s: float = 5.0) -> None:
         """Stop and reap the direct Vite process."""
@@ -191,7 +198,7 @@ def run_webui_dev_server(
     target_url: str,
     browser_url: str,
     output: Callable[[str], None] | None = None,
-) -> Iterator[WebUIDevServer]:
+) -> Generator[WebUIDevServer, None, None]:
     """Run a Vite sidecar for the duration of a foreground WebUI command."""
     server = start_webui_dev_server(
         target_url=target_url,

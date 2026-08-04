@@ -2,6 +2,7 @@
 
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -424,11 +425,17 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
 
 
-def _attach_to_background_gateway(runtime: "GatewayRuntime") -> None:
+def _attach_to_background_gateway(
+    runtime: "GatewayRuntime",
+    *,
+    poll_hook: Callable[[], None] | None = None,
+) -> None:
     """Keep a foreground WebUI command attached to a managed gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
         while runtime.status().running:
+            if poll_hook is not None:
+                poll_hook()
             time.sleep(0.5)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping nanobot...[/yellow]")

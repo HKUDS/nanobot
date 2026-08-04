@@ -152,6 +152,15 @@ def test_dev_server_stop_terminates_and_reaps_the_direct_process() -> None:
     assert process.returncode == 0
 
 
+def test_dev_server_reports_an_unexpected_exit() -> None:
+    process = _FakeProcess()
+    process.returncode = 23
+    server = WebUIDevServer(process=process)
+
+    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
+        server.ensure_running()
+
+
 def test_dev_server_context_stops_the_child(monkeypatch) -> None:
     process = _FakeProcess()
     process.returncode = 0

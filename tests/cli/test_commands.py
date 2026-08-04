@@ -34,6 +34,7 @@ from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
+from nanobot.webui.dev import WebUIDevError
 from nanobot.webui.metadata import (
     WEBUI_MESSAGE_SOURCE_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -2202,8 +2203,13 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     def fake_dev_server(**kwargs):
         seen["dev_kwargs"] = kwargs
         seen["dev_running"] = True
+        dev_server = SimpleNamespace(
+            url=kwargs["browser_url"],
+            ensure_running=lambda: None,
+        )
+        seen["dev_server"] = dev_server
         try:
-            yield SimpleNamespace(url=kwargs["browser_url"])
+            yield dev_server
         finally:
             seen["dev_running"] = False
 
@@ -2245,6 +2251,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
         "webui_static_dist": False,
         "webui_bundle_mode": "skip",
         "unconfigured_provider_error": None,
+        "webui_dev_server": seen["dev_server"],
     }
     assert seen["dev_running"] is False
     assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
@@ -2255,6 +2262,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
 def test_webui_dev_waits_for_external_gateway_via_health_endpoint(monkeypatch) -> None:
     health_results = iter((True, False))
     health_calls: list[tuple[str, int]] = []
+    sidecar_checks = 0
 
     def fake_health(host: str, port: int) -> bool:
         health_calls.append((host, port))
@@ -2267,9 +2275,44 @@ def test_webui_dev_waits_for_external_gateway_via_health_endpoint(monkeypatch) -
     )
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
-    cli_webui._wait_with_existing_foreground_gateway("127.0.0.1", 18888)
+    def ensure_sidecar_running() -> None:
+        nonlocal sidecar_checks
+        sidecar_checks += 1
+
+    dev_server = MagicMock()
+    dev_server.ensure_running.side_effect = ensure_sidecar_running
+    cli_webui._wait_with_existing_foreground_gateway("127.0.0.1", 18888, dev_server)
 
     assert health_calls == [("127.0.0.1", 18888), ("127.0.0.1", 18888)]
+    assert sidecar_checks == 2
+
+
+async def test_webui_dev_monitor_fails_when_sidecar_exits() -> None:
+    dev_server = MagicMock()
+    dev_server.ensure_running.side_effect = WebUIDevError(
+        "WebUI development server exited unexpectedly (code 23)"
+    )
+
+    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
+        await cli_gateway_runtime._watch_webui_dev_server(
+            dev_server,
+            asyncio.Event(),
+            poll_interval_s=0,
+        )
+
+
+async def test_webui_dev_monitor_ignores_an_expected_gateway_shutdown() -> None:
+    dev_server = MagicMock()
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()
+
+    await cli_gateway_runtime._watch_webui_dev_server(
+        dev_server,
+        shutdown_event,
+        poll_interval_s=0,
+    )
+
+    dev_server.ensure_running.assert_not_called()
 
 
 def test_browser_readiness_accepts_http_auth_response(monkeypatch) -> None:
@@ -2628,6 +2671,21 @@ def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> No
     assert "Closing the browser does not stop channels or automations" in output
     assert "Press Ctrl+C here to stop nanobot" in output
     assert "Gateway stopped" in output
+
+
+def test_attach_to_background_gateway_checks_owned_sidecar() -> None:
+    class _FakeRuntime:
+        def status(self):
+            return SimpleNamespace(running=True)
+
+    def sidecar_exited() -> None:
+        raise WebUIDevError("WebUI development server exited unexpectedly (code 23)")
+
+    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
+        cli_webui_support._attach_to_background_gateway(
+            _FakeRuntime(),
+            poll_hook=sidecar_exited,
+        )
 
 
 def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:

@@ -35,6 +35,7 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.build import BuildMode
+from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
 
 __all__ = ["_run_gateway"]
@@ -54,6 +55,20 @@ def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
         return True
     except (OSError, urllib.error.URLError, TimeoutError, ValueError):
         return False
+
+
+async def _watch_webui_dev_server(
+    server: WebUIDevServer,
+    shutdown_event: asyncio.Event,
+    *,
+    poll_interval_s: float = 0.2,
+) -> None:
+    """Fail the foreground gateway when its owned Vite sidecar exits."""
+    while not shutdown_event.is_set():
+        await asyncio.sleep(poll_interval_s)
+        if shutdown_event.is_set():
+            return
+        server.ensure_running()
 
 
 def _signal_name(signum: int) -> str:
@@ -280,6 +295,7 @@ def _run_gateway(
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
+    webui_dev_server: WebUIDevServer | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
@@ -855,6 +871,11 @@ def _run_gateway(
                     _open_browser_when_ready(),
                     name="nanobot-open-browser",
                 ))
+            if webui_dev_server is not None:
+                tasks.append(asyncio.create_task(
+                    _watch_webui_dev_server(webui_dev_server, shutdown_event),
+                    name="nanobot-webui-dev-server",
+                ))
             runtime_tasks = asyncio.gather(*tasks)
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
@@ -870,6 +891,8 @@ def _run_gateway(
                 runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+        except WebUIDevError:
+            raise
         except Exception:
             import traceback
 

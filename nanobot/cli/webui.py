@@ -41,6 +41,7 @@ from nanobot.config.paths import get_workspace_path
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.dev import (
     WebUIDevError,
+    WebUIDevServer,
     run_webui_dev_server,
     webui_dev_browser_url,
     webui_dev_proxy_target,
@@ -49,7 +50,11 @@ from nanobot.webui.dev import (
 console = Console()
 
 
-def _wait_with_existing_foreground_gateway(gateway_host: str, gateway_port: int) -> None:
+def _wait_with_existing_foreground_gateway(
+    gateway_host: str,
+    gateway_port: int,
+    dev_server: WebUIDevServer,
+) -> None:
     """Keep a Vite sidecar alive without taking ownership of an external gateway."""
     import time
 
@@ -58,7 +63,10 @@ def _wait_with_existing_foreground_gateway(gateway_host: str, gateway_port: int)
         "Press Ctrl+C to stop Vite; the gateway will keep running.[/dim]"
     )
     try:
-        while _gateway_health_ready(gateway_host, gateway_port):
+        while True:
+            dev_server.ensure_running()
+            if not _gateway_health_ready(gateway_host, gateway_port):
+                break
             time.sleep(0.5)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping the WebUI dev server.[/yellow]")
@@ -279,15 +287,19 @@ def webui(
                 target_url=webui_dev_proxy_target(webui_url),
                 browser_url=dev_browser_url,
                 output=lambda message: console.print(f"[green]✓[/green] {message}"),
-            ):
+            ) as dev_server:
                 if not no_open:
                     _open_webui_browser(dev_browser_url, wait=False)
                 if runtime.status().running:
-                    _attach_to_background_gateway(runtime)
+                    _attach_to_background_gateway(
+                        runtime,
+                        poll_hook=dev_server.ensure_running,
+                    )
                 else:
                     _wait_with_existing_foreground_gateway(
                         runtime_config.gateway.host,
                         effective_gateway_port,
+                        dev_server,
                     )
         except WebUIDevError as exc:
             console.print(f"[red]Error: {exc}[/red]")
@@ -315,7 +327,7 @@ def webui(
                 target_url=dev_proxy_target,
                 browser_url=dev_browser_url,
                 output=lambda message: console.print(f"[green]✓[/green] {message}"),
-            ):
+            ) as dev_server:
                 _run_gateway(
                     runtime_config,
                     port=effective_gateway_port,
@@ -324,6 +336,7 @@ def webui(
                     webui_static_dist=False,
                     webui_bundle_mode="skip",
                     unconfigured_provider_error=settings_setup_error,
+                    webui_dev_server=dev_server,
                 )
         except WebUIDevError as exc:
             console.print(f"[red]Error: {exc}[/red]")
