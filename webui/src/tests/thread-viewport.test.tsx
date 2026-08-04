@@ -157,10 +157,11 @@ function getScroller(container: HTMLElement): HTMLElement {
 
 async function renderPromptRailViewport({
   scrollTo,
+  messages: promptMessages = makePromptExchangeMessages(5),
 }: {
   scrollTo?: (options?: ScrollToOptions) => void;
+  messages?: UIMessage[];
 } = {}) {
-  const promptMessages = makePromptExchangeMessages(5);
   const { container } = render(
     <ThreadViewport
       messages={promptMessages}
@@ -1506,12 +1507,34 @@ describe("ThreadViewport", () => {
     expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
 
     const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
-    expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
-    expect(within(targetPrompt).getByText("answer 3")).toBeInTheDocument();
+    fireEvent.pointerEnter(targetPrompt);
+    const preview = screen.getByTestId("prompt-rail-preview");
+    expect(within(preview).getByText("message 3")).toBeInTheDocument();
+    expect(within(preview).getByText("answer 3")).toBeInTheDocument();
 
     fireEvent.click(targetPrompt);
 
     expect(navigateTo).toHaveBeenCalledWith(1064);
+  });
+
+  it("renders markdown in prompt rail previews", async () => {
+    const promptMessages = makePromptExchangeMessages(5);
+    const answer = promptMessages.find((message) => message.id === "a3");
+    if (!answer) throw new TypeError("prompt answer fixture missing");
+    answer.content = "### Confirmed limit\n\nUse the **policy cap**.";
+
+    await renderPromptRailViewport({ messages: promptMessages });
+
+    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    fireEvent.pointerEnter(targetPrompt);
+    const preview = screen.getByTestId("prompt-rail-preview");
+
+    await waitFor(() => {
+      expect(preview.querySelector("h3")).toHaveTextContent("Confirmed limit");
+    });
+    expect(preview.querySelector("strong")).toHaveTextContent("policy cap");
+    expect(preview).not.toHaveTextContent("###");
+    expect(preview).not.toHaveTextContent("**");
   });
 
   it("lets direct paging input interrupt prompt rail navigation", async () => {

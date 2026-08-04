@@ -5,27 +5,6 @@ import "./globals.css";
 import "./i18n";
 import { initializeLoopbackRuntimeHost } from "./lib/runtime";
 
-const PRELOAD_RECOVERY_KEY = "nanobot-webui.preload-recovery-at";
-const PRELOAD_RECOVERY_WINDOW_MS = 10_000;
-
-// A long-lived tab can request a lazy chunk removed by a newer deployment.
-// Reload through the no-cache HTML entry once, then preserve the plain-text
-// fallback if a persistent network or deployment error survives the refresh.
-window.addEventListener("vite:preloadError", (event) => {
-  try {
-    const now = Date.now();
-    const previousAttempt = Number(window.sessionStorage.getItem(PRELOAD_RECOVERY_KEY));
-    if (Number.isFinite(previousAttempt) && now - previousAttempt < PRELOAD_RECOVERY_WINDOW_MS) {
-      return;
-    }
-    window.sessionStorage.setItem(PRELOAD_RECOVERY_KEY, String(now));
-  } catch {
-    return;
-  }
-  event.preventDefault();
-  window.location.reload();
-});
-
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
 // LAN access over plain HTTP leaves it undefined, which crashes components that
 // generate client-side message IDs. Shim a v4-ish fallback so call sites stay
