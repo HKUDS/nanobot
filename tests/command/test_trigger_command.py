@@ -9,6 +9,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.command.builtin import build_help_text, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.session.manager import SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
 
 
@@ -17,7 +18,11 @@ async def test_trigger_command_creates_session_bound_local_trigger(tmp_path: Pat
     router = CommandRouter()
     register_builtin_commands(router)
     store = LocalTriggerStore(tmp_path)
-    loop = SimpleNamespace(workspace=tmp_path, local_trigger_store=store)
+    loop = SimpleNamespace(
+        workspace=tmp_path,
+        local_trigger_store=store,
+        sessions=SessionManager(tmp_path),
+    )
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",
@@ -53,7 +58,11 @@ async def test_trigger_command_binds_inbound_session_when_unified_session_is_act
     router = CommandRouter()
     register_builtin_commands(router)
     store = LocalTriggerStore(tmp_path)
-    loop = SimpleNamespace(workspace=tmp_path, local_trigger_store=store)
+    loop = SimpleNamespace(
+        workspace=tmp_path,
+        local_trigger_store=store,
+        sessions=SessionManager(tmp_path),
+    )
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",
@@ -82,7 +91,11 @@ async def test_trigger_command_without_name_returns_usage_only(tmp_path: Path) -
     router = CommandRouter()
     register_builtin_commands(router)
     store = LocalTriggerStore(tmp_path)
-    loop = SimpleNamespace(workspace=tmp_path, local_trigger_store=store)
+    loop = SimpleNamespace(
+        workspace=tmp_path,
+        local_trigger_store=store,
+        sessions=SessionManager(tmp_path),
+    )
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",

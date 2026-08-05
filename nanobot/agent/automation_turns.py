@@ -141,6 +141,19 @@ class AutomationTurnCoordinator:
                 pending_ids.add(pending_id)
         return pending_ids
 
+    def fail_deferred(self, messages: Iterable[InboundMessage]) -> int:
+        """Fail deferred turns recognized by this coordinator."""
+        completed = 0
+        for msg in messages:
+            if self._turn_id(msg) is None:
+                continue
+            self.complete(
+                msg,
+                error=AutomationTurnError("session discarded before deferred turn ran"),
+            )
+            completed += 1
+        return completed
+
     async def publish_next_deferred(self, session_key: str) -> bool:
         return await publish_next_deferred_turn(
             deferred_queues=self.deferred_queues,

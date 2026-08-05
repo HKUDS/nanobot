@@ -140,14 +140,14 @@ def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeyp
     assert new_scope.access_mode == "full"
 
 
-def test_transient_session_defaults_to_restricted_access(tmp_path, monkeypatch) -> None:
+def test_memory_only_session_defaults_to_restricted_access(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     default.mkdir()
     write_webui_default_access_mode("full")
     sessions = SessionManager(tmp_path / "sessions")
     key = "websocket:temporary-default"
-    sessions.get_or_create_transient(key)
+    sessions.get_or_create_memory_only(key)
     controller = WebUIWorkspaceController(
         session_manager=sessions,
         default_workspace=default,
@@ -165,7 +165,7 @@ def test_transient_session_defaults_to_restricted_access(tmp_path, monkeypatch) 
     assert scope.access_mode == "restricted"
 
 
-def test_transient_session_uses_live_scope_during_active_turn(tmp_path, monkeypatch) -> None:
+def test_memory_only_session_uses_live_scope_during_active_turn(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"
@@ -173,7 +173,7 @@ def test_transient_session_uses_live_scope_during_active_turn(tmp_path, monkeypa
     project.mkdir()
     write_webui_default_access_mode("full")
     sessions = SessionManager(tmp_path / "sessions")
-    sessions.get_or_create_transient("websocket:temporary-scoped")
+    sessions.get_or_create_memory_only("websocket:temporary-scoped")
     controller = WebUIWorkspaceController(
         session_manager=sessions,
         default_workspace=default,

@@ -42,6 +42,7 @@ class ProviderConversationStateController:
         model: str | None,
         messages: list[dict[str, Any]],
         state: ProviderConversationState | None = None,
+        log_content: bool = True,
     ) -> None:
         self._provider = provider
         self._model = model
@@ -53,6 +54,7 @@ class ProviderConversationStateController:
         )
         self._boundary = len(messages)
         self._request_messages: list[dict[str, Any]] = []
+        self._log_content = log_content
 
     def independent_request_context(
         self,
@@ -60,9 +62,12 @@ class ProviderConversationStateController:
         context_window_tokens: int | None,
     ) -> ProviderCallContext | None:
         """Return typed provider context for a request that does not resume state."""
-        if context_window_tokens is None:
+        if context_window_tokens is None and self._log_content:
             return None
-        return ProviderCallContext(context_window_tokens=context_window_tokens)
+        return ProviderCallContext(
+            context_window_tokens=context_window_tokens,
+            log_content=self._log_content,
+        )
 
     def prepare_request(
         self,
@@ -112,6 +117,7 @@ class ProviderConversationStateController:
                 if independent_context is not None
                 else None
             ),
+            log_content=self._log_content,
         )
 
     def observe_response(

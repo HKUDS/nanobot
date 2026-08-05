@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
-from nanobot.bus.events import (
-    INBOUND_META_TRANSIENT_SESSION,
-    InboundMessage,
-    OutboundMessage,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -20,6 +16,9 @@ from nanobot.pairing import (
     generate_code,
     is_approved,
 )
+
+if TYPE_CHECKING:
+    from nanobot.session.policy import SessionRuntimePolicy
 
 
 class BaseChannel(ABC):
@@ -241,6 +240,7 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
         authorization_id: str | None = None,
+        required_session_policy: SessionRuntimePolicy | None = None,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -282,7 +282,6 @@ class BaseChannel(ABC):
             return
 
         meta = dict(metadata or {})
-        transient_session = meta.pop(INBOUND_META_TRANSIENT_SESSION, False) is True
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
 
@@ -294,7 +293,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
-            transient_session=transient_session,
+            required_session_policy=required_session_policy,
         )
 
         await self.bus.publish_inbound(msg)

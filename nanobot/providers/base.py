@@ -249,6 +249,7 @@ class ProviderCallContext:
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
+    log_content: bool = True
 
 
 @dataclass
@@ -911,6 +912,7 @@ class LLMProvider(ABC):
             on_retry_wait=on_retry_wait,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
+            log_content=provider_context is None or provider_context.log_content,
         )
 
     async def chat_with_retry(
@@ -955,6 +957,7 @@ class LLMProvider(ABC):
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            log_content=provider_context is None or provider_context.log_content,
         )
 
     @classmethod
@@ -1062,6 +1065,7 @@ class LLMProvider(ABC):
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        log_content: bool = True,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -1123,6 +1127,7 @@ class LLMProvider(ABC):
                             context_window_tokens=(
                                 provider_context.context_window_tokens
                             ),
+                            log_content=provider_context.log_content,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(
@@ -1145,7 +1150,11 @@ class LLMProvider(ABC):
                 logger.warning(
                     "Stopping persistent retry after {} identical transient errors: {}",
                     identical_error_count,
-                    (response.content or "")[:120].lower(),
+                    (
+                        (response.content or "")[:120].lower()
+                        if log_content
+                        else "[content omitted]"
+                    ),
                 )
                 if on_retry_wait:
                     await on_retry_wait(
@@ -1157,7 +1166,11 @@ class LLMProvider(ABC):
                 logger.warning(
                     "LLM request failed after {} retries, giving up: {}",
                     attempt,
-                    (response.content or "")[:120].lower(),
+                    (
+                        (response.content or "")[:120].lower()
+                        if log_content
+                        else "[content omitted]"
+                    ),
                 )
                 if on_retry_wait:
                     await on_retry_wait(
@@ -1176,7 +1189,11 @@ class LLMProvider(ABC):
                 attempt,
                 "+" if persistent and attempt > len(delays) else f"/{len(delays)}",
                 int(round(delay)),
-                (response.content or "")[:120].lower(),
+                (
+                    (response.content or "")[:120].lower()
+                    if log_content
+                    else "[content omitted]"
+                ),
             )
             await self._sleep_with_heartbeat(
                 delay,

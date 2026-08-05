@@ -234,7 +234,7 @@ async def test_read_session_filters_by_query_and_returns_recent_matches(tmp_path
 @pytest.mark.asyncio
 async def test_read_session_searches_current_temporary_chat_in_memory(tmp_path):
     manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-current")
+    session = manager.get_or_create_memory_only("websocket:temporary-current")
     session.messages = [
         {"role": "user", "content": "the launch codename is firefly"},
         {"role": "assistant", "content": "I will remember that during this chat"},

@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.session.policy import (
+    DEFAULT_SESSION_RUNTIME_POLICY,
+    MEMORY_ONLY_SESSION_RUNTIME_POLICY,
+)
 
 
 class _FakeTool(Tool):
@@ -27,6 +31,12 @@ class _FakeTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         return kwargs
+
+
+class _DurableSessionTool(_FakeTool):
+    @property
+    def requires_durable_session(self) -> bool:
+        return True
 
 def _tool_names(definitions: list[dict[str, Any]]) -> list[str]:
     names: list[str] = []
@@ -56,6 +66,20 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
+
+
+def test_runtime_policy_filters_tools_that_require_a_durable_session() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_session"))
+    registry.register(_DurableSessionTool("spawn"))
+
+    durable = registry.for_runtime_policy(DEFAULT_SESSION_RUNTIME_POLICY)
+    memory_only = registry.for_runtime_policy(MEMORY_ONLY_SESSION_RUNTIME_POLICY)
+
+    assert durable is registry
+    assert durable.tool_names == ["read_session", "spawn"]
+    assert memory_only.tool_names == ["read_session"]
+    assert memory_only.get("spawn") is None
 
 
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:

@@ -75,9 +75,9 @@ def test_flush_all_includes_live_sessions_outside_strong_cache(tmp_path, monkeyp
     assert set(saved) == {("test:active", True), ("test:other", True)}
 
 
-def test_transient_session_never_reaches_storage(tmp_path) -> None:
+def test_memory_only_session_never_reaches_storage(tmp_path) -> None:
     manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-test")
+    session = manager.get_or_create_memory_only("websocket:temporary-test")
     session.add_message("user", "secret")
 
     manager.save(session, fsync=True)
@@ -87,9 +87,9 @@ def test_transient_session_never_reaches_storage(tmp_path) -> None:
     assert list(manager.sessions_dir.glob("*.jsonl")) == []
 
 
-def test_transient_session_history_is_bounded_in_memory(tmp_path) -> None:
+def test_memory_only_session_history_is_bounded_in_memory(tmp_path) -> None:
     manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-bounded")
+    session = manager.get_or_create_memory_only("websocket:temporary-bounded")
     for index in range(FILE_MAX_MESSAGES + 2):
         session.add_message("user", f"message {index}")
 
@@ -100,11 +100,26 @@ def test_transient_session_history_is_bounded_in_memory(tmp_path) -> None:
     assert manager.read_session_file(session.key) is None
 
 
-def test_discard_transient_session_forgets_live_history(tmp_path) -> None:
+def test_discard_memory_only_session_forgets_live_history(tmp_path) -> None:
     manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-test")
+    session = manager.get_or_create_memory_only("websocket:temporary-test")
     session.add_message("user", "secret")
 
-    assert manager.discard_transient(session.key) is True
+    assert manager.discard_memory_only(session.key) is True
     assert manager.get_cached(session.key) is None
-    assert manager.discard_transient(session.key) is False
+    assert manager.discard_memory_only(session.key) is False
+
+
+def test_memory_only_session_cannot_be_forked_into_durable_storage(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create_memory_only("websocket:temporary-source")
+    source.add_message("user", "private source content")
+
+    forked = manager.fork_session_before_user_index(
+        source.key,
+        "websocket:durable-target",
+        before_user_index=1,
+    )
+
+    assert forked is None
+    assert manager.read_session_file("websocket:durable-target") is None

@@ -154,6 +154,10 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         return ctx.sessions is not None
 
     @property
+    def requires_durable_session(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "create_goal"
 
@@ -283,6 +287,10 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.sessions is not None
+
+    @property
+    def requires_durable_session(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:

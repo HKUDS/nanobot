@@ -20,11 +20,7 @@ from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
-from nanobot.bus.events import (
-    INBOUND_META_TRANSIENT_SESSION,
-    OUTBOUND_META_AGENT_UI,
-    OutboundMessage,
-)
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
@@ -56,6 +52,7 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.policy import MEMORY_ONLY_SESSION_RUNTIME_POLICY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -1020,8 +1017,6 @@ class WebSocketChannel(BaseChannel):
                 return
 
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
-            if temporary:
-                metadata[INBOUND_META_TRANSIENT_SESSION] = True
             if envelope.get("webui") is True:
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
@@ -1083,6 +1078,10 @@ class WebSocketChannel(BaseChannel):
                     media=media_paths or None,
                     metadata=metadata,
                     is_dm=False,
+                    session_key=f"{self.name}:{cid}" if temporary else None,
+                    required_session_policy=(
+                        MEMORY_ONLY_SESSION_RUNTIME_POLICY if temporary else None
+                    ),
                 )
                 accepted = True
             finally:

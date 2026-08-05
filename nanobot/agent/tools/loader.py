@@ -160,6 +160,10 @@ class _LegacyErrorPrefixTool(Tool):
         return self._wrapped.concurrency_safe
 
     @property
+    def requires_durable_session(self) -> bool:
+        return self._wrapped.requires_durable_session
+
+    @property
     def config_key(self) -> str:
         return getattr(self._wrapped, "config_key", "")
 

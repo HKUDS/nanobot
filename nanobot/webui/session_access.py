@@ -204,7 +204,7 @@ class WebuiSessionAccess:
     ) -> SessionMatch | None:
         if session_key.casefold() == "current" and current_session_key:
             session = self._sessions.get_cached(current_session_key)
-            if session is None or not session.transient:
+            if session is None or session.is_memory_only is not True:
                 return None
             messages = _visible_messages(session.messages)
             needle = query.casefold()

@@ -22,6 +22,12 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.policy import (
+    DEFAULT_SESSION_RUNTIME_POLICY,
+    MEMORY_ONLY_SESSION_RUNTIME_POLICY,
+    SessionPersistence,
+    SessionRuntimePolicy,
+)
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -157,7 +163,11 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
-    transient: bool = field(default=False, repr=False, compare=False)
+    runtime_policy: SessionRuntimePolicy = field(
+        default=DEFAULT_SESSION_RUNTIME_POLICY,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -183,6 +193,11 @@ class Session:
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
+
+    @property
+    def is_memory_only(self) -> bool:
+        """Return whether this session must remain outside durable storage."""
+        return self.runtime_policy.persistence is SessionPersistence.MEMORY_ONLY
 
     def get_history(
         self,
@@ -965,7 +980,7 @@ class SessionManager:
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
-        self._transient_sessions: dict[str, Session] = {}
+        self._memory_only_sessions: dict[str, Session] = {}
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
 
@@ -979,9 +994,9 @@ class SessionManager:
             self._overflow_cache[key] = evicted
 
     def _cached(self, key: str) -> Session | None:
-        transient = self._transient_sessions.get(key)
-        if transient is not None:
-            return transient
+        memory_only = self._memory_only_sessions.get(key)
+        if memory_only is not None:
+            return memory_only
 
         session = self._cache.get(key)
         if session is not None:
@@ -1059,21 +1074,21 @@ class SessionManager:
         self._remember(session)
         return session
 
-    def get_or_create_transient(self, key: str) -> Session:
-        """Return a live in-memory session that can never reach the store."""
-        session = self._transient_sessions.get(key)
+    def get_or_create_memory_only(self, key: str) -> Session:
+        """Return a live session whose runtime policy forbids durable storage."""
+        session = self._memory_only_sessions.get(key)
         if session is None:
             self._cache.pop(key, None)
             self._overflow_cache.pop(key, None)
-            session = Session(key=key, transient=True)
-            self._transient_sessions[key] = session
+            session = Session(key=key, runtime_policy=MEMORY_ONLY_SESSION_RUNTIME_POLICY)
+            self._memory_only_sessions[key] = session
         return session
 
-    def is_transient_active(self, key: str) -> bool:
-        return key in self._transient_sessions
+    def is_memory_only_active(self, key: str) -> bool:
+        return key in self._memory_only_sessions
 
-    def discard_transient(self, key: str) -> bool:
-        return self._transient_sessions.pop(key, None) is not None
+    def discard_memory_only(self, key: str) -> bool:
+        return self._memory_only_sessions.pop(key, None) is not None
 
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
@@ -1088,7 +1103,7 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
-        if session.transient:
+        if session.is_memory_only is True:
             session.enforce_file_cap()
             return
 
@@ -1124,7 +1139,7 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
-        self._transient_sessions.pop(key, None)
+        self._memory_only_sessions.pop(key, None)
         self._cache.pop(key, None)
         self._overflow_cache.pop(key, None)
 
@@ -1151,6 +1166,8 @@ class SessionManager:
             return None
         source = self._cached(source_key) or self._load(source_key)
         if source is None:
+            return None
+        if source.is_memory_only is True:
             return None
 
         copied: list[dict[str, Any]] = []

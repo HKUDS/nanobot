@@ -925,7 +925,7 @@ class Consolidator:
             replay_max_messages,
         )
         summary = await self._archive_session_chunk(session, chunk, runtime=runtime)
-        if session.transient is True and not summary:
+        if session.is_memory_only is True and not summary:
             return None
         session.last_consolidated = end_idx
         session.provider_state = None
@@ -1055,8 +1055,8 @@ class Consolidator:
         runtime: LLMRuntime,
         previous_summary: str | None = None,
     ) -> str | None:
-        """Archive normally, or retain a transient summary only on the session."""
-        if session.transient is not True:
+        """Archive normally, or retain a memory-only summary on the session."""
+        if session.is_memory_only is not True:
             return await self.archive(
                 chunk,
                 runtime=runtime,
@@ -1107,7 +1107,7 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
-            if session.transient is True and not last_summary:
+            if session.is_memory_only is True and not last_summary:
                 meta = session.metadata.get("_last_summary")
                 if isinstance(meta, dict):
                     value = cast(dict[str, object], meta).get("text")
@@ -1167,12 +1167,12 @@ class Consolidator:
                     previous_summary=last_summary,
                 )
                 # Durable sessions advance after either a summary or their raw
-                # fallback. A transient failure has no fallback, so it retries
+                # fallback. A memory-only failure has no fallback, so it retries
                 # later without moving the replay boundary.
                 if summary:
                     last_summary = summary
-                elif session.transient is True:
-                    # There is no durable raw fallback for a transient session,
+                elif session.is_memory_only is True:
+                    # There is no durable raw fallback for a memory-only session,
                     # so keep its replay boundary unchanged and retry later.
                     break
                 session.last_consolidated = end_idx

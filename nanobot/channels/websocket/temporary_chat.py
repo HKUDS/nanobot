@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
-    RUNTIME_CONTROL_TRANSIENT_SESSION_DISCARD,
+    RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD,
     InboundMessage,
 )
+from nanobot.session.policy import MEMORY_ONLY_SESSION_RUNTIME_POLICY
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -54,7 +55,7 @@ class TemporaryChats:
             return "temporary_chat_in_use"
         self._by_owner[owner] = chat_id
         self._owners[chat_id] = owner
-        self._sessions.get_or_create_transient(f"websocket:{chat_id}")
+        self._sessions.get_or_create_memory_only(f"websocket:{chat_id}")
         return None
 
     def remember_attachments(self, chat_id: str, paths: list[str]) -> None:
@@ -68,17 +69,16 @@ class TemporaryChats:
             return "temporary_chat_not_owned"
         self._owners.pop(chat_id, None)
         self._by_owner.pop(owner, None)
-        session_key = f"websocket:{chat_id}"
-        assert self._sessions is not None
-        self._sessions.discard_transient(session_key)
         self._media.discard_inbound_attachments(self._attachments.pop(chat_id, []))
         await self._bus.publish_inbound(InboundMessage(
             channel="websocket",
             sender_id="webui",
             chat_id=chat_id,
             content="",
+            session_key_override=f"websocket:{chat_id}",
+            required_session_policy=MEMORY_ONLY_SESSION_RUNTIME_POLICY,
             metadata={
-                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_TRANSIENT_SESSION_DISCARD,
+                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD,
             },
         ))
         return None

@@ -303,13 +303,15 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    memory_only = session.is_memory_only is True
     snapshot = session.messages[session.last_consolidated:]
     runtime = None
-    if snapshot:
+    if snapshot and not memory_only:
         runtime = ctx.runtime or loop.runtime_for_session(session)
     session.clear()
     loop.sessions.save(session)
-    loop.sessions.invalidate(session.key)
+    if not memory_only:
+        loop.sessions.invalidate(session.key)
     if snapshot and runtime is not None:
         loop.schedule_background(
             loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
@@ -886,6 +888,14 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             content="Usage: /goal <long-running task description>",
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
+    session = ctx.session or ctx.loop.sessions.get_cached(ctx.key)
+    if session is not None and not session.runtime_policy.allow_durable_session_work:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Goal mode requires a persistent chat. Open a regular chat and try again.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
     if ctx.session is None:
         return OutboundMessage(
             channel=ctx.msg.channel,
@@ -960,6 +970,15 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
                 "Usage: /trigger <name>\n\n"
                 "Create a named local trigger bound to this chat session."
             ),
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    session = ctx.session or ctx.loop.sessions.get_cached(ctx.key)
+    if session is not None and not session.runtime_policy.allow_durable_session_work:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Triggers require a persistent chat. Open a regular chat and try again.",
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 

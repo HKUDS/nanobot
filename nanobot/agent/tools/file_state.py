@@ -150,6 +150,10 @@ class FileStateStore:
             self._states_by_key[key] = states
         return states
 
+    def discard(self, session_key: str) -> bool:
+        """Forget read/write state owned by one session."""
+        return self._states_by_key.pop(session_key, None) is not None
+
     def clear(self) -> None:
         self._states_by_key.clear()
 

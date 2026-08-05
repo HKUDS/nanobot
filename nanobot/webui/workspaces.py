@@ -223,7 +223,7 @@ class WebUIWorkspaceController:
         if self._sessions is None:
             return self.default_scope()
         cached = self._sessions.get_cached(session_key)
-        if cached is not None and cached.transient:
+        if cached is not None and cached.is_memory_only is True:
             restricted = build_workspace_scope(
                 self._default_workspace,
                 "restricted",

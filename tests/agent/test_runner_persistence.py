@@ -53,6 +53,52 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     assert (tmp_path / ".nanobot" / "tool-results" / "test_runner" / "call_big.txt").exists()
 
 
+async def test_runner_does_not_persist_tool_results_when_policy_disallows_it(tmp_path):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    captured_second_call: list[dict] = []
+    call_count = 0
+
+    async def chat_with_retry(*, messages, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(
+                    id="call_private",
+                    name="list_dir",
+                    arguments={"path": "."},
+                )],
+                usage={},
+            )
+        captured_second_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="private tool result" * 2_000)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        workspace=tmp_path,
+        session_key="test:memory-only",
+        max_tool_result_chars=2048,
+        persist_tool_results=False,
+    ))
+
+    assert result.final_content == "done"
+    tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
+    assert "[tool output persisted]" not in tool_message["content"]
+    assert not (tmp_path / ".nanobot" / "tool-results").exists()
+
+
 def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
     from nanobot.utils.helpers import maybe_persist_tool_result
 

@@ -115,6 +115,8 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
+    persist_tool_results: bool = True
+    log_content: bool = True
 
 
 @dataclass(slots=True)
@@ -444,6 +446,7 @@ class AgentRunner:
             model=spec.runtime.model,
             messages=messages,
             state=spec.provider_state,
+            log_content=spec.log_content,
         )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
@@ -456,6 +459,7 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
+            persist_tool_results=spec.persist_tool_results,
         )
 
         for iteration in range(spec.max_iterations):
@@ -1456,6 +1460,7 @@ class AgentRunner:
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
+                log_content=spec.log_content,
             )
             if handled is not None:
                 return handled
@@ -1485,6 +1490,7 @@ class AgentRunner:
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
+                log_content=spec.log_content,
             )
             if handled is not None:
                 return handled
@@ -1505,6 +1511,7 @@ class AgentRunner:
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
+                log_content=spec.log_content,
             )
             if handled is not None:
                 return handled
@@ -1573,13 +1580,18 @@ class AgentRunner:
         event: dict[str, str],
         tool_call: ToolCallRequest,
         workspace_violation_counts: dict[str, int],
+        log_content: bool,
     ) -> tuple[Any, dict[str, str], BaseException | None] | None:
         """Classify safety-boundary failures, or return ``None`` to pass through."""
         if self._is_ssrf_violation(raw_text):
             logger.warning(
                 "Tool {} blocked by SSRF guard; returning non-retryable tool error: {}",
                 tool_call.name,
-                raw_text.replace("\n", " ").strip()[:200],
+                (
+                    raw_text.replace("\n", " ").strip()[:200]
+                    if log_content
+                    else "[content omitted]"
+                ),
             )
             event["detail"] = self._event_detail("ssrf_violation: ", raw_text)
             return self._ssrf_soft_payload(raw_text), event, None
