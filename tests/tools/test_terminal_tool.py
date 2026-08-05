@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import nanobot.agent.tools.shell as shell_module
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -190,10 +191,13 @@ async def test_terminal_tool_write_returns_only_new_output(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_exec_and_write_stdin_use_the_trusted_shared_terminal(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(shell_module, "_IS_WINDOWS", True)
     manager = MagicMock()
     manager.supports_exec_bridge = True
     manager.shell_family = "powershell"
+    manager.supports_exec_shell.return_value = True
     manager.is_exec_session_id.side_effect = lambda value: value.startswith("termexec-")
     manager.start_exec = AsyncMock(return_value=(
         "termexec-1",
@@ -224,6 +228,8 @@ async def test_exec_and_write_stdin_use_the_trusted_shared_terminal(
     try:
         initial = await exec_tool.execute(
             command="Write-Output ready; Start-Sleep 10",
+            shell="powershell",
+            login=False,
             yield_time_ms=0,
         )
         final = await stdin_tool.execute(
@@ -237,6 +243,7 @@ async def test_exec_and_write_stdin_use_the_trusted_shared_terminal(
 
     assert "Process running. session_id: termexec-1" in initial
     assert "done" in final
+    manager.supports_exec_shell.assert_called_once_with("powershell", login=False)
     manager.start_exec.assert_awaited_once()
     manager.write_exec.assert_awaited_once_with(
         "termexec-1",

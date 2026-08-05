@@ -705,6 +705,32 @@ class TerminalSessionManager:
     def supports_exec_bridge(self) -> bool:
         return self.shell_family in {"powershell", "posix"}
 
+    def supports_exec_shell(self, shell: str | None, *, login: bool) -> bool:
+        """Return whether an exec shell override preserves this PTY's semantics."""
+        if not self.supports_exec_bridge or login:
+            return False
+        if not shell:
+            return True
+
+        requested = Path(shell).expanduser()
+        active = Path(self.shell_argv[0]).expanduser()
+        if requested.is_absolute():
+            try:
+                return os.path.normcase(str(requested.resolve())) == os.path.normcase(
+                    str(active.resolve())
+                )
+            except OSError:
+                return False
+
+        requested_name = requested.name.lower()
+        active_name = active.name.lower()
+        if self.shell_family == "powershell":
+            # Providers often serialize the default Windows shell explicitly
+            # as "powershell" even when the host selected pwsh (or vice versa).
+            # Both names are compatible with the PowerShell bridge helpers.
+            return requested_name in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+        return requested_name.removesuffix(".exe") == active_name.removesuffix(".exe")
+
     @staticmethod
     def _canonical_project(project_path: str | Path) -> tuple[Path, str]:
         try:

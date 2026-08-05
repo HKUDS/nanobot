@@ -330,7 +330,10 @@ class ExecTool(Tool):
         if isinstance(prepared, str):
             return prepared
 
-        terminal_project = self._shared_terminal_project(shell=shell, login=login)
+        terminal_project = self._shared_terminal_project(
+            shell=shell,
+            login=prepared.login,
+        )
         if (
             terminal_project is not None
             and self._terminal_session_manager is not None
@@ -415,15 +418,13 @@ class ExecTool(Tool):
         self,
         *,
         shell: str | None,
-        login: bool | None,
+        login: bool,
     ) -> Path | None:
         manager = self._terminal_session_manager
         if (
             not self._terminal_bridge_enabled
             or manager is None
-            or not manager.supports_exec_bridge
-            or shell is not None
-            or login is True
+            or not manager.supports_exec_shell(shell, login=login)
         ):
             return None
         scope = current_trusted_terminal_scope()

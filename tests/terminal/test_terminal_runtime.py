@@ -65,6 +65,29 @@ async def _wait_for_write(backend: _FakeBackend) -> str:
     raise AssertionError("terminal command was not written")
 
 
+def test_exec_bridge_accepts_only_semantically_compatible_shell_options(
+    tmp_path: Path,
+) -> None:
+    powershell = TerminalSessionManager(shell_argv=["pwsh.exe"])
+    assert powershell.supports_exec_shell(None, login=False) is True
+    assert powershell.supports_exec_shell("powershell", login=False) is True
+    assert powershell.supports_exec_shell("pwsh.exe", login=False) is True
+    assert powershell.supports_exec_shell("cmd", login=False) is False
+    assert powershell.supports_exec_shell("pwsh", login=True) is False
+
+    bash = TerminalSessionManager(shell_argv=["bash"])
+    assert bash.supports_exec_shell("bash", login=False) is True
+    assert bash.supports_exec_shell("sh", login=False) is False
+
+    active_shell = tmp_path / "pwsh.exe"
+    other_shell = tmp_path / "powershell.exe"
+    active_shell.touch()
+    other_shell.touch()
+    explicit = TerminalSessionManager(shell_argv=[str(active_shell)])
+    assert explicit.supports_exec_shell(str(active_shell), login=False) is True
+    assert explicit.supports_exec_shell(str(other_shell), login=False) is False
+
+
 @pytest.mark.asyncio
 async def test_project_terminal_is_reused_and_replays_output(tmp_path: Path) -> None:
     factory = _FakeBackendFactory()
