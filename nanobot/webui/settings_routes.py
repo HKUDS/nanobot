@@ -634,6 +634,7 @@ class WebUISettingsRouter:
             "api_key_hint": self._masked_secret(config.api.api_key),
             "endpoint": f"http://{connect_host}:{config.api.port}/v1",
             "command": "nanobot serve",
+            "config_path": str(get_config_path().expanduser().resolve(strict=False)),
             "log_path": str(status.log_path),
         }
         if last_action:

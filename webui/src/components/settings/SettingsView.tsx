@@ -8416,6 +8416,12 @@ function RuntimeSettings({
               )}
             </div>
           </SettingsRow>
+          {apiDefaults.config_path ? (
+            <ReadOnlyRow
+              title={tx("settings.api.configFile", "Config file")}
+              value={apiDefaults.config_path}
+            />
+          ) : null}
           {!apiDefaults.running ? (
             <>
               <SettingsRow

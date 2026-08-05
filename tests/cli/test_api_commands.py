@@ -50,14 +50,16 @@ def _status(tmp_path: Path, *, running: bool, managed: bool, reason: str) -> Pro
 
 def test_api_status_reports_externally_managed(tmp_path) -> None:
     app = _test_app(tmp_path, _status(tmp_path, running=True, managed=False, reason="external"))
+    config_path = str((tmp_path / "config.json").resolve())
 
-    result = runner.invoke(app, ["api", "status"])
+    result = runner.invoke(app, ["api", "status", "--config", config_path])
 
     assert result.exit_code == 0
     assert "Running: yes" in result.output
     assert "Managed: no" in result.output
     assert "Reason: external" in result.output
     assert "Endpoint: http://127.0.0.1:8900/v1" in result.output
+    assert f"Config: {config_path}" in result.output
     assert "Port: 8900" in result.output
 
 

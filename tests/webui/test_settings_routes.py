@@ -175,6 +175,9 @@ def _patch_api_service_deps(monkeypatch, status: ProcessStatus) -> None:
         lambda: SimpleNamespace(api=_api_config(), workspace_path=Path("/tmp/workspace")),
     )
     monkeypatch.setattr(
+        "nanobot.webui.settings_routes.get_config_path", lambda: Path("/tmp/config.json")
+    )
+    monkeypatch.setattr(
         "nanobot.webui.settings_routes.ApiRuntime.effective_status",
         lambda _self, **_kwargs: status,
     )
@@ -199,6 +202,7 @@ async def test_api_service_payload_reports_externally_managed(monkeypatch) -> No
     assert body["running"] is True
     assert body["managed"] is False
     assert body["endpoint"] == "http://127.0.0.1:8900/v1"
+    assert body["config_path"] == "/tmp/config.json"
 
 
 @pytest.mark.asyncio

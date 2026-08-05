@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from urllib.request import urlopen
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import urlopen
 
 from nanobot.process_runtime import (
     ManagedProcessRuntime,
@@ -75,6 +75,10 @@ class ApiRuntime(ManagedProcessRuntime[ApiStartOptions]):
         configured endpoint: an API answering on ``/health`` was started
         outside this gateway (e.g. systemd) and is reported as running with
         ``managed=False`` so callers never treat it as their own.
+
+        Detection is scoped to the endpoint given here. An API instance
+        started from a different config file is inspected separately, e.g.
+        via ``nanobot api status --config <path>``.
         """
         status = self.status()
         if status.running:

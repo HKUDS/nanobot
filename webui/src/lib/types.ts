@@ -724,6 +724,7 @@ export interface ApiServicePayload {
   api_key_hint?: string | null;
   endpoint: string;
   command: string;
+  config_path?: string | null;
   log_path?: string | null;
   last_action?: "started" | "stopped" | string;
 }
