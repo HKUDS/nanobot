@@ -901,6 +901,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                 "SOUL.md",
                 "USER.md",
                 "memory/MEMORY.md",
+                "memory/.dream_cursor",
             ],
         )
         gs.init()

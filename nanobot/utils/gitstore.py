@@ -241,9 +241,60 @@ class GitStore:
         for d in sorted(dirs):
             lines.append(f"!{d}/")
         for f in self._tracked_files:
-            lines.append(f"!{f}")
+            if str(Path(f).parent) == ".":
+                lines.append(f"!{f}")
         lines.append("!.gitignore")
+        lines.extend(self._missing_dir_blocks(set()))
         return "\n".join(lines) + "\n"
+
+    def _missing_dir_blocks(self, existing_lines: set[str]) -> list[str]:
+        """Ignore rules for tracked directories not covered by *existing_lines*.
+
+        Everything inside a tracked directory is ignored unless explicitly
+        tracked, so runtime artifacts created after init (``memory/history.jsonl``,
+        ``memory/.cursor``, ...) never surface as untracked files (#5246).
+        """
+        dirs: set[str] = set()
+        for f in self._tracked_files:
+            parent = str(Path(f).parent)
+            if parent != ".":
+                dirs.add(parent)
+        additions: list[str] = []
+        for d in sorted(dirs):
+            if f"{d}/*" in existing_lines:
+                continue
+            additions.append(f"{d}/*")
+            additions.extend(
+                f"!{f}" for f in self._tracked_files if str(Path(f).parent) == d
+            )
+        return additions
+
+    def ensure_gitignore(self) -> bool:
+        """Backfill ignore rules into an already-initialized workspace.
+
+        Workspaces created before the per-directory rules existed may show
+        runtime files such as ``memory/history.jsonl`` as untracked (#5246).
+        Returns True when .gitignore was updated, False when it was already
+        up to date or the repo is not initialized.
+        """
+        if not self.is_initialized():
+            return False
+
+        gitignore = self._workspace / ".gitignore"
+        try:
+            existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+            additions = self._missing_dir_blocks(set(existing.splitlines()))
+            if not additions:
+                return False
+            merged = existing.rstrip("\n")
+            body = (merged + "\n" if merged else "") + "\n".join(additions) + "\n"
+            gitignore.write_text(body, encoding="utf-8")
+            logger.debug("Git store ignore rules backfilled at {}", self._workspace)
+            return True
+        except OSError as exc:
+            raise GitStoreError(
+                f"Git ignore backfill failed for {self._workspace}"
+            ) from exc
 
     # -- query -----------------------------------------------------------------
 

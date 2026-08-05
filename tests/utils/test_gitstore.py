@@ -332,3 +332,72 @@ class TestCommitIdEncoding:
             capture_output=True, text=True, check=True,
         ).stdout.strip()
         assert git._resolve_sha(real) is not None
+
+
+class TestRuntimeFileIgnoring:
+    """Regression tests for GitHub issue #5246.
+
+    Runtime files created inside tracked directories (memory/history.jsonl,
+    memory/.cursor) must not show up as untracked in the workspace repo.
+    """
+
+    TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor"]
+
+    def test_new_workspace_ignores_runtime_files(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        g.init()
+        (tmp_path / "memory" / "history.jsonl").write_text("{}\n", encoding="utf-8")
+        (tmp_path / "memory" / ".cursor").write_text("0", encoding="utf-8")
+        status = subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        assert "history.jsonl" not in status
+        assert ".cursor" not in status
+
+    def test_tracked_files_remain_unignored(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        g.init()
+        result = subprocess.run(
+            ["git", "-C", str(tmp_path), "check-ignore", "memory/MEMORY.md", "SOUL.md"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1  # exit 1: no path ignored
+
+    def test_ensure_gitignore_backfills_legacy_workspace(self, tmp_path):
+        from dulwich import porcelain
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        porcelain.init(str(workspace))
+        legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+        (workspace / ".gitignore").write_text(legacy, encoding="utf-8")
+
+        g = GitStore(workspace, tracked_files=self.TRACKED)
+        assert g.ensure_gitignore() is True
+
+        lines = (workspace / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "memory/*" in lines
+        ignore_idx = lines.index("memory/*")
+        # Negations must follow the ignore rule to keep tracked files visible.
+        last_negations = {
+            line: idx for idx, line in enumerate(lines) if line.startswith("!memory/")
+        }
+        assert last_negations["!memory/MEMORY.md"] > ignore_idx
+        assert last_negations["!memory/.dream_cursor"] > ignore_idx
+        assert legacy.strip() in "\n".join(lines)  # legacy content preserved
+        assert g.ensure_gitignore() is False  # idempotent
+
+        memory_dir = workspace / "memory"
+        memory_dir.mkdir(exist_ok=True)
+        (memory_dir / "history.jsonl").write_text("{}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["git", "-C", str(workspace), "check-ignore", "memory/history.jsonl"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_ensure_gitignore_noop_when_not_initialized(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        assert g.ensure_gitignore() is False
+        assert not (tmp_path / ".gitignore").exists()
