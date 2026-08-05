@@ -18,6 +18,12 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.tools.terminal import current_trusted_terminal_scope
+from nanobot.terminal.runtime import (
+    TerminalExecInfo,
+    TerminalExecPoll,
+    TerminalSessionManager,
+)
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -471,7 +477,7 @@ def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
     return output[:head_chars] + output[-tail_chars:], omitted
 
 
-def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
+def format_session_poll(session_id: str, poll: _SessionPoll | TerminalExecPoll) -> str:
     parts = [poll.output] if poll.output else []
     if poll.truncated_chars:
         parts.append(f"({poll.truncated_chars:,} chars truncated from output)")
@@ -554,12 +560,26 @@ class WriteStdinTool(Tool):
         self,
         *,
         manager: ExecSessionManager | None = None,
+        terminal_manager: TerminalSessionManager | None = None,
+        terminal_bridge_enabled: bool = False,
     ) -> None:
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
+        self._terminal_manager = terminal_manager
+        self._terminal_bridge_enabled = terminal_bridge_enabled
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        return cls(manager=ctx.exec_session_manager)
+        cfg = ctx.config.exec
+        return cls(
+            manager=ctx.exec_session_manager,
+            terminal_manager=ctx.terminal_session_manager,
+            terminal_bridge_enabled=bool(
+                ctx.terminal_session_manager is not None
+                and not cfg.sandbox
+                and not cfg.allow_patterns
+                and not cfg.deny_patterns
+            ),
+        )
 
     @property
     def exclusive(self) -> bool:
@@ -617,14 +637,13 @@ class WriteStdinTool(Tool):
                     ),
                     max_output_chars=output_limit,
                 )
-            poll = await self._manager.write(
+            poll = await self._write_session(
                 session_id=session_id,
                 chars=chars,
                 close_stdin=close_stdin,
                 terminate=terminate,
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
                 max_output_chars=output_limit,
-                owner_session_key=current_request_session_key(),
             )
             result = format_session_poll(session_id, poll)
             return ToolResult.error(result) if poll.timed_out else result
@@ -632,6 +651,43 @@ class WriteStdinTool(Tool):
             return ToolResult.error(f"Error: exec session not found: {session_id!r}")
         except Exception as exc:
             return ToolResult.error(f"Error writing to exec session: {exc}")
+
+    async def _write_session(
+        self,
+        *,
+        session_id: str,
+        chars: str | None,
+        close_stdin: bool,
+        terminate: bool,
+        yield_time_ms: int,
+        max_output_chars: int,
+    ) -> _SessionPoll | TerminalExecPoll:
+        terminal_manager = self._terminal_manager
+        scope = current_trusted_terminal_scope()
+        if (
+            self._terminal_bridge_enabled
+            and terminal_manager is not None
+            and scope is not None
+            and terminal_manager.is_exec_session_id(session_id)
+        ):
+            return await terminal_manager.write_exec(
+                session_id,
+                chars=chars,
+                close_stdin=close_stdin,
+                terminate=terminate,
+                yield_time_ms=yield_time_ms,
+                max_output_chars=max_output_chars,
+                owner_session_key=current_request_session_key(),
+            )
+        return await self._manager.write(
+            session_id=session_id,
+            chars=chars,
+            close_stdin=close_stdin,
+            terminate=terminate,
+            yield_time_ms=yield_time_ms,
+            max_output_chars=max_output_chars,
+            owner_session_key=current_request_session_key(),
+        )
 
     async def _wait_for_output(
         self,
@@ -649,19 +705,18 @@ class WriteStdinTool(Tool):
         upstream_truncated = 0
         search_overlap = ""
         first = True
-        poll: _SessionPoll | None = None
+        poll: _SessionPoll | TerminalExecPoll | None = None
 
         while True:
             remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
             step_ms = min(500, remaining_ms)
-            poll = await self._manager.write(
+            poll = await self._write_session(
                 session_id=session_id,
                 chars=chars if first else None,
                 close_stdin=close_stdin if first else False,
                 terminate=terminate if first else False,
                 yield_time_ms=step_ms,
                 max_output_chars=MAX_OUTPUT_CHARS,
-                owner_session_key=current_request_session_key(),
             )
             first = False
             upstream_truncated += poll.truncated_chars
@@ -705,12 +760,26 @@ class ListExecSessionsTool(Tool):
         self,
         *,
         manager: ExecSessionManager | None = None,
+        terminal_manager: TerminalSessionManager | None = None,
+        terminal_bridge_enabled: bool = False,
     ) -> None:
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
+        self._terminal_manager = terminal_manager
+        self._terminal_bridge_enabled = terminal_bridge_enabled
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        return cls(manager=ctx.exec_session_manager)
+        cfg = ctx.config.exec
+        return cls(
+            manager=ctx.exec_session_manager,
+            terminal_manager=ctx.terminal_session_manager,
+            terminal_bridge_enabled=bool(
+                ctx.terminal_session_manager is not None
+                and not cfg.sandbox
+                and not cfg.allow_patterns
+                and not cfg.deny_patterns
+            ),
+        )
 
     @property
     def name(self) -> str:
@@ -731,9 +800,22 @@ class ListExecSessionsTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            sessions = await self._manager.list(
-                owner_session_key=current_request_session_key(),
+            sessions: list[ExecSessionInfo | TerminalExecInfo] = list(
+                await self._manager.list(
+                    owner_session_key=current_request_session_key(),
+                )
             )
+            terminal_manager = self._terminal_manager
+            scope = current_trusted_terminal_scope()
+            if (
+                self._terminal_bridge_enabled
+                and terminal_manager is not None
+                and scope is not None
+            ):
+                sessions.extend(await terminal_manager.list_exec(
+                    scope.project_path,
+                    owner_session_key=current_request_session_key(),
+                ))
             if not sessions:
                 return "No active exec sessions."
             lines: list[str] = []

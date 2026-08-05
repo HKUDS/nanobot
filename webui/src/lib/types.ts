@@ -1265,6 +1265,8 @@ export type InboundEvent =
       seq: number;
       running: boolean;
       exit_code?: number | null;
+      pty_backend?: "conpty" | "winpty" | null;
+      windows_build?: number | null;
     }
   | {
       event: "terminal_output";

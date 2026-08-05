@@ -13,7 +13,8 @@ from nanobot.agent.tools.context import (
     bind_request_context,
     reset_request_context,
 )
-from nanobot.agent.tools.shell import ExecToolConfig
+from nanobot.agent.tools.exec_session import WriteStdinTool
+from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
 from nanobot.agent.tools.terminal import TerminalTool
 from nanobot.config.schema import ToolsConfig
 from nanobot.security.workspace_access import (
@@ -23,6 +24,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.terminal.runtime import (
     TRUSTED_TERMINAL_REQUEST_METADATA_KEY,
+    TerminalExecPoll,
     TerminalInfo,
     TerminalRead,
 )
@@ -183,3 +185,65 @@ async def test_terminal_tool_write_returns_only_new_output(tmp_path: Path) -> No
         project_path=tmp_path.resolve(),
     )
     assert json.loads(result)["data"] == "ok\r\n"
+
+
+@pytest.mark.asyncio
+async def test_exec_and_write_stdin_use_the_trusted_shared_terminal(
+    tmp_path: Path,
+) -> None:
+    manager = MagicMock()
+    manager.supports_exec_bridge = True
+    manager.shell_family = "powershell"
+    manager.is_exec_session_id.side_effect = lambda value: value.startswith("termexec-")
+    manager.start_exec = AsyncMock(return_value=(
+        "termexec-1",
+        TerminalExecPoll(
+            output="ready\r\n",
+            done=False,
+            exit_code=None,
+        ),
+    ))
+    manager.write_exec = AsyncMock(return_value=TerminalExecPoll(
+        output="done\r\n",
+        done=True,
+        exit_code=0,
+    ))
+    exec_tool = ExecTool(
+        working_dir=str(tmp_path),
+        terminal_session_manager=manager,
+        terminal_bridge_enabled=True,
+    )
+    stdin_tool = WriteStdinTool(
+        terminal_manager=manager,
+        terminal_bridge_enabled=True,
+    )
+    request_token = bind_request_context(_trusted_request())
+    scope_token = bind_workspace_scope(
+        build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    )
+    try:
+        initial = await exec_tool.execute(
+            command="Write-Output ready; Start-Sleep 10",
+            yield_time_ms=0,
+        )
+        final = await stdin_tool.execute(
+            session_id="termexec-1",
+            chars="input\r",
+            yield_time_ms=100,
+        )
+    finally:
+        reset_workspace_scope(scope_token)
+        reset_request_context(request_token)
+
+    assert "Process running. session_id: termexec-1" in initial
+    assert "done" in final
+    manager.start_exec.assert_awaited_once()
+    manager.write_exec.assert_awaited_once_with(
+        "termexec-1",
+        chars="input\r",
+        close_stdin=False,
+        terminate=False,
+        yield_time_ms=100,
+        max_output_chars=10_000,
+        owner_session_key="websocket:chat-1",
+    )

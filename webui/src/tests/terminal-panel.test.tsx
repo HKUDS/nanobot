@@ -7,15 +7,35 @@ import type { NanobotClient } from "@/lib/nanobot-client";
 import type { ConnectionStatus, TerminalEvent } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
+let terminalInstances: Array<{
+  rows: number;
+  cols: number;
+  options: { windowsPty?: { backend: string; buildNumber?: number } };
+}> = [];
+let fitCols = 100;
+let resizeObserverCallbacks: ResizeObserverCallback[] = [];
+
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     rows = 30;
     cols = 100;
+    options = {};
 
-    loadAddon() {}
-    open() {}
+    constructor() {
+      terminalInstances.push(this);
+    }
+
+    loadAddon(addon: { activate?: (terminal: MockTerminal) => void }) {
+      addon.activate?.(this);
+    }
+    open(container: HTMLElement) {
+      Object.defineProperty(container, "clientWidth", { configurable: true, value: 560 });
+      Object.defineProperty(container, "clientHeight", { configurable: true, value: 500 });
+    }
     reset() {}
-    write() {}
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    }
     focus() {}
     dispose() {}
     onData() {
@@ -26,11 +46,20 @@ vi.mock("@xterm/xterm", () => ({
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class MockFitAddon {
-    fit() {}
+    terminal?: { cols: number };
+    activate(terminal: { cols: number }) {
+      this.terminal = terminal;
+    }
+    fit() {
+      if (this.terminal) this.terminal.cols = fitCols;
+    }
   },
 }));
 
 class MockResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallbacks.push(callback);
+  }
   observe() {}
   disconnect() {}
   unobserve() {}
@@ -63,6 +92,9 @@ function makeClient(initialStatus: ConnectionStatus) {
       status = value;
       for (const handler of statusHandlers) handler(value);
     },
+    emitTerminal(event: TerminalEvent) {
+      for (const handler of terminalHandlers) handler(event);
+    },
   };
   return client;
 }
@@ -77,6 +109,9 @@ function wrap(client: ReturnType<typeof makeClient>, children: ReactNode) {
 
 describe("TerminalPanel", () => {
   beforeEach(() => {
+    terminalInstances = [];
+    fitCols = 100;
+    resizeObserverCallbacks = [];
     vi.stubGlobal("ResizeObserver", MockResizeObserver);
   });
 
@@ -105,6 +140,65 @@ describe("TerminalPanel", () => {
     act(() => client.emitStatus("reconnecting"));
     act(() => client.emitStatus("open"));
     expect(client.openTerminal).toHaveBeenCalledTimes(2);
+
+    view.unmount();
+  });
+
+  it("applies Windows PTY compatibility and resizes after both drag directions", async () => {
+    const client = makeClient("open");
+    const view = render(wrap(
+      client,
+      <TerminalPanel
+        chatId="chat-1"
+        projectPath="C:\\projects\\nanobot"
+        onClose={() => {}}
+      />,
+    ));
+    await act(async () => {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    act(() => client.emitTerminal({
+      event: "terminal_ready",
+      chat_id: "chat-1",
+      terminal_id: "term-1",
+      project_path: "C:\\projects\\nanobot",
+      rows: 30,
+      cols: 100,
+      data: "old output\r\n",
+      seq: 1,
+      running: true,
+      exit_code: null,
+      pty_backend: "conpty",
+      windows_build: 26100,
+    }));
+    await act(async () => {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(terminalInstances[0].options.windowsPty).toEqual({
+      backend: "conpty",
+      buildNumber: 26100,
+    });
+    expect(client.resizeTerminal).toHaveBeenCalledWith("chat-1", "term-1", 30, 100);
+
+    fitCols = 48;
+    act(() => resizeObserverCallbacks[0]?.([], {} as ResizeObserver));
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      }));
+    });
+    expect(client.resizeTerminal).toHaveBeenCalledWith("chat-1", "term-1", 30, 48);
+
+    fitCols = 132;
+    act(() => resizeObserverCallbacks[0]?.([], {} as ResizeObserver));
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      }));
+    });
+    expect(client.resizeTerminal).toHaveBeenCalledWith("chat-1", "term-1", 30, 132);
 
     view.unmount();
   });

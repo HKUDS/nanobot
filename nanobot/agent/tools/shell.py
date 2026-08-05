@@ -36,10 +36,12 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.tools.terminal import current_trusted_terminal_scope
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
+from nanobot.terminal.runtime import TerminalError, TerminalExecPoll, TerminalSessionManager
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -195,6 +197,13 @@ class ExecTool(Tool):
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
             session_manager=ctx.exec_session_manager,
+            terminal_session_manager=ctx.terminal_session_manager,
+            terminal_bridge_enabled=bool(
+                ctx.terminal_session_manager is not None
+                and not cfg.sandbox
+                and not cfg.allow_patterns
+                and not cfg.deny_patterns
+            ),
         )
 
     def __init__(
@@ -213,6 +222,8 @@ class ExecTool(Tool):
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
         session_manager: ExecSessionManager | None = None,
+        terminal_session_manager: TerminalSessionManager | None = None,
+        terminal_bridge_enabled: bool = False,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -247,6 +258,8 @@ class ExecTool(Tool):
         self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
+        self._terminal_session_manager = terminal_session_manager
+        self._terminal_bridge_enabled = terminal_bridge_enabled
 
     @property
     def name(self) -> str:
@@ -287,7 +300,9 @@ class ExecTool(Tool):
             f"{platform_note}"
             "For long-running or interactive commands, pass yield_time_ms; "
             "if the command keeps running, exec returns a session_id that can "
-            "be polled or written to with write_stdin. Output is truncated at "
+            "be polled or written to with write_stdin. In a trusted local WebUI "
+            "project with Full access, compatible default-shell commands run "
+            "visibly in the shared project terminal. Output is truncated at "
             "10 000 chars; timeout defaults to 60s."
         )
 
@@ -314,6 +329,25 @@ class ExecTool(Tool):
         prepared = self._prepare_command(command, working_dir, timeout, shell, login)
         if isinstance(prepared, str):
             return prepared
+
+        terminal_project = self._shared_terminal_project(shell=shell, login=login)
+        if (
+            terminal_project is not None
+            and self._terminal_session_manager is not None
+            and self._terminal_session_manager.shell_family == "powershell"
+            and ("\n" in prepared.command or "\r" in prepared.command)
+        ):
+            # PSReadLine treats programmatic multiline input as an edit buffer
+            # and does not reliably submit it through ConPTY. Preserve legacy
+            # exec semantics for this narrow compatibility case.
+            terminal_project = None
+        if terminal_project is not None:
+            return await self._execute_shared_terminal(
+                terminal_project,
+                prepared,
+                yield_time_ms=yield_time_ms,
+                max_output_chars=max_output_chars,
+            )
 
         if yield_time_ms is not None:
             return await self._execute_session(prepared, yield_time_ms, max_output_chars)
@@ -376,6 +410,82 @@ class ExecTool(Tool):
             if process is not None:
                 await self._kill_process(process)
             return ToolResult.error(f"Error executing command: {str(e)}")
+
+    def _shared_terminal_project(
+        self,
+        *,
+        shell: str | None,
+        login: bool | None,
+    ) -> Path | None:
+        manager = self._terminal_session_manager
+        if (
+            not self._terminal_bridge_enabled
+            or manager is None
+            or not manager.supports_exec_bridge
+            or shell is not None
+            or login is True
+        ):
+            return None
+        scope = current_trusted_terminal_scope()
+        return Path(scope.project_path) if scope is not None else None
+
+    async def _execute_shared_terminal(
+        self,
+        project: Path,
+        prepared: _PreparedCommand,
+        *,
+        yield_time_ms: int | None,
+        max_output_chars: int | None,
+    ) -> str:
+        manager = self._terminal_session_manager
+        assert manager is not None
+        output_limit = clamp_session_int(
+            max_output_chars,
+            self._MAX_OUTPUT if yield_time_ms is None else DEFAULT_MAX_OUTPUT_CHARS,
+            1000,
+            MAX_OUTPUT_CHARS,
+        )
+        try:
+            if yield_time_ms is not None:
+                session_id, poll = await manager.start_exec(
+                    project,
+                    command=prepared.command,
+                    cwd=prepared.cwd,
+                    timeout=prepared.timeout,
+                    yield_time_ms=clamp_session_int(
+                        yield_time_ms,
+                        DEFAULT_YIELD_MS,
+                        0,
+                        MAX_YIELD_MS,
+                    ),
+                    max_output_chars=output_limit,
+                    owner_session_key=current_request_session_key(),
+                )
+                result = format_session_poll(session_id, poll)
+                return ToolResult.error(result) if poll.timed_out else result
+
+            poll = await manager.run_exec(
+                project,
+                command=prepared.command,
+                cwd=prepared.cwd,
+                timeout=prepared.timeout,
+                max_output_chars=output_limit,
+                owner_session_key=current_request_session_key(),
+            )
+            return self._format_shared_terminal_result(poll)
+        except TerminalError as exc:
+            return ToolResult.error(f"Error executing command in shared terminal: {exc}")
+
+    @staticmethod
+    def _format_shared_terminal_result(poll: TerminalExecPoll) -> str:
+        parts = [poll.output] if poll.output else []
+        if poll.truncated_chars:
+            parts.append(f"({poll.truncated_chars:,} chars truncated from output)")
+        if poll.timed_out:
+            parts.append("Error: Command timed out; shared terminal command was interrupted.")
+        parts.append(f"Exit code: {poll.exit_code}")
+        result = "\n".join(parts)
+        return ToolResult.error(result) if poll.timed_out else result
 
     async def _execute_session(
         self,

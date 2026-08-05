@@ -63,15 +63,23 @@ export function TerminalPanel({
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
-  const lastDimensionsRef = useRef({ rows: 0, cols: 0 });
+  const resizeSettleFrameRef = useRef<number | null>(null);
+  const lastSentDimensionsRef = useRef({ rows: 0, cols: 0 });
   const [entered, setEntered] = useState(false);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
 
-  const fitAndResize = useCallback((sendResize: boolean) => {
+  const fitAndResize = useCallback((sendResize: boolean, force = false) => {
     const terminal = terminalRef.current;
     const fit = fitRef.current;
-    if (!terminal || !fit || !containerRef.current?.isConnected) return;
+    const container = containerRef.current;
+    if (
+      !terminal
+      || !fit
+      || !container?.isConnected
+      || container.clientWidth <= 0
+      || container.clientHeight <= 0
+    ) return;
     try {
       fit.fit();
     } catch {
@@ -80,12 +88,13 @@ export function TerminalPanel({
     const dimensions = { rows: terminal.rows, cols: terminal.cols };
     if (dimensions.rows < 2 || dimensions.cols < 2) return;
     if (
-      dimensions.rows === lastDimensionsRef.current.rows
-      && dimensions.cols === lastDimensionsRef.current.cols
+      !force
+      && dimensions.rows === lastSentDimensionsRef.current.rows
+      && dimensions.cols === lastSentDimensionsRef.current.cols
     ) return;
-    lastDimensionsRef.current = dimensions;
     const terminalId = terminalIdRef.current;
-    if (sendResize && terminalId) {
+    if (sendResize && terminalId && client.status === "open") {
+      lastSentDimensionsRef.current = dimensions;
       client.resizeTerminal(chatId, terminalId, dimensions.rows, dimensions.cols);
     }
   }, [chatId, client]);
@@ -133,12 +142,22 @@ export function TerminalPanel({
     const terminalSubscription = client.onTerminal(chatId, (event) => {
       if (event.event === "terminal_ready") {
         terminalIdRef.current = event.terminal_id;
+        if (event.pty_backend) {
+          terminal.options.windowsPty = {
+            backend: event.pty_backend,
+            ...(typeof event.windows_build === "number"
+              ? { buildNumber: event.windows_build }
+              : {}),
+          };
+        }
         terminal.reset();
-        if (event.data) terminal.write(event.data);
+        if (event.data) {
+          terminal.write(event.data, () => fitAndResize(true, true));
+        }
         setStatus(event.running ? "ready" : "exited");
         setError(null);
         window.requestAnimationFrame(() => {
-          fitAndResize(true);
+          fitAndResize(true, true);
           terminal.focus();
         });
         return;
@@ -185,10 +204,24 @@ export function TerminalPanel({
       resizeFrameRef.current = window.requestAnimationFrame(() => {
         resizeFrameRef.current = null;
         fitAndResize(true);
+        if (resizeSettleFrameRef.current !== null) {
+          window.cancelAnimationFrame(resizeSettleFrameRef.current);
+        }
+        // The drag handle mutates CSS variables in an animation frame. A
+        // second frame lets layout/canvas metrics settle before the final fit,
+        // avoiding ConPTY/xterm reflow against a stale column count.
+        resizeSettleFrameRef.current = window.requestAnimationFrame(() => {
+          resizeSettleFrameRef.current = null;
+          fitAndResize(true);
+        });
       });
     });
     observer.observe(container);
     const openFrame = window.requestAnimationFrame(requestOpen);
+    const fonts = document.fonts;
+    if (fonts) {
+      void fonts.ready.then(() => fitAndResize(true, true));
+    }
 
     return () => {
       const terminalId = terminalIdRef.current;
@@ -200,6 +233,10 @@ export function TerminalPanel({
       if (resizeFrameRef.current !== null) {
         window.cancelAnimationFrame(resizeFrameRef.current);
         resizeFrameRef.current = null;
+      }
+      if (resizeSettleFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeSettleFrameRef.current);
+        resizeSettleFrameRef.current = null;
       }
       observer.disconnect();
       statusSubscription();
@@ -334,7 +371,7 @@ export function TerminalPanel({
         <div className="relative min-h-0 flex-1 bg-[#0d1117]">
           <div
             ref={containerRef}
-            className="absolute inset-0 px-2 py-2 [&_.xterm]:h-full [&_.xterm-viewport]:!overflow-y-auto"
+            className="absolute inset-0 min-h-0 min-w-0 px-2 py-2 [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-screen]:max-w-full [&_.xterm-viewport]:!overflow-y-auto"
             onClick={() => terminalRef.current?.focus()}
           />
           {error ? (

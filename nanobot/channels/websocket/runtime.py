@@ -637,6 +637,8 @@ class WebSocketChannel(BaseChannel):
                     seq=replay.next_seq,
                     running=replay.running,
                     exit_code=replay.exit_code,
+                    pty_backend=info.pty_backend,
+                    windows_build=info.windows_build,
                 )
                 if replay.running:
                     self._start_terminal_pump(

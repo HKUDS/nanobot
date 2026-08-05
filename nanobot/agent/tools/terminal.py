@@ -24,6 +24,21 @@ from nanobot.terminal.runtime import (
 )
 
 
+def current_trusted_terminal_scope() -> WorkspaceScope | None:
+    """Return server-authorized shared-terminal scope for the active tool call."""
+    request = current_request_context()
+    scope = current_workspace_scope()
+    if (
+        request is None
+        or request.channel != "websocket"
+        or request.metadata.get(TRUSTED_TERMINAL_REQUEST_METADATA_KEY) is not True
+        or scope is None
+        or scope.access_mode != "full"
+    ):
+        return None
+    return scope
+
+
 @tool_parameters(
     tool_parameters_schema(
         action=StringSchema(
@@ -101,9 +116,9 @@ class TerminalTool(Tool):
     def description(self) -> str:
         return (
             "Operate the persistent interactive terminal shared with the current WebUI project. "
-            "Use exec for ordinary one-shot commands. Use terminal for programs that need a PTY, "
-            "ongoing interactive state, or visible human-agent collaboration. Available only for "
-            "local WebUI chats using Full access."
+            "Ordinary exec and write_stdin calls already use this visible terminal when compatible; "
+            "use terminal for raw keystrokes, ongoing shell state, or direct human-agent "
+            "collaboration. Available only for local WebUI chats using Full access."
         )
 
     @property
@@ -127,7 +142,7 @@ class TerminalTool(Tool):
             return ToolResult.error(
                 "Error: terminal requires Full access for the current WebUI project"
             )
-        return scope
+        return current_trusted_terminal_scope() or scope
 
     @staticmethod
     def _require_terminal_id(terminal_id: str | None) -> str | ToolResult:

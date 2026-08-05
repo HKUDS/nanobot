@@ -11,6 +11,7 @@ import pytest
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.security.workspace_access import build_workspace_scope
+from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.terminal.runtime import (
     TRUSTED_TERMINAL_REQUEST_METADATA_KEY,
@@ -18,6 +19,20 @@ from nanobot.terminal.runtime import (
     TerminalRead,
 )
 from nanobot.webui.gateway_services import build_gateway_services
+
+
+@pytest.fixture(autouse=True)
+def _clear_websocket_turn_state() -> Any:
+    """Keep message-ingress tests from leaking process-global turn owners."""
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
+    yield
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
 def _channel(tmp_path: Path, manager: Any) -> WebSocketChannel:
@@ -107,6 +122,8 @@ async def test_terminal_open_attaches_to_full_access_project(tmp_path: Path) -> 
         "seq": 4,
         "running": False,
         "exit_code": 0,
+        "pty_backend": None,
+        "windows_build": None,
     }
 
 
