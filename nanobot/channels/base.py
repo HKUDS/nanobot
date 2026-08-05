@@ -278,7 +278,7 @@ class BaseChannel(ABC):
                 )
             return
 
-        meta = dict(metadata or {})
+        meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
 

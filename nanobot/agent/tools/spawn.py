@@ -59,10 +59,6 @@ class SpawnTool(Tool):
         return cls(manager=manager)
 
     @property
-    def requires_durable_session(self) -> bool:
-        return True
-
-    @property
     def name(self) -> str:
         return "spawn"
 

@@ -43,12 +43,7 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import (
-    INBOUND_META_RUNTIME_CONTROL,
-    RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD,
-    InboundMessage,
-    OutboundMessage,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
@@ -717,7 +712,6 @@ class AgentLoop:
     def _build_initial_messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
-        memory_only = ctx.session.is_memory_only is True
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
         return self.context.build_messages(
             history=ctx.history,
@@ -727,8 +721,7 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
-            include_long_term_memory=not memory_only,
-            include_memory_recent_history=not memory_only and not ctx.ephemeral,
+            include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
         )
@@ -1095,9 +1088,6 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
-                persist_tool_results=(
-                    session is None or session.is_memory_only is not True
-                ),
             ))
         finally:
             turn_scope_stack.close()
@@ -1169,18 +1159,10 @@ class AgentLoop:
 
                 raw = msg.content.strip()
                 effective_key = self._effective_session_key(msg)
-                if (
-                    msg.memory_only_session
-                    and not self.sessions.is_memory_only_active(effective_key)
-                ):
-                    continue
-                if (
-                    msg.metadata.get(INBOUND_META_RUNTIME_CONTROL)
-                    == RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD
-                ):
-                    await self._cancel_active_tasks(effective_key)
-                    self.sessions.discard_memory_only(effective_key)
-                    continue
+                if msg.memory_only_session:
+                    session = self.sessions.get_cached(effective_key)
+                    if session is None or session.memory_only is not True:
+                        continue
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
                 if self.commands.is_priority(raw):
@@ -1621,26 +1603,28 @@ class AgentLoop:
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg
 
-        # Resolve the session only after checking any required persistence mode.
         if ctx.session is None:
             if msg.memory_only_session:
-                active_session = self.sessions.get_cached(ctx.session_key)
-                if (
-                    active_session is None
-                    or active_session.is_memory_only is not True
-                ):
+                ctx.session = self.sessions.get_cached(ctx.session_key)
+                if ctx.session is None or ctx.session.memory_only is not True:
                     raise RuntimeError("memory-only session is not active")
-                ctx.session = active_session
             else:
                 ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
-        if session.is_memory_only is True:
+        tools = ctx.tools or self.tools
+        if session.memory_only is True:
             ctx.ephemeral = True
-        ctx.tools = (ctx.tools or self.tools).for_persistence(session.persistence)
+            restricted = ToolRegistry()
+            for name in tools.tool_names:
+                tool = tools.get(name)
+                if name not in {"create_goal", "update_goal", "spawn", "cron"} and tool:
+                    restricted.register(tool)
+            tools = restricted
+        ctx.tools = tools
 
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        elif session.is_memory_only is not True:
+        elif session.memory_only is not True:
             preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
         else:
@@ -1662,8 +1646,6 @@ class AgentLoop:
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
-        if ctx.ephemeral and session.is_memory_only is not True:
-            return
         ctx.session, pending = self.auto_compact.prepare_session(
             session,
             ctx.session_key,
@@ -1736,7 +1718,7 @@ class AgentLoop:
         replay_max_messages = replay_max_messages_for_context(
             runtime.context_window_tokens
         )
-        if not ctx.ephemeral or session.is_memory_only is True:
+        if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 runtime=runtime,

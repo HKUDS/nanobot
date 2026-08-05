@@ -115,7 +115,6 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
-    persist_tool_results: bool = True
 
 
 @dataclass(slots=True)
@@ -457,7 +456,6 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
-            persist_tool_results=spec.persist_tool_results,
         )
 
         for iteration in range(spec.max_iterations):

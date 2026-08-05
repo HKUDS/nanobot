@@ -79,7 +79,6 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
         workspace: Path | None = None,
-        include_long_term_memory: bool = True,
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
@@ -94,10 +93,9 @@ class ContextBuilder:
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        if include_long_term_memory:
-            memory = self.memory.read_memory()
-            if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
-                parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
+        memory = self.memory.read_memory()
+        if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
+            parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
 
         active_skills = self.skills.get_always_skills()
         active_skills.extend(
@@ -221,7 +219,6 @@ class ContextBuilder:
         session_summary: str | None = None,
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
         workspace: Path | None = None,
-        include_long_term_memory: bool = True,
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
@@ -241,7 +238,6 @@ class ContextBuilder:
                     channel=channel,
                     session_summary=session_summary,
                     workspace=root,
-                    include_long_term_memory=include_long_term_memory,
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,

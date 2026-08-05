@@ -72,10 +72,6 @@ class CronTool(Tool):
             raise RuntimeError("CronTool requires an initialized cron service")
         return cls(cron_service=cron_service, default_timezone=ctx.timezone)
 
-    @property
-    def requires_durable_session(self) -> bool:
-        return True
-
     @staticmethod
     def _request_route() -> tuple[str, str, str, dict[str, Any]]:
         """Return routing from the authoritative request snapshot."""

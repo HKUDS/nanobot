@@ -68,7 +68,6 @@ class ContextGovernanceConfig:
     context_block_limit: int | None = None
     max_tokens: int | None = None
     inflight_start_index: int = 0
-    persist_tool_results: bool = True
 
 
 class ContextGovernor:
@@ -117,10 +116,6 @@ class ContextGovernor:
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
-            return result
-        if not config.persist_tool_results:
-            if isinstance(result, str) and len(result) > config.max_tool_result_chars:
-                return truncate_text(result, config.max_tool_result_chars)
             return result
         try:
             content = maybe_persist_tool_result(

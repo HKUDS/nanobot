@@ -198,11 +198,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    @property
-    def requires_durable_session(self) -> bool:
-        """Whether this tool depends on durable or deferred session state."""
-        return False
-
     # --- Plugin metadata ---
 
     config_key: str = ""
