@@ -778,6 +778,26 @@ def test_update_agent_settings_accepts_context_window_options(
     assert saved.agents.defaults.context_window_tokens == 200000
 
 
+def test_update_agent_settings_marks_timezone_as_manual(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.config.timezone.get_localzone_name",
+        lambda: "Asia/Shanghai",
+    )
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_agent_settings({"timezone": ["Asia/Shanghai"]})
+
+    assert payload["requires_restart"] is False
+    saved = load_config(config_path)
+    assert saved.agents.defaults.timezone == "Asia/Shanghai"
+    assert saved.agents.defaults.timezone_mode == "manual"
+
+
 def test_update_model_configuration_preserves_custom_context_windows(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

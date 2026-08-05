@@ -145,7 +145,6 @@ import {
   updateModelConfiguration,
   updateNetworkSafetySettings,
   updateProviderSettings,
-  updateSettings,
   updateTranscriptionSettings,
   updateWebSearchSettings,
 } from "@/lib/api";
@@ -403,7 +402,6 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
-  onWorkspaceSettingsChange?: () => void | Promise<void>;
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
@@ -505,14 +503,6 @@ const DEFAULT_NETWORK_SAFETY_FORM: NetworkSafetySettingsUpdate = {
   webuiDefaultAccessMode: "default",
 };
 
-function detectedSystemTimezone(fallback: string): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function agentDraftFromPayload(
   payload: SettingsPayload,
   preferredPresetName?: string,
@@ -533,7 +523,7 @@ function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
-    timezone: detectedSystemTimezone(payload.agent.timezone),
+    timezone: payload.agent.timezone,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
 }
@@ -616,7 +606,6 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
-  onWorkspaceSettingsChange,
   onSectionChange,
   onLogout,
   onRestart,
@@ -636,7 +625,6 @@ export function SettingsView({
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
-  const [settingsFetchSettled, setSettingsFetchSettled] = useState(false);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [nanobotFeaturesLoading, setNanobotFeaturesLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
@@ -732,7 +720,6 @@ export function SettingsView({
   const [form, setForm] = useState<AgentSettingsDraft>(() =>
     initialSettings ? agentDraftFromPayload(initialSettings) : DEFAULT_AGENT_SETTINGS_DRAFT,
   );
-  const timezoneAutoSaveAttemptRef = useRef<string | null>(null);
   const [modelCallOrder, setModelCallOrder] = useState<string[]>(
     () => initialSettings?.model_call_order ?? [],
   );
@@ -816,7 +803,6 @@ export function SettingsView({
   useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
-    setSettingsFetchSettled(false);
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
@@ -831,7 +817,6 @@ export function SettingsView({
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
-          setSettingsFetchSettled(true);
         }
       });
     return () => {
@@ -1071,11 +1056,6 @@ export function SettingsView({
       form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
       form.presetLabel.trim() !== selectedPreset.label
     );
-  }, [form, settings]);
-
-  const runtimeDirty = useMemo(() => {
-    if (!settings) return false;
-    return form.timezone !== settings.agent.timezone;
   }, [form, settings]);
 
   const imageGenerationDirty = useMemo(() => {
@@ -1389,44 +1369,6 @@ export function SettingsView({
       setSaving(false);
     }
   };
-
-  const saveRuntimeSettings = useCallback(async () => {
-    if (!settings || !runtimeDirty || saving) return;
-    setSaving(true);
-    try {
-      const payload = await updateSettings(token, {
-        timezone: form.timezone,
-      });
-      applyPayload(payload);
-      if (payload.requires_restart) {
-        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
-      }
-      await onWorkspaceSettingsChange?.();
-      await maybeRestartHostEngine(payload);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    applyPayload,
-    form.timezone,
-    maybeRestartHostEngine,
-    onWorkspaceSettingsChange,
-    runtimeDirty,
-    saving,
-    settings,
-    token,
-  ]);
-
-  useEffect(() => {
-    if (!settingsFetchSettled || !settings || !runtimeDirty || saving) return;
-    const attemptKey = `${settings.agent.timezone}\u0000${form.timezone}`;
-    if (timezoneAutoSaveAttemptRef.current === attemptKey) return;
-    timezoneAutoSaveAttemptRef.current = attemptKey;
-    void saveRuntimeSettings();
-  }, [form.timezone, runtimeDirty, saveRuntimeSettings, saving, settings, settingsFetchSettled]);
 
   const saveImageGenerationSettings = async () => {
     if (!settings || !imageGenerationDirty || imageGenerationSaving) return;

@@ -2129,7 +2129,6 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
-                    onWorkspaceSettingsChange={refreshWorkspaces}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}

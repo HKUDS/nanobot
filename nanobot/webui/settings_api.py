@@ -1399,10 +1399,12 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
             ZoneInfo(timezone)
         except Exception:
             raise WebUISettingsError("invalid timezone") from None
-        if defaults.timezone != timezone:
+        timezone_changed = defaults.timezone != timezone
+        if timezone_changed or defaults.timezone_mode != "manual":
             defaults.timezone = timezone
+            defaults.timezone_mode = "manual"
             changed = True
-            restart_required = True
+            restart_required = timezone_changed
 
     tool_hint_max_length = _query_first_alias(
         query,

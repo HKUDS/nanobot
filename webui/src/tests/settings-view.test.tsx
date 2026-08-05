@@ -30,7 +30,7 @@ function settingsPayload(): SettingsPayload {
       context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      timezone: "UTC",
       tool_hint_max_length: 40,
     },
     model_presets: [{

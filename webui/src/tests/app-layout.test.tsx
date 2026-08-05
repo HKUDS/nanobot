@@ -234,8 +234,6 @@ import {
 import App from "@/App";
 
 describe("App layout", () => {
-  let restoreTimezoneResolvedOptions: (() => void) | null = null;
-
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
@@ -273,8 +271,6 @@ describe("App layout", () => {
   });
 
   afterEach(() => {
-    restoreTimezoneResolvedOptions?.();
-    restoreTimezoneResolvedOptions = null;
     vi.useRealTimers();
   });
 
@@ -2147,11 +2143,10 @@ describe("App layout", () => {
     expect(screen.queryByText("Dream")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
     expect(screen.getByText("Default workspace")).toBeInTheDocument();
-    const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    expect(screen.getByText(detectedTimezone)).toBeInTheDocument();
+    expect(screen.getByText("UTC")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
     expect(screen.queryByRole("listbox", { name: "Select timezone" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: detectedTimezone })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "UTC" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("Connect SDKs and agents through a local /v1 endpoint."),
@@ -2170,42 +2165,22 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
-  it("detects and saves the system timezone without showing a timezone control", async () => {
-    const resolvedOptionsSpy = vi
-      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
-      .mockReturnValue({
-        locale: "en-US",
-        calendar: "gregory",
-        numberingSystem: "latn",
-        timeZone: "Asia/Shanghai",
-      });
-    restoreTimezoneResolvedOptions = () => resolvedOptionsSpy.mockRestore();
+  it("keeps the backend timezone without writing settings on mount", async () => {
     const initialSettings = baseSettingsPayload();
-    const savedSettings = {
-      ...initialSettings,
-      agent: { ...initialSettings.agent, timezone: "Asia/Shanghai" },
-    };
     mockFetchRoutes({
       "/api/settings": initialSettings,
-      "/api/settings/update?timezone=Asia%2FShanghai": savedSettings,
     });
     const fetchMock = vi.mocked(fetch);
     window.history.replaceState(null, "", "/#/settings?section=runtime");
 
     render(<App />);
 
-    expect(await screen.findByText("Asia/Shanghai")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/update?timezone=Asia%2FShanghai",
-        expect.any(Object),
-      ),
-    );
+    expect(await screen.findByText("UTC")).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([input]) =>
         String(input).startsWith("/api/settings/update?timezone="),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(screen.queryByRole("heading", { name: "Regional" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("Used for schedules and time-aware replies."),
