@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
-from nanobot.session.policy import SessionRuntimePolicy
+from nanobot.session.policy import SessionPersistence
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -38,9 +38,9 @@ class ToolRegistry:
         self._tools.pop(name, None)
         self._cached_definitions = None
 
-    def for_runtime_policy(self, policy: SessionRuntimePolicy) -> ToolRegistry:
-        """Return the tools available under a session's runtime policy."""
-        if policy.allow_durable_session_work:
+    def for_persistence(self, persistence: SessionPersistence) -> ToolRegistry:
+        """Return the tools available for a session persistence mode."""
+        if persistence is SessionPersistence.DURABLE:
             return self
         restricted = ToolRegistry()
         for tool in self._tools.values():

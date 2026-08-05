@@ -2,7 +2,6 @@ import asyncio
 import copy
 
 import pytest
-from loguru import logger
 
 from nanobot.providers.base import (
     RETRY_AFTER_BUFFER,
@@ -104,34 +103,6 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
     assert response.content == "503 final server error"
     assert provider.calls == 4
     assert delays == [1, 2, 4]
-
-
-@pytest.mark.asyncio
-async def test_chat_with_retry_redacts_error_content_when_logging_is_disabled(
-    monkeypatch,
-) -> None:
-    provider = ScriptedProvider([
-        LLMResponse(content=f"429 private-error-{index}", finish_reason="error")
-        for index in range(4)
-    ])
-
-    async def _fake_sleep(_delay: int) -> None:
-        return None
-
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
-    records: list[str] = []
-    sink = logger.add(records.append, format="{message}")
-    try:
-        await provider.chat_with_retry(
-            messages=[{"role": "user", "content": "hello"}],
-            provider_context=ProviderCallContext(log_content=False),
-        )
-    finally:
-        logger.remove(sink)
-
-    logs = "".join(records)
-    assert "private-error" not in logs
-    assert "[content omitted]" in logs
 
 
 @pytest.mark.asyncio

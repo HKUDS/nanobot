@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from nanobot.bus.outbound_events import OutboundEvent
-    from nanobot.session.policy import SessionRuntimePolicy
 
 # Optional ``OutboundMessage.metadata`` key for structured, channel-agnostic UI
 # payloads. Value is JSON-serializable with at least ``kind``; rich clients may
@@ -34,8 +33,7 @@ class InboundMessage:
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
-    # Process only while a session with this runtime-only policy remains active.
-    required_session_policy: "SessionRuntimePolicy | None" = None
+    memory_only_session: bool = False  # Message belongs to a live memory-only session.
 
     @property
     def session_key(self) -> str:

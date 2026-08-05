@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from loguru import logger
 
@@ -16,9 +16,6 @@ from nanobot.pairing import (
     generate_code,
     is_approved,
 )
-
-if TYPE_CHECKING:
-    from nanobot.session.policy import SessionRuntimePolicy
 
 
 class BaseChannel(ABC):
@@ -240,7 +237,7 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
         authorization_id: str | None = None,
-        required_session_policy: SessionRuntimePolicy | None = None,
+        memory_only_session: bool = False,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -293,7 +290,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
-            required_session_policy=required_session_policy,
+            memory_only_session=memory_only_session,
         )
 
         await self.bus.publish_inbound(msg)

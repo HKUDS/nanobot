@@ -39,7 +39,6 @@ class AgentTurnHookSpec:
     turn_hooks: list[AgentHook] = field(default_factory=list)
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
-    log_tool_arguments: bool = True
     attributes: dict[str, Any] | None = None
 
 
@@ -52,7 +51,6 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         session_key=spec.session_key,
         tool_hint_max_length=spec.tool_hint_max_length,
         on_iteration=spec.on_iteration,
-        log_tool_arguments=spec.log_tool_arguments,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook

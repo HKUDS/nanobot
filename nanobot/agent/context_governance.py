@@ -118,22 +118,25 @@ class ContextGovernor:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
-        content = result
-        if config.persist_tool_results:
-            try:
-                content = maybe_persist_tool_result(
-                    config.workspace,
-                    config.session_key,
-                    tool_call_id,
-                    result,
-                    max_chars=config.max_tool_result_chars,
-                )
-            except Exception:
-                logger.exception(
-                    "Tool result persist failed for {} in {}; using raw result",
-                    tool_call_id,
-                    config.session_key or "default",
-                )
+        if not config.persist_tool_results:
+            if isinstance(result, str) and len(result) > config.max_tool_result_chars:
+                return truncate_text(result, config.max_tool_result_chars)
+            return result
+        try:
+            content = maybe_persist_tool_result(
+                config.workspace,
+                config.session_key,
+                tool_call_id,
+                result,
+                max_chars=config.max_tool_result_chars,
+            )
+        except Exception:
+            logger.exception(
+                "Tool result persist failed for {} in {}; using raw result",
+                tool_call_id,
+                config.session_key or "default",
+            )
+            content = result
         if isinstance(content, str) and len(content) > config.max_tool_result_chars:
             return truncate_text(content, config.max_tool_result_chars)
         return content

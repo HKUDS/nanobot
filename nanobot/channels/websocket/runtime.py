@@ -52,7 +52,6 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.goal_state import goal_state_ws_blob
-from nanobot.session.policy import MEMORY_ONLY_SESSION_RUNTIME_POLICY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -1079,9 +1078,7 @@ class WebSocketChannel(BaseChannel):
                     metadata=metadata,
                     is_dm=False,
                     session_key=f"{self.name}:{cid}" if temporary else None,
-                    required_session_policy=(
-                        MEMORY_ONLY_SESSION_RUNTIME_POLICY if temporary else None
-                    ),
+                    memory_only_session=temporary,
                 )
                 accepted = True
             finally:

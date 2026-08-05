@@ -175,7 +175,6 @@ class FallbackProvider(LLMProvider):
         return ProviderCallContext(
             conversation_state=provider_context.conversation_state,
             context_window_tokens=context_window_tokens,
-            log_content=provider_context.log_content,
         )
 
     def _primary_available(self) -> bool:
@@ -275,12 +274,6 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
-        request_context = kwargs.get("provider_context")
-        log_content = (
-            request_context.log_content
-            if isinstance(request_context, ProviderCallContext)
-            else True
-        )
         primary_was_attempted = False
         primary_error = "unknown error"
         # A primary error eligible for failover did not return a replacement
@@ -294,11 +287,7 @@ class FallbackProvider(LLMProvider):
                 self._primary_failures = 0
                 self._primary_tripped_at = None
                 return response
-            primary_error = (
-                (response.content or primary_error)[:120]
-                if log_content
-                else "[content omitted]"
-            )
+            primary_error = (response.content or primary_error)[:120]
 
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (response.error_kind or "").lower() == "timeout"
@@ -323,11 +312,7 @@ class FallbackProvider(LLMProvider):
                 logger.warning(
                     "Primary model '{}' returned non-fallbackable error: {}",
                     primary_model,
-                    (
-                        (response.content or "")[:120]
-                        if log_content
-                        else "[content omitted]"
-                    ),
+                    (response.content or "")[:120],
                 )
                 return response
 
@@ -407,7 +392,6 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs["provider_context"] = ProviderCallContext(
                     conversation_state=state,
                     context_window_tokens=context_window_tokens,
-                    log_content=provider_context.log_content,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
@@ -426,11 +410,7 @@ class FallbackProvider(LLMProvider):
             logger.warning(
                 "Fallback '{}' also failed: {}",
                 fallback_model,
-                (
-                    (fallback_response.content or "")[:120]
-                    if log_content
-                    else "[content omitted]"
-                ),
+                (fallback_response.content or "")[:120],
             )
 
         logger.warning(

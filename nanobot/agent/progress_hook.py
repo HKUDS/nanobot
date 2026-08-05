@@ -32,7 +32,6 @@ class AgentProgressHook(AgentHook):
         session_key: str | None = None,
         tool_hint_max_length: int = 40,
         on_iteration: Callable[[int], None] | None = None,
-        log_tool_arguments: bool = True,
     ) -> None:
         super().__init__(reraise=True)
         self._on_progress = on_progress
@@ -41,7 +40,6 @@ class AgentProgressHook(AgentHook):
         self._session_key = session_key
         self._tool_hint_max_length = tool_hint_max_length
         self._on_iteration = on_iteration
-        self._log_tool_arguments = log_tool_arguments
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
@@ -147,14 +145,11 @@ class AgentProgressHook(AgentHook):
                 tool_hint=True,
                 tool_events=[payload],
             )
-            if self._log_tool_arguments:
-                logger.info(
-                    "Provider-hosted tool call: {}({})",
-                    name,
-                    json.dumps(arguments, ensure_ascii=False)[:200],
-                )
-            else:
-                logger.info("Provider-hosted tool call: {}([arguments omitted])", name)
+            logger.info(
+                "Provider-hosted tool call: {}({})",
+                name,
+                json.dumps(arguments, ensure_ascii=False)[:200],
+            )
             return
         if on_progress_accepts_tool_events(self._on_progress):
             await invoke_on_progress(
@@ -179,11 +174,8 @@ class AgentProgressHook(AgentHook):
                 tool_events=tool_events,
             )
         for tc in context.tool_calls:
-            if self._log_tool_arguments:
-                args_str = json.dumps(tc.arguments, ensure_ascii=False)
-                logger.info("Tool call: {}({})", tc.name, args_str[:200])
-            else:
-                logger.info("Tool call: {}([arguments omitted])", tc.name)
+            args_str = json.dumps(tc.arguments, ensure_ascii=False)
+            logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""

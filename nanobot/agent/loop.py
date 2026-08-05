@@ -717,7 +717,7 @@ class AgentLoop:
     def _build_initial_messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
-        policy = ctx.session.runtime_policy
+        memory_only = ctx.session.is_memory_only is True
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
         return self.context.build_messages(
             history=ctx.history,
@@ -727,10 +727,8 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
-            include_long_term_memory=policy.include_automatic_memory_context,
-            include_memory_recent_history=(
-                policy.include_automatic_memory_context and not ctx.ephemeral
-            ),
+            include_long_term_memory=not memory_only,
+            include_memory_recent_history=not memory_only and not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
         )
@@ -806,43 +804,6 @@ class AgentLoop:
                 await t
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
-
-    def _drop_pending_messages(self, key: str) -> int:
-        """Discard follow-up messages already routed into an active turn."""
-        queue = self._pending_queues.get(key)
-        if queue is None:
-            return 0
-        dropped = 0
-        while True:
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                return dropped
-            dropped += 1
-
-    async def _discard_memory_only_session(self, key: str) -> None:
-        """Cancel session-owned runtime work before releasing in-memory state."""
-        self._drop_pending_messages(key)
-        deferred_messages = self._deferred_automation_turns.pop(key, [])
-        for _, coordinator in self._automation_turn_coordinators:
-            coordinator.fail_deferred(deferred_messages)
-        cleanup_failed = False
-        try:
-            await self._cancel_active_tasks(key)
-        except Exception:
-            cleanup_failed = True
-            logger.warning("Failed to cancel all active work for discarded session {}", key)
-        try:
-            await self._exec_session_manager.terminate_by_owner(key)
-        except Exception:
-            cleanup_failed = True
-            logger.warning("Failed to terminate all exec work for discarded session {}", key)
-        self._file_state_store.discard(key)
-        self.runtime_event_publisher.clear_turn(key)
-        if cleanup_failed:
-            logger.warning("Retaining memory-only policy after incomplete cleanup for {}", key)
-            return
-        self.sessions.discard_memory_only(key)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -1099,9 +1060,6 @@ class AgentLoop:
                 turn_hooks=list(hooks or []),
                 ephemeral=ephemeral,
                 run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
-                log_tool_arguments=(
-                    session is None or session.runtime_policy.log_content
-                ),
             ))
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -1140,9 +1098,6 @@ class AgentLoop:
                 persist_tool_results=(
                     session is None or session.is_memory_only is not True
                 ),
-                log_content=(
-                    session is None or session.runtime_policy.log_content
-                ),
             ))
         finally:
             turn_scope_stack.close()
@@ -1171,10 +1126,7 @@ class AgentLoop:
                 await on_stream(stream_content)
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
-            if session is None or session.runtime_policy.log_content:
-                logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-            else:
-                logger.error("LLM returned error: [content omitted]")
+            logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
     def _check_expired_sessions_if_due(self) -> None:
@@ -1217,23 +1169,17 @@ class AgentLoop:
 
                 raw = msg.content.strip()
                 effective_key = self._effective_session_key(msg)
-                required_policy = msg.required_session_policy
-                if required_policy is not None:
-                    active_session = self.sessions.get_cached(effective_key)
-                    if (
-                        active_session is None
-                        or active_session.runtime_policy != required_policy
-                    ):
-                        logger.info(
-                            "Dropping message for inactive runtime session {}",
-                            effective_key,
-                        )
-                        continue
+                if (
+                    msg.memory_only_session
+                    and not self.sessions.is_memory_only_active(effective_key)
+                ):
+                    continue
                 if (
                     msg.metadata.get(INBOUND_META_RUNTIME_CONTROL)
                     == RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD
                 ):
-                    await self._discard_memory_only_session(effective_key)
+                    await self._cancel_active_tasks(effective_key)
+                    self.sessions.discard_memory_only(effective_key)
                     continue
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
@@ -1355,8 +1301,7 @@ class AgentLoop:
                     # _emit_checkpoint during tool execution; materializing
                     # it into session history now makes it visible in the
                     # next conversation turn.
-                    cached = self.sessions.get_cached(session_key)
-                    if cached is not None and cached.is_memory_only is True:
+                    if msg.memory_only_session:
                         raise
                     try:
                         key = self._effective_session_key(msg)
@@ -1635,7 +1580,6 @@ class AgentLoop:
         had_injections: bool,
         streamed_content: bool,
         *,
-        log_content: bool = True,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
@@ -1644,11 +1588,11 @@ class AgentLoop:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
-        if log_content:
+        if not msg.memory_only_session:
             preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
             logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         else:
-            logger.info("Response to {}:{}: [content omitted]", msg.channel, msg.sender_id)
+            logger.info("Response to {}:{}: [memory-only session]", msg.channel, msg.sender_id)
 
         event = None
         meta = dict(msg.metadata or {})
@@ -1677,32 +1621,30 @@ class AgentLoop:
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg
 
-        # Resolve the session at the restore boundary so a required runtime
-        # policy is checked before any durable session can be created.
+        # Resolve the session only after checking any required persistence mode.
         if ctx.session is None:
-            required_policy = msg.required_session_policy
-            if required_policy is None:
-                ctx.session = self.sessions.get_or_create(ctx.session_key)
-            else:
+            if msg.memory_only_session:
                 active_session = self.sessions.get_cached(ctx.session_key)
                 if (
                     active_session is None
-                    or active_session.runtime_policy != required_policy
+                    or active_session.is_memory_only is not True
                 ):
-                    raise RuntimeError("required session runtime policy is not active")
+                    raise RuntimeError("memory-only session is not active")
                 ctx.session = active_session
+            else:
+                ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
         if session.is_memory_only is True:
             ctx.ephemeral = True
-        ctx.tools = (ctx.tools or self.tools).for_runtime_policy(session.runtime_policy)
+        ctx.tools = (ctx.tools or self.tools).for_persistence(session.persistence)
 
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        elif session.runtime_policy.log_content:
+        elif session.is_memory_only is not True:
             preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
         else:
-            logger.info("Processing message from {}:{}: [content omitted]", msg.channel, msg.sender_id)
+            logger.info("Processing memory-only message from {}:{}", msg.channel, msg.sender_id)
 
         self._remember_unified_session_route(
             session,
@@ -2008,7 +1950,6 @@ class AgentLoop:
             ctx.stop_reason,
             ctx.had_injections,
             ctx.streamed_content,
-            log_content=ctx.require_session().runtime_policy.log_content,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         if ctx.ephemeral and ctx.outbound is not None:

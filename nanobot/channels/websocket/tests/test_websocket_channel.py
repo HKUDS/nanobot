@@ -41,7 +41,6 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
-from nanobot.session.policy import MEMORY_ONLY_SESSION_RUNTIME_POLICY
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
@@ -230,7 +229,7 @@ async def test_temporary_chat_is_connection_owned_and_never_persisted(bus, tmp_p
     inbound = bus.publish_inbound.await_args_list[0].args[0]
     assert inbound.session_key == f"websocket:{chat_id}"
     assert inbound.session_key_override == f"websocket:{chat_id}"
-    assert inbound.required_session_policy is MEMORY_ONLY_SESSION_RUNTIME_POLICY
+    assert inbound.memory_only_session is True
     assert inbound.metadata["cli_apps"] == [{"name": "drawio"}]
     assert Path(inbound.media[0]).read_text(encoding="utf-8") == "hello"
     assert sessions.get_cached(inbound.session_key).is_memory_only is True
@@ -248,11 +247,11 @@ async def test_temporary_chat_is_connection_owned_and_never_persisted(bus, tmp_p
     control = bus.publish_inbound.await_args_list[1].args[0]
     assert control.session_key == inbound.session_key
     assert control.session_key_override == inbound.session_key_override
-    assert control.required_session_policy is MEMORY_ONLY_SESSION_RUNTIME_POLICY
+    assert control.memory_only_session is False
     assert control.metadata[INBOUND_META_RUNTIME_CONTROL] == (
         RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD
     )
-    assert sessions.is_memory_only_active(inbound.session_key) is True
+    assert sessions.is_memory_only_active(inbound.session_key) is False
     assert Path(inbound.media[0]).exists() is False
     assert read_transcript_lines(inbound.session_key) == []
 
@@ -339,7 +338,7 @@ async def test_disconnect_discards_temporary_chat(bus, tmp_path) -> None:
     assert control.metadata[INBOUND_META_RUNTIME_CONTROL] == (
         RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD
     )
-    assert sessions.is_memory_only_active(session_key) is True
+    assert sessions.is_memory_only_active(session_key) is False
     assert "temporary-disconnect" not in channel._subs
 
 

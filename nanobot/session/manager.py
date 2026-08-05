@@ -22,12 +22,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
-from nanobot.session.policy import (
-    DEFAULT_SESSION_RUNTIME_POLICY,
-    MEMORY_ONLY_SESSION_RUNTIME_POLICY,
-    SessionPersistence,
-    SessionRuntimePolicy,
-)
+from nanobot.session.policy import SessionPersistence
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -163,8 +158,8 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
-    runtime_policy: SessionRuntimePolicy = field(
-        default=DEFAULT_SESSION_RUNTIME_POLICY,
+    persistence: SessionPersistence = field(
+        default=SessionPersistence.DURABLE,
         repr=False,
         compare=False,
     )
@@ -197,7 +192,7 @@ class Session:
     @property
     def is_memory_only(self) -> bool:
         """Return whether this session must remain outside durable storage."""
-        return self.runtime_policy.persistence is SessionPersistence.MEMORY_ONLY
+        return self.persistence is SessionPersistence.MEMORY_ONLY
 
     def get_history(
         self,
@@ -1075,12 +1070,12 @@ class SessionManager:
         return session
 
     def get_or_create_memory_only(self, key: str) -> Session:
-        """Return a live session whose runtime policy forbids durable storage."""
+        """Return a live session that can never reach durable storage."""
         session = self._memory_only_sessions.get(key)
         if session is None:
             self._cache.pop(key, None)
             self._overflow_cache.pop(key, None)
-            session = Session(key=key, runtime_policy=MEMORY_ONLY_SESSION_RUNTIME_POLICY)
+            session = Session(key=key, persistence=SessionPersistence.MEMORY_ONLY)
             self._memory_only_sessions[key] = session
         return session
 

@@ -9,7 +9,6 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD,
     InboundMessage,
 )
-from nanobot.session.policy import MEMORY_ONLY_SESSION_RUNTIME_POLICY
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -69,14 +68,16 @@ class TemporaryChats:
             return "temporary_chat_not_owned"
         self._owners.pop(chat_id, None)
         self._by_owner.pop(owner, None)
+        session_key = f"websocket:{chat_id}"
+        assert self._sessions is not None
+        self._sessions.discard_memory_only(session_key)
         self._media.discard_inbound_attachments(self._attachments.pop(chat_id, []))
         await self._bus.publish_inbound(InboundMessage(
             channel="websocket",
             sender_id="webui",
             chat_id=chat_id,
             content="",
-            session_key_override=f"websocket:{chat_id}",
-            required_session_policy=MEMORY_ONLY_SESSION_RUNTIME_POLICY,
+            session_key_override=session_key,
             metadata={
                 INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MEMORY_ONLY_SESSION_DISCARD,
             },
