@@ -169,13 +169,13 @@ def _status(*, running: bool, managed: bool, reason: str) -> ProcessStatus:
     )
 
 
-def _patch_api_service_deps(monkeypatch, status: ProcessStatus) -> None:
+def _patch_api_service_deps(monkeypatch, status: ProcessStatus, *, config_path: Path) -> None:
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.load_config",
         lambda: SimpleNamespace(api=_api_config(), workspace_path=Path("/tmp/workspace")),
     )
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.get_config_path", lambda: Path("/tmp/config.json")
+        "nanobot.webui.settings_routes.get_config_path", lambda: config_path
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ApiRuntime.effective_status",
@@ -190,8 +190,11 @@ def _patch_api_service_deps(monkeypatch, status: ProcessStatus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_service_payload_reports_externally_managed(monkeypatch) -> None:
-    _patch_api_service_deps(monkeypatch, _status(running=True, managed=False, reason="external"))
+async def test_api_service_payload_reports_externally_managed(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    _patch_api_service_deps(
+        monkeypatch, _status(running=True, managed=False, reason="external"), config_path=config_path
+    )
     request = SimpleNamespace(path="/api/settings/api-service", headers=Headers())
 
     response = await _router().dispatch(None, request, "/api/settings/api-service")
@@ -202,12 +205,16 @@ async def test_api_service_payload_reports_externally_managed(monkeypatch) -> No
     assert body["running"] is True
     assert body["managed"] is False
     assert body["endpoint"] == "http://127.0.0.1:8900/v1"
-    assert body["config_path"] == "/tmp/config.json"
+    assert body["config_path"] == str(config_path)
 
 
 @pytest.mark.asyncio
-async def test_api_service_payload_reports_managed_running(monkeypatch) -> None:
-    _patch_api_service_deps(monkeypatch, _status(running=True, managed=True, reason="running"))
+async def test_api_service_payload_reports_managed_running(monkeypatch, tmp_path) -> None:
+    _patch_api_service_deps(
+        monkeypatch,
+        _status(running=True, managed=True, reason="running"),
+        config_path=tmp_path / "config.json",
+    )
     request = SimpleNamespace(path="/api/settings/api-service", headers=Headers())
 
     response = await _router().dispatch(None, request, "/api/settings/api-service")
@@ -219,8 +226,12 @@ async def test_api_service_payload_reports_managed_running(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_service_payload_reports_off(monkeypatch) -> None:
-    _patch_api_service_deps(monkeypatch, _status(running=False, managed=False, reason="not_started"))
+async def test_api_service_payload_reports_off(monkeypatch, tmp_path) -> None:
+    _patch_api_service_deps(
+        monkeypatch,
+        _status(running=False, managed=False, reason="not_started"),
+        config_path=tmp_path / "config.json",
+    )
     request = SimpleNamespace(path="/api/settings/api-service", headers=Headers())
 
     response = await _router().dispatch(None, request, "/api/settings/api-service")
@@ -232,8 +243,12 @@ async def test_api_service_payload_reports_off(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_service_start_refuses_external(monkeypatch) -> None:
-    _patch_api_service_deps(monkeypatch, _status(running=True, managed=False, reason="external"))
+async def test_api_service_start_refuses_external(monkeypatch, tmp_path) -> None:
+    _patch_api_service_deps(
+        monkeypatch,
+        _status(running=True, managed=False, reason="external"),
+        config_path=tmp_path / "config.json",
+    )
     request = SimpleNamespace(path="/api/settings/api-service/start", headers=Headers())
 
     response = await _router().dispatch(None, request, "/api/settings/api-service/start")
@@ -244,8 +259,12 @@ async def test_api_service_start_refuses_external(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_service_stop_refuses_external(monkeypatch) -> None:
-    _patch_api_service_deps(monkeypatch, _status(running=True, managed=False, reason="external"))
+async def test_api_service_stop_refuses_external(monkeypatch, tmp_path) -> None:
+    _patch_api_service_deps(
+        monkeypatch,
+        _status(running=True, managed=False, reason="external"),
+        config_path=tmp_path / "config.json",
+    )
     request = SimpleNamespace(path="/api/settings/api-service/stop", headers=Headers())
 
     response = await _router().dispatch(None, request, "/api/settings/api-service/stop")

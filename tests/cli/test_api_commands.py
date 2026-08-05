@@ -27,7 +27,7 @@ def _test_app(tmp_path: Path, status: ProcessStatus) -> typer.Typer:
 
     app.add_typer(
         create_api_app(
-            console=Console(),
+            console=Console(width=200),
             load_runtime_config=load_runtime_config,
             runtime_factory=lambda **_kwargs: FakeRuntime(status),
         ),
