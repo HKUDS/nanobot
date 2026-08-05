@@ -7,6 +7,7 @@ from pathlib import Path
 
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.providers.capabilities import FAST_MODE, NATIVE_SEARCH, resolve_provider_capability
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
@@ -148,6 +149,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            fast_mode=resolve_provider_capability(spec, p, FAST_MODE),
         )
     elif backend == "xai_grok":
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
@@ -156,6 +158,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            native_search=resolve_provider_capability(spec, p, NATIVE_SEARCH) is True,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
@@ -204,6 +207,7 @@ def _make_provider_core(
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
+            native_search=resolve_provider_capability(spec, p, NATIVE_SEARCH),
         )
 
     provider.generation = preset.to_generation_settings()
@@ -315,6 +319,7 @@ def provider_signature(
             fallback.context_window_tokens,
             getattr(fp, "proxy", None) if fp else None,
             fp.thinking_style if fp else None,
+            fp.capabilities if fp else None,
         )
 
     provider_name = config.get_provider_name(resolved.model, preset=resolved)
@@ -336,6 +341,7 @@ def provider_signature(
         resolved.context_window_tokens,
         getattr(p, "proxy", None) if p else None,
         p.thinking_style if p else None,
+        p.capabilities if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 

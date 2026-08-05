@@ -140,6 +140,34 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
 
 
 @pytest.mark.asyncio
+async def test_native_search_switch_disables_catalog_lookup_and_hosted_tool(monkeypatch) -> None:
+    _mock_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    async def unexpected_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("disabled native search must not fetch model capabilities")
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
+        unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider(
+        native_search=False,
+        extra_body={"tools": [{"type": "x_search"}]},
+    )
+
+    response = await provider.chat([{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert bodies[0]["tools"] == []
+
+
+@pytest.mark.asyncio
 async def test_provider_keeps_local_x_search_when_model_does_not_support_hosted_search(
     monkeypatch,
 ) -> None:

@@ -537,6 +537,11 @@ export interface SettingsPayload {
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
     proxy?: string | null;
+    capabilities?: Array<{
+      name: string;
+      enabled: boolean;
+      default_enabled?: boolean;
+    }>;
     advanced_fields?: Array<
       | "api_type"
       | "extra_headers"
@@ -1068,6 +1073,7 @@ export interface ProviderSettingsUpdate {
   apiBase?: string;
   apiType?: "auto" | "chat_completions" | "responses";
   proxy?: string;
+  capabilities?: Record<string, boolean>;
   extraHeaders?: string;
   extraBody?: string;
   extraQuery?: string;

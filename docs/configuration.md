@@ -330,6 +330,31 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
+Provider-hosted web search can be enabled from the WebUI provider settings, or with the
+equivalent structured capability setting. It routes compatible models through Responses,
+adds the native search tool, and surfaces search activity in chat:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "capabilities": {
+        "native_search": true
+      }
+    }
+  }
+}
+```
+
+Existing `extraBody` forms for these capabilities remain compatible. Once a capability is
+explicitly set, its switch takes precedence—including `false`, which removes the managed
+provider-hosted tool or service tier from outgoing requests.
+
+When native search is enabled, its provider-hosted tool replaces nanobot's same-name local
+`web_search` function in that model request. This prevents duplicate searches while leaving
+other tools, including `web_fetch`, available.
+
 `extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
@@ -339,13 +364,38 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
       "apiKey": "${OPENAI_API_KEY}",
       "apiType": "responses",
       "extraBody": {
-        "tools": [{ "type": "web_search" }],
-        "include": ["web_search_call.action.sources"]
+        "metadata": { "team": "agents" }
       }
     }
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>DeepSeek native web search</b></summary>
+
+DeepSeek V4 Flash uses DeepSeek's native Responses API. Its provider-hosted web search is
+enabled by default because it does not require a separate paid add-on. Turn it off from the
+WebUI provider settings, or with:
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "capabilities": {
+        "native_search": false
+      }
+    }
+  }
+}
+```
+
+The switch applies to `deepseek-v4-flash`; DeepSeek models that remain on Chat Completions
+cannot use this Responses tool. Native search calls appear in the WebUI activity stream, and
+their opaque output items are preserved for multi-turn Responses state replay.
 
 </details>
 
@@ -695,23 +745,23 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
-To opt in to Codex Fast mode, merge this provider setting into `config.json`:
+Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json
 {
   "providers": {
     "openaiCodex": {
-      "extraBody": {
-        "service_tier": "priority"
+      "capabilities": {
+        "fast_mode": true
       }
     }
   }
 }
 ```
 
-`priority` is the Responses API request value used by Codex Fast mode. The setting only works
-for models and accounts that support Fast mode; remove `service_tier` to return to standard
-processing. Fast mode consumes Codex credits at a higher rate. See the
+The switch sends the Responses API `service_tier: "priority"` value. It only works for models
+and accounts that support Fast mode; turn the switch off to return to standard processing.
+Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
@@ -735,6 +785,8 @@ The provider reads xAI's model catalog and includes the server-hosted `x_search`
 tool only when the selected model advertises `supportsBackendSearch`. Models
 without that capability continue normally without hosted X Search. When enabled,
 searches run inside xAI's Responses API and citations arrive as inline links.
+Hosted X Search is on by default to preserve this behavior. It can be turned off in the
+WebUI provider settings or with `providers.xaiGrok.capabilities.native_search: false`.
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
 public OAuth client and proxy contract used by

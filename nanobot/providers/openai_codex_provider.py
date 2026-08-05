@@ -50,11 +50,13 @@ class OpenAICodexProvider(LLMProvider):
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        fast_mode: bool | None = None,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
+        self._fast_mode = fast_mode
         self._native_compaction_available = True
 
     async def _call_codex(
@@ -112,6 +114,12 @@ class OpenAICodexProvider(LLMProvider):
         if self._extra_body:
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
+        if self._fast_mode is True:
+            body["service_tier"] = "priority"
+        elif self._fast_mode is False:
+            service_tier = body.get("service_tier")
+            if isinstance(service_tier, str) and service_tier.lower() == "priority":
+                body.pop("service_tier")
 
         stage = "oauth_token"
         try:

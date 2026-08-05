@@ -3101,6 +3101,129 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
+  it("shows and saves provider-native capability switches", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "grok@example.com",
+        oauth_login_supported: true,
+        capabilities: [{ name: "native_search", enabled: true, default_enabled: true }],
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "codex@example.com",
+        oauth_login_supported: true,
+        capabilities: [{ name: "fast_mode", enabled: false, default_enabled: false }],
+      },
+      {
+        name: "deepseek",
+        label: "DeepSeek",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "deep••••test",
+        api_base: "https://api.deepseek.com",
+        capabilities: [{ name: "native_search", enabled: true, default_enabled: true }],
+      },
+      {
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        capabilities: [{ name: "native_search", enabled: false, default_enabled: false }],
+      },
+    ];
+    const payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const [input] = args;
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    const xSearch = screen.getByRole("switch", { name: "X Search" });
+    expect(xSearch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(xSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=xai_grok",
+      expect.anything(),
+    ));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Save provider" }),
+    ).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=openai_codex",
+      expect.anything(),
+    ));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Save provider" }),
+    ).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
+    expect(screen.getByText(/DeepSeek V4 Flash/)).toBeInTheDocument();
+    const deepSeekSearch = screen.getByRole("switch", { name: "DeepSeek web search" });
+    expect(deepSeekSearch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(deepSeekSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(
+      screen.queryByRole("switch", { name: "DeepSeek web search" }),
+    ).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(
+      screen.queryByRole("switch", { name: "OpenAI web search" }),
+    ).not.toBeInTheDocument());
+
+    await waitFor(() => {
+      const capabilityUpdates = fetchMock.mock.calls
+        .filter(([input]) => String(input).startsWith("/api/settings/provider/update?"))
+        .map(([input, init]) => {
+          const provider = new URLSearchParams(String(input).split("?")[1]).get("provider");
+          const headers = init?.headers as Record<string, string>;
+          const values = JSON.parse(decodeURIComponent(
+            headers["X-Nanobot-Provider-Values"],
+          )) as { capabilities?: Record<string, boolean> };
+          return [provider, values.capabilities] as const;
+        });
+      expect(capabilityUpdates).toEqual([
+        ["xai_grok", { native_search: false }],
+        ["openai_codex", { fast_mode: true }],
+        ["deepseek", { native_search: false }],
+        ["openai", { native_search: true }],
+      ]);
+    });
+  });
+
   it("creates a custom provider with folded advanced request settings", async () => {
     const base = settingsPayload();
     let payload: SettingsPayload = {

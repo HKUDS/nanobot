@@ -216,6 +216,10 @@ class ProviderConfig(Base):
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
     proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+    capabilities: dict[str, bool] = Field(
+        default_factory=dict,
+        exclude_if=lambda value: not value,
+    )  # Explicit provider-native feature switches; supported names come from the provider registry
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
     # nanobot/providers/openai_compat_provider.py. Kept duplicated here to
@@ -319,16 +323,43 @@ class ProvidersConfig(Base):
         return self
 
     @model_validator(mode="after")
-    def _validate_api_type_scope(self) -> "ProvidersConfig":
+    def _validate_provider_options(self) -> "ProvidersConfig":
+        from nanobot.providers.registry import find_by_name
+
         for name in self.__class__.model_fields:
-            if name == "openai":
-                continue
             provider = getattr(self, name, None)
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
+            if not isinstance(provider, ProviderConfig):
+                continue
+            if name != "openai" and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+            if provider.capabilities:
+                spec = find_by_name(name)
+                supported: set[str] = (
+                    {capability.name for capability in spec.capabilities} if spec else set()
+                )
+                unknown = set(provider.capabilities) - supported
+                if unknown:
+                    capability = sorted(unknown)[0]
+                    raise ValueError(
+                        f"providers.{name}.capabilities.{capability} is not supported"
+                    )
+            if (
+                name == "openai"
+                and provider.api_type == "chat_completions"
+                and provider.capabilities.get("native_search") is True
+            ):
+                raise ValueError(
+                    "providers.openai.capabilities.native_search requires "
+                    "providers.openai.api_type to be auto or responses"
+                )
         for provider in (self.model_extra or {}).values():
             if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+            if isinstance(provider, ProviderConfig) and provider.capabilities:
+                capability = sorted(provider.capabilities)[0]
+                raise ValueError(
+                    f"custom provider capability {capability!r} is not supported"
+                )
         return self
 
 

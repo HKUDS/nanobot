@@ -46,6 +46,18 @@ _SENSITIVE_ERROR_KEYS = {
 }
 
 
+def _is_hosted_x_search_tool(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return cast(dict[object, object], value).get("type") == "x_search"
+
+
+def _is_named_x_search_tool(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return cast(dict[object, object], value).get("name") == "x_search"
+
+
 class XAIGrokProvider(LLMProvider):
     """Call xAI's subscription proxy and expose supported hosted tools."""
 
@@ -56,11 +68,13 @@ class XAIGrokProvider(LLMProvider):
         default_model: str = DEFAULT_XAI_GROK_MODEL,
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        native_search: bool = True,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
+        self._native_search = native_search
         self._model_capabilities: dict[str, bool] | None = None
         self._model_capabilities_fetched_at = 0.0
 
@@ -112,14 +126,11 @@ class XAIGrokProvider(LLMProvider):
         stage = "oauth_token"
         try:
             token = await asyncio.to_thread(get_xai_oauth_token, proxy=self.proxy)
-            stage = "model_capabilities"
-            supports_backend_search = await self._supports_backend_search(token, wire_model)
+            supports_backend_search = False
+            if self._native_search:
+                stage = "model_capabilities"
+                supports_backend_search = await self._supports_backend_search(token, wire_model)
             converted_tools = convert_tools(tools or [])
-            if supports_backend_search:
-                converted_tools = [
-                    tool for tool in converted_tools if tool.get("name") != "x_search"
-                ]
-                converted_tools.append({"type": "x_search"})
 
             body: dict[str, Any] = {
                 "model": wire_model,
@@ -138,6 +149,19 @@ class XAIGrokProvider(LLMProvider):
             }
             if self._extra_body:
                 body.update(self._extra_body)
+            configured_tools = body.get("tools")
+            if isinstance(configured_tools, list):
+                normalized_tools: list[object] = [
+                    tool
+                    for tool in cast(list[object], configured_tools)
+                    if not _is_hosted_x_search_tool(tool)
+                ]
+                if supports_backend_search:
+                    normalized_tools = [
+                        tool for tool in normalized_tools if not _is_named_x_search_tool(tool)
+                    ]
+                    normalized_tools.append({"type": "x_search"})
+                body["tools"] = normalized_tools
 
             headers = _build_headers(token.access, wire_model)
             stage = "xai_request"

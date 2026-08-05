@@ -20,6 +20,12 @@ FINISH_REASON_MAP = {
     "cancelled": "error",
 }
 REPLAYABLE_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
+_MAX_HOSTED_SEARCH_CALL_ID_CHARS = 200
+_MAX_HOSTED_SEARCH_QUERY_CHARS = 1000
+_MAX_HOSTED_SEARCH_QUERIES = 4
+_MAX_HOSTED_SEARCH_SOURCES = 8
+_MAX_HOSTED_SEARCH_TITLE_CHARS = 300
+_MAX_HOSTED_SEARCH_URL_CHARS = 2048
 
 
 @dataclass(slots=True)
@@ -87,6 +93,184 @@ def _response_object_list(value: object) -> list[dict[str, Any]]:
         for raw in cast(list[object], value)
         if (item := _response_object(raw)) is not None
     ]
+
+
+@dataclass(slots=True)
+class _HostedWebSearchState:
+    arguments: dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    started: bool = False
+    ended: bool = False
+
+
+def _first_nonempty_string(*values: object) -> str | None:
+    return next(
+        (value.strip() for value in values if isinstance(value, str) and value.strip()),
+        None,
+    )
+
+
+def _hosted_web_search_arguments(*values: object) -> dict[str, Any]:
+    for value in values:
+        item = _response_object(value) or {}
+        action = _response_object(item.get("action")) or {}
+        query_values = action.get("queries", item.get("queries"))
+        queries = (
+            [
+                query.strip()
+                for query in cast(list[object], query_values)
+                if isinstance(query, str) and query.strip()
+            ][:_MAX_HOSTED_SEARCH_QUERIES]
+            if isinstance(query_values, list)
+            else []
+        )
+        query = " · ".join(queries) or _first_nonempty_string(
+            action.get("query"),
+            item.get("query"),
+        )
+        if query is not None:
+            return {"query": query[:_MAX_HOSTED_SEARCH_QUERY_CHARS]}
+    return {}
+
+
+def _hosted_web_search_result(item_value: object, status: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"status": status}
+    item = _response_object(item_value) or {}
+    action = _response_object(item.get("action")) or {}
+    sources = action.get("sources")
+    if not isinstance(sources, list):
+        return result
+
+    visible_sources: list[dict[str, str]] = []
+    for source_value in cast(list[object], sources):
+        source = _response_object(source_value) or {}
+        url = source.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        visible_source = {"url": url.strip()[:_MAX_HOSTED_SEARCH_URL_CHARS]}
+        title = source.get("title")
+        if isinstance(title, str) and title.strip():
+            visible_source["title"] = title.strip()[:_MAX_HOSTED_SEARCH_TITLE_CHARS]
+        visible_sources.append(visible_source)
+        if len(visible_sources) >= _MAX_HOSTED_SEARCH_SOURCES:
+            break
+    if visible_sources:
+        result["sources"] = visible_sources
+    return result
+
+
+def _hosted_web_search_call_id(event: object, item: object) -> str | None:
+    event_object = _response_object(event) or {}
+    item_object = _response_object(item) or {}
+    call_id = _first_nonempty_string(
+        item_object.get("id"),
+        item_object.get("call_id"),
+        event_object.get("item_id"),
+        event_object.get("call_id"),
+        event_object.get("id"),
+    )
+    if call_id is not None:
+        return call_id[:_MAX_HOSTED_SEARCH_CALL_ID_CHARS]
+    output_index = event_object.get("output_index")
+    if isinstance(output_index, int) and not isinstance(output_index, bool):
+        return f"web-search-{output_index}"
+    return None
+
+
+def _hosted_web_search_events(
+    event: object,
+    event_type: object,
+    states: dict[str, _HostedWebSearchState],
+) -> list[dict[str, Any]]:
+    """Normalize Responses web-search lifecycle events for the agent progress hook."""
+    if not isinstance(event_type, str):
+        return []
+
+    event_object = _response_object(event) or {}
+    item_value = event_object.get("item")
+    item = _response_object(item_value) or {}
+    is_item_event = event_type in {
+        "response.output_item.added",
+        "response.output_item.done",
+    }
+    is_search_item = is_item_event and item.get("type") == "web_search_call"
+    lifecycle_phase: str | None = None
+    if event_type in {
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+    } or (is_search_item and event_type == "response.output_item.added"):
+        lifecycle_phase = "start"
+    elif is_search_item and event_type == "response.output_item.done":
+        lifecycle_phase = "end"
+
+    if lifecycle_phase is None:
+        if event_type not in {"response.completed", "response.incomplete"}:
+            return []
+        terminal_status = event_type.removeprefix("response.")
+        completed: list[dict[str, Any]] = []
+        for call_id, state in states.items():
+            if not state.started or state.ended:
+                continue
+            state.ended = True
+            state.result = {"status": terminal_status}
+            completed.append({
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": call_id,
+                "name": "web_search",
+                "arguments": state.arguments,
+                "result": state.result,
+            })
+        return completed
+
+    call_id = _hosted_web_search_call_id(event, item_value)
+    if call_id is None:
+        return []
+    state = states.setdefault(call_id, _HostedWebSearchState())
+    arguments = _hosted_web_search_arguments(item_value, event)
+    arguments_changed = bool(arguments) and arguments != state.arguments
+    if arguments_changed:
+        state.arguments = arguments
+
+    normalized: list[dict[str, Any]] = []
+    if not state.started:
+        state.started = True
+        normalized.append({
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": call_id,
+            "name": "web_search",
+            "arguments": state.arguments,
+            "result": None,
+        })
+    elif lifecycle_phase == "start" and arguments_changed and not state.ended:
+        normalized.append({
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": call_id,
+            "name": "web_search",
+            "arguments": state.arguments,
+            "result": None,
+        })
+
+    if lifecycle_phase == "end":
+        status = item.get("status")
+        if not isinstance(status, str) or not status:
+            status = "completed"
+        result = _hosted_web_search_result(item_value, status)
+        if not state.ended or result != state.result:
+            state.ended = True
+            state.result = result
+            normalized.append({
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": call_id,
+                "name": "web_search",
+                "arguments": state.arguments,
+                "result": result,
+            })
+    return normalized
 
 
 def map_finish_reason(status: str | None) -> str:
@@ -269,11 +453,19 @@ async def consume_sse_with_reasoning(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
+    hosted_web_searches: dict[str, _HostedWebSearchState] = {}
 
     async for event in iter_sse(response):
         if on_response_event:
             await on_response_event(event)
         event_type = event.get("type")
+        if on_tool_call_delta:
+            for hosted_event in _hosted_web_search_events(
+                event,
+                event_type,
+                hosted_web_searches,
+            ):
+                await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = _as_json_object(event.get("item")) or {}
             if item.get("type") == "function_call":
@@ -555,10 +747,18 @@ async def consume_sdk_stream(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
+    hosted_web_searches: dict[str, _HostedWebSearchState] = {}
 
     async for raw_event in stream:
         event: Any = raw_event
         event_type = getattr(event, "type", None)
+        if on_tool_call_delta:
+            for hosted_event in _hosted_web_search_events(
+                event,
+                event_type,
+                hosted_web_searches,
+            ):
+                await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = getattr(event, "item", None)
             if item and getattr(item, "type", None) == "function_call":

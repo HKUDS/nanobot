@@ -162,7 +162,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include={"proxy", "extra_body"},
+            include={"proxy", "extra_body", "capabilities"},
             exclude_none=True,
         )
         if settings:

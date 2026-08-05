@@ -264,6 +264,7 @@ type ProviderForm = {
   apiBase: string;
   apiType: ProviderApiType;
   proxy: string;
+  capabilities: Record<string, boolean>;
   extraHeaders: string;
   extraBody: string;
   extraQuery: string;
@@ -306,6 +307,14 @@ function providerJsonValue(value: Record<string, unknown> | null | undefined): s
   return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
 }
 
+function providerCapabilityValues(
+  provider: SettingsPayload["providers"][number],
+): Record<string, boolean> {
+  return Object.fromEntries(
+    (provider.capabilities ?? []).map((capability) => [capability.name, capability.enabled]),
+  );
+}
+
 function providerFormFromRow(
   provider: SettingsPayload["providers"][number],
 ): ProviderForm {
@@ -315,6 +324,7 @@ function providerFormFromRow(
     apiBase: provider.api_base ?? provider.default_api_base ?? "",
     apiType: provider.api_type ?? "auto",
     proxy: provider.proxy ?? "",
+    capabilities: providerCapabilityValues(provider),
     extraHeaders: providerJsonValue(provider.extra_headers),
     extraBody: providerJsonValue(provider.extra_body),
     extraQuery: providerJsonValue(provider.extra_query),
@@ -332,6 +342,7 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     apiBase: "",
     apiType: "auto",
     proxy: "",
+    capabilities: {},
     extraHeaders: "",
     extraBody: "",
     extraQuery: "",
@@ -1497,6 +1508,9 @@ export function SettingsView({
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+      }
+      if ((provider.capabilities ?? []).length > 0) {
+        update.capabilities = providerForm.capabilities;
       }
       for (const field of provider.advanced_fields ?? []) {
         if (field === "api_type") update.apiType = providerForm.apiType;
@@ -3852,16 +3866,122 @@ function ModelAdvancedFields({
   );
 }
 
+function ProviderCapabilityOptions({
+  providerName,
+  capabilities,
+  values,
+  onChange,
+}: {
+  providerName: string;
+  capabilities: NonNullable<SettingsPayload["providers"][number]["capabilities"]>;
+  values: Record<string, boolean>;
+  onChange: (values: Record<string, boolean>) => void;
+}) {
+  const { t } = useTranslation();
+  if (capabilities.length === 0) return null;
+
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const presentation = (name: string): {
+    title: string;
+    description: string;
+    icon: LucideIcon;
+  } => {
+    if (name === "fast_mode") {
+      return {
+        title: tx("settings.providers.capabilityFastMode", "Fast mode"),
+        description: tx(
+          "settings.providers.capabilityFastModeHelp",
+          "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+        ),
+        icon: Zap,
+      };
+    }
+    if (name === "native_search" && providerName === "deepseek") {
+      return {
+        title: tx("settings.providers.capabilityDeepSeekSearch", "DeepSeek web search"),
+        description: tx(
+          "settings.providers.capabilityDeepSeekSearchHelp",
+          "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
+        ),
+        icon: Globe2,
+      };
+    }
+    if (name === "native_search" && providerName === "xai_grok") {
+      return {
+        title: tx("settings.providers.capabilityXSearch", "X Search"),
+        description: tx(
+          "settings.providers.capabilityXSearchHelp",
+          "Allow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
+        ),
+        icon: Globe2,
+      };
+    }
+    if (name === "native_search" && providerName === "openai") {
+      return {
+        title: tx("settings.providers.capabilityOpenAISearch", "OpenAI web search"),
+        description: tx(
+          "settings.providers.capabilityOpenAISearchHelp",
+          "Allow compatible Responses API models to search the web. Search activity appears in chat.",
+        ),
+        icon: Globe2,
+      };
+    }
+    return {
+      title: name.replaceAll("_", " "),
+      description: tx(
+        "settings.providers.capabilityGenericHelp",
+        "Enable this provider-hosted capability for new model requests.",
+      ),
+      icon: Sparkles,
+    };
+  };
+
+  return (
+    <div className="overflow-hidden rounded-[18px] border border-border/45 bg-background/75">
+      {capabilities.map((capability, index) => {
+        const details = presentation(capability.name);
+        const Icon = details.icon;
+        const checked = values[capability.name] ?? capability.enabled;
+        return (
+          <div
+            key={capability.name}
+            className={cn(
+              "flex items-center justify-between gap-4 px-4 py-3",
+              index > 0 && "border-t border-border/45",
+            )}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
+                <Icon className="h-4 w-4" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-foreground">{details.title}</p>
+                <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+                  {details.description}
+                </p>
+              </div>
+            </div>
+            <ToggleButton
+              checked={checked}
+              onChange={(enabled) => onChange({ ...values, [capability.name]: enabled })}
+              ariaLabel={details.title}
+              label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ProviderAdvancedOptions({
   fields,
   form,
   onChange,
-  footer,
 }: {
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
-  footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -4058,18 +4178,13 @@ function ProviderAdvancedOptions({
                 <Textarea
                   value={form.extraBody}
                   onChange={(event) => onChange({ extraBody: event.target.value })}
-                  placeholder={'{"service_tier":"priority"}'}
+                  placeholder={'{"custom_field":"value"}'}
                   spellCheck={false}
                   className="min-h-[96px] resize-y rounded-[14px] bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
           </div>
-          {footer ? (
-            <div className="mt-3 flex items-center justify-end gap-2 border-t border-border/45 pt-3">
-              {footer}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -4171,15 +4286,23 @@ function ProvidersSettings({
     const isOauthProvider = provider.auth_type === "oauth";
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
+    const capabilityRows = provider.capabilities ?? [];
+    const supportsOauthProviderSettings =
+      isOauthProvider && (supportsOauthAdvancedSettings || capabilityRows.length > 0);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
+    const capabilitiesDirty = capabilityRows.some(
+      (capability) => (form.capabilities[capability.name] ?? capability.enabled)
+        !== capability.enabled,
+    );
     const oauthSettingsDirty = isOauthProvider && (
       form.proxy.trim() !== (provider.proxy ?? "").trim()
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
+      || capabilitiesDirty
     );
     const oauthSettingsSaving = saving && oauthSettingsDirty;
     const oauthActionBusy = saving && !oauthSettingsSaving;
@@ -4193,7 +4316,8 @@ function ProvidersSettings({
       || form.extraQuery.trim()
       || form.thinkingStyle.trim()
       || form.region.trim()
-      || form.profile.trim(),
+      || form.profile.trim()
+      || capabilitiesDirty,
     );
     const missingOptionalCredential =
       !isOauthProvider
@@ -4320,42 +4444,49 @@ function ProvidersSettings({
                     </Button>
                   </div>
                 </div>
+                <ProviderCapabilityOptions
+                  providerName={provider.name}
+                  capabilities={capabilityRows}
+                  values={form.capabilities}
+                  onChange={(capabilities) =>
+                    onChangeProviderForm(provider.name, { capabilities })}
+                />
                 {supportsOauthAdvancedSettings ? (
                   <ProviderAdvancedOptions
                     fields={advancedFields}
                     form={form}
                     onChange={(value) => onChangeProviderForm(provider.name, value)}
-                    footer={
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => toggleProvider(provider.name)}
-                          disabled={saving}
-                          className="rounded-full"
-                        >
-                          {t("settings.actions.cancel")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onSaveProvider(provider.name)}
-                          disabled={saving || !oauthSettingsDirty}
-                          className="rounded-full"
-                        >
-                          {oauthSettingsSaving ? (
-                            <Loader2
-                              className="mr-1.5 h-3.5 w-3.5 animate-spin"
-                              aria-hidden
-                            />
-                          ) : null}
-                          {oauthSettingsSaving
-                            ? t("settings.actions.saving")
-                            : tx("settings.providers.saveProvider", "Save provider")}
-                        </Button>
-                      </>
-                    }
                   />
+                ) : null}
+                {supportsOauthProviderSettings ? (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => toggleProvider(provider.name)}
+                      disabled={saving}
+                      className="rounded-full"
+                    >
+                      {t("settings.actions.cancel")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onSaveProvider(provider.name)}
+                      disabled={saving || !oauthSettingsDirty}
+                      className="rounded-full"
+                    >
+                      {oauthSettingsSaving ? (
+                        <Loader2
+                          className="mr-1.5 h-3.5 w-3.5 animate-spin"
+                          aria-hidden
+                        />
+                      ) : null}
+                      {oauthSettingsSaving
+                        ? t("settings.actions.saving")
+                        : tx("settings.providers.saveProvider", "Save provider")}
+                    </Button>
+                  </div>
                 ) : null}
               </>
             ) : (
@@ -4445,6 +4576,13 @@ function ProvidersSettings({
                     className="h-9 rounded-full text-[13px]"
                   />
                 </label>
+                <ProviderCapabilityOptions
+                  providerName={provider.name}
+                  capabilities={capabilityRows}
+                  values={form.capabilities}
+                  onChange={(capabilities) =>
+                    onChangeProviderForm(provider.name, { capabilities })}
+                />
                 <ProviderAdvancedOptions
                   fields={advancedFields}
                   form={form}
