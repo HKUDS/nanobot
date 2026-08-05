@@ -361,6 +361,7 @@ async def test_health_endpoint(aiohttp_client, app) -> None:
     assert resp.status == 200
     body = await resp.json()
     assert body["status"] == "ok"
+    assert body["service"] == "nanobot"
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")

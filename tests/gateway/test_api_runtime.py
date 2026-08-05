@@ -74,8 +74,12 @@ def test_api_runtime_builds_detached_serve_command(tmp_path: Path, monkeypatch) 
 
 
 class FakeHealthResponse:
-    def __init__(self, status: int) -> None:
+    def __init__(self, status: int, body: bytes) -> None:
         self.status = status
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
 
     def __enter__(self) -> "FakeHealthResponse":
         return self
@@ -84,19 +88,38 @@ class FakeHealthResponse:
         return None
 
 
+NANOBOT_HEALTH = b'{"status": "ok", "service": "nanobot"}'
+
+
 def test_probe_api_health_success(monkeypatch) -> None:
     def fake_urlopen(url, **kwargs):
         assert url == "http://127.0.0.1:9900/health"
         assert kwargs["timeout"] == 0.25
-        return FakeHealthResponse(200)
+        return FakeHealthResponse(200, NANOBOT_HEALTH)
 
     monkeypatch.setattr("nanobot.api.runtime.urlopen", fake_urlopen)
     assert probe_api_health("127.0.0.1", 9900, timeout=0.25) is True
 
 
+def test_probe_api_health_rejects_foreign_service(monkeypatch) -> None:
+    def fake_urlopen(_url, **_kwargs):
+        return FakeHealthResponse(200, b'{"status": "ok", "service": "something-else"}')
+
+    monkeypatch.setattr("nanobot.api.runtime.urlopen", fake_urlopen)
+    assert probe_api_health("127.0.0.1", 9900) is False
+
+
 def test_probe_api_health_rejects_other_responses(monkeypatch) -> None:
     def fake_urlopen(_url, **_kwargs):
-        return FakeHealthResponse(404)
+        return FakeHealthResponse(404, b"not found")
+
+    monkeypatch.setattr("nanobot.api.runtime.urlopen", fake_urlopen)
+    assert probe_api_health("127.0.0.1", 9900) is False
+
+
+def test_probe_api_health_rejects_malformed_body(monkeypatch) -> None:
+    def fake_urlopen(_url, **_kwargs):
+        return FakeHealthResponse(200, b"<html>not json</html>")
 
     monkeypatch.setattr("nanobot.api.runtime.urlopen", fake_urlopen)
     assert probe_api_health("127.0.0.1", 9900) is False

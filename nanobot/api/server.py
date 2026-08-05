@@ -439,7 +439,7 @@ async def handle_models(request: web.Request) -> web.Response:
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /health"""
-    return web.json_response({"status": "ok"})
+    return web.json_response({"status": "ok", "service": "nanobot"})
 
 
 # ---------------------------------------------------------------------------

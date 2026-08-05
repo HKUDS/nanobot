@@ -51,6 +51,7 @@ from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
+from nanobot.cli.api import create_api_app  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
@@ -406,6 +407,14 @@ app.command(name="webui")(webui)
 # Gateway / Server
 # ============================================================================
 
+
+app.add_typer(
+    create_api_app(
+        console=console,
+        load_runtime_config=_load_runtime_config,
+    ),
+    name="api",
+)
 
 app.add_typer(
     create_gateway_app(

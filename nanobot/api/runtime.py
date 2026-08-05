@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from urllib.request import urlopen
 from dataclasses import dataclass
@@ -38,16 +39,20 @@ def api_runtime_paths(config_path: Path) -> ProcessRuntimePaths:
 
 
 def probe_api_health(host: str, port: int, *, timeout: float = 0.5) -> bool:
-    """Return True when an OpenAI-compatible API answers on ``host:port``.
+    """Return True when a nanobot API answers on ``host:port``.
 
-    The API server exposes an unauthenticated ``/health`` endpoint; a 200 here
-    means a ``nanobot serve`` instance is already listening, even when this
-    gateway did not start it (for example, a systemd-managed service).
+    The API server exposes an unauthenticated ``/health`` endpoint that
+    identifies itself with a ``service`` field; a matching response means a
+    ``nanobot serve`` instance is already listening, even when this gateway
+    did not start it (for example, a systemd-managed service).
     """
     url = f"http://{host}:{port}/health"
     try:
         with urlopen(url, timeout=timeout) as response:
-            return response.status == 200
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload.get("service") == "nanobot"
     except (OSError, ValueError):
         return False
 
