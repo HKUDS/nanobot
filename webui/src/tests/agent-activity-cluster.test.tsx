@@ -265,6 +265,53 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("feathers only the activity edges with clipped content", () => {
+    const raf = installAnimationFrameQueue();
+    try {
+      render(
+        <AgentActivityCluster
+          messages={activityMessages()}
+          isTurnStreaming
+          hasBodyBelow={false}
+        />,
+      );
+
+      const scrollport = screen.getByTestId("agent-activity-scroll");
+      setScrollGeometry(scrollport, {
+        scrollHeight: 1000,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+
+      act(() => {
+        raf.flush();
+      });
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+
+      scrollport.scrollTop = 440;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+
+      scrollport.scrollTop = 0;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+
+      setScrollGeometry(scrollport, {
+        scrollHeight: 100,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+    } finally {
+      raf.restore();
+    }
+  });
+
   it("turns the live reasoning marker into an animated check when thinking completes", async () => {
     const liveReasoning: UIMessage = {
       id: "r-check",

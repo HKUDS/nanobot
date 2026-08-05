@@ -10,6 +10,8 @@ interface ThinkingReasoningShellProps {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   contentRef: Ref<HTMLDivElement>;
+  fadeTop: boolean;
+  fadeBottom: boolean;
   onToggle: () => void;
   onScroll: () => void;
 }
@@ -21,6 +23,8 @@ export function ThinkingReasoningShell({
   children,
   viewportRef,
   contentRef,
+  fadeTop,
+  fadeBottom,
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
@@ -75,8 +79,10 @@ export function ThinkingReasoningShell({
           <div
             ref={viewportRef}
             data-testid={expanded ? "agent-activity-scroll" : undefined}
+            data-fade-top={fadeTop}
+            data-fade-bottom={fadeBottom}
             onScroll={onScroll}
-            className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="activity-scroll-fade mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             aria-hidden={!expanded}
           >
             <div ref={contentRef} className="flex flex-col gap-0.5">
