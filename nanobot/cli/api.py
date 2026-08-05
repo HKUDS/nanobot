@@ -54,7 +54,7 @@ def create_api_app(
         console.print(f"Logs: {status.log_path}")
 
     @api_app.command("status")
-    def api_status(
+    def api_status(  # pyright: ignore[reportUnusedFunction]
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Show the OpenAI-compatible API server status."""
