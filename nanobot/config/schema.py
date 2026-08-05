@@ -142,10 +142,7 @@ class AgentDefaults(Base):
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
     reasoning_effort: str | None = None  # low / medium / high / xhigh / max / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # Effective IANA timezone, e.g. "Asia/Shanghai"
-    timezone_mode: Literal["auto", "manual"] = Field(
-        default="auto",
-        exclude_if=lambda value: value == "manual",
-    )
+    timezone_mode: Literal["auto", "manual"] = "auto"
     bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
