@@ -241,22 +241,15 @@ class TestBuildResponsesBodyExtraBody:
             {"type": "web_search"},
         ]
 
-    def test_native_search_switch_owns_the_responses_search_tool(self) -> None:
-        enabled = OpenAICompatProvider(
+    def test_responses_web_search_tool_owns_the_local_function(self) -> None:
+        provider = OpenAICompatProvider(
             api_key="test-key",
             default_model="gpt-4o",
             spec=find_by_name("openai"),
-            native_search=True,
-        )
-        disabled = OpenAICompatProvider(
-            api_key="test-key",
-            default_model="gpt-5",
-            spec=find_by_name("openai"),
             extra_body={"tools": [{"type": "web_search"}]},
-            native_search=False,
         )
 
-        enabled_body = enabled._build_responses_body(
+        body = provider._build_responses_body(
             messages=_simple_messages(),
             tools=[
                 {
@@ -282,17 +275,8 @@ class TestBuildResponsesBodyExtraBody:
             reasoning_effort=None,
             tool_choice=None,
         )
-        disabled_body = disabled._build_responses_body(
-            messages=_simple_messages(),
-            tools=None,
-            model=None,
-            max_tokens=100,
-            temperature=0.1,
-            reasoning_effort=None,
-            tool_choice=None,
-        )
 
-        assert enabled_body["tools"] == [
+        assert body["tools"] == [
             {
                 "type": "function",
                 "name": "read_file",
@@ -301,26 +285,14 @@ class TestBuildResponsesBodyExtraBody:
             },
             {"type": "web_search"},
         ]
-        assert enabled_body["include"] == ["web_search_call.action.sources"]
-        assert enabled._should_use_responses_api(None, None) is True
-        assert "tools" not in disabled_body
-        disabled_chat_body = disabled._build_kwargs(
-            messages=_simple_messages(),
-            tools=None,
-            model=None,
-            max_tokens=100,
-            temperature=0.1,
-            reasoning_effort=None,
-            tool_choice=None,
-        )
-        assert "extra_body" not in disabled_chat_body
+        assert body["include"] == ["web_search_call.action.sources"]
+        assert provider._should_use_responses_api(None, None) is True
 
-    def test_deepseek_native_search_replaces_the_local_search_function(self) -> None:
+    def test_deepseek_default_search_replaces_the_local_search_function(self) -> None:
         provider = OpenAICompatProvider(
             api_key="test-key",
             default_model="deepseek-v4-flash",
             spec=find_by_name("deepseek"),
-            native_search=True,
         )
 
         body = provider._build_responses_body(
@@ -342,6 +314,38 @@ class TestBuildResponsesBodyExtraBody:
 
         assert body["tools"] == [{"type": "web_search"}]
         assert "include" not in body
+
+    def test_explicit_empty_tools_disables_deepseek_default_search(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="deepseek-v4-flash",
+            spec=find_by_name("deepseek"),
+            extra_body={"tools": []},
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search with nanobot's configured backend",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            model=None,
+            max_tokens=100,
+            temperature=0.1,
+            reasoning_effort=None,
+            tool_choice=None,
+        )
+
+        assert body["tools"] == [{
+            "type": "function",
+            "name": "web_search",
+            "description": "Search with nanobot's configured backend",
+            "parameters": {"type": "object"},
+        }]
 
     def test_responses_extra_body_merges_include_without_duplicates(self) -> None:
         provider = OpenAICompatProvider(

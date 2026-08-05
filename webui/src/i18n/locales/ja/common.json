@@ -373,8 +373,7 @@
       "capabilityXSearch": "X 検索",
       "capabilityXSearchHelp": "対応する Grok モデルが xAI ホストの X Search を使用できるようにします。検索状況はチャットに表示されます。",
       "capabilityOpenAISearch": "OpenAI ウェブ検索",
-      "capabilityOpenAISearchHelp": "Responses API 対応モデルがウェブを検索できるようにします。検索状況はチャットに表示されます。",
-      "capabilityGenericHelp": "新しいモデルリクエストで、このプロバイダー提供機能を有効にします。"
+      "capabilityOpenAISearchHelp": "Responses API 対応モデルがウェブを検索できるようにします。検索状況はチャットに表示されます。"
     },
     "image": {
       "selectProvider": "プロバイダーを選択",

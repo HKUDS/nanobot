@@ -733,118 +733,25 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
         },
     )
 
-    payload = update_provider_settings(
-        {"provider": [provider_name], "proxy": [" http://127.0.0.1:7890 "]}
-    )
+    payload = update_provider_settings({
+        "provider": [provider_name],
+        "proxy": [" http://127.0.0.1:7890 "],
+        "extraBody": [json.dumps({"tools": []})],
+    })
 
     providers = {row["name"]: row for row in payload["providers"]}
     assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
     assert getattr(load_config(config_path).providers, config_attr).proxy == (
         "http://127.0.0.1:7890"
     )
+    assert providers[provider_name]["extra_body"] == {"tools": []}
+    assert getattr(load_config(config_path).providers, config_attr).extra_body == {"tools": []}
 
     cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
 
     providers = {row["name"]: row for row in cleared["providers"]}
     assert providers[provider_name]["proxy"] is None
     assert getattr(load_config(config_path).providers, config_attr).proxy is None
-
-
-def test_settings_payload_exposes_native_provider_capabilities_and_legacy_values(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate({
-        "providers": {
-            "openaiCodex": {"extraBody": {"service_tier": "priority"}},
-        }
-    })
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr(
-        "nanobot.webui.settings_api._oauth_provider_status",
-        lambda _spec: {
-            "configured": False,
-            "account": None,
-            "expires_at": None,
-            "login_supported": True,
-        },
-    )
-
-    providers = {row["name"]: row for row in settings_payload()["providers"]}
-
-    assert providers["openai"]["capabilities"] == [{
-        "name": "native_search",
-        "enabled": False,
-        "default_enabled": False,
-    }]
-    assert providers["openai_codex"]["capabilities"][0]["enabled"] is True
-    assert providers["deepseek"]["capabilities"] == [{
-        "name": "native_search",
-        "enabled": True,
-        "default_enabled": True,
-    }]
-    assert providers["xai_grok"]["capabilities"] == [{
-        "name": "native_search",
-        "enabled": True,
-        "default_enabled": True,
-    }]
-
-
-def test_update_provider_settings_persists_native_capability_switches(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr(
-        "nanobot.webui.settings_api._oauth_provider_status",
-        lambda _spec: {
-            "configured": False,
-            "account": None,
-            "expires_at": None,
-            "login_supported": True,
-        },
-    )
-
-    update_provider_settings({
-        "provider": ["openai_codex"],
-        "capabilities": [json.dumps({"fast_mode": True})],
-    })
-    update_provider_settings({
-        "provider": ["xai_grok"],
-        "capabilities": [json.dumps({"native_search": False})],
-    })
-    payload = update_provider_settings({
-        "provider": ["deepseek"],
-        "capabilities": [json.dumps({"native_search": False})],
-    })
-
-    saved = load_config(config_path)
-    assert saved.providers.openai_codex.capabilities == {"fast_mode": True}
-    assert saved.providers.xai_grok.capabilities == {"native_search": False}
-    assert saved.providers.deepseek.capabilities == {"native_search": False}
-    providers = {row["name"]: row for row in payload["providers"]}
-    assert providers["openai_codex"]["capabilities"][0]["enabled"] is True
-    assert providers["xai_grok"]["capabilities"][0]["enabled"] is False
-    assert providers["deepseek"]["capabilities"][0]["enabled"] is False
-
-
-def test_update_provider_settings_rejects_unknown_native_capability(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="not supported for this provider"):
-        update_provider_settings({
-            "provider": ["deepseek"],
-            "capabilities": [json.dumps({"fast_mode": True})],
-        })
 
 
 def test_update_provider_settings_keeps_oauth_credentials_read_only(
@@ -855,10 +762,7 @@ def test_update_provider_settings_keeps_oauth_credentials_read_only(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(
-        WebUISettingsError,
-        match="only supports proxy, extra_body, and capabilities settings",
-    ):
+    with pytest.raises(WebUISettingsError, match="only supports proxy and extra_body settings"):
         update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
 
 

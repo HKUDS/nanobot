@@ -213,25 +213,6 @@ class TestResolveConfig:
         assert reloaded.providers.xai_grok.extra_body == {"parallel_tool_calls": False}
         assert reloaded.providers.xai_grok.api_key is None
 
-    def test_save_preserves_oauth_provider_capability_switches(self, tmp_path):
-        config_path = tmp_path / "config.json"
-        config = Config.model_validate({
-            "providers": {
-                "openaiCodex": {"capabilities": {"fast_mode": True}},
-                "xaiGrok": {"capabilities": {"native_search": False}},
-            }
-        })
-
-        save_config(config, config_path)
-
-        saved = json.loads(config_path.read_text(encoding="utf-8"))
-        assert saved["providers"]["openaiCodex"] == {
-            "capabilities": {"fast_mode": True}
-        }
-        assert saved["providers"]["xaiGrok"] == {
-            "capabilities": {"native_search": False}
-        }
-
     def test_save_preserves_settings_across_oauth_provider_blocks(self, tmp_path):
         config_path = tmp_path / "config.json"
         config = Config.model_validate(

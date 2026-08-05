@@ -32,7 +32,6 @@ from nanobot.audio.transcription_registry import (
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
 from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
-from nanobot.providers.capabilities import resolve_provider_capability
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -247,25 +246,6 @@ def _provider_json_setting(
     return cast(dict[str, Any], value) or None
 
 
-def _provider_capabilities_setting(query: QueryParams) -> dict[str, bool]:
-    raw = (_query_first(query, "capabilities") or "").strip()
-    if not raw:
-        return {}
-    try:
-        value: object = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise WebUISettingsError("capabilities must be a JSON object") from exc
-    if not isinstance(value, dict):
-        raise WebUISettingsError("capabilities must be a JSON object")
-
-    capabilities: dict[str, bool] = {}
-    for name, enabled in cast(dict[object, object], value).items():
-        if not isinstance(name, str) or not name or type(enabled) is not bool:
-            raise WebUISettingsError("capabilities must map names to booleans")
-        capabilities[name] = enabled
-    return capabilities
-
-
 _REDACTED_PROVIDER_SECRET = "••••••••"
 _PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
 _PROVIDER_SECRET_KEYS = frozenset({
@@ -380,8 +360,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     ):
         if _query_has_alias(query, snake, camel):
             updates[snake] = _provider_json_setting(query, snake, camel)
-    if _query_has_alias(query, "capabilities", "capabilities"):
-        updates["capabilities"] = _provider_capabilities_setting(query)
     return updates
 
 
@@ -635,18 +613,6 @@ def _provider_settings_row(
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": _model_catalog_kind(spec),
         "advanced_fields": _provider_advanced_field_names(name, spec),
-        "capabilities": [
-            {
-                "name": capability.name,
-                "enabled": resolve_provider_capability(
-                    spec,
-                    provider_config,
-                    capability.name,
-                ) is True,
-                "default_enabled": capability.default_enabled,
-            }
-            for capability in spec.capabilities
-        ],
         "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
         "extra_body": _redact_provider_secret_values(provider_config.extra_body),
         "extra_query": _redact_provider_secret_values(provider_config.extra_query),
@@ -1769,19 +1735,6 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     updates = _provider_config_updates(query)
-    if "capabilities" in updates:
-        supported_capabilities = {capability.name for capability in spec.capabilities}
-        submitted_capabilities = updates["capabilities"]
-        unknown_capabilities = set(submitted_capabilities) - supported_capabilities
-        if unknown_capabilities:
-            capability = sorted(unknown_capabilities)[0]
-            raise WebUISettingsError(
-                f"capability {capability!r} is not supported for this provider"
-            )
-        updates["capabilities"] = {
-            **provider_config.capabilities,
-            **submitted_capabilities,
-        }
     if not spec.is_oauth and spec.name != "openai":
         # Preserve the legacy settings API contract: api_type only applies to
         # OpenAI, and is ignored when older clients send it for another provider.
@@ -1789,19 +1742,15 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body", "capabilities"}
+        unsupported = set(updates) - {"proxy", "extra_body"}
         if unsupported:
-            raise WebUISettingsError(
-                "OAuth provider only supports proxy, extra_body, and capabilities settings"
-            )
+            raise WebUISettingsError("OAuth provider only supports proxy and extra_body settings")
     else:
         allowed = {
             "api_key",
             "api_base",
             *_provider_advanced_field_names(provider_key, spec),
         }
-        if spec.capabilities:
-            allowed.add("capabilities")
         if find_by_name(provider_key) is None:
             allowed.add("display_name")
         unsupported = set(updates) - allowed

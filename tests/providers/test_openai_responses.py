@@ -1474,33 +1474,6 @@ class TestConsumeSdkStream:
         ]
 
     @pytest.mark.asyncio
-    async def test_hosted_web_search_is_closed_by_terminal_event(self):
-        events = [
-            SimpleNamespace(
-                type="response.web_search_call.in_progress",
-                item_id="ws_2",
-                output_index=1,
-            ),
-            SimpleNamespace(
-                type="response.completed",
-                response=SimpleNamespace(status="completed", usage=None, output=[]),
-            ),
-        ]
-        tool_events: list[dict] = []
-
-        async def stream():
-            for event in events:
-                yield event
-
-        async def on_tool_event(event: dict) -> None:
-            tool_events.append(event)
-
-        await consume_sdk_stream(stream(), on_tool_call_delta=on_tool_event)
-
-        assert [event["phase"] for event in tool_events] == ["start", "end"]
-        assert tool_events[-1]["result"] == {"status": "completed"}
-
-    @pytest.mark.asyncio
     async def test_refusal_events_reconcile_parts_and_terminal_output(self):
         refusal = "First and second sentence. Done-only. Terminal suffix."
         terminal_response = {

@@ -522,8 +522,7 @@
       "capabilityXSearch": "Pesquisa no X",
       "capabilityXSearchHelp": "Permite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
       "capabilityOpenAISearch": "Pesquisa web da OpenAI",
-      "capabilityOpenAISearchHelp": "Permite que modelos compatíveis com a Responses API pesquisem na web. A atividade de pesquisa aparece no chat.",
-      "capabilityGenericHelp": "Ativa este recurso hospedado pelo provedor para novas solicitações ao modelo."
+      "capabilityOpenAISearchHelp": "Permite que modelos compatíveis com a Responses API pesquisem na web. A atividade de pesquisa aparece no chat."
     },
     "legal": {
       "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."

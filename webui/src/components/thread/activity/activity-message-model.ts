@@ -58,7 +58,7 @@ function canMergeAdjacentProgress(
 
 function mergeTraceMessages(previous: UIMessage, incoming: UIMessage): UIMessage {
   const toolEvents = mergeToolProgressEvents(previous.toolEvents, incoming.toolEvents ?? []);
-  const traces = previous.toolEvents?.length || incoming.toolEvents?.length
+  const traces = incoming.toolEvents?.length
     ? mergeToolProgressTraceLines(
         messageTraces(previous),
         previous.toolEvents,

@@ -373,8 +373,7 @@
       "capabilityXSearch": "X 검색",
       "capabilityXSearchHelp": "지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
       "capabilityOpenAISearch": "OpenAI 웹 검색",
-      "capabilityOpenAISearchHelp": "Responses API 호환 모델이 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
-      "capabilityGenericHelp": "새 모델 요청에 이 제공자 호스팅 기능을 활성화합니다."
+      "capabilityOpenAISearchHelp": "Responses API 호환 모델이 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다."
     },
     "image": {
       "selectProvider": "제공자 선택",

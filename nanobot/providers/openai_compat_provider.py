@@ -33,7 +33,6 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
-from nanobot.providers.capabilities import is_native_search_tool
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_state,
@@ -56,6 +55,19 @@ if TYPE_CHECKING:
 # use, or replaced by tests via ``patch(...)``.  Kept as a plain name so
 # that ``unittest.mock.patch`` can find and replace it.
 AsyncOpenAI: Any = None
+
+
+def _is_hosted_web_search_type(value: object) -> bool:
+    return isinstance(value, str) and (
+        value == "web_search" or value.startswith("web_search_")
+    )
+
+
+def _is_hosted_web_search_tool(tool: object) -> bool:
+    if not isinstance(tool, dict):
+        return False
+    tool_type = cast(dict[object, object], tool).get("type")
+    return _is_hosted_web_search_type(tool_type)
 
 
 def _is_named_function_tool(tool: object, name: str) -> bool:
@@ -465,10 +477,6 @@ class OpenAICompatProvider(LLMProvider):
     registry lookups needed.
     """
 
-    # Some routing tests and integrations construct a lightweight instance
-    # without calling __init__; keep the optional feature safely disabled there.
-    _native_search: bool | None = None
-
     _native_compaction_available = True
 
     def __init__(
@@ -482,29 +490,15 @@ class OpenAICompatProvider(LLMProvider):
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
-        native_search: bool | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._extra_body = dict(extra_body or {})
-        if native_search is not None:
-            configured_tools = self._extra_body.get("tools")
-            if isinstance(configured_tools, list):
-                remaining_tools: list[object] = [
-                    tool
-                    for tool in cast(list[object], configured_tools)
-                    if not is_native_search_tool(tool)
-                ]
-                if remaining_tools:
-                    self._extra_body["tools"] = remaining_tools
-                else:
-                    self._extra_body.pop("tools", None)
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
-        self._native_search = native_search
         self._native_compaction_available = True
 
         if api_key and spec and spec.env_key:
@@ -1007,7 +1001,7 @@ class OpenAICompatProvider(LLMProvider):
         if not provider_responses and not model_responses:
             return False
         if self._responses_is_required():
-            # Explicit Responses-only capabilities are mandatory; do not
+            # Explicit Responses-only request fields are mandatory; do not
             # consult the circuit breaker or fall back to Chat Completions.
             return True
         if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
@@ -1027,7 +1021,22 @@ class OpenAICompatProvider(LLMProvider):
         return self._responses_circuit_allows_probe(model, reasoning_effort)
 
     def _responses_is_required(self) -> bool:
-        return self._api_type == "responses" or self._native_search is True
+        return self._api_type == "responses" or self._hosted_web_search_enabled()
+
+    def _hosted_web_search_enabled(self) -> bool:
+        configured_tools = self._extra_body.get("tools")
+        if "tools" in self._extra_body:
+            return isinstance(configured_tools, list) and any(
+                _is_hosted_web_search_tool(tool)
+                for tool in cast(list[object], configured_tools)
+            )
+        return bool(
+            self._spec
+            and any(
+                _is_hosted_web_search_type(tool_type)
+                for tool_type in self._spec.responses_default_tools
+            )
+        )
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
@@ -1192,31 +1201,29 @@ class OpenAICompatProvider(LLMProvider):
             body["tool_choice"] = tool_choice or "auto"
 
         extra_body = getattr(self, "_extra_body", {})
+        if "tools" not in extra_body and self._spec and self._spec.responses_default_tools:
+            body["tools"] = [
+                *cast(list[object], body.get("tools", [])),
+                *({"type": tool_type} for tool_type in self._spec.responses_default_tools),
+            ]
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
 
-        if self._native_search is not None:
+        if self._hosted_web_search_enabled():
             configured_tools = body.get("tools")
-            managed_tools: list[object] = (
-                [
-                    tool
-                    for tool in cast(list[object], configured_tools)
-                    if not is_native_search_tool(tool)
-                    and not (
-                        self._native_search
-                        and _is_named_function_tool(tool, "web_search")
-                    )
-                ]
-                if isinstance(configured_tools, list)
-                else []
-            )
-            if self._native_search:
-                managed_tools.append({"type": "web_search"})
-            if managed_tools:
+            if isinstance(configured_tools, list):
+                managed_tools: list[object] = []
+                hosted_search_seen = False
+                for tool in cast(list[object], configured_tools):
+                    if _is_named_function_tool(tool, "web_search"):
+                        continue
+                    if _is_hosted_web_search_tool(tool):
+                        if hosted_search_seen:
+                            continue
+                        hosted_search_seen = True
+                    managed_tools.append(tool)
                 body["tools"] = managed_tools
-            else:
-                body.pop("tools", None)
-            if self._native_search and self._spec and self._spec.name == "openai":
+            if self._spec and self._spec.name == "openai":
                 source_include = "web_search_call.action.sources"
                 configured_include = body.get("include")
                 if isinstance(configured_include, list):

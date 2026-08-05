@@ -330,31 +330,6 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-Provider-hosted web search can be enabled from the WebUI provider settings, or with the
-equivalent structured capability setting. It routes compatible models through Responses,
-adds the native search tool, and surfaces search activity in chat:
-
-```json
-{
-  "providers": {
-    "openai": {
-      "apiKey": "${OPENAI_API_KEY}",
-      "capabilities": {
-        "native_search": true
-      }
-    }
-  }
-}
-```
-
-Existing `extraBody` forms for these capabilities remain compatible. Once a capability is
-explicitly set, its switch takes precedence—including `false`, which removes the managed
-provider-hosted tool or service tier from outgoing requests.
-
-When native search is enabled, its provider-hosted tool replaces nanobot's same-name local
-`web_search` function in that model request. This prevents duplicate searches while leaving
-other tools, including `web_fetch`, available.
-
 `extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
@@ -364,12 +339,17 @@ other tools, including `web_fetch`, available.
       "apiKey": "${OPENAI_API_KEY}",
       "apiType": "responses",
       "extraBody": {
-        "metadata": { "team": "agents" }
+        "tools": [{ "type": "web_search" }],
+        "include": ["web_search_call.action.sources"]
       }
     }
   }
 }
 ```
+
+The WebUI's OpenAI web-search switch writes the corresponding `apiType` and `extraBody.tools`
+fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
+request, while other tools such as `web_fetch` remain available.
 
 </details>
 
@@ -385,8 +365,8 @@ WebUI provider settings, or with:
   "providers": {
     "deepseek": {
       "apiKey": "${DEEPSEEK_API_KEY}",
-      "capabilities": {
-        "native_search": false
+      "extraBody": {
+        "tools": []
       }
     }
   }
@@ -751,8 +731,8 @@ Codex Fast mode can be enabled from the WebUI provider settings, or with:
 {
   "providers": {
     "openaiCodex": {
-      "capabilities": {
-        "fast_mode": true
+      "extraBody": {
+        "service_tier": "priority"
       }
     }
   }
@@ -786,7 +766,7 @@ tool only when the selected model advertises `supportsBackendSearch`. Models
 without that capability continue normally without hosted X Search. When enabled,
 searches run inside xAI's Responses API and citations arrive as inline links.
 Hosted X Search is on by default to preserve this behavior. It can be turned off in the
-WebUI provider settings or with `providers.xaiGrok.capabilities.native_search: false`.
+WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
 public OAuth client and proxy contract used by

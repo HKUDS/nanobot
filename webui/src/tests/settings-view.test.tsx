@@ -3101,7 +3101,7 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
-  it("shows and saves provider-native capability switches", async () => {
+  it("maps provider request switches to raw extraBody fields", async () => {
     const base = settingsPayload();
     const providers: SettingsPayload["providers"] = [
       {
@@ -3112,7 +3112,8 @@ describe("SettingsView Apps catalog", () => {
         api_key_required: false,
         oauth_account: "grok@example.com",
         oauth_login_supported: true,
-        capabilities: [{ name: "native_search", enabled: true, default_enabled: true }],
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
       },
       {
         name: "openai_codex",
@@ -3122,7 +3123,8 @@ describe("SettingsView Apps catalog", () => {
         api_key_required: false,
         oauth_account: "codex@example.com",
         oauth_login_supported: true,
-        capabilities: [{ name: "fast_mode", enabled: false, default_enabled: false }],
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
       },
       {
         name: "deepseek",
@@ -3131,7 +3133,8 @@ describe("SettingsView Apps catalog", () => {
         api_key_required: true,
         api_key_hint: "deep••••test",
         api_base: "https://api.deepseek.com",
-        capabilities: [{ name: "native_search", enabled: true, default_enabled: true }],
+        advanced_fields: ["extra_body"],
+        extra_body: null,
       },
       {
         name: "openai",
@@ -3140,7 +3143,9 @@ describe("SettingsView Apps catalog", () => {
         api_key_required: true,
         api_key_hint: "sk-••••test",
         api_base: "https://api.openai.com/v1",
-        capabilities: [{ name: "native_search", enabled: false, default_enabled: false }],
+        api_type: "auto",
+        advanced_fields: ["api_type", "extra_body"],
+        extra_body: null,
       },
     ];
     const payload: SettingsPayload = { ...base, providers };
@@ -3205,21 +3210,27 @@ describe("SettingsView Apps catalog", () => {
     ).not.toBeInTheDocument());
 
     await waitFor(() => {
-      const capabilityUpdates = fetchMock.mock.calls
+      const requestUpdates = fetchMock.mock.calls
         .filter(([input]) => String(input).startsWith("/api/settings/provider/update?"))
         .map(([input, init]) => {
           const provider = new URLSearchParams(String(input).split("?")[1]).get("provider");
           const headers = init?.headers as Record<string, string>;
           const values = JSON.parse(decodeURIComponent(
             headers["X-Nanobot-Provider-Values"],
-          )) as { capabilities?: Record<string, boolean> };
-          return [provider, values.capabilities] as const;
+          )) as { apiType?: string; extraBody?: string };
+          return [provider, {
+            ...(values.apiType ? { apiType: values.apiType } : {}),
+            extraBody: JSON.parse(values.extraBody ?? "{}"),
+          }] as const;
         });
-      expect(capabilityUpdates).toEqual([
-        ["xai_grok", { native_search: false }],
-        ["openai_codex", { fast_mode: true }],
-        ["deepseek", { native_search: false }],
-        ["openai", { native_search: true }],
+      expect(requestUpdates).toEqual([
+        ["xai_grok", { extraBody: { tools: [] } }],
+        ["openai_codex", { extraBody: { service_tier: "priority" } }],
+        ["deepseek", { extraBody: { tools: [] } }],
+        ["openai", {
+          apiType: "responses",
+          extraBody: { tools: [{ type: "web_search" }] },
+        }],
       ]);
     });
   });

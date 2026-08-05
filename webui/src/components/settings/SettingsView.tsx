@@ -264,7 +264,6 @@ type ProviderForm = {
   apiBase: string;
   apiType: ProviderApiType;
   proxy: string;
-  capabilities: Record<string, boolean>;
   extraHeaders: string;
   extraBody: string;
   extraQuery: string;
@@ -277,6 +276,52 @@ type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
+type ProviderRequestOption = {
+  kind: "priority" | "hosted_tool";
+  titleKey: string;
+  title: string;
+  helpKey: string;
+  help: string;
+  toolType?: "web_search" | "x_search";
+  defaultEnabled?: boolean;
+  forceResponses?: boolean;
+};
+const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>> = {
+  openai_codex: [{
+    kind: "priority",
+    titleKey: "settings.providers.capabilityFastMode",
+    title: "Fast mode",
+    helpKey: "settings.providers.capabilityFastModeHelp",
+    help: "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+  }],
+  openai: [{
+    kind: "hosted_tool",
+    titleKey: "settings.providers.capabilityOpenAISearch",
+    title: "OpenAI web search",
+    helpKey: "settings.providers.capabilityOpenAISearchHelp",
+    help: "Allow compatible Responses API models to search the web. Search activity appears in chat.",
+    toolType: "web_search",
+    forceResponses: true,
+  }],
+  deepseek: [{
+    kind: "hosted_tool",
+    titleKey: "settings.providers.capabilityDeepSeekSearch",
+    title: "DeepSeek web search",
+    helpKey: "settings.providers.capabilityDeepSeekSearchHelp",
+    help: "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
+    toolType: "web_search",
+    defaultEnabled: true,
+  }],
+  xai_grok: [{
+    kind: "hosted_tool",
+    titleKey: "settings.providers.capabilityXSearch",
+    title: "X Search",
+    helpKey: "settings.providers.capabilityXSearchHelp",
+    help: "Allow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
+    toolType: "x_search",
+    defaultEnabled: true,
+  }],
+};
 const CUSTOM_PROVIDER_CREATION_KEY = "__custom_provider__";
 const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
   "extra_headers",
@@ -307,12 +352,66 @@ function providerJsonValue(value: Record<string, unknown> | null | undefined): s
   return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
 }
 
-function providerCapabilityValues(
-  provider: SettingsPayload["providers"][number],
-): Record<string, boolean> {
-  return Object.fromEntries(
-    (provider.capabilities ?? []).map((capability) => [capability.name, capability.enabled]),
-  );
+function parseProviderExtraBody(value: string): Record<string, unknown> | null {
+  if (!value.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasHostedSearchTool(value: unknown, toolType: "web_search" | "x_search"): boolean {
+  return Array.isArray(value) && value.some((tool) => (
+    tool && typeof tool === "object" && !Array.isArray(tool)
+    && (tool as Record<string, unknown>).type === toolType
+  ));
+}
+
+function providerRequestOptionEnabled(
+  option: ProviderRequestOption,
+  extraBody: Record<string, unknown>,
+): boolean {
+  if (option.kind === "priority") return extraBody.service_tier === "priority";
+  if (Object.prototype.hasOwnProperty.call(extraBody, "tools")) {
+    return hasHostedSearchTool(extraBody.tools, option.toolType!);
+  }
+  return option.defaultEnabled === true;
+}
+
+function updateProviderRequestOption(
+  option: ProviderRequestOption,
+  enabled: boolean,
+  form: ProviderForm,
+): Partial<ProviderForm> {
+  const extraBody = { ...(parseProviderExtraBody(form.extraBody) ?? {}) };
+  if (option.kind === "priority") {
+    if (enabled) extraBody.service_tier = "priority";
+    else if (extraBody.service_tier === "priority") delete extraBody.service_tier;
+  } else {
+    const toolType = option.toolType!;
+    const tools = Array.isArray(extraBody.tools)
+      ? extraBody.tools.filter((tool) => !(
+          tool && typeof tool === "object" && !Array.isArray(tool)
+          && (tool as Record<string, unknown>).type === toolType
+        ))
+      : [];
+    if (enabled) tools.push({ type: toolType });
+    if (tools.length || option.defaultEnabled) {
+      extraBody.tools = tools;
+    } else {
+      delete extraBody.tools;
+    }
+  }
+  return {
+    extraBody: providerJsonValue(extraBody),
+    ...(option.forceResponses && enabled
+      ? { apiType: "responses" as const }
+      : {}),
+  };
 }
 
 function providerFormFromRow(
@@ -324,7 +423,6 @@ function providerFormFromRow(
     apiBase: provider.api_base ?? provider.default_api_base ?? "",
     apiType: provider.api_type ?? "auto",
     proxy: provider.proxy ?? "",
-    capabilities: providerCapabilityValues(provider),
     extraHeaders: providerJsonValue(provider.extra_headers),
     extraBody: providerJsonValue(provider.extra_body),
     extraQuery: providerJsonValue(provider.extra_query),
@@ -342,7 +440,6 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     apiBase: "",
     apiType: "auto",
     proxy: "",
-    capabilities: {},
     extraHeaders: "",
     extraBody: "",
     extraQuery: "",
@@ -1508,9 +1605,6 @@ export function SettingsView({
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
-      }
-      if ((provider.capabilities ?? []).length > 0) {
-        update.capabilities = providerForm.capabilities;
       }
       for (const field of provider.advanced_fields ?? []) {
         if (field === "api_type") update.apiType = providerForm.apiType;
@@ -3866,85 +3960,31 @@ function ModelAdvancedFields({
   );
 }
 
-function ProviderCapabilityOptions({
+function ProviderRequestOptions({
   providerName,
-  capabilities,
-  values,
+  form,
   onChange,
 }: {
   providerName: string;
-  capabilities: NonNullable<SettingsPayload["providers"][number]["capabilities"]>;
-  values: Record<string, boolean>;
-  onChange: (values: Record<string, boolean>) => void;
+  form: ProviderForm;
+  onChange: (value: Partial<ProviderForm>) => void;
 }) {
   const { t } = useTranslation();
-  if (capabilities.length === 0) return null;
+  const options = PROVIDER_REQUEST_OPTIONS[providerName] ?? [];
+  if (options.length === 0) return null;
+  const extraBody = parseProviderExtraBody(form.extraBody) ?? {};
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const presentation = (name: string): {
-    title: string;
-    description: string;
-    icon: LucideIcon;
-  } => {
-    if (name === "fast_mode") {
-      return {
-        title: tx("settings.providers.capabilityFastMode", "Fast mode"),
-        description: tx(
-          "settings.providers.capabilityFastModeHelp",
-          "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
-        ),
-        icon: Zap,
-      };
-    }
-    if (name === "native_search" && providerName === "deepseek") {
-      return {
-        title: tx("settings.providers.capabilityDeepSeekSearch", "DeepSeek web search"),
-        description: tx(
-          "settings.providers.capabilityDeepSeekSearchHelp",
-          "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
-        ),
-        icon: Globe2,
-      };
-    }
-    if (name === "native_search" && providerName === "xai_grok") {
-      return {
-        title: tx("settings.providers.capabilityXSearch", "X Search"),
-        description: tx(
-          "settings.providers.capabilityXSearchHelp",
-          "Allow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
-        ),
-        icon: Globe2,
-      };
-    }
-    if (name === "native_search" && providerName === "openai") {
-      return {
-        title: tx("settings.providers.capabilityOpenAISearch", "OpenAI web search"),
-        description: tx(
-          "settings.providers.capabilityOpenAISearchHelp",
-          "Allow compatible Responses API models to search the web. Search activity appears in chat.",
-        ),
-        icon: Globe2,
-      };
-    }
-    return {
-      title: name.replaceAll("_", " "),
-      description: tx(
-        "settings.providers.capabilityGenericHelp",
-        "Enable this provider-hosted capability for new model requests.",
-      ),
-      icon: Sparkles,
-    };
-  };
 
   return (
     <div className="overflow-hidden rounded-[18px] border border-border/45 bg-background/75">
-      {capabilities.map((capability, index) => {
-        const details = presentation(capability.name);
-        const Icon = details.icon;
-        const checked = values[capability.name] ?? capability.enabled;
+      {options.map((option, index) => {
+        const title = tx(option.titleKey, option.title);
+        const Icon = option.kind === "priority" ? Zap : Globe2;
+        const checked = providerRequestOptionEnabled(option, extraBody);
         return (
           <div
-            key={capability.name}
+            key={option.titleKey}
             className={cn(
               "flex items-center justify-between gap-4 px-4 py-3",
               index > 0 && "border-t border-border/45",
@@ -3955,16 +3995,18 @@ function ProviderCapabilityOptions({
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-foreground">{details.title}</p>
+                <p className="text-[13px] font-semibold text-foreground">{title}</p>
                 <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                  {details.description}
+                  {tx(option.helpKey, option.help)}
                 </p>
               </div>
             </div>
             <ToggleButton
               checked={checked}
-              onChange={(enabled) => onChange({ ...values, [capability.name]: enabled })}
-              ariaLabel={details.title}
+              onChange={(enabled) => onChange(
+                updateProviderRequestOption(option, enabled, form),
+              )}
+              ariaLabel={title}
               label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </div>
@@ -3978,10 +4020,12 @@ function ProviderAdvancedOptions({
   fields,
   form,
   onChange,
+  footer,
 }: {
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
+  footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -4178,13 +4222,18 @@ function ProviderAdvancedOptions({
                 <Textarea
                   value={form.extraBody}
                   onChange={(event) => onChange({ extraBody: event.target.value })}
-                  placeholder={'{"custom_field":"value"}'}
+                  placeholder={'{"service_tier":"priority"}'}
                   spellCheck={false}
                   className="min-h-[96px] resize-y rounded-[14px] bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
           </div>
+        </div>
+      ) : null}
+      {footer ? (
+        <div className="flex items-center justify-end gap-2 border-t border-border/45 py-3">
+          {footer}
         </div>
       ) : null}
     </div>
@@ -4286,23 +4335,15 @@ function ProvidersSettings({
     const isOauthProvider = provider.auth_type === "oauth";
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
-    const capabilityRows = provider.capabilities ?? [];
-    const supportsOauthProviderSettings =
-      isOauthProvider && (supportsOauthAdvancedSettings || capabilityRows.length > 0);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
-    const capabilitiesDirty = capabilityRows.some(
-      (capability) => (form.capabilities[capability.name] ?? capability.enabled)
-        !== capability.enabled,
-    );
     const oauthSettingsDirty = isOauthProvider && (
       form.proxy.trim() !== (provider.proxy ?? "").trim()
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
-      || capabilitiesDirty
     );
     const oauthSettingsSaving = saving && oauthSettingsDirty;
     const oauthActionBusy = saving && !oauthSettingsSaving;
@@ -4316,8 +4357,7 @@ function ProvidersSettings({
       || form.extraQuery.trim()
       || form.thinkingStyle.trim()
       || form.region.trim()
-      || form.profile.trim()
-      || capabilitiesDirty,
+      || form.profile.trim(),
     );
     const missingOptionalCredential =
       !isOauthProvider
@@ -4444,49 +4484,47 @@ function ProvidersSettings({
                     </Button>
                   </div>
                 </div>
-                <ProviderCapabilityOptions
+                <ProviderRequestOptions
                   providerName={provider.name}
-                  capabilities={capabilityRows}
-                  values={form.capabilities}
-                  onChange={(capabilities) =>
-                    onChangeProviderForm(provider.name, { capabilities })}
+                  form={form}
+                  onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 {supportsOauthAdvancedSettings ? (
                   <ProviderAdvancedOptions
                     fields={advancedFields}
                     form={form}
                     onChange={(value) => onChangeProviderForm(provider.name, value)}
+                    footer={
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => toggleProvider(provider.name)}
+                          disabled={saving}
+                          className="rounded-full"
+                        >
+                          {t("settings.actions.cancel")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSaveProvider(provider.name)}
+                          disabled={saving || !oauthSettingsDirty}
+                          className="rounded-full"
+                        >
+                          {oauthSettingsSaving ? (
+                            <Loader2
+                              className="mr-1.5 h-3.5 w-3.5 animate-spin"
+                              aria-hidden
+                            />
+                          ) : null}
+                          {oauthSettingsSaving
+                            ? t("settings.actions.saving")
+                            : tx("settings.providers.saveProvider", "Save provider")}
+                        </Button>
+                      </>
+                    }
                   />
-                ) : null}
-                {supportsOauthProviderSettings ? (
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => toggleProvider(provider.name)}
-                      disabled={saving}
-                      className="rounded-full"
-                    >
-                      {t("settings.actions.cancel")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onSaveProvider(provider.name)}
-                      disabled={saving || !oauthSettingsDirty}
-                      className="rounded-full"
-                    >
-                      {oauthSettingsSaving ? (
-                        <Loader2
-                          className="mr-1.5 h-3.5 w-3.5 animate-spin"
-                          aria-hidden
-                        />
-                      ) : null}
-                      {oauthSettingsSaving
-                        ? t("settings.actions.saving")
-                        : tx("settings.providers.saveProvider", "Save provider")}
-                    </Button>
-                  </div>
                 ) : null}
               </>
             ) : (
@@ -4576,12 +4614,10 @@ function ProvidersSettings({
                     className="h-9 rounded-full text-[13px]"
                   />
                 </label>
-                <ProviderCapabilityOptions
+                <ProviderRequestOptions
                   providerName={provider.name}
-                  capabilities={capabilityRows}
-                  values={form.capabilities}
-                  onChange={(capabilities) =>
-                    onChangeProviderForm(provider.name, { capabilities })}
+                  form={form}
+                  onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <ProviderAdvancedOptions
                   fields={advancedFields}

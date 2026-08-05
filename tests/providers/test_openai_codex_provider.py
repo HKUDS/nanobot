@@ -300,35 +300,6 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("enabled", "extra_body", "expected_tier"),
-    [
-        (True, None, "priority"),
-        (False, {"service_tier": "priority"}, None),
-    ],
-)
-async def test_codex_fast_mode_switch_controls_priority_tier(
-    monkeypatch,
-    enabled: bool,
-    extra_body: dict[str, Any] | None,
-    expected_tier: str | None,
-) -> None:
-    bodies: list[dict[str, Any]] = []
-    _mock_codex_token(monkeypatch)
-
-    async def fake_request(_url, _headers, body, **_kwargs):
-        bodies.append(body)
-        return provider_base.LLMResponse(content="ok")
-
-    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
-    provider = OpenAICodexProvider(extra_body=extra_body, fast_mode=enabled)
-
-    await provider.chat([{"role": "user", "content": "hello"}])
-
-    assert bodies[0].get("service_tier") == expected_tier
-
-
-@pytest.mark.asyncio
 async def test_codex_timeout_error_is_typed_and_retryable(monkeypatch) -> None:
     _mock_codex_token(monkeypatch)
 

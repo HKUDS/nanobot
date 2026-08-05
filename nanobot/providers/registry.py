@@ -29,14 +29,6 @@ class ProviderModelSpec:
 
 
 @dataclass(frozen=True)
-class ProviderCapabilitySpec:
-    """A user-selectable provider-native request capability."""
-
-    name: str
-    default_enabled: bool = False
-
-
-@dataclass(frozen=True)
 class ProviderSpec:
     """One LLM provider's metadata. See PROVIDERS below for real examples.
 
@@ -53,7 +45,6 @@ class ProviderSpec:
     model_catalog: str = "auto"  # WebUI model-list source
     builtin_models: tuple[ProviderModelSpec, ...] = ()
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
-    capabilities: tuple[ProviderCapabilitySpec, ...] = ()
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "xai_grok"
@@ -124,6 +115,10 @@ class ProviderSpec:
     # because providers may add Responses support incrementally (DeepSeek V4
     # Flash is supported before V4 Pro).
     responses_models: tuple[str, ...] = ()
+
+    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
+    # supplies the hosted-tool selection. Values are raw Responses tool types.
+    responses_default_tools: tuple[str, ...] = ()
 
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
@@ -394,7 +389,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
-        capabilities=(ProviderCapabilitySpec(name="native_search"),),
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
@@ -447,7 +441,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
-        capabilities=(ProviderCapabilitySpec(name="fast_mode"),),
     ),
     # xAI subscription: OAuth-based, with capability-gated server-hosted X Search.
     ProviderSpec(
@@ -467,9 +460,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="xai_grok",
         default_api_base="https://cli-chat-proxy.grok.com/v1",
         is_oauth=True,
-        capabilities=(
-            ProviderCapabilitySpec(name="native_search", default_enabled=True),
-        ),
     ),
     # GitHub Copilot: OAuth-based
     ProviderSpec(
@@ -493,9 +483,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
         responses_models=("deepseek-v4-flash",),
-        capabilities=(
-            ProviderCapabilitySpec(name="native_search", default_enabled=True),
-        ),
+        responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

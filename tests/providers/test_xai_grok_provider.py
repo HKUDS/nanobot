@@ -140,12 +140,12 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
 
 
 @pytest.mark.asyncio
-async def test_native_search_switch_disables_catalog_lookup_and_hosted_tool(monkeypatch) -> None:
+async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monkeypatch) -> None:
     _mock_token(monkeypatch)
     bodies: list[dict[str, Any]] = []
 
     async def unexpected_catalog_lookup(*_args, **_kwargs):
-        raise AssertionError("disabled native search must not fetch model capabilities")
+        raise AssertionError("explicitly disabled X Search must not fetch model capabilities")
 
     async def fake_request(_url, _headers, body, **_kwargs):
         bodies.append(body)
@@ -156,15 +156,27 @@ async def test_native_search_switch_disables_catalog_lookup_and_hosted_tool(monk
         unexpected_catalog_lookup,
     )
     monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
-    provider = XAIGrokProvider(
-        native_search=False,
-        extra_body={"tools": [{"type": "x_search"}]},
+    provider = XAIGrokProvider(extra_body={"tools": []})
+
+    response = await provider.chat(
+        [{"role": "user", "content": "hello"}],
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {"type": "object"},
+            },
+        }],
     )
 
-    response = await provider.chat([{"role": "user", "content": "hello"}])
-
     assert response.content == "ok"
-    assert bodies[0]["tools"] == []
+    assert bodies[0]["tools"] == [{
+        "type": "function",
+        "name": "read_file",
+        "description": "Read a file",
+        "parameters": {"type": "object"},
+    }]
 
 
 @pytest.mark.asyncio
