@@ -43,6 +43,7 @@ from nanobot.utils.restart import (
 if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
+    from nanobot.terminal.runtime import TerminalSessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
 
 
@@ -101,6 +102,7 @@ class ChannelManager:
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
+        webui_terminal_manager: TerminalSessionManager | None = None,
     ):
         self.config = config
         self.bus = bus
@@ -114,6 +116,7 @@ class ChannelManager:
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self._webui_skill_state_action = webui_skill_state_action
+        self._webui_terminal_manager = webui_terminal_manager
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -181,6 +184,7 @@ class ChannelManager:
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
                 skill_state_action=self._webui_skill_state_action,
+                terminal_manager=self._webui_terminal_manager,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

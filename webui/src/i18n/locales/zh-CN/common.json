@@ -1334,6 +1334,20 @@
     "next": "下一张",
     "close": "关闭预览"
   },
+  "terminal": {
+    "aria": "项目终端",
+    "toggle": "切换项目终端",
+    "requiresFullAccess": "项目终端需要本机 WebUI、完整访问模式，并启用 exec 工具。",
+    "resize": "调整终端宽度",
+    "connected": "已连接",
+    "connecting": "正在连接",
+    "stopping": "正在停止",
+    "exited": "已退出",
+    "error": "出错",
+    "restart": "重启终端",
+    "kill": "结束终端进程",
+    "detach": "隐藏终端"
+  },
   "filePreview": {
     "aria": "文件预览",
     "breadcrumb": "文件路径",

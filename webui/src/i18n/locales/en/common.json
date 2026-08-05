@@ -1334,6 +1334,20 @@
     "next": "Next image",
     "close": "Close image preview"
   },
+  "terminal": {
+    "aria": "Project terminal",
+    "toggle": "Toggle project terminal",
+    "requiresFullAccess": "The project terminal requires local WebUI Full access and an enabled exec tool.",
+    "resize": "Resize terminal",
+    "connected": "Connected",
+    "connecting": "Connecting",
+    "stopping": "Stopping",
+    "exited": "Exited",
+    "error": "Error",
+    "restart": "Restart terminal",
+    "kill": "End terminal process",
+    "detach": "Hide terminal"
+  },
   "filePreview": {
     "aria": "File preview",
     "breadcrumb": "File path",

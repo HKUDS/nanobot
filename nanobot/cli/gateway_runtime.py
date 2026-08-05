@@ -32,6 +32,7 @@ from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.terminal.runtime import TerminalSessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.build import BuildMode
@@ -414,6 +415,14 @@ def _run_gateway(
         route_policy=WebuiTurnRoutePolicy(session_manager),
     )
 
+    terminal_manager = None
+    if _webui_channel_enabled(config) and config.tools.exec.enable:
+        terminal_manager = TerminalSessionManager(
+            allowed_env_keys=config.tools.exec.allowed_env_keys,
+            path_prepend=config.tools.exec.path_prepend,
+            path_append=config.tools.exec.path_append,
+        )
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -431,6 +440,7 @@ def _run_gateway(
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
+        terminal_session_manager=terminal_manager,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
@@ -669,6 +679,7 @@ def _run_gateway(
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
         webui_skill_state_action=_webui_skill_state_action,
+        webui_terminal_manager=agent.terminal_session_manager,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:

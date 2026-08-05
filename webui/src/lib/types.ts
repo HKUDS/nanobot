@@ -363,6 +363,7 @@ export interface WorkspacesPayload {
   controls: {
     can_change_project: boolean;
     can_use_full_access: boolean;
+    can_use_terminal?: boolean;
   };
 }
 
@@ -1253,6 +1254,44 @@ export type InboundEvent =
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
     }
+  | {
+      event: "terminal_ready";
+      chat_id: string;
+      terminal_id: string;
+      project_path: string;
+      rows: number;
+      cols: number;
+      data: string;
+      seq: number;
+      running: boolean;
+      exit_code?: number | null;
+    }
+  | {
+      event: "terminal_output";
+      chat_id: string;
+      terminal_id: string;
+      data: string;
+      seq: number;
+      replay_reset?: boolean;
+    }
+  | {
+      event: "terminal_exit";
+      chat_id: string;
+      terminal_id: string;
+      exit_code?: number | null;
+    }
+  | {
+      event: "terminal_detached";
+      chat_id: string;
+      terminal_id: string;
+    }
+  | {
+      event: "terminal_error";
+      chat_id?: string;
+      terminal_id?: string;
+      detail?: string;
+      reason?: string;
+    }
   | { event: "transcription_result"; request_id: string; text: string }
   | {
       event: "transcription_error";
@@ -1268,6 +1307,11 @@ export type InboundEvent =
       /** Present when this error rejects a specific outbound WebUI turn. */
       turn_id?: string;
     };
+
+export type TerminalEvent = Extract<
+  InboundEvent,
+  { event: `terminal_${string}` }
+>;
 
 /** Base64-encoded file attached to an outbound ``message`` envelope.
  *
@@ -1340,6 +1384,17 @@ export type Outbound =
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
+  | { type: "terminal_open"; chat_id: string; rows: number; cols: number }
+  | { type: "terminal_input"; chat_id: string; terminal_id: string; data: string }
+  | {
+      type: "terminal_resize";
+      chat_id: string;
+      terminal_id: string;
+      rows: number;
+      cols: number;
+    }
+  | { type: "terminal_detach"; chat_id: string; terminal_id: string }
+  | { type: "terminal_kill"; chat_id: string; terminal_id: string }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {
       type: "message";

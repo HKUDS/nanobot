@@ -219,6 +219,7 @@ class GatewayHTTPHandler:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
+        terminal_available: bool = False,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -240,6 +241,7 @@ class GatewayHTTPHandler:
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
         self.local_trigger_pending_ids = local_trigger_pending_ids
+        self.terminal_available = terminal_available
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -930,7 +932,8 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         return _http_json_response(
             self.workspaces.payload(
-                controls_available=self.workspace_controls_available(connection)
+                controls_available=self.workspace_controls_available(connection),
+                terminal_available=self.terminal_available,
             )
         )
 

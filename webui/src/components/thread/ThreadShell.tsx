@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +22,7 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { Button } from "@/components/ui/button";
 import {
   ApiError,
   fetchFilePreviewAvailability,
@@ -44,6 +54,12 @@ import type {
 } from "@/lib/types";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
 import { useClient } from "@/providers/ClientProvider";
+import { cn } from "@/lib/utils";
+import { SquareTerminal } from "lucide-react";
+
+const TerminalPanel = lazy(() => import("@/components/TerminalPanel").then((module) => ({
+  default: module.TerminalPanel,
+})));
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
 
@@ -273,6 +289,11 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+const TERMINAL_DEFAULT_WIDTH = 560;
+const TERMINAL_MIN_WIDTH = 400;
+const TERMINAL_MAX_WIDTH = 920;
+const TERMINAL_MIN_MAIN_WIDTH = 420;
+const TERMINAL_PREFERENCE_PREFIX = "nanobot:project-terminal:";
 
 type FilePreviewAvailabilityCacheEntry = {
   available?: boolean;
@@ -289,6 +310,37 @@ function maxFilePreviewWidth(containerWidth: number): number {
     FILE_PREVIEW_MIN_WIDTH,
     Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
   );
+}
+
+function clampTerminalWidth(width: number, maxWidth: number): number {
+  return Math.min(Math.max(width, TERMINAL_MIN_WIDTH), maxWidth);
+}
+
+function maxTerminalWidth(containerWidth: number): number {
+  return Math.max(
+    TERMINAL_MIN_WIDTH,
+    Math.min(TERMINAL_MAX_WIDTH, containerWidth - TERMINAL_MIN_MAIN_WIDTH),
+  );
+}
+
+function terminalPreferenceKey(projectPath: string): string {
+  return `${TERMINAL_PREFERENCE_PREFIX}${encodeURIComponent(projectPath)}`;
+}
+
+function readTerminalPreference(projectPath: string): boolean {
+  try {
+    return window.localStorage.getItem(terminalPreferenceKey(projectPath)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeTerminalPreference(projectPath: string, open: boolean): void {
+  try {
+    window.localStorage.setItem(terminalPreferenceKey(projectPath), open ? "1" : "0");
+  } catch {
+    // Private mode or host storage policy can disable persistence.
+  }
 }
 
 interface ThreadShellProps {
@@ -654,10 +706,13 @@ export function ThreadShell({
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalWidth, setTerminalWidth] = useState(TERMINAL_DEFAULT_WIDTH);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
+  const terminalWidthRef = useRef(TERMINAL_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
@@ -726,6 +781,10 @@ export function ThreadShell({
   }, [filePreviewWidth]);
 
   useEffect(() => {
+    terminalWidthRef.current = terminalWidth;
+  }, [terminalWidth]);
+
+  useEffect(() => {
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
@@ -735,6 +794,23 @@ export function ThreadShell({
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
   }, [historyKey]);
+
+  const terminalAvailable = Boolean(
+    chatId
+    && workspaceScope?.project_path
+    && workspaceScope.access_mode === "full"
+    && workspaceControls?.can_use_full_access === true
+    && workspaceControls?.can_use_terminal === true,
+  );
+
+  useEffect(() => {
+    const projectPath = workspaceScope?.project_path;
+    if (!terminalAvailable || !projectPath || filePreviewPath) {
+      setTerminalOpen(false);
+      return;
+    }
+    setTerminalOpen(readTerminalPreference(projectPath));
+  }, [filePreviewPath, historyKey, terminalAvailable, workspaceScope?.project_path]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
@@ -1264,6 +1340,7 @@ export function ThreadShell({
     }
     setFilePreviewClosing(false);
     setFilePreviewPath(path);
+    setTerminalOpen(false);
   }, []);
 
   const handleCloseFilePreview = useCallback(() => {
@@ -1329,6 +1406,59 @@ export function ThreadShell({
     window.addEventListener("pointercancel", handlePointerUp);
   }, []);
 
+  const handleTerminalResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const panel = event.currentTarget.closest<HTMLElement>("[data-terminal-panel]");
+    const shellRect = shellRef.current?.getBoundingClientRect();
+    const rightEdge = shellRect?.right ?? window.innerWidth;
+    const maxWidth = maxTerminalWidth(shellRect?.width ?? window.innerWidth);
+    const originalBodyCursor = document.body.style.cursor;
+    const originalBodyUserSelect = document.body.style.userSelect;
+    const originalPanelTransition = panel?.style.transition ?? "";
+    let nextWidth = terminalWidthRef.current;
+    let frame: number | null = null;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    if (panel) panel.style.transition = "none";
+
+    const applyWidth = (clientX: number) => {
+      nextWidth = clampTerminalWidth(rightEdge - clientX, maxWidth);
+      terminalWidthRef.current = nextWidth;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        panel?.style.setProperty("--terminal-width", `${nextWidth}px`);
+        panel?.style.setProperty("--terminal-slot-width", `${nextWidth}px`);
+      });
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+      panel?.style.setProperty("--terminal-width", `${nextWidth}px`);
+      panel?.style.setProperty("--terminal-slot-width", `${nextWidth}px`);
+      if (panel) panel.style.transition = originalPanelTransition;
+      setTerminalWidth(nextWidth);
+      document.body.style.cursor = originalBodyCursor;
+      document.body.style.userSelect = originalBodyUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    applyWidth(event.clientX);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, []);
+
   useEffect(() => {
     if (!filePreviewPath) return;
     const clampToShell = () => {
@@ -1344,6 +1474,44 @@ export function ThreadShell({
       window.removeEventListener("resize", clampToShell);
     };
   }, [filePreviewPath]);
+
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const clampToShell = () => {
+      const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+      const maxWidth = maxTerminalWidth(shellWidth);
+      const nextWidth = clampTerminalWidth(terminalWidthRef.current, maxWidth);
+      terminalWidthRef.current = nextWidth;
+      setTerminalWidth(nextWidth);
+    };
+    clampToShell();
+    window.addEventListener("resize", clampToShell);
+    return () => window.removeEventListener("resize", clampToShell);
+  }, [terminalOpen]);
+
+  const handleToggleTerminal = useCallback(() => {
+    const projectPath = workspaceScope?.project_path;
+    if (!terminalAvailable || !projectPath) return;
+    setTerminalOpen((current) => {
+      const next = !current;
+      writeTerminalPreference(projectPath, next);
+      return next;
+    });
+    if (!terminalOpen) {
+      if (filePreviewCloseTimerRef.current !== null) {
+        window.clearTimeout(filePreviewCloseTimerRef.current);
+        filePreviewCloseTimerRef.current = null;
+      }
+      setFilePreviewPath(null);
+      setFilePreviewClosing(false);
+    }
+  }, [terminalAvailable, terminalOpen, workspaceScope?.project_path]);
+
+  const handleCloseTerminal = useCallback(() => {
+    const projectPath = workspaceScope?.project_path;
+    setTerminalOpen(false);
+    if (projectPath) writeTerminalPreference(projectPath, false);
+  }, [workspaceScope?.project_path]);
 
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
@@ -1468,6 +1636,28 @@ export function ThreadShell({
       onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
     />
   ) : undefined;
+  const terminalAction = session ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      disabled={!terminalAvailable}
+      aria-label={t("terminal.toggle", { defaultValue: "Toggle project terminal" })}
+      aria-pressed={terminalOpen}
+      title={terminalAvailable
+        ? t("terminal.toggle", { defaultValue: "Toggle project terminal" })
+        : t("terminal.requiresFullAccess", {
+          defaultValue: "The project terminal requires local WebUI Full access and an enabled exec tool.",
+        })}
+      onClick={handleToggleTerminal}
+      className={cn(
+        "host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
+        terminalOpen && "bg-accent/55 text-foreground",
+      )}
+      data-testid="terminal-toggle"
+    >
+      <SquareTerminal className="h-4 w-4" aria-hidden />
+    </Button>
+  ) : undefined;
 
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -1484,6 +1674,7 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            terminalAction={terminalAction}
           />
         ) : null}
         <FilePreviewAvailabilityProvider
@@ -1524,6 +1715,18 @@ export function ThreadShell({
           onResizeStart={handleFilePreviewResizeStart}
           onClose={handleCloseFilePreview}
         />
+      ) : null}
+      {terminalOpen && chatId && workspaceScope?.project_path && !filePreviewPath ? (
+        <Suspense fallback={null}>
+          <TerminalPanel
+            key={workspaceScope.project_path}
+            chatId={chatId}
+            projectPath={workspaceScope.project_path}
+            desktopWidth={terminalWidth}
+            onResizeStart={handleTerminalResizeStart}
+            onClose={handleCloseTerminal}
+          />
+        </Suspense>
       ) : null}
     </section>
   );

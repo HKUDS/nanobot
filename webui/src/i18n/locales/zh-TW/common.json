@@ -1320,6 +1320,20 @@
     "next": "下一張",
     "close": "關閉預覽"
   },
+  "terminal": {
+    "aria": "專案終端機",
+    "toggle": "切換專案終端機",
+    "requiresFullAccess": "專案終端機需要本機 WebUI、完整存取模式，並啟用 exec 工具。",
+    "resize": "調整終端機寬度",
+    "connected": "已連線",
+    "connecting": "正在連線",
+    "stopping": "正在停止",
+    "exited": "已結束",
+    "error": "錯誤",
+    "restart": "重新啟動終端機",
+    "kill": "結束終端機程序",
+    "detach": "隱藏終端機"
+  },
   "filePreview": {
     "aria": "檔案預覽",
     "breadcrumb": "檔案路徑",

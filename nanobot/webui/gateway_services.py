@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
+    from nanobot.terminal.runtime import TerminalSessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
 
 
@@ -38,6 +39,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    terminal_manager: TerminalSessionManager | None
 
 
 def build_gateway_services(
@@ -59,6 +61,7 @@ def build_gateway_services(
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
+    terminal_manager: TerminalSessionManager | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -103,6 +106,7 @@ def build_gateway_services(
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         skill_state_action=skill_state_action,
+        terminal_available=terminal_manager is not None,
         log=logger,
     )
     return GatewayServices(
@@ -117,4 +121,5 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        terminal_manager=terminal_manager,
     )

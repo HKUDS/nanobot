@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
     from nanobot.security.workspace_access import WorkspaceSandboxStatus
     from nanobot.session.manager import SessionManager
+    from nanobot.terminal.runtime import TerminalSessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
@@ -83,6 +84,7 @@ class ToolContext:
     subagent_manager: SubagentManager | None = None
     cron_service: CronService | None = None
     exec_session_manager: ExecSessionManager | None = None
+    terminal_session_manager: TerminalSessionManager | None = None
     sessions: SessionManager | None = None
     file_state_store: FileStates | None = None
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None

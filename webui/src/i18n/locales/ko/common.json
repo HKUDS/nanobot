@@ -1320,6 +1320,20 @@
     "next": "다음 이미지",
     "close": "미리보기 닫기"
   },
+  "terminal": {
+    "aria": "프로젝트 터미널",
+    "toggle": "프로젝트 터미널 전환",
+    "requiresFullAccess": "프로젝트 터미널을 사용하려면 로컬 WebUI의 전체 액세스와 활성화된 exec 도구가 필요합니다.",
+    "resize": "터미널 크기 조절",
+    "connected": "연결됨",
+    "connecting": "연결 중",
+    "stopping": "중지 중",
+    "exited": "종료됨",
+    "error": "오류",
+    "restart": "터미널 다시 시작",
+    "kill": "터미널 프로세스 종료",
+    "detach": "터미널 숨기기"
+  },
   "filePreview": {
     "aria": "파일 미리보기",
     "breadcrumb": "파일 경로",

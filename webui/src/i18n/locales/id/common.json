@@ -1320,6 +1320,20 @@
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
   },
+  "terminal": {
+    "aria": "Terminal proyek",
+    "toggle": "Tampilkan atau sembunyikan terminal proyek",
+    "requiresFullAccess": "Terminal proyek memerlukan WebUI lokal, Akses Penuh, dan alat exec yang diaktifkan.",
+    "resize": "Ubah ukuran terminal",
+    "connected": "Terhubung",
+    "connecting": "Menghubungkan",
+    "stopping": "Menghentikan",
+    "exited": "Selesai",
+    "error": "Kesalahan",
+    "restart": "Mulai ulang terminal",
+    "kill": "Akhiri proses terminal",
+    "detach": "Sembunyikan terminal"
+  },
   "filePreview": {
     "aria": "Pratinjau file",
     "breadcrumb": "Jalur file",
