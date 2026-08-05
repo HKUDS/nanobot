@@ -49,6 +49,12 @@
       "noMatch": "Nenhuma solicitação pendente corresponde a este código."
     }
   },
+  "temporaryChat": {
+    "title": "Chat temporário",
+    "description": "Não é salvo no histórico nem na memória. As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "notSaved": "Não salvo",
+    "clear": "Limpar chat temporário"
+  },
   "sidebar": {
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",

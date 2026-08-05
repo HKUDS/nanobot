@@ -346,6 +346,18 @@ class TestBuildSystemPrompt:
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
 
+    def test_can_exclude_long_term_memory_without_changing_agent_identity(self, tmp_path):
+        builder = _builder(tmp_path)
+        builder.memory.write_memory("# Memory\n- private detail")
+
+        result = builder.build_system_prompt(
+            include_long_term_memory=False,
+            include_memory_recent_history=False,
+        )
+
+        assert "private detail" not in result
+        assert "workspace" in result.lower()
+
 
 # ---------------------------------------------------------------------------
 # build_messages

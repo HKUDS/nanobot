@@ -49,6 +49,12 @@
       "noMatch": "Aucune demande en attente ne correspond à ce code."
     }
   },
+  "temporaryChat": {
+    "title": "Discussion temporaire",
+    "description": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire. Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
+    "notSaved": "Non enregistrée",
+    "clear": "Effacer la discussion temporaire"
+  },
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",

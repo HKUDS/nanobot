@@ -43,7 +43,12 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_RUNTIME_CONTROL,
+    RUNTIME_CONTROL_TRANSIENT_SESSION_DISCARD,
+    InboundMessage,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
@@ -721,6 +726,7 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
+            include_long_term_memory=ctx.require_session().transient is not True,
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
@@ -1159,7 +1165,19 @@ class AgentLoop:
 
                 raw = msg.content.strip()
                 effective_key = self._effective_session_key(msg)
+                if (
+                    msg.metadata.get(INBOUND_META_RUNTIME_CONTROL)
+                    == RUNTIME_CONTROL_TRANSIENT_SESSION_DISCARD
+                ):
+                    await self._cancel_active_tasks(effective_key)
+                    self.sessions.discard_transient(effective_key)
+                    continue
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
+                    continue
+                if (
+                    msg.transient_session
+                    and not self.sessions.is_transient_active(effective_key)
+                ):
                     continue
                 if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
@@ -1279,6 +1297,8 @@ class AgentLoop:
                     # _emit_checkpoint during tool execution; materializing
                     # it into session history now makes it visible in the
                     # next conversation turn.
+                    if msg.transient_session:
+                        raise
                     try:
                         key = self._effective_session_key(msg)
                         session = self.sessions.get_or_create(key)
@@ -1564,8 +1584,11 @@ class AgentLoop:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        if not msg.transient_session:
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        else:
+            logger.info("Response to {}:{}: [temporary chat]", msg.channel, msg.sender_id)
 
         event = None
         meta = dict(msg.metadata or {})
@@ -1594,17 +1617,22 @@ class AgentLoop:
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        if ctx.kind is TurnKind.SYSTEM:
-            logger.info("Processing system message from {}", msg.sender_id)
-        else:
-            logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
-
         # Session is already fetched by the caller (_process_message) but
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
+        if session.transient is True:
+            ctx.ephemeral = True
+
+        if ctx.kind is TurnKind.SYSTEM:
+            logger.info("Processing system message from {}", msg.sender_id)
+        elif session.transient is True:
+            logger.info("Processing temporary message from {}:{}", msg.channel, msg.sender_id)
+        else:
+            preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+            logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+
         self._remember_unified_session_route(
             session,
             msg,
@@ -1621,6 +1649,8 @@ class AgentLoop:
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
+        if ctx.ephemeral and session.transient is not True:
+            return
         ctx.session, pending = self.auto_compact.prepare_session(
             session,
             ctx.session_key,
@@ -1693,7 +1723,7 @@ class AgentLoop:
         replay_max_messages = replay_max_messages_for_context(
             runtime.context_window_tokens
         )
-        if not ctx.ephemeral:
+        if not ctx.ephemeral or session.transient is True:
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 runtime=runtime,

@@ -848,6 +848,42 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("keeps temporary messages across navigation and drops them after clear", async () => {
+    const client = makeClient();
+    const view = (chatId: string, temporary: boolean) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={temporary ? "Temporary chat" : "Regular chat"}
+        temporary={temporary}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("temporary-live", true));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "keep this only in memory" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "temporary-live",
+      "keep this only in memory",
+    ));
+
+    rerender(view("regular", false));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+    rerender(view("temporary-live", true));
+    expect(screen.getByText("keep this only in memory")).toBeInTheDocument();
+
+    rerender(view("temporary-cleared", true));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+  });
+
   it("highlights sent skill references without skill metadata", async () => {
     const client = makeClient();
     render(wrap(
