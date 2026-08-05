@@ -8,7 +8,11 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_TRANSIENT_SESSION,
+    InboundMessage,
+    OutboundMessage,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -302,7 +306,8 @@ class BaseChannel(ABC):
                 )
             return
 
-        meta = metadata or {}
+        meta = dict(metadata or {})
+        transient_session = meta.pop(INBOUND_META_TRANSIENT_SESSION, False) is True
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
 
@@ -314,6 +319,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            transient_session=transient_session,
         )
 
         await self.bus.publish_inbound(msg)

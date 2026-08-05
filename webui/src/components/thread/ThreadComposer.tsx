@@ -84,6 +84,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+import { isTemporaryChatId } from "@/lib/temporary-chat";
 import type {
   CliAppInfo,
   ChatSummary,
@@ -205,6 +206,8 @@ interface ThreadComposerProps {
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
+  compactWorkspaceControls?: boolean;
+  workspaceConnected?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -440,7 +443,9 @@ function storeSlashRecents(commands: string[]): void {
 
 function queuedPromptsStorageKey(key?: string | null): string | null {
   const clean = key?.trim();
-  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
+  return clean && !isTemporaryChatId(clean)
+    ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}`
+    : null;
 }
 
 function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
@@ -955,6 +960,8 @@ export function ThreadComposer({
   runStartedAt = null,
   goalState,
   workspaceScope = null,
+  compactWorkspaceControls = false,
+  workspaceConnected = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -1005,17 +1012,18 @@ export function ThreadComposer({
     () => queuedPromptsStorageKey(pendingQueueKey),
     [pendingQueueKey],
   );
-  const showProjectPicker =
+  const projectPickerAvailable =
     isHero
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
+  const showProjectPicker = projectPickerAvailable && !compactWorkspaceControls;
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
     skipQueuedPromptPersistRef.current = true;
     setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
-  }, [queuedPromptStorageKey]);
+  }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!queuedPromptStorageKey) return;
@@ -2425,6 +2433,19 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
+            {compactWorkspaceControls && projectPickerAvailable ? (
+              <WorkspaceProjectPicker
+                compact
+                connected={workspaceConnected}
+                isHero={isHero}
+                disabled={disabled || workspaceScopeDisabled}
+                scope={workspaceScope}
+                defaultScope={workspaceDefaultScope}
+                controls={workspaceControls}
+                error={workspaceError}
+                onChange={onWorkspaceScopeChange}
+              />
+            ) : null}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2433,7 +2454,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : workspaceScope ? (
+            ) : workspaceScope && (!compactWorkspaceControls || workspaceConnected) ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
                 disabled={disabled || workspaceScopeDisabled}
@@ -2544,15 +2565,17 @@ export function ThreadComposer({
             </Button>
           </div>
         </div>
-        <WorkspaceProjectPicker
-          isHero={isHero}
-          disabled={disabled || workspaceScopeDisabled}
-          scope={workspaceScope}
-          defaultScope={workspaceDefaultScope}
-          controls={workspaceControls}
-          error={workspaceError}
-          onChange={onWorkspaceScopeChange}
-        />
+        {showProjectPicker ? (
+          <WorkspaceProjectPicker
+            isHero={isHero}
+            disabled={disabled || workspaceScopeDisabled}
+            scope={workspaceScope}
+            defaultScope={workspaceDefaultScope}
+            controls={workspaceControls}
+            error={workspaceError}
+            onChange={onWorkspaceScopeChange}
+          />
+        ) : null}
       </div>
     </form>
   );

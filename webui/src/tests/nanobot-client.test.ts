@@ -71,6 +71,54 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("keeps temporary chats out of attachment and reconnect state", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const chatId = "temporary-test";
+    client.connect();
+    client.onChat(chatId, vi.fn());
+    client.sendMessage(chatId, "hello", undefined, { turnId: "turn-1" });
+
+    lastSocket().fakeOpen();
+
+    expect(lastSocket().sent.map((raw) => JSON.parse(raw))).toEqual([
+      {
+        type: "message",
+        chat_id: chatId,
+        content: "hello",
+        turn_id: "turn-1",
+        webui: true,
+      },
+    ]);
+
+    client.discardTemporaryChat(chatId);
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "discard_temporary_chat",
+      chat_id: chatId,
+    });
+  });
+
+  it("forgets temporary chats when the socket drops", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: true,
+      maxBackoffMs: 1,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    client.onChat("temporary-drop", vi.fn());
+    lastSocket().close();
+
+    await vi.advanceTimersByTimeAsync(1);
+    lastSocket().fakeOpen();
+
+    expect(lastSocket().sent).toEqual([]);
+  });
+
   it("routes events to the matching chat handler", () => {
     const client = new NanobotClient({
       url: "ws://test",

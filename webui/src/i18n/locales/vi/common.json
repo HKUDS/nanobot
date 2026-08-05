@@ -49,6 +49,12 @@
       "noMatch": "Không có yêu cầu đang chờ nào khớp với mã này."
     }
   },
+  "temporaryChat": {
+    "title": "Trò chuyện tạm thời",
+    "description": "Không được lưu vào lịch sử hoặc bộ nhớ. Yêu cầu vẫn được gửi đến nhà cung cấp mô hình và thao tác công cụ có thể để lại thay đổi.",
+    "notSaved": "Không lưu",
+    "clear": "Xóa trò chuyện tạm thời"
+  },
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",

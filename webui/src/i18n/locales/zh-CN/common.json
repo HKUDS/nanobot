@@ -49,6 +49,12 @@
       "noMatch": "没有待处理请求与此配对码匹配。"
     }
   },
+  "temporaryChat": {
+    "title": "临时聊天",
+    "description": "不会保存到历史记录或记忆。请求仍会发送给模型提供商，工具操作也可能留下更改。",
+    "notSaved": "不保存",
+    "clear": "清空临时聊天"
+  },
   "sidebar": {
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",

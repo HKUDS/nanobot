@@ -11,6 +11,7 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
+import { isTemporaryChatId } from "./temporary-chat";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -173,6 +174,8 @@ export class NanobotClient {
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
+  /** Temporary chat is connection-owned and intentionally not reattached. */
+  private temporaryChatId: string | null = null;
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
@@ -725,7 +728,16 @@ export class NanobotClient {
     } catch {
       // ignore
     }
+    this.clearTemporaryChats();
     this.setStatus("closed");
+  }
+
+  discardTemporaryChat(chatId: string): void {
+    if (!isTemporaryChatId(chatId)) return;
+    if (this.socket?.readyState === WS_OPEN) {
+      this.rawSend({ type: "discard_temporary_chat", chat_id: chatId });
+    }
+    this.forgetTemporaryChat(chatId);
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
@@ -793,6 +805,10 @@ export class NanobotClient {
   }
 
   attach(chatId: string): void {
+    if (isTemporaryChatId(chatId)) {
+      this.temporaryChatId = chatId;
+      return;
+    }
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
@@ -814,7 +830,9 @@ export class NanobotClient {
       startsNewRun?: boolean;
     },
   ): void {
-    this.knownChats.add(chatId);
+    const temporary = isTemporaryChatId(chatId);
+    if (temporary) this.temporaryChatId = chatId;
+    if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
       chat_id: chatId,
@@ -863,6 +881,7 @@ export class NanobotClient {
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
+    if (isTemporaryChatId(chatId)) return;
     this.knownChats.add(chatId);
     this.queueSend({
       type: "set_workspace_scope",
@@ -1094,6 +1113,7 @@ export class NanobotClient {
 
   private handleClose(event?: { code?: number }): void {
     this.socket = null;
+    this.clearTemporaryChats();
     if (this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
@@ -1238,6 +1258,38 @@ export class NanobotClient {
     } else {
       this.sendQueue.push(frame);
     }
+  }
+
+  private clearTemporaryChats(): void {
+    if (this.temporaryChatId) this.forgetTemporaryChat(this.temporaryChatId);
+  }
+
+  private forgetTemporaryChat(chatId: string): void {
+    if (this.temporaryChatId === chatId) this.temporaryChatId = null;
+    this.knownChats.delete(chatId);
+    this.chatHandlers.delete(chatId);
+    this.pendingInboundByChat.delete(chatId);
+    const wasRunning = this.runStartedAtByChatId.delete(chatId);
+    this.runGenerationByChatId.delete(chatId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    this.unsettledRunTurnIdsByChatId.delete(chatId);
+    this.canonicalCompletedTurnIdsByChatId.delete(chatId);
+    this.goalStateByChatId.delete(chatId);
+    for (const key of [...this.runStartedAtByTurnKey.keys()]) {
+      if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);
+    }
+    for (const [key, pending] of [...this.pendingMessageSends]) {
+      if (pending.chatId !== chatId) continue;
+      this.pendingMessageSends.delete(key);
+      this.socketPendingMessageSendKeys.delete(key);
+    }
+    this.sendQueue = this.sendQueue.filter((frame) => (
+      !("chat_id" in frame) || frame.chat_id !== chatId
+    ));
+    if (this.lastSocketMessageSendKey?.startsWith(`${chatId}\u0000`)) {
+      this.lastSocketMessageSendKey = null;
+    }
+    if (wasRunning) this.emitRunStatus(chatId, null);
   }
 
   private frameFitsTransport(frame: Outbound): boolean {

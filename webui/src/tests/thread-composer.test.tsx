@@ -1070,6 +1070,58 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it("keeps temporary-chat workspace controls on demand", async () => {
+    const user = userEvent.setup();
+    const onWorkspaceScopeChange = vi.fn();
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        compactWorkspaceControls
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    expect(screen.queryByRole("button", {
+      name: "Workspace access mode: Default Permission",
+    })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+    const input = await screen.findByLabelText("Paste path");
+    fireEvent.change(input, { target: { value: "relative/project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Enter an absolute folder path on this machine.",
+    );
+
+    rerender(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        compactWorkspaceControls
+        workspaceConnected
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    expect(screen.getByRole("button", {
+      name: "Workspace access mode: Default Permission",
+    })).toBeInTheDocument();
+  });
+
   it("uses the native folder picker for project selection on native host", async () => {
     const onWorkspaceScopeChange = vi.fn();
     const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
@@ -2886,6 +2938,50 @@ describe("ThreadComposer", () => {
     await waitFor(() => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps temporary chat guidance in memory only", async () => {
+    const onSend = vi.fn();
+    const view = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="temporary-private"
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "do not persist this" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("do not persist this")).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
+
+    view.unmount();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="temporary-private"
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("do not persist this")).not.toBeInTheDocument();
+    });
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
   });
 
 });

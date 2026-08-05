@@ -49,6 +49,12 @@
       "noMatch": "Tidak ada permintaan tertunda yang cocok dengan kode ini."
     }
   },
+  "temporaryChat": {
+    "title": "Obrolan sementara",
+    "description": "Tidak disimpan ke riwayat atau memori. Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
+    "notSaved": "Tidak disimpan",
+    "clear": "Hapus obrolan sementara"
+  },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",

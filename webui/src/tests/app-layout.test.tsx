@@ -14,6 +14,7 @@ const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
+const discardTemporaryChatSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
@@ -220,6 +221,7 @@ vi.mock("@/lib/nanobot-client", () => {
     newChat = vi.fn();
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
+    discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
     updateMaxFrameBytes = vi.fn();
@@ -248,6 +250,7 @@ describe("App layout", () => {
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
     setSidebarStateSpy.mockReset();
+    discardTemporaryChatSpy.mockReset();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
@@ -382,6 +385,76 @@ describe("App layout", () => {
         `#/chat/${encodeURIComponent("websocket:chat-1")}`,
       ),
     );
+  });
+
+  it("keeps a temporary chat while navigating and discards it on unmount", async () => {
+    const { unmount } = render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const temporaryButton = within(sidebar).getByRole("button", { name: "Temporary chat" });
+
+    fireEvent.click(temporaryButton);
+
+    expect(temporaryButton).toHaveAttribute("aria-current", "page");
+    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
+      "data-active-id",
+      "temporary-chat",
+    );
+    expect(window.location.hash).toBe("#/temporary");
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(temporaryButton);
+    expect(window.location.hash).toBe("#/temporary");
+    expect(temporaryButton).toHaveAttribute("aria-current", "page");
+
+    unmount();
+    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledOnce());
+    expect(discardTemporaryChatSpy.mock.calls[0][0]).toMatch(/^temporary-/);
+  });
+
+  it("clears a temporary chat explicitly without leaving it", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Temporary chat" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clear temporary chat" }));
+
+    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledOnce());
+    expect(window.location.hash).toBe("#/temporary");
+    expect(within(sidebar).getByRole("button", { name: "Temporary chat" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("starts temporary chat with restricted on-demand workspace controls", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "full",
+        default_scope: {
+          project_path: "/tmp/workspace",
+          project_name: "workspace",
+          access_mode: "full",
+          restrict_to_workspace: false,
+        },
+        controls: { can_change_project: true, can_use_full_access: true },
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Temporary chat" }));
+
+    expect(await screen.findByRole("button", { name: "Choose project" })).toBeInTheDocument();
+    expect(screen.queryByText("Full Access")).not.toBeInTheDocument();
   });
 
   it("restores the Settings route after a restart fallback hash", async () => {

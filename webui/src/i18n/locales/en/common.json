@@ -49,6 +49,12 @@
       "noMatch": "No pending request matches this code."
     }
   },
+  "temporaryChat": {
+    "title": "Temporary chat",
+    "description": "Not saved to history or memory. Requests still go to your model provider, and tool actions may leave changes.",
+    "notSaved": "Not saved",
+    "clear": "Clear temporary chat"
+  },
   "sidebar": {
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",
