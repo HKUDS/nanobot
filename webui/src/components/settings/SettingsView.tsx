@@ -364,11 +364,16 @@ function parseProviderExtraBody(value: string): Record<string, unknown> | null {
   }
 }
 
+function isHostedSearchTool(tool: unknown, toolType: "web_search" | "x_search"): boolean {
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return false;
+  const configuredType = (tool as Record<string, unknown>).type;
+  if (typeof configuredType !== "string") return false;
+  return configuredType === toolType
+    || (toolType === "web_search" && configuredType.startsWith("web_search_"));
+}
+
 function hasHostedSearchTool(value: unknown, toolType: "web_search" | "x_search"): boolean {
-  return Array.isArray(value) && value.some((tool) => (
-    tool && typeof tool === "object" && !Array.isArray(tool)
-    && (tool as Record<string, unknown>).type === toolType
-  ));
+  return Array.isArray(value) && value.some((tool) => isHostedSearchTool(tool, toolType));
 }
 
 function providerRequestOptionEnabled(
@@ -394,10 +399,7 @@ function updateProviderRequestOption(
   } else {
     const toolType = option.toolType!;
     const tools = Array.isArray(extraBody.tools)
-      ? extraBody.tools.filter((tool) => !(
-          tool && typeof tool === "object" && !Array.isArray(tool)
-          && (tool as Record<string, unknown>).type === toolType
-        ))
+      ? extraBody.tools.filter((tool) => !isHostedSearchTool(tool, toolType))
       : [];
     if (enabled) tools.push({ type: toolType });
     if (tools.length || option.defaultEnabled) {

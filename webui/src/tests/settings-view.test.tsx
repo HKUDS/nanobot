@@ -3235,6 +3235,66 @@ describe("SettingsView Apps catalog", () => {
     });
   });
 
+  it("recognizes and removes versioned web search tools without losing raw settings", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      providers: [{
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        api_type: "auto",
+        advanced_fields: ["api_type", "extra_body"],
+        extra_body: {
+          metadata: { owner: "legacy-config" },
+          tools: [
+            { type: "web_search_preview", search_context_size: "medium" },
+            { type: "file_search", vector_store_ids: ["vs_legacy"] },
+          ],
+        },
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    expect(searchSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = fetchMock.mock.calls.find(
+        ([input]) => String(input).startsWith("/api/settings/provider/update?"),
+      );
+      expect(updateCall).toBeTruthy();
+      const headers = updateCall?.[1]?.headers as Record<string, string>;
+      const values = JSON.parse(decodeURIComponent(
+        headers["X-Nanobot-Provider-Values"],
+      )) as { extraBody: string };
+      expect(JSON.parse(values.extraBody)).toEqual({
+        metadata: { owner: "legacy-config" },
+        tools: [{ type: "file_search", vector_store_ids: ["vs_legacy"] }],
+      });
+    });
+  });
+
   it("creates a custom provider with folded advanced request settings", async () => {
     const base = settingsPayload();
     let payload: SettingsPayload = {

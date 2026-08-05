@@ -55,7 +55,8 @@ def _is_hosted_x_search_tool(value: object) -> bool:
 def _is_named_x_search_tool(value: object) -> bool:
     if not isinstance(value, dict):
         return False
-    return cast(dict[object, object], value).get("name") == "x_search"
+    record = cast(dict[object, object], value)
+    return record.get("type") == "function" and record.get("name") == "x_search"
 
 
 class XAIGrokProvider(LLMProvider):
@@ -126,7 +127,7 @@ class XAIGrokProvider(LLMProvider):
             token = await asyncio.to_thread(get_xai_oauth_token, proxy=self.proxy)
             configured_tools = self._extra_body.get("tools")
             tools_are_explicit = "tools" in self._extra_body
-            hosted_search_requested = not tools_are_explicit or (
+            configured_hosted_search = (
                 isinstance(configured_tools, list)
                 and any(
                     _is_hosted_x_search_tool(tool)
@@ -134,20 +135,17 @@ class XAIGrokProvider(LLMProvider):
                 )
             )
             supports_backend_search = False
-            if hosted_search_requested:
+            if not tools_are_explicit:
                 stage = "model_capabilities"
                 supports_backend_search = await self._supports_backend_search(token, wire_model)
             converted_tools = convert_tools(tools or [])
             if isinstance(configured_tools, list):
-                converted_tools.extend(
-                    tool
-                    for tool in cast(list[dict[str, Any]], configured_tools)
-                    if not _is_hosted_x_search_tool(tool)
-                )
-            if supports_backend_search:
+                converted_tools.extend(cast(list[dict[str, Any]], configured_tools))
+            if supports_backend_search or configured_hosted_search:
                 converted_tools = [
                     tool for tool in converted_tools if not _is_named_x_search_tool(tool)
                 ]
+            if supports_backend_search:
                 converted_tools.append({"type": "x_search"})
 
             body: dict[str, Any] = {
