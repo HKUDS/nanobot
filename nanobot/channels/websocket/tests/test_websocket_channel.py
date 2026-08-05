@@ -2547,6 +2547,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     )
     config.tools.web.search.provider = "brave"
     config.tools.web.search.api_key = "brave-secret"
+    expected_timezone = config.agents.defaults.timezone
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
@@ -2587,7 +2588,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["agent"]["provider"] == "openai"
         assert body["agent"]["model_preset"] == "default"
         assert body["agent"]["max_tokens"] == 8192
-        assert body["agent"]["timezone"] == "UTC"
+        assert body["agent"]["timezone"] == expected_timezone
         assert "bot_name" not in body["agent"]
         assert "bot_icon" not in body["agent"]
         assert body["agent"]["tool_hint_max_length"] == 40

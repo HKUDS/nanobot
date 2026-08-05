@@ -4,6 +4,10 @@ from zoneinfo import ZoneInfo
 
 from tzlocal import get_localzone_name
 
+_UTC_ALIASES = frozenset(
+    {"Etc/GMT", "Etc/UTC", "GMT", "GMT0", "Greenwich", "UCT", "Universal", "Zulu"}
+)
+
 
 def detect_system_timezone() -> str:
     """Return the host's IANA timezone, falling back safely to UTC."""
@@ -12,4 +16,4 @@ def detect_system_timezone() -> str:
         ZoneInfo(timezone)
     except Exception:
         return "UTC"
-    return timezone
+    return "UTC" if timezone in _UTC_ALIASES else timezone

@@ -85,3 +85,12 @@ def test_backend_timezone_detection_falls_back_to_utc(monkeypatch) -> None:
     )
 
     assert detect_system_timezone() == "UTC"
+
+
+def test_backend_timezone_detection_normalizes_utc_aliases(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.config.timezone.get_localzone_name",
+        lambda: "Etc/UTC",
+    )
+
+    assert detect_system_timezone() == "UTC"
