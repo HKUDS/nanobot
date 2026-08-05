@@ -1383,8 +1383,9 @@ class AgentLoop:
             self.subagents.close,
             self._exec_session_manager.close_all,
         ]
-        if self.terminal_session_manager is not None:
-            cleanup_steps.append(self.terminal_session_manager.close_all)
+        terminal_session_manager = getattr(self, "terminal_session_manager", None)
+        if terminal_session_manager is not None:
+            cleanup_steps.append(terminal_session_manager.close_all)
         cleanup_steps.append(lambda: agent_context.close_mcp(self))
         for cleanup in cleanup_steps:
             try:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import importlib
 import os
 import shutil
 import signal
@@ -17,7 +18,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 _IS_WINDOWS = sys.platform == "win32"
 _DEFAULT_ROWS = 30
@@ -176,12 +177,12 @@ class _WindowsPtyBackend:
         cols: int,
     ) -> _WindowsPtyBackend:
         try:
-            from winpty import PtyProcess  # pyright: ignore[reportMissingTypeStubs]
+            winpty = importlib.import_module("winpty")
         except ImportError as exc:  # pragma: no cover - dependency is platform-specific
             raise TerminalError(
                 "Interactive terminals on Windows require the pywinpty package"
             ) from exc
-        pty_process = cast(Any, PtyProcess)
+        pty_process = getattr(winpty, "PtyProcess")
         return cls(
             pty_process.spawn(
                 argv,
