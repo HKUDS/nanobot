@@ -1024,8 +1024,9 @@ class OpenAICompatProvider(LLMProvider):
         return self._api_type == "responses" or self._hosted_web_search_enabled()
 
     def _hosted_web_search_enabled(self) -> bool:
-        configured_tools = self._extra_body.get("tools")
-        if "tools" in self._extra_body:
+        extra_body = getattr(self, "_extra_body", {})
+        configured_tools = extra_body.get("tools")
+        if "tools" in extra_body:
             return isinstance(configured_tools, list) and any(
                 _is_hosted_web_search_tool(tool)
                 for tool in cast(list[object], configured_tools)
@@ -1034,7 +1035,7 @@ class OpenAICompatProvider(LLMProvider):
             self._spec
             and any(
                 _is_hosted_web_search_type(tool_type)
-                for tool_type in self._spec.responses_default_tools
+                for tool_type in getattr(self._spec, "responses_default_tools", ())
             )
         )
 
@@ -1201,10 +1202,11 @@ class OpenAICompatProvider(LLMProvider):
             body["tool_choice"] = tool_choice or "auto"
 
         extra_body = getattr(self, "_extra_body", {})
-        if "tools" not in extra_body and self._spec and self._spec.responses_default_tools:
+        default_tools = getattr(self._spec, "responses_default_tools", ())
+        if "tools" not in extra_body and default_tools:
             body["tools"] = [
                 *cast(list[object], body.get("tools", [])),
-                *({"type": tool_type} for tool_type in self._spec.responses_default_tools),
+                *({"type": tool_type} for tool_type in default_tools),
             ]
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
