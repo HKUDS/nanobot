@@ -7,6 +7,7 @@ import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 import nanobot.channels.whatsapp.runtime as whatsapp_module
@@ -89,10 +90,11 @@ def _make_send_client() -> SimpleNamespace:
     )
 
 
-def _patch_neonize_api(monkeypatch, detect_mime=None) -> None:
+def _patch_neonize_api(monkeypatch, detect_mime=None, detect_buffer=None) -> None:
     detect_mime = detect_mime or (
         lambda path, *, mime: mimetypes.guess_type(path)[0] or "application/octet-stream"
     )
+    detect_buffer = detect_buffer or (lambda data, *, mime: "application/octet-stream")
     monkeypatch.setattr(
         whatsapp_module,
         "_NEONIZE_API",
@@ -104,6 +106,7 @@ def _patch_neonize_api(monkeypatch, detect_mime=None) -> None:
             PairStatusEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
             detect_mime=detect_mime,
+            detect_buffer=detect_buffer,
         ),
     )
 
@@ -257,6 +260,104 @@ async def test_send_mislabeled_audio_as_document(monkeypatch) -> None:
         mimetype="audio/x-wav",
     )
     client.send_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_mislabeled_audio_as_document(monkeypatch) -> None:
+    payload = b"remote wav payload"
+    media_url = "https://cdn.example/recording.mpeg?token=secret"
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == media_url
+        return httpx.Response(200, content=payload)
+
+    monkeypatch.setattr(
+        whatsapp_module,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(handle_request),
+    )
+
+    def detect_buffer(data: bytes, *, mime: bool) -> str:
+        assert data == payload
+        assert mime is True
+        return "audio/x-wav"
+
+    _patch_neonize_api(
+        monkeypatch,
+        detect_buffer=detect_buffer,
+    )
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[media_url],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_document.assert_awaited_once_with(
+        jid,
+        payload,
+        filename="recording.mpeg",
+        mimetype="audio/x-wav",
+    )
+    client.send_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_media_blocks_private_url(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    with pytest.raises(httpx.RequestError, match="private/internal"):
+        await ch.send(
+            OutboundMessage(
+                channel="whatsapp",
+                chat_id="12345@s.whatsapp.net",
+                content="",
+                media=["http://127.0.0.1/recording.mpeg"],
+            )
+        )
+
+    client.send_video.assert_not_awaited()
+    client.send_document.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_media_enforces_download_limit(monkeypatch) -> None:
+    monkeypatch.setattr(whatsapp_module, "_REMOTE_MEDIA_MAX_BYTES", 3)
+    monkeypatch.setattr(
+        whatsapp_module,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, content=b"1234")),
+    )
+    _patch_neonize_api(monkeypatch)
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    with pytest.raises(ValueError, match="exceeds the 3-byte limit"):
+        await ch.send(
+            OutboundMessage(
+                channel="whatsapp",
+                chat_id="12345@s.whatsapp.net",
+                content="",
+                media=["https://cdn.example/recording.mpeg"],
+            )
+        )
+
+    client.send_video.assert_not_awaited()
+    client.send_document.assert_not_awaited()
 
 
 @pytest.mark.asyncio
