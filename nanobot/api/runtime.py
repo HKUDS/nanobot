@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from urllib.request import urlopen
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from nanobot.process_runtime import (
     ManagedProcessRuntime,
     ProcessRuntimePaths,
     ProcessStartOptions,
+    ProcessStatus,
 )
 
 
@@ -35,10 +37,53 @@ def api_runtime_paths(config_path: Path) -> ProcessRuntimePaths:
     )
 
 
+def probe_api_health(host: str, port: int, *, timeout: float = 0.5) -> bool:
+    """Return True when an OpenAI-compatible API answers on ``host:port``.
+
+    The API server exposes an unauthenticated ``/health`` endpoint; a 200 here
+    means a ``nanobot serve`` instance is already listening, even when this
+    gateway did not start it (for example, a systemd-managed service).
+    """
+    url = f"http://{host}:{port}/health"
+    try:
+        with urlopen(url, timeout=timeout) as response:
+            return response.status == 200
+    except (OSError, ValueError):
+        return False
+
+
 class ApiRuntime(ManagedProcessRuntime[ApiStartOptions]):
     """Manage a WebUI-controlled OpenAI-compatible API process."""
 
     service_name = "api"
+
+    def effective_status(
+        self,
+        *,
+        host: str,
+        port: int,
+        probe_timeout: float = 0.5,
+    ) -> ProcessStatus:
+        """Return live status, including externally-managed API servers.
+
+        When no process is recorded in this runtime's state file, probe the
+        configured endpoint: an API answering on ``/health`` was started
+        outside this gateway (e.g. systemd) and is reported as running with
+        ``managed=False`` so callers never treat it as their own.
+        """
+        status = self.status()
+        if status.running:
+            return status
+        if probe_api_health(host, port, timeout=probe_timeout):
+            return ProcessStatus(
+                running=True,
+                pid=None,
+                state_path=self.paths.state_path,
+                log_path=self.paths.log_path,
+                port=port,
+                reason="external",
+            )
+        return status
 
     def _build_child_command(self, options: ApiStartOptions) -> list[str]:
         command = [

@@ -42,6 +42,10 @@ class ProcessStatus:
     port: int | None = None
     command: tuple[str, ...] = ()
     reason: str = "not_started"
+    #: True when this runtime owns the running process. A server answering on
+    #: the configured port but started elsewhere (e.g. systemd) is running but
+    #: not managed by this runtime.
+    managed: bool = False
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             port=_as_int(state.get("port")),
             command=tuple(cast(list[str], command)) if isinstance(command, list) else (),
             reason=reason or "running",
+            managed=True,
         )
 
     def read_log_tail(self, *, tail: int = 200) -> list[str]:

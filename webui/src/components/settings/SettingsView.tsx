@@ -8365,40 +8365,55 @@ function RuntimeSettings({
                     ? tx("settings.values.running", "Running")
                     : tx("settings.values.off", "Off")}
               </StatusPill>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={apiServiceLoading || apiServiceAction !== null || apiMissingNetworkKey}
-                onClick={() =>
-                  onApiServiceAction(
-                    apiDefaults.running ? "stop" : "start",
-                    apiDefaults.running
-                      ? undefined
-                      : {
-                          host: apiHost,
-                          port: apiPort,
-                          timeout: apiDefaults.timeout,
-                          apiKey: apiKey.trim() || undefined,
-                        },
-                  )
-                }
-                className="rounded-full"
-              >
-                {apiServiceAction ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : apiDefaults.running ? (
-                  <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                )}
-                {apiServiceAction === "start"
-                  ? tx("settings.api.starting", "Starting...")
-                  : apiServiceAction === "stop"
-                    ? tx("settings.api.stopping", "Stopping...")
-                    : apiDefaults.running
-                      ? tx("settings.api.stop", "Stop")
-                      : tx("settings.api.start", "Start API server")}
-              </Button>
+              {apiDefaults.running && !apiDefaults.managed ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled
+                  className="rounded-full"
+                  title={tx(
+                    "settings.api.externalManagedHelp",
+                    "The API server is managed outside this app (e.g. systemd).",
+                  )}
+                >
+                  {tx("settings.api.externallyManaged", "Managed externally")}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={apiServiceLoading || apiServiceAction !== null || apiMissingNetworkKey}
+                  onClick={() =>
+                    onApiServiceAction(
+                      apiDefaults.running ? "stop" : "start",
+                      apiDefaults.running
+                        ? undefined
+                        : {
+                            host: apiHost,
+                            port: apiPort,
+                            timeout: apiDefaults.timeout,
+                            apiKey: apiKey.trim() || undefined,
+                          },
+                    )
+                  }
+                  className="rounded-full"
+                >
+                  {apiServiceAction ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : apiDefaults.running ? (
+                    <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {apiServiceAction === "start"
+                    ? tx("settings.api.starting", "Starting...")
+                    : apiServiceAction === "stop"
+                      ? tx("settings.api.stopping", "Stopping...")
+                      : apiDefaults.running
+                        ? tx("settings.api.stop", "Stop")
+                        : tx("settings.api.start", "Start API server")}
+                </Button>
+              )}
             </div>
           </SettingsRow>
           {!apiDefaults.running ? (

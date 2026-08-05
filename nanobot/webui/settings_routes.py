@@ -39,6 +39,7 @@ from nanobot.optional_features import (
     with_channel_runtime_status,
 )
 from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.process_runtime import ProcessStatus
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import case_insensitive_header
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
@@ -175,7 +176,7 @@ class WebUISettingsRouter:
         if path == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
         if path == "/api/settings/api-service":
-            return self._handle_settings_api_service(request)
+            return await self._handle_settings_api_service(request)
         if path == "/api/settings/api-service/start":
             return await self._handle_settings_api_service_start(connection, request)
         if path == "/api/settings/api-service/stop":
@@ -506,10 +507,12 @@ class WebUISettingsRouter:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="browser"))
 
-    def _handle_settings_api_service(self, request: WsRequest) -> Response:
+    async def _handle_settings_api_service(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
-        return self._json_response(self._api_service_payload())
+        config = load_config()
+        status = await asyncio.to_thread(self._api_service_status, config)
+        return self._json_response(self._api_service_payload(status=status))
 
     async def _handle_settings_api_service_start(
         self,
@@ -519,6 +522,10 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         try:
+            config = load_config()
+            status = await asyncio.to_thread(self._api_service_status, config)
+            if status.running and not status.managed:
+                return self._error_response(409, self._api_runtime_message("api_running_external"))
             await asyncio.to_thread(
                 nanobot_features_action,
                 "enable",
@@ -581,6 +588,10 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         try:
+            config = load_config()
+            status = await asyncio.to_thread(self._api_service_status, config)
+            if status.running and not status.managed:
+                return self._error_response(409, self._api_runtime_message("api_running_external"))
             result = await asyncio.to_thread(self._api_runtime().stop)
         except Exception as e:
             self.logger.exception("failed to stop managed API service")
@@ -594,15 +605,29 @@ class WebUISettingsRouter:
         config_path = get_config_path().expanduser().resolve(strict=False)
         return ApiRuntime(paths=api_runtime_paths(config_path))
 
-    def _api_service_payload(self, *, last_action: str | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _api_service_status(config: Any) -> ProcessStatus:
+        """Live API status, including servers managed outside this gateway."""
+        runtime = ApiRuntime(
+            paths=api_runtime_paths(get_config_path().expanduser().resolve(strict=False))
+        )
+        connect_host = "127.0.0.1" if config.api.host in {"0.0.0.0", "::"} else config.api.host
+        return runtime.effective_status(host=connect_host, port=config.api.port)
+
+    def _api_service_payload(
+        self,
+        *,
+        status: ProcessStatus | None = None,
+        last_action: str | None = None,
+    ) -> dict[str, Any]:
         config = load_config()
-        status = self._api_runtime().status()
+        status = status if status is not None else self._api_service_status(config)
         extras = optional_dependency_groups()
         connect_host = "127.0.0.1" if config.api.host in {"0.0.0.0", "::"} else config.api.host
         payload = {
             "installed": extra_installed("api", extras.get("api")),
             "running": status.running,
-            "managed": status.running,
+            "managed": status.managed,
             "host": config.api.host,
             "port": config.api.port,
             "timeout": config.api.timeout,
@@ -628,6 +653,10 @@ class WebUISettingsRouter:
             "api_exited_during_startup": "API server exited during startup. Check its log for details.",
             "api_stop_timeout": "API server did not stop in time.",
             "api_state_stale": "API server state was stale; try starting it again.",
+            "api_running_external": (
+                "API server is already running outside this app (e.g. systemd). "
+                "Stop it there first, then manage it here."
+            ),
         }
         if message in known:
             return known[message]
