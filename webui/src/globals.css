@@ -475,34 +475,32 @@
     min-width: 0;
     overflow: hidden;
   }
-  @media (prefers-reduced-motion: no-preference) {
-    .thread-composer-footer {
-      transition:
-        padding-bottom var(--composer-drawer-duration)
-          var(--composer-drawer-easing);
-    }
-    .composer-workspace-drawer {
-      transition:
-        grid-template-rows var(--composer-drawer-duration)
-          var(--composer-drawer-easing),
-        opacity var(--composer-drawer-duration)
-          var(--composer-drawer-easing);
-    }
-    .composer-workspace-drawer-content {
-      transform: translateY(-6px);
-      transition: transform var(--composer-drawer-duration)
+  .thread-composer-footer {
+    transition:
+      padding-bottom var(--composer-drawer-duration)
         var(--composer-drawer-easing);
-    }
-    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
-      transform: translateY(0);
-    }
-    .composer-workspace-compact {
-      transition:
-        grid-template-columns var(--composer-drawer-duration)
-          var(--composer-drawer-easing),
-        opacity var(--composer-drawer-duration)
-          var(--composer-drawer-easing);
-    }
+  }
+  .composer-workspace-drawer {
+    transition:
+      grid-template-rows var(--composer-drawer-duration)
+        var(--composer-drawer-easing),
+      opacity var(--composer-drawer-duration)
+        var(--composer-drawer-easing);
+  }
+  .composer-workspace-drawer-content {
+    transform: translateY(-6px);
+    transition: transform var(--composer-drawer-duration)
+      var(--composer-drawer-easing);
+  }
+  .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+    transform: translateY(0);
+  }
+  .composer-workspace-compact {
+    transition:
+      grid-template-columns var(--composer-drawer-duration)
+        var(--composer-drawer-easing),
+      opacity var(--composer-drawer-duration)
+        var(--composer-drawer-easing);
   }
   @keyframes run-pulse-dot {
     0%,
@@ -574,6 +572,17 @@
     .composer-status-drawer-content {
       transform: translateY(2px);
       transition-duration: 140ms, 220ms;
+    }
+    .thread-composer-footer {
+      transition-duration: 220ms;
+    }
+    .composer-workspace-drawer,
+    .composer-workspace-compact {
+      transition-duration: 220ms, 140ms;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-2px);
+      transition-duration: 220ms;
     }
     .thread-layout {
       transition-duration: 360ms;
