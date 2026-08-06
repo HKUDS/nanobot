@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -363,6 +363,46 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_when_session_replaced_during_await(
+    tmp_path: Path,
+) -> None:
+    """After LLM await, if the cached session was replaced by /new, skip the update."""
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="A stale title", finish_reason="stop")
+    )
+    stale = loop.sessions.get_or_create("websocket:stale-title")
+    stale.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    stale.add_message("user", "hello")
+    stale.add_message("assistant", "hi there")
+    loop.sessions.save(stale)
+
+    # Simulate /new: invalidate the cached session and create a replacement.
+    loop.sessions.invalidate("websocket:stale-title")
+    replacement = loop.sessions.get_or_create("websocket:stale-title")
+    replacement.add_message("user", "new conversation after /new")
+    loop.sessions.save(replacement)
+
+    # Patch get_or_create to return the stale reference (simulating the race
+    # where the function got the session before /new ran).
+    with patch.object(loop.sessions, "get_or_create", return_value=stale):
+        generated = await maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:stale-title",
+            provider=loop.provider,
+            model=loop.model,
+        )
+
+    # The stale reference should be rejected — title not written.
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in stale.metadata
+    # The replacement must still be the cached session.
+    assert loop.sessions.get_cached("websocket:stale-title") is replacement
+    # The replacement's messages must be intact.
+    assert replacement.messages[0]["content"] == "hello"
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
