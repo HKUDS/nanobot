@@ -1019,7 +1019,7 @@ class CliAppManager:
             "PYTHONUNBUFFERED": "1",
         }
 
-        def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         command = subprocess.list2cmdline(argv)
         logger.info("CLI Apps: running {}", command)
         result = subprocess.run(
