@@ -298,7 +298,8 @@ interface ThreadShellProps {
   title: string;
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
-  onOpenTemporaryChat?: () => void;
+  temporaryChatEnabled?: boolean;
+  onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
@@ -587,7 +588,8 @@ export function ThreadShell({
   title,
   temporary = false,
   temporaryChatIds = [],
-  onOpenTemporaryChat,
+  temporaryChatEnabled = false,
+  onTemporaryChatEnabledChange,
   onToggleSidebar,
   onCreateChat,
   onForkChat,
@@ -1463,7 +1465,8 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          onOpenTemporaryChat={onOpenTemporaryChat}
+          temporaryChatEnabled={temporaryChatEnabled}
+          onTemporaryChatEnabledChange={onTemporaryChatEnabledChange}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}

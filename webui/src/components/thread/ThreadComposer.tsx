@@ -51,6 +51,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   floatingItemClassName,
   floatingSurfaceElevationClassName,
@@ -196,7 +197,8 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
-  onOpenTemporaryChat?: () => void;
+  temporaryChatEnabled?: boolean;
+  onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
@@ -924,7 +926,8 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
-  onOpenTemporaryChat,
+  temporaryChatEnabled = false,
+  onTemporaryChatEnabledChange,
   onTranscribeAudio,
   runStartedAt = null,
   goalState,
@@ -2322,25 +2325,25 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
-            {isHero && onOpenTemporaryChat && !voiceRecorder.isRecording ? (
+            {isHero && onTemporaryChatEnabledChange && !voiceRecorder.isRecording ? (
               <TooltipProvider delayDuration={220} skipDelayDuration={80}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={disabled || isStreaming}
-                      aria-label={t("temporaryChat.title")}
-                      onClick={onOpenTemporaryChat}
+                    <div
                       className={cn(
-                        "thread-composer-action touch-target shrink-0 gap-1.5 rounded-full border border-dashed px-2.5 text-[12px] font-medium transition-colors",
-                        isHero ? "h-8" : "h-9",
-                        "border-border/80 bg-card/75 text-muted-foreground hover:border-foreground/30 hover:bg-card hover:text-foreground",
+                        "thread-composer-action flex h-8 shrink-0 items-center gap-2 px-1 text-[12px] font-medium transition-colors",
+                        temporaryChatEnabled ? "text-foreground" : "text-muted-foreground",
                       )}
                     >
-                      <MessageCircleDashed className="h-4 w-4" aria-hidden />
+                      <MessageCircleDashed className="h-3.5 w-3.5" aria-hidden />
                       <span className="hidden sm:inline">{t("temporaryChat.title")}</span>
-                    </Button>
+                      <ToggleButton
+                        checked={temporaryChatEnabled}
+                        disabled={disabled || isStreaming}
+                        onChange={onTemporaryChatEnabledChange}
+                        label={t("temporaryChat.title")}
+                      />
+                    </div>
                   </TooltipTrigger>
                   <TooltipContent
                     side="top"

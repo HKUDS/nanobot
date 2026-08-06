@@ -984,6 +984,7 @@ function Shell({
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
+  const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
@@ -1035,6 +1036,7 @@ function Shell({
   const showMainSidebar = view !== "settings";
   const temporaryChatId = temporaryChatIdFromSessionKey(activeKey);
   const temporaryChatActive = view === "chat" && temporaryChatId !== null;
+  const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySession = temporaryChatActive && activeKey
     ? temporarySessions[activeKey] ?? null
     : null;
@@ -1071,6 +1073,11 @@ function Shell({
   useEffect(() => {
     temporarySessionsRef.current = temporarySessions;
   }, [temporarySessions]);
+
+  useEffect(() => {
+    if (view === "chat" && !activeKey) return;
+    setTemporaryChatEnabled(false);
+  }, [activeKey, view]);
 
   useEffect(() => () => {
     for (const session of Object.values(temporarySessionsRef.current)) {
@@ -1182,8 +1189,11 @@ function Shell({
     });
   }, [activeChatId]);
   const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
-    if (temporaryChatActive) {
-      if (temporarySession?.workspaceScope) return temporarySession.workspaceScope;
+    if (temporaryChatRequested) {
+      const selectedScope = temporarySession?.workspaceScope ?? draftWorkspaceScope;
+      if (selectedScope) {
+        return normalizeWorkspaceScope(scopeWithAccessMode(selectedScope, "restricted"));
+      }
       return workspaces?.default_scope
         ? normalizeWorkspaceScope(scopeWithAccessMode(workspaces.default_scope, "restricted"))
         : null;
@@ -1199,7 +1209,7 @@ function Shell({
     activeChatId,
     activeSession?.workspaceScope,
     draftWorkspaceScope,
-    temporaryChatActive,
+    temporaryChatRequested,
     temporarySession?.workspaceScope,
     workspaceOverrides,
     workspaces?.default_scope,
@@ -1455,6 +1465,33 @@ function Shell({
     }
   }, [activeWorkspaceScope, createChat, navigate, t]);
 
+  const onCreateTemporaryChat = useCallback(
+    async (workspaceScope?: WorkspaceScopePayload | null) => {
+      const session = createTemporaryChatSession();
+      const restrictedScope = workspaceScope
+        ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
+        : null;
+      const nextSession = restrictedScope
+        ? { ...session, workspaceScope: restrictedScope }
+        : session;
+      setTemporarySessions((current) => ({
+        ...current,
+        [nextSession.key]: nextSession,
+      }));
+      setTemporaryChatEnabled(false);
+      setWorkspaceError(null);
+      setSessionSearchOpen(false);
+      navigate({
+        view: "chat",
+        activeKey: nextSession.key,
+        settingsSection: "overview",
+      });
+      setMobileSidebarOpen(false);
+      return nextSession.chatId;
+    },
+    [navigate],
+  );
+
   const onForkChat = useCallback(async (
     sourceChatId: string,
     beforeUserIndex: number,
@@ -1484,25 +1521,19 @@ function Shell({
 
   const onNewChat = useCallback(() => {
     navigate(defaultShellRoute());
+    setTemporaryChatEnabled(false);
     setDraftWorkspaceScope(null);
     setWorkspaceError(null);
     setSessionSearchOpen(false);
     setMobileSidebarOpen(false);
   }, [navigate]);
 
-  const onOpenTemporaryChat = useCallback(() => {
+  const onTemporaryChatEnabledChange = useCallback((enabled: boolean) => {
     if (view !== "chat" || activeKey) return;
-    const session = createTemporaryChatSession();
-    setTemporarySessions((current) => ({ ...current, [session.key]: session }));
+    setTemporaryChatEnabled(enabled);
+    setDraftWorkspaceScope(null);
     setWorkspaceError(null);
-    setSessionSearchOpen(false);
-    navigate({
-      view: "chat",
-      activeKey: session.key,
-      settingsSection: "overview",
-    });
-    setMobileSidebarOpen(false);
-  }, [activeKey, navigate, view]);
+  }, [activeKey, view]);
 
   const onNewChatInProject = useCallback(
     (projectPath: string, projectName: string) => {
@@ -1512,6 +1543,7 @@ function Shell({
         onNewChat();
         return;
       }
+      setTemporaryChatEnabled(false);
       navigate(defaultShellRoute());
       setDraftWorkspaceScope(normalizeWorkspaceScope({
         project_path: trimmed,
@@ -2200,13 +2232,19 @@ function Shell({
                 session={activeSession}
                 sessions={sessions}
                 title={headerTitle}
-                temporary={temporaryChatActive}
+                temporary={temporaryChatRequested}
                 temporaryChatIds={temporaryChatIds}
-                onOpenTemporaryChat={!activeKey ? onOpenTemporaryChat : undefined}
-                workspaceConnected={!!temporarySession?.workspaceScope}
+                temporaryChatEnabled={temporaryChatEnabled}
+                onTemporaryChatEnabledChange={
+                  !activeKey ? onTemporaryChatEnabledChange : undefined
+                }
+                workspaceConnected={!!(
+                  temporarySession?.workspaceScope
+                  || (temporaryChatEnabled && draftWorkspaceScope)
+                )}
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}
-                onCreateChat={onCreateChat}
+                onCreateChat={temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat}
                 onForkChat={temporaryChatActive ? undefined : onForkChat}
                 onTurnEnd={onTurnEnd}
                 theme={theme}
