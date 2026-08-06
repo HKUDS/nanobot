@@ -1,6 +1,39 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-import { entryLazyFeatureImports, webuiManualChunk } from "../../vite.config";
+import {
+  entryLazyFeatureImports,
+  gzipWebuiAssets,
+  webuiManualChunk,
+  writeCompressedWebuiAssets,
+} from "../../vite.config";
+
+describe("gzipWebuiAssets", () => {
+  it("compresses finalized files after Rollup writes the bundle", () => {
+    const plugin = gzipWebuiAssets();
+    expect(plugin.generateBundle).toBeUndefined();
+    expect(plugin.writeBundle).toBeTypeOf("function");
+
+    const outputDir = mkdtempSync(path.join(tmpdir(), "nanobot-vite-gzip-"));
+    try {
+      const assetPath = path.join(outputDir, "assets", "index-final.js");
+      mkdirSync(path.dirname(assetPath), { recursive: true });
+      const finalized = Buffer.from(
+        "const __vite__mapDeps = ['assets/lazy-feature.js'];\n".repeat(200),
+      );
+      writeFileSync(assetPath, finalized);
+
+      writeCompressedWebuiAssets(outputDir, ["assets/index-final.js"]);
+
+      expect(gunzipSync(readFileSync(`${assetPath}.gz`))).toEqual(finalized);
+    } finally {
+      rmSync(outputDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("entryLazyFeatureImports", () => {
   it("allows the core runtime but rejects heavy lazy feature chunks", () => {

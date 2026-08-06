@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -31,24 +32,28 @@ function guardWebuiEntryChunk(): Plugin {
   };
 }
 
-function gzipWebuiAssets(): Plugin {
+export function writeCompressedWebuiAssets(outputDir: string, fileNames: string[]): void {
+  for (const fileName of fileNames) {
+    if (!GZIP_ASSET_PATTERN.test(fileName)) continue;
+    const outputPath = path.resolve(outputDir, fileName);
+    const bytes = readFileSync(outputPath);
+    if (bytes.byteLength < GZIP_MIN_BYTES) continue;
+    const compressed = gzipSync(bytes, { level: 9 });
+    if (compressed.byteLength >= bytes.byteLength) continue;
+    writeFileSync(`${outputPath}.gz`, compressed);
+  }
+}
+
+export function gzipWebuiAssets(): Plugin {
   return {
     name: "nanobot-gzip-webui-assets",
     apply: "build",
-    generateBundle(_options, bundle) {
-      for (const [fileName, output] of Object.entries(bundle)) {
-        if (!GZIP_ASSET_PATTERN.test(fileName)) continue;
-        const source = output.type === "asset" ? output.source : output.code;
-        const bytes = Buffer.from(source);
-        if (bytes.byteLength < GZIP_MIN_BYTES) continue;
-        const compressed = gzipSync(bytes, { level: 9 });
-        if (compressed.byteLength >= bytes.byteLength) continue;
-        this.emitFile({
-          type: "asset",
-          fileName: `${fileName}.gz`,
-          source: compressed,
-        });
+    writeBundle(options, bundle) {
+      const outputDir = options.dir ?? (options.file ? path.dirname(options.file) : undefined);
+      if (!outputDir) {
+        throw new Error("WebUI gzip build requires a Rollup output directory");
       }
+      writeCompressedWebuiAssets(outputDir, Object.keys(bundle));
     },
   };
 }
