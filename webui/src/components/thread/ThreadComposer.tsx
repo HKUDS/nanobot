@@ -51,7 +51,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   floatingItemClassName,
   floatingSurfaceElevationClassName,
@@ -2329,21 +2328,23 @@ export function ThreadComposer({
               <TooltipProvider delayDuration={220} skipDelayDuration={80}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={disabled || isStreaming}
+                      aria-label={t("temporaryChat.title")}
+                      aria-pressed={temporaryChatEnabled}
+                      onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
                       className={cn(
-                        "thread-composer-action flex h-8 shrink-0 items-center gap-2 px-1 text-[12px] font-medium transition-colors",
-                        temporaryChatEnabled ? "text-foreground" : "text-muted-foreground",
+                        "thread-composer-action h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-[color,background-color,box-shadow] duration-200",
+                        temporaryChatEnabled
+                          ? "bg-[#2997FF]/[0.12] text-[#147bd1] shadow-[inset_0_0_0_1px_rgba(41,151,255,0.22)] hover:bg-[#2997FF]/[0.16] hover:text-[#147bd1] dark:text-[#69b7ff] dark:hover:text-[#69b7ff]"
+                          : "text-muted-foreground hover:bg-accent/45 hover:text-foreground",
                       )}
                     >
-                      <MessageCircleDashed className="h-3.5 w-3.5" aria-hidden />
+                      <MessageCircleDashed className="h-4 w-4" aria-hidden />
                       <span className="hidden sm:inline">{t("temporaryChat.title")}</span>
-                      <ToggleButton
-                        checked={temporaryChatEnabled}
-                        disabled={disabled || isStreaming}
-                        onChange={onTemporaryChatEnabledChange}
-                        label={t("temporaryChat.title")}
-                      />
-                    </div>
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent
                     side="top"
