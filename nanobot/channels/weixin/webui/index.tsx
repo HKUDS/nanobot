@@ -16,6 +16,7 @@ export default {
     logoUrl: "https://weixin.qq.com/favicon.ico",
     setup: {
       mode: "connect",
+      compact: true,
       command: "nanobot channels login weixin",
       docsUrl: chatAppGuideUrl("wechat"),
       fields: [

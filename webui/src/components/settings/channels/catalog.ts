@@ -11,6 +11,7 @@ export type ChannelPresentation = {
 
 export type ChannelSetupPresentation = {
   mode?: "webui" | "credentials" | "connect";
+  compact?: boolean;
   primaryActionLabel?: string;
   command?: string;
   docsUrl?: string;
@@ -29,6 +30,7 @@ export type ChannelSetupPresentation = {
 
 export type ChannelCatalogSetupPresentation = {
   mode?: "webui" | "credentials" | "connect";
+  compact?: boolean;
   command?: string;
   docsUrl?: string;
   docsLogoUrl?: string;

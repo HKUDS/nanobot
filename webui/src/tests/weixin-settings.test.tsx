@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import weixinUi from "../../../nanobot/channels/weixin/webui";
@@ -117,7 +117,28 @@ describe("Weixin settings", () => {
     ]));
   });
 
-  it("saves primary and collapsed advanced fields in connect mode", async () => {
+  it("shows the primary controls without setup prose or a save button", () => {
+    render(
+      <ChannelSetupPanel
+        token="api-token"
+        feature={weixinFeature()}
+        actionKey={null}
+        showBrandLogos={false}
+        onAction={vi.fn()}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Connect WeChat" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Allowed users")).toBeInTheDocument();
+    expect(screen.queryByText("Required setup")).not.toBeInTheDocument();
+    expect(screen.queryByText("WeChat channel setup and gateway")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next steps")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save settings" })).not.toBeInTheDocument();
+    expect(api.configureChannel).not.toHaveBeenCalled();
+  });
+
+  it("auto-saves primary and collapsed advanced fields in one update", async () => {
     const onFeaturesUpdate = vi.fn();
     render(
       <ChannelSetupPanel
@@ -144,7 +165,6 @@ describe("Weixin settings", () => {
     fireEvent.change(screen.getByLabelText("Context message budget"), {
       target: { value: "7" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(api.configureChannel).toHaveBeenCalledWith(
       "api-token",
@@ -156,11 +176,12 @@ describe("Weixin settings", () => {
       },
       { enable: true },
     ));
+    expect(api.configureChannel).toHaveBeenCalledTimes(1);
     expect(onFeaturesUpdate).toHaveBeenCalledWith(refreshedFeatures);
     expect(await screen.findByText("Saved settings.")).toBeInTheDocument();
   });
 
-  it("does not enable an inactive channel when saving connect settings", async () => {
+  it("does not enable an inactive channel when auto-saving connect settings", async () => {
     render(
       <ChannelSetupPanel
         token="api-token"
@@ -177,17 +198,87 @@ describe("Weixin settings", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.change(screen.getByLabelText("Allowed users"), {
+      target: { value: "bob" },
+    });
 
     await waitFor(() => expect(api.configureChannel).toHaveBeenCalledWith(
       "api-token",
       "weixin",
       {
-        "channels.weixin.allowFrom": "alice",
+        "channels.weixin.allowFrom": "bob",
         "channels.weixin.sendProgress": "false",
         "channels.weixin.contextMessageBudget": "8",
       },
       { enable: false },
     ));
+  });
+
+  it("keeps a failed automatic save visible without adding a manual save button", async () => {
+    api.configureChannel.mockRejectedValueOnce(new Error("Gateway unavailable"));
+    render(
+      <ChannelSetupPanel
+        token="api-token"
+        feature={weixinFeature()}
+        actionKey={null}
+        showBrandLogos={false}
+        onAction={vi.fn()}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Allowed users"), {
+      target: { value: "bob" },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Gateway unavailable");
+    expect(screen.queryByRole("button", { name: "Save settings" })).not.toBeInTheDocument();
+  });
+
+  it("queues the latest edit while an automatic save is in flight", async () => {
+    let resolveFirstSave!: (value: {
+      name: string;
+      saved: boolean;
+      nanobot_features: NanobotFeaturesPayload;
+    }) => void;
+    api.configureChannel.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstSave = resolve;
+    }));
+    render(
+      <ChannelSetupPanel
+        token="api-token"
+        feature={weixinFeature()}
+        actionKey={null}
+        showBrandLogos={false}
+        onAction={vi.fn()}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Allowed users"), {
+      target: { value: "bob" },
+    });
+    await waitFor(() => expect(api.configureChannel).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Allowed users"), {
+      target: { value: "carol" },
+    });
+    await act(async () => resolveFirstSave({
+      name: "weixin",
+      saved: true,
+      nanobot_features: refreshedFeatures,
+    }));
+
+    await waitFor(() => expect(api.configureChannel).toHaveBeenCalledTimes(2));
+    expect(api.configureChannel).toHaveBeenLastCalledWith(
+      "api-token",
+      "weixin",
+      {
+        "channels.weixin.allowFrom": "carol",
+        "channels.weixin.sendProgress": "false",
+        "channels.weixin.contextMessageBudget": "8",
+      },
+      { enable: true },
+    );
   });
 });
