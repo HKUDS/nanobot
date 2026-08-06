@@ -4,13 +4,14 @@ import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 
 import pytest
 
 pytest.importorskip("nio")
 pytest.importorskip("nh3")
 pytest.importorskip("mistune")
-from nio import RoomSendResponse, SyncError
+from nio import JoinResponse, RoomSendResponse, SyncError
 
 import nanobot.channels.matrix.runtime as matrix_module
 from nanobot.bus.events import OutboundMessage
@@ -103,6 +104,15 @@ class _FakeAsyncClient:
 
     async def join(self, room_id: str) -> None:
         self.join_calls.append(room_id)
+
+    async def _send(self, response_class, method, path, data=None, **kwargs):
+        """Minimal mock for nio's ``_send`` used by ``_join_room_safe``."""
+        if response_class is JoinResponse and method == "POST" and "/join/" in path:
+            encoded = path.split("/join/")[1].split("?")[0]
+            room_id = unquote(encoded)
+            self.join_calls.append(room_id)
+            return JoinResponse(room_id=room_id)
+        return response_class()
 
     async def accept_key_verification(self, transaction_id: str):
         self.operation_calls.append(f"accept:{transaction_id}")
@@ -308,7 +318,7 @@ async def test_start_skips_load_store_when_device_id_missing(
     assert clients[0].load_store_called is False
     assert len(clients[0].callbacks) == 3
     assert clients[0].to_device_callbacks == []
-    assert len(clients[0].response_callbacks) == 3
+    assert len(clients[0].response_callbacks) == 4
 
     await channel.stop()
 
@@ -590,6 +600,7 @@ async def test_room_invite_joins_when_sender_allowed() -> None:
 
     assert client.join_calls == ["!room:matrix.org"]
 
+
 @pytest.mark.asyncio
 async def test_room_invite_respects_allow_list_when_configured() -> None:
     channel = MatrixChannel(_make_config(allow_from=["@bob:matrix.org"]), MessageBus())
@@ -600,6 +611,61 @@ async def test_room_invite_respects_allow_list_when_configured() -> None:
     event = SimpleNamespace(sender="@alice:matrix.org")
 
     await channel._on_room_invite(room, event)
+
+    assert client.join_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_sync_invite_fallback_joins_pending_invites() -> None:
+    """_on_sync_invite_fallback joins rooms from sync invite_state for allowed senders."""
+    channel = MatrixChannel(
+        _make_config(allow_from=["@alice:matrix.org"]), MessageBus()
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    invite_event = SimpleNamespace(sender="@alice:matrix.org")
+    invite_info = SimpleNamespace(invite_state=[invite_event])
+    rooms = SimpleNamespace(invite={"!room:matrix.org": invite_info})
+    response = SimpleNamespace(rooms=rooms)
+
+    await channel._on_sync_invite_fallback(response)
+
+    assert client.join_calls == ["!room:matrix.org"]
+
+
+@pytest.mark.asyncio
+async def test_on_sync_invite_fallback_skips_when_no_invites() -> None:
+    """_on_sync_invite_fallback is a no-op when sync has no invites."""
+    channel = MatrixChannel(
+        _make_config(allow_from=["@alice:matrix.org"]), MessageBus()
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    rooms = SimpleNamespace(invite={})
+    response = SimpleNamespace(rooms=rooms)
+
+    await channel._on_sync_invite_fallback(response)
+
+    assert client.join_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_sync_invite_fallback_skips_denied_sender() -> None:
+    """_on_sync_invite_fallback respects the allow list."""
+    channel = MatrixChannel(
+        _make_config(allow_from=["@bob:matrix.org"]), MessageBus()
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    invite_event = SimpleNamespace(sender="@alice:matrix.org")
+    invite_info = SimpleNamespace(invite_state=[invite_event])
+    rooms = SimpleNamespace(invite={"!room:matrix.org": invite_info})
+    response = SimpleNamespace(rooms=rooms)
+
+    await channel._on_sync_invite_fallback(response)
 
     assert client.join_calls == []
 

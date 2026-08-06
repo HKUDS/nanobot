@@ -97,6 +97,11 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
   ].includes(element.type);
 }
 
+function isThreadDisclosureTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest("[data-thread-disclosure]") !== null;
+}
+
 type ThreadScrollDirection = "backward" | "forward";
 
 const KEYBOARD_SCROLL_DIRECTIONS: Readonly<
@@ -572,7 +577,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       handleDirectionalInput(directionFromDelta(event.deltaY));
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button === 0 && event.target === el) yieldCameraToUser();
+      if (
+        event.button === 0
+        && (event.target === el || isThreadDisclosureTarget(event.target))
+      ) {
+        yieldCameraToUser();
+      }
     };
     let lastTouchY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
@@ -598,6 +608,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         || event.metaKey
         || isKeyboardEditableElement(event.target as Element | null)
       ) {
+        return;
+      }
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isThreadDisclosureTarget(event.target)
+      ) {
+        yieldCameraToUser();
         return;
       }
       handleDirectionalInput(keyboardScrollDirection(event));
