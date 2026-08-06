@@ -385,6 +385,7 @@ function ChannelSetupSurface({
         token,
         feature.name,
         channelValuesForSave(editableFields, fieldValues),
+        { enable: feature.enabled },
       );
       if (payload.nanobot_features) {
         onFeaturesUpdate(payload.nanobot_features);

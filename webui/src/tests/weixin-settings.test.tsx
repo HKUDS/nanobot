@@ -19,7 +19,9 @@ const refreshedFeatures: NanobotFeaturesPayload = {
   enabled_count: 0,
 };
 
-function weixinFeature(): NanobotFeatureInfo {
+function weixinFeature(
+  overrides: Partial<NanobotFeatureInfo> = {},
+): NanobotFeatureInfo {
   return {
     name: "weixin",
     display_name: "WeChat",
@@ -74,6 +76,7 @@ function weixinFeature(): NanobotFeatureInfo {
     status: "enabled",
     install_supported: true,
     requires_restart: false,
+    ...overrides,
   };
 }
 
@@ -151,8 +154,40 @@ describe("Weixin settings", () => {
         "channels.weixin.sendProgress": "true",
         "channels.weixin.contextMessageBudget": "7",
       },
+      { enable: true },
     ));
     expect(onFeaturesUpdate).toHaveBeenCalledWith(refreshedFeatures);
     expect(await screen.findByText("Saved settings.")).toBeInTheDocument();
+  });
+
+  it("does not enable an inactive channel when saving connect settings", async () => {
+    render(
+      <ChannelSetupPanel
+        token="api-token"
+        feature={weixinFeature({
+          enabled: false,
+          running: false,
+          runtime_status: "stopped",
+          status: "not_enabled",
+        })}
+        actionKey={null}
+        showBrandLogos={false}
+        onAction={vi.fn()}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(api.configureChannel).toHaveBeenCalledWith(
+      "api-token",
+      "weixin",
+      {
+        "channels.weixin.allowFrom": "alice",
+        "channels.weixin.sendProgress": "false",
+        "channels.weixin.contextMessageBudget": "8",
+      },
+      { enable: false },
+    ));
   });
 });
