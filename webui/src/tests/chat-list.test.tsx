@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -45,6 +46,39 @@ describe("ChatList", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("exposes inactive chats as session mention drag sources", () => {
+    const dataTransfer = {
+      effectAllowed: "",
+      setData: vi.fn(),
+    };
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "active", title: "Active chat" }),
+          session({ chatId: "reference", title: "Reference chat" }),
+        ]}
+        activeKey="websocket:active"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Active chat" }))
+      .toHaveAttribute("draggable", "false");
+    const reference = screen.getByRole("button", { name: "Reference chat" });
+    expect(reference).toHaveAttribute("draggable", "true");
+
+    fireEvent.dragStart(reference, { dataTransfer });
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      SESSION_DRAG_TYPE,
+      "websocket:reference",
+    );
   });
 
   it("orders chats by latest session activity by default", () => {

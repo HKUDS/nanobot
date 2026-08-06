@@ -40,6 +40,7 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
+import { writeDraggedSession } from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -276,10 +277,19 @@ export const ChatList = memo(function ChatList({
                           <button
                             type="button"
                             onClick={() => onSelect(s.key)}
+                            draggable={!active}
+                            onDragStart={(event) => {
+                              if (active) {
+                                event.preventDefault();
+                                return;
+                              }
+                              writeDraggedSession(event.dataTransfer, s.key);
+                            }}
                             aria-current={active ? "page" : undefined}
                             title={tooltipTitle}
                             className={cn(
                               "min-w-0 flex-1 overflow-hidden text-left",
+                              !active && "cursor-grab active:cursor-grabbing",
                               compact ? "py-1" : "py-1.5",
                               projectMode && "pl-7",
                             )}

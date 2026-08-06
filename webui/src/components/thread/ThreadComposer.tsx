@@ -105,6 +105,10 @@ import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
+import {
+  hasDraggedSession,
+  readDraggedSession,
+} from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 
@@ -1606,10 +1610,13 @@ export function ThreadComposer({
     [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
   );
 
-  const chooseMentionCandidate = useCallback(
-    (candidate: MentionCandidate) => {
-      if (!cliAppMention) return;
+  const insertMentionCandidate = useCallback(
+    (candidate: MentionCandidate, start: number, end: number) => {
       if (candidate.kind === "session") {
+        const alreadySelected = activeSessionMentions.some(
+          (mention) => mention.session_key === candidate.mention.session_key,
+        );
+        if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
         const name = candidate.name.toLowerCase();
         setSelectedSessionMentions([
           ...activeSessionMentions.filter((mention) => (
@@ -1619,10 +1626,13 @@ export function ThreadComposer({
           candidate.mention,
         ]);
       }
-      const suffix = value.slice(cliAppMention.end);
-      const mention = `@${candidate.name}${suffix.startsWith(" ") ? "" : " "}`;
-      const next = `${value.slice(0, cliAppMention.start)}${mention}${suffix}`;
-      const nextCursor = cliAppMention.start + mention.length;
+      const prefix = value.slice(0, start);
+      const suffix = value.slice(end);
+      const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
+      const trailingSpace = /^\s/.test(suffix) ? "" : " ";
+      const mention = `${leadingSpace}@${candidate.name}${trailingSpace}`;
+      const next = `${prefix}${mention}${suffix}`;
+      const nextCursor = prefix.length + mention.length;
       setValue(next);
       setCursorPosition(nextCursor);
       setCliAppMenuDismissed(true);
@@ -1636,8 +1646,39 @@ export function ThreadComposer({
         el.setSelectionRange(nextCursor, nextCursor);
       });
     },
-    [activeSessionMentions, cliAppMention, resizeTextarea, value],
+    [activeSessionMentions, resizeTextarea, value],
   );
+
+  const chooseMentionCandidate = useCallback(
+    (candidate: MentionCandidate) => {
+      if (!cliAppMention) return;
+      insertMentionCandidate(candidate, cliAppMention.start, cliAppMention.end);
+    },
+    [cliAppMention, insertMentionCandidate],
+  );
+
+  const handleSessionDrop = useCallback((event: React.DragEvent) => {
+    if (!hasDraggedSession(event.dataTransfer)) return false;
+    event.preventDefault();
+    if (disabled) return true;
+    const sessionKey = readDraggedSession(event.dataTransfer);
+    const mention = availableSessionMentions.find(
+      (candidate) => candidate.session_key === sessionKey,
+    );
+    if (!mention) return true;
+    const caret = textareaRef.current?.selectionStart ?? value.length;
+    insertMentionCandidate(
+      {
+        kind: "session",
+        name: mention.name,
+        displayName: mention.title || mention.name,
+        mention,
+      },
+      caret,
+      textareaRef.current?.selectionEnd ?? caret,
+    );
+    return true;
+  }, [availableSessionMentions, disabled, insertMentionCandidate, value.length]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
@@ -2068,9 +2109,18 @@ export function ThreadComposer({
         submit();
       }}
       onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
+      onDragOver={(event) => {
+        if (hasDraggedSession(event.dataTransfer)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        } else {
+          onDragOver(event);
+        }
+      }}
       onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      onDrop={(event) => {
+        if (!handleSessionDrop(event)) onDrop(event);
+      }}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
       {showSlashMenu ? (
