@@ -56,7 +56,6 @@
     "clear": "清空临时聊天",
     "sectionTitle": "临时聊天",
     "closeAction": "关闭临时聊天",
-    "endedAfterReload": "页面刷新后，临时聊天已结束，且不会保存。",
     "endedAfterDisconnect": "连接中断后，临时聊天已结束，且不会保存。"
   },
   "sidebar": {

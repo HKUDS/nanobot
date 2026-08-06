@@ -56,7 +56,6 @@
     "clear": "Hapus obrolan sementara",
     "sectionTitle": "Obrolan sementara",
     "closeAction": "Tutup obrolan sementara",
-    "endedAfterReload": "Obrolan sementara berakhir saat halaman dimuat ulang. Obrolan tidak disimpan.",
     "endedAfterDisconnect": "Obrolan sementara berakhir karena koneksi terputus. Obrolan tidak disimpan."
   },
   "sidebar": {

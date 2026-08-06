@@ -56,7 +56,6 @@
     "clear": "Effacer la discussion temporaire",
     "sectionTitle": "Discussions temporaires",
     "closeAction": "Fermer la discussion temporaire",
-    "endedAfterReload": "Les discussions temporaires ont pris fin lors du rechargement de la page. Elles n’ont pas été enregistrées.",
     "endedAfterDisconnect": "Les discussions temporaires ont pris fin car la connexion a été interrompue. Elles n’ont pas été enregistrées."
   },
   "sidebar": {

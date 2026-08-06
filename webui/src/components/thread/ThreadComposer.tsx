@@ -203,8 +203,7 @@ interface ThreadComposerProps {
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
-  compactWorkspaceControls?: boolean;
-  workspaceConnected?: boolean;
+  workspaceControlsHidden?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -929,8 +928,7 @@ export function ThreadComposer({
   runStartedAt = null,
   goalState,
   workspaceScope = null,
-  compactWorkspaceControls = false,
-  workspaceConnected = false,
+  workspaceControlsHidden = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -981,7 +979,7 @@ export function ThreadComposer({
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
-  const showProjectPicker = projectPickerAvailable && !compactWorkspaceControls;
+  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
@@ -2286,28 +2284,6 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            {projectPickerAvailable ? (
-              <div
-                className="composer-workspace-compact shrink-0"
-                data-composer-workspace-compact=""
-                data-state={compactWorkspaceControls ? "open" : "closed"}
-                aria-hidden={compactWorkspaceControls ? undefined : true}
-              >
-                <div className="composer-workspace-compact-clip">
-                  <WorkspaceProjectPicker
-                    compact
-                    connected={workspaceConnected}
-                    isHero={isHero}
-                    disabled={disabled || workspaceScopeDisabled || !compactWorkspaceControls}
-                    scope={workspaceScope}
-                    defaultScope={workspaceDefaultScope}
-                    controls={workspaceControls}
-                    error={workspaceError}
-                    onChange={onWorkspaceScopeChange}
-                  />
-                </div>
-              </div>
-            ) : null}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2316,7 +2292,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : workspaceScope && (!compactWorkspaceControls || workspaceConnected) ? (
+            ) : workspaceScope && !workspaceControlsHidden ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
                 disabled={disabled || workspaceScopeDisabled}

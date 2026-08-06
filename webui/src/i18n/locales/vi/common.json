@@ -56,7 +56,6 @@
     "clear": "Xóa trò chuyện tạm thời",
     "sectionTitle": "Trò chuyện tạm thời",
     "closeAction": "Đóng trò chuyện tạm thời",
-    "endedAfterReload": "Các cuộc trò chuyện tạm thời đã kết thúc khi trang được tải lại. Chúng không được lưu.",
     "endedAfterDisconnect": "Các cuộc trò chuyện tạm thời đã kết thúc vì kết nối bị gián đoạn. Chúng không được lưu."
   },
   "sidebar": {

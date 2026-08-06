@@ -87,7 +87,6 @@ const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
-const TEMPORARY_CHAT_RELOAD_NOTICE_KEY = "nanobot-webui.temporaryChat.reloaded";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
@@ -103,20 +102,7 @@ type ShellRoute = {
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
 };
-type TemporaryChatNotice = "reload" | "connection";
-
-function consumeTemporaryChatReloadNotice(): TemporaryChatNotice | null {
-  if (typeof window === "undefined") return null;
-  try {
-    if (window.sessionStorage.getItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY) !== "1") {
-      return null;
-    }
-    window.sessionStorage.removeItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY);
-    return "reload";
-  } catch {
-    return null;
-  }
-}
+type TemporaryChatNotice = "connection";
 
 const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
@@ -1023,7 +1009,7 @@ function Shell({
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [temporaryChatNotice, setTemporaryChatNotice] =
-    useState<TemporaryChatNotice | null>(consumeTemporaryChatReloadNotice);
+    useState<TemporaryChatNotice | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
@@ -1107,22 +1093,6 @@ function Shell({
       client.discardTemporaryChat(session.chatId);
     }
   }, [client]);
-
-  useEffect(() => {
-    const hasTemporaryChats = () => Object.keys(temporarySessionsRef.current).length > 0;
-    const handlePageHide = (event: PageTransitionEvent) => {
-      if (event.persisted || !hasTemporaryChats()) return;
-      try {
-        window.sessionStorage.setItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY, "1");
-      } catch {
-        // Reload still proceeds; temporary chats are intentionally memory-only.
-      }
-    };
-    window.addEventListener("pagehide", handlePageHide);
-    return () => {
-      window.removeEventListener("pagehide", handlePageHide);
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2306,10 +2276,6 @@ function Shell({
                 onTemporaryChatEnabledChange={
                   !activeKey ? onTemporaryChatEnabledChange : undefined
                 }
-                workspaceConnected={!!(
-                  temporarySession?.workspaceScope
-                  || (temporaryChatEnabled && draftWorkspaceScope)
-                )}
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}
                 onCreateChat={temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat}
@@ -2413,9 +2379,7 @@ function Shell({
                 )}
               >
                 <span className="min-w-0 py-1 leading-5">
-                  {temporaryChatNotice === "reload"
-                    ? t("temporaryChat.endedAfterReload")
-                    : t("temporaryChat.endedAfterDisconnect")}
+                  {t("temporaryChat.endedAfterDisconnect")}
                 </span>
                 <Button
                   type="button"

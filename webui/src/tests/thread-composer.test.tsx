@@ -1069,71 +1069,19 @@ describe("ThreadComposer", () => {
     }));
   });
 
-  it("keeps temporary-chat workspace controls on demand", async () => {
-    const user = userEvent.setup();
-    const onWorkspaceScopeChange = vi.fn();
-    const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
-      project_name: "workspace",
-      access_mode: "restricted" as const,
-      restrict_to_workspace: true,
-    };
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Ask anything..."
-        variant="hero"
-        compactWorkspaceControls
-        workspaceScope={defaultScope}
-        workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-      />,
-    );
-
-    expect(screen.queryByRole("button", {
-      name: "Workspace access mode: Default Permission",
-    })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
-    const input = await screen.findByLabelText("Paste path");
-    fireEvent.change(input, { target: { value: "relative/project" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Enter an absolute folder path on this machine.",
-    );
-
-    rerender(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Ask anything..."
-        variant="hero"
-        compactWorkspaceControls
-        workspaceConnected
-        workspaceScope={defaultScope}
-        workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-      />,
-    );
-
-    expect(screen.getByRole("button", {
-      name: "Workspace access mode: Default Permission",
-    })).toBeInTheDocument();
-  });
-
-  it("slides workspace controls between the project row and compact button", () => {
+  it("slides project controls closed without offering a compact replacement", () => {
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
-    const composer = (compactWorkspaceControls: boolean) => (
+    const composer = (workspaceControlsHidden: boolean) => (
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Ask anything..."
         variant="hero"
-        compactWorkspaceControls={compactWorkspaceControls}
+        workspaceControlsHidden={workspaceControlsHidden}
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         workspaceControls={{ can_change_project: true, can_use_full_access: true }}
@@ -1142,32 +1090,24 @@ describe("ThreadComposer", () => {
     );
     const { container, rerender } = render(composer(false));
     const drawer = container.querySelector("[data-composer-workspace-drawer]");
-    const compact = container.querySelector("[data-composer-workspace-compact]");
 
     expect(drawer).toHaveAttribute("data-state", "open");
     expect(drawer).not.toHaveAttribute("aria-hidden");
-    expect(compact).toHaveAttribute("data-state", "closed");
-    expect(compact).toHaveAttribute("aria-hidden", "true");
-    expect(within(compact as HTMLElement).getByRole("button", {
-      hidden: true,
-      name: "Choose project",
-    })).toBeDisabled();
+    expect(container.querySelector("[data-composer-workspace-compact]")).not.toBeInTheDocument();
 
     rerender(composer(true));
 
     expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
-    expect(container.querySelector("[data-composer-workspace-compact]")).toBe(compact);
     expect(drawer).toHaveAttribute("data-state", "closed");
     expect(drawer).toHaveAttribute("aria-hidden", "true");
     expect(within(drawer as HTMLElement).getByRole("button", {
       hidden: true,
       name: "Choose project",
     })).toBeDisabled();
-    expect(compact).toHaveAttribute("data-state", "open");
-    expect(compact).not.toHaveAttribute("aria-hidden");
-    expect(within(compact as HTMLElement).getByRole("button", {
-      name: "Choose project",
-    })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Choose project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Workspace access mode: Full Access",
+    })).not.toBeInTheDocument();
 
     rerender(composer(false));
 
@@ -1176,11 +1116,6 @@ describe("ThreadComposer", () => {
     expect(within(drawer as HTMLElement).getByRole("button", {
       name: "Choose project",
     })).toBeEnabled();
-    expect(compact).toHaveAttribute("data-state", "closed");
-    expect(within(compact as HTMLElement).getByRole("button", {
-      hidden: true,
-      name: "Choose project",
-    })).toBeDisabled();
   });
 
   it("uses the native folder picker for project selection on native host", async () => {

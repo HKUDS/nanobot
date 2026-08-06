@@ -56,7 +56,6 @@
     "clear": "清空臨時聊天",
     "sectionTitle": "臨時聊天",
     "closeAction": "關閉臨時聊天",
-    "endedAfterReload": "頁面重新載入後，臨時聊天已結束，且不會儲存。",
     "endedAfterDisconnect": "連線中斷後，臨時聊天已結束，且不會儲存。"
   },
   "sidebar": {

@@ -56,7 +56,6 @@
     "clear": "一時チャットを消去",
     "sectionTitle": "一時チャット",
     "closeAction": "一時チャットを閉じる",
-    "endedAfterReload": "ページを再読み込みしたため、一時チャットは終了しました。保存されていません。",
     "endedAfterDisconnect": "接続が中断されたため、一時チャットは終了しました。保存されていません。"
   },
   "sidebar": {

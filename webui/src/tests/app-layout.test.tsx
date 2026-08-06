@@ -263,7 +263,6 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     localStorage.removeItem("nanobot-webui.restartStartedAt");
     localStorage.removeItem("nanobot-webui.restartRoute");
-    sessionStorage.removeItem("nanobot-webui.temporaryChat.reloaded");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       api_token: "api-tok",
@@ -494,9 +493,7 @@ describe("App layout", () => {
       "motion-safe:duration-150",
       "text-[var(--temporary-control-active)]",
     );
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "Reloading, closing, or losing the connection ends these chats.",
-    );
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(screen.queryByTestId("temporary-chat-outline")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
@@ -519,7 +516,7 @@ describe("App layout", () => {
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
   });
 
-  it("allows leaving a page with temporary chats and records a reload notice", async () => {
+  it("allows leaving a page with temporary chats without blocking", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
@@ -533,25 +530,6 @@ describe("App layout", () => {
     const beforeUnload = new Event("beforeunload", { cancelable: true });
     act(() => window.dispatchEvent(beforeUnload));
     expect(beforeUnload.defaultPrevented).toBe(false);
-
-    const pageHide = new Event("pagehide") as PageTransitionEvent;
-    Object.defineProperty(pageHide, "persisted", { value: false });
-    act(() => window.dispatchEvent(pageHide));
-    expect(sessionStorage.getItem("nanobot-webui.temporaryChat.reloaded")).toBe("1");
-  });
-
-  it("explains when a reload ended temporary chats", async () => {
-    sessionStorage.setItem("nanobot-webui.temporaryChat.reloaded", "1");
-
-    render(<App />);
-
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Temporary chats ended when the page reloaded. They were not saved.",
-    );
-    expect(sessionStorage.getItem("nanobot-webui.temporaryChat.reloaded")).toBeNull();
-    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("ends temporary chats and explains a connection interruption", async () => {
@@ -579,7 +557,7 @@ describe("App layout", () => {
     expect(screen.queryByText("connection-sensitive message")).not.toBeInTheDocument();
   });
 
-  it("starts temporary chat with restricted on-demand workspace controls", async () => {
+  it("does not offer project selection in temporary chat", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/workspaces": {
@@ -597,9 +575,10 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "Choose project" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
 
-    expect(await screen.findByRole("button", { name: "Choose project" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose project" })).not.toBeInTheDocument();
     expect(screen.queryByText("Full Access")).not.toBeInTheDocument();
   });
 

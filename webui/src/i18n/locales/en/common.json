@@ -56,7 +56,6 @@
     "clear": "Clear temporary chat",
     "sectionTitle": "Temporary chats",
     "closeAction": "Close temporary chat",
-    "endedAfterReload": "Temporary chats ended when the page reloaded. They were not saved.",
     "endedAfterDisconnect": "Temporary chats ended because the connection was interrupted. They were not saved."
   },
   "sidebar": {

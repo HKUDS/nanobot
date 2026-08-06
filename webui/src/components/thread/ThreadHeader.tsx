@@ -1,5 +1,5 @@
 import { Menu, MessageCircleDashed, Moon, Sun } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,6 @@ export function ThreadHeader({
   onTemporaryChatEnabledChange,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
-  const [temporaryChatHelpOpen, setTemporaryChatHelpOpen] = useState(false);
 
   return (
     <div
@@ -78,8 +77,8 @@ export function ThreadHeader({
         {sessionInfoAction}
         {promptNavigatorAction}
         {onTemporaryChatEnabledChange ? (
-          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
-            <Tooltip open={temporaryChatHelpOpen} onOpenChange={setTemporaryChatHelpOpen}>
+          <TooltipProvider delayDuration={700} skipDelayDuration={0}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="button"
@@ -88,11 +87,7 @@ export function ThreadHeader({
                   disabled={temporaryChatDisabled}
                   aria-label={t("temporaryChat.title")}
                   aria-pressed={temporaryChatEnabled}
-                  onClick={() => {
-                    const enabled = !temporaryChatEnabled;
-                    onTemporaryChatEnabledChange(enabled);
-                    setTemporaryChatHelpOpen(enabled);
-                  }}
+                  onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
                   className={cn(
                     "host-no-drag h-8 w-8 shrink-0 rounded-full bg-transparent text-muted-foreground shadow-none transition-none hover:text-foreground",
                     temporaryChatEnabled ? "hover:bg-transparent" : "hover:bg-accent/45",

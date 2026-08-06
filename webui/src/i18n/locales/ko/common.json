@@ -56,7 +56,6 @@
     "clear": "임시 채팅 지우기",
     "sectionTitle": "임시 채팅",
     "closeAction": "임시 채팅 닫기",
-    "endedAfterReload": "페이지가 새로고침되어 임시 채팅이 종료되었습니다. 저장되지 않았습니다.",
     "endedAfterDisconnect": "연결이 중단되어 임시 채팅이 종료되었습니다. 저장되지 않았습니다."
   },
   "sidebar": {

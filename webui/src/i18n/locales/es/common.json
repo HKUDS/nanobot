@@ -56,7 +56,6 @@
     "clear": "Borrar chat temporal",
     "sectionTitle": "Chats temporales",
     "closeAction": "Cerrar chat temporal",
-    "endedAfterReload": "Los chats temporales terminaron al recargar la página. No se guardaron.",
     "endedAfterDisconnect": "Los chats temporales terminaron porque se interrumpió la conexión. No se guardaron."
   },
   "sidebar": {

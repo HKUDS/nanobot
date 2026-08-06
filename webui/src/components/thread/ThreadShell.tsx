@@ -316,7 +316,6 @@ interface ThreadShellProps {
   hideThemeButton?: boolean;
   hideHeader?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
-  workspaceConnected?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -486,7 +485,7 @@ function HeroGreeting({ text }: { text: string }) {
       <h1
         ref={headingRef}
         data-testid="hero-greeting"
-        className="whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
+        className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
       >
         {text}
       </h1>
@@ -604,7 +603,6 @@ export function ThreadShell({
   hideThemeButton = false,
   hideHeader = false,
   workspaceScope = null,
-  workspaceConnected = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -1431,8 +1429,7 @@ export function ThreadShell({
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
-          compactWorkspaceControls={temporary}
-          workspaceConnected={workspaceConnected}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
@@ -1476,8 +1473,7 @@ export function ThreadShell({
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
-          compactWorkspaceControls={temporary}
-          workspaceConnected={workspaceConnected}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}

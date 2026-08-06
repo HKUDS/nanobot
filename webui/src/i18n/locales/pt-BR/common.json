@@ -56,7 +56,6 @@
     "clear": "Limpar chat temporário",
     "sectionTitle": "Chats temporários",
     "closeAction": "Fechar chat temporário",
-    "endedAfterReload": "Os chats temporários foram encerrados quando a página foi recarregada. Eles não foram salvos.",
     "endedAfterDisconnect": "Os chats temporários foram encerrados porque a conexão foi interrompida. Eles não foram salvos."
   },
   "sidebar": {

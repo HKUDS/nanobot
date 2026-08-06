@@ -459,21 +459,6 @@
     min-height: 0;
     overflow: hidden;
   }
-  .composer-workspace-compact {
-    display: grid;
-    grid-template-columns: 0fr;
-    opacity: 0;
-    pointer-events: none;
-  }
-  .composer-workspace-compact[data-state="open"] {
-    grid-template-columns: 1fr;
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .composer-workspace-compact-clip {
-    min-width: 0;
-    overflow: hidden;
-  }
   .thread-composer-footer {
     transition:
       padding-bottom var(--composer-drawer-duration)
@@ -493,13 +478,6 @@
   }
   .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
     transform: translateY(0);
-  }
-  .composer-workspace-compact {
-    transition:
-      grid-template-columns var(--composer-drawer-duration)
-        var(--composer-drawer-easing),
-      opacity var(--composer-drawer-duration)
-        var(--composer-drawer-easing);
   }
   @keyframes run-pulse-dot {
     0%,
@@ -575,8 +553,7 @@
     .thread-composer-footer {
       transition-duration: 0.01ms;
     }
-    .composer-workspace-drawer,
-    .composer-workspace-compact {
+    .composer-workspace-drawer {
       transition-duration: 0.01ms, 120ms;
     }
     .composer-workspace-drawer-content {
