@@ -3375,10 +3375,9 @@ function ModelsSettings({
   );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (preset: SettingsPayload["model_presets"][number]) => {
-    const toggleCurrentPreset = !creating && selectedPreset?.name === preset.name;
     onSelectConfiguration();
-    if (toggleCurrentPreset) {
-      setEditorOpen((open) => !open);
+    if (!creating && selectedPreset?.name === preset.name) {
+      setEditorOpen(true);
       return;
     }
     setForm((prev) => ({
@@ -3393,6 +3392,11 @@ function ModelsSettings({
       reasoningEffort: preset.reasoning_effort ?? "",
     }));
     setEditorOpen(true);
+  };
+  const closeEditor = () => {
+    if (creatingSaving) return;
+    if (creating) onCancelCreate();
+    setEditorOpen(false);
   };
 
   const moveCallOrderItem = (index: number, offset: -1 | 1) => {
@@ -3473,7 +3477,13 @@ function ModelsSettings({
               </Button>
             </div>
           ) : (
-            <>
+            <div className="xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] xl:divide-x xl:divide-border/45">
+              <div
+                className={cn(
+                  "min-w-0 divide-y divide-border/45",
+                  editorOpen && "hidden xl:block",
+                )}
+              >
               <div role="list" className="divide-y divide-border/45">
                 {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
@@ -3495,6 +3505,8 @@ function ModelsSettings({
                     isDropTarget &&
                     draggedCallOrderIndex !== null &&
                     draggedCallOrderIndex < orderIndex;
+                  const isSelected =
+                    editorOpen && !creating && selectedPreset?.name === name;
                   return (
                     <div
                       key={key}
@@ -3567,6 +3579,7 @@ function ModelsSettings({
                           dropAfterTarget &&
                           "after:absolute after:inset-x-4 after:bottom-0 after:z-10 after:h-0.5 after:rounded-full after:bg-foreground sm:after:inset-x-5",
                         ordered && draggedCallOrderIndex === orderIndex && "opacity-35",
+                        isSelected && "bg-muted/45 hover:bg-muted/45",
                         "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       )}
                     >
@@ -3580,8 +3593,8 @@ function ModelsSettings({
                       )}
                       <button
                         type="button"
-                        aria-pressed={selectedPreset?.name === name}
-                        aria-expanded={selectedPreset?.name === name && editorOpen}
+                        aria-pressed={isSelected}
+                        aria-controls="model-preset-detail"
                         disabled={!preset}
                         onClick={() => preset && selectPreset(preset)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-[12px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -3627,8 +3640,8 @@ function ModelsSettings({
                         </span>
                         <ChevronRight
                           className={cn(
-                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                            selectedPreset?.name === name && editorOpen && "rotate-90",
+                            "h-4 w-4 shrink-0 text-muted-foreground transition-[color,transform] group-hover:translate-x-0.5",
+                            isSelected && "text-foreground",
                           )}
                           aria-hidden
                         />
@@ -3694,18 +3707,45 @@ function ModelsSettings({
                   </SettingsStatusMessage>
                 ) : null}
               </div>
-            </>
-          )}
-
-      {editorOpen && (selectedPreset || creating) ? (
-        <>
-            <div className="flex min-h-[52px] items-center justify-between gap-3 bg-muted/15 px-4 py-3 sm:px-5">
-              <span className="text-[13px] font-semibold text-foreground/85">
-                {creating
-                  ? tx("settings.models.newPreset", "New model preset")
-                  : tx("settings.models.editPreset", "Edit preset")}
-              </span>
-            </div>
+              </div>
+              <div
+                id="model-preset-detail"
+                className={cn(
+                  "min-w-0 divide-y divide-border/45",
+                  !editorOpen && "hidden xl:block",
+                )}
+              >
+                {editorOpen && (selectedPreset || creating) ? (
+                  <>
+                    <div className="flex min-h-[64px] items-center gap-2 bg-muted/15 px-4 py-3 sm:px-5">
+                      <button
+                        type="button"
+                        onClick={closeEditor}
+                        disabled={creatingSaving}
+                        aria-label={tx(
+                          "settings.models.backToPresets",
+                          "Back to model presets",
+                        )}
+                        className="-ml-2 grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 xl:hidden"
+                      >
+                        <ChevronLeft className="h-4 w-4" aria-hidden />
+                      </button>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[14px] font-semibold text-foreground/90">
+                          {creating
+                            ? tx("settings.models.newPreset", "New model preset")
+                            : selectedPreset?.label}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                          {creating
+                            ? tx(
+                                "settings.models.newPresetHelp",
+                                "Save a reusable model and its generation settings.",
+                              )
+                            : tx("settings.models.editPreset", "Edit preset")}
+                        </span>
+                      </span>
+                    </div>
             <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
               <Input
                 autoFocus={creating}
@@ -3813,10 +3853,7 @@ function ModelsSettings({
                   variant="ghost"
                   className="self-start rounded-full text-muted-foreground"
                   disabled={creatingSaving}
-                  onClick={() => {
-                    setEditorOpen(false);
-                    onCancelCreate();
-                  }}
+                  onClick={closeEditor}
                 >
                   {tx("settings.actions.cancel", "Cancel")}
                 </Button>
@@ -3860,8 +3897,28 @@ function ModelsSettings({
                 </Button>
               </div>
             </div>
-          </>
-      ) : null}
+                  </>
+                ) : (
+                  <div className="flex min-h-[320px] items-center justify-center px-8 py-12 text-center">
+                    <div className="max-w-[16rem]">
+                      <span className="mx-auto grid h-10 w-10 place-items-center rounded-[14px] bg-muted text-muted-foreground">
+                        <Pencil className="h-4 w-4" aria-hidden />
+                      </span>
+                      <p className="mt-3 text-[14px] font-medium text-foreground">
+                        {tx("settings.models.selectPreset", "Select a preset")}
+                      </p>
+                      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                        {tx(
+                          "settings.models.selectPresetHelp",
+                          "Select a preset from the list to edit its model and generation settings.",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </SettingsGroup>
       </section>
     </div>

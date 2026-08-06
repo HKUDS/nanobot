@@ -2137,6 +2137,44 @@ describe("SettingsView Apps catalog", () => {
     expect(reasoningEffort).toHaveValue("provider-native-mode");
   });
 
+  it("associates preset selection with the responsive detail pane", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const row = await screen.findByTestId("model-call-order-row-primary");
+    const trigger = within(row).getAllByRole("button")[0];
+    const detail = document.getElementById("model-preset-detail");
+    expect(detail).toHaveClass("hidden", "xl:block");
+    expect(trigger).toHaveAttribute("aria-controls", "model-preset-detail");
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-pressed", "true");
+    expect(detail).not.toHaveClass("hidden");
+    expect(within(detail as HTMLElement).getByDisplayValue("Primary")).toBeInTheDocument();
+
+    const backButton = screen.getByRole("button", { name: "Back to model presets" });
+    expect(backButton).toHaveClass("xl:hidden");
+    fireEvent.click(backButton);
+
+    expect(trigger).toHaveAttribute("aria-pressed", "false");
+    expect(detail).toHaveClass("hidden", "xl:block");
+  });
+
   it("drags model presets to reorder and saves the model call order immediately", async () => {
     const { payload, backupPreset } = settingsPayloadWithBackup();
     const updatedPayload: SettingsPayload = {
@@ -4010,6 +4048,10 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Fast writing")).toHaveValue("");
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to model presets" }));
+    expect(screen.queryByPlaceholderText("Fast writing")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
