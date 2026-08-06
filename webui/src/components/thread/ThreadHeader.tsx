@@ -1,5 +1,5 @@
 import { Menu, MessageCircleDashed, Moon, Sun } from "lucide-react";
-import { useState, type ReactNode, type Ref } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ interface ThreadHeaderProps {
   temporaryChatEnabled?: boolean;
   temporaryChatDisabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
-  temporaryChatButtonRef?: Ref<HTMLButtonElement>;
 }
 
 export function ThreadHeader({
@@ -42,7 +41,6 @@ export function ThreadHeader({
   temporaryChatEnabled = false,
   temporaryChatDisabled = false,
   onTemporaryChatEnabledChange,
-  temporaryChatButtonRef,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
   const [temporaryChatHelpOpen, setTemporaryChatHelpOpen] = useState(false);
@@ -84,9 +82,9 @@ export function ThreadHeader({
             <Tooltip open={temporaryChatHelpOpen} onOpenChange={setTemporaryChatHelpOpen}>
               <TooltipTrigger asChild>
                 <Button
-                  ref={temporaryChatButtonRef}
                   type="button"
                   variant="ghost"
+                  size="icon"
                   disabled={temporaryChatDisabled}
                   aria-label={t("temporaryChat.title")}
                   aria-pressed={temporaryChatEnabled}
@@ -96,14 +94,13 @@ export function ThreadHeader({
                     setTemporaryChatHelpOpen(enabled);
                   }}
                   className={cn(
-                    "host-no-drag h-8 shrink-0 gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-[color,background-color,box-shadow] duration-200",
+                    "host-no-drag h-8 w-8 shrink-0 rounded-full transition-[color,background-color,box-shadow]",
                     temporaryChatEnabled
-                      ? "bg-[hsl(var(--temporary-accent)/0.12)] text-[hsl(var(--temporary-foreground))] shadow-[inset_0_0_0_1px_hsl(var(--temporary-border)/0.35)] hover:bg-[hsl(var(--temporary-accent)/0.18)] hover:text-[hsl(var(--temporary-foreground))]"
-                      : "text-muted-foreground hover:bg-accent/45 hover:text-foreground",
+                      ? "duration-150 bg-[hsl(var(--temporary-accent)/0.12)] text-[hsl(var(--temporary-foreground))] shadow-[inset_0_0_0_1px_hsl(var(--temporary-border)/0.35)] hover:bg-[hsl(var(--temporary-accent)/0.18)] hover:text-[hsl(var(--temporary-foreground))]"
+                      : "duration-75 text-muted-foreground hover:bg-accent/45 hover:text-foreground",
                   )}
                 >
                   <MessageCircleDashed className="h-4 w-4" aria-hidden />
-                  <span>{t("temporaryChat.title")}</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent

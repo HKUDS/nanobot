@@ -485,26 +485,21 @@ describe("App layout", () => {
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
-    expect(temporaryToggle).toHaveClass("rounded-full");
-    expect(within(temporaryToggle).getByText("Temporary chat")).not.toHaveClass("hidden");
+    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-full");
+    expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
+    expect(temporaryToggle).toHaveClass("duration-150");
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "Reloading, closing, or losing the connection ends these chats.",
     );
-    const temporaryOutline = screen.getByTestId("temporary-chat-outline");
-    expect(temporaryOutline).toHaveClass(
-      "border-dashed",
-      "border-[hsl(var(--temporary-border))]",
-    );
-    await waitFor(() => expect(temporaryOutline).toHaveAttribute("data-expanded", "true"));
+    expect(screen.queryByTestId("temporary-chat-outline")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
-    expect(temporaryOutline).toHaveAttribute("data-expanded", "false");
+    expect(temporaryToggle).toHaveClass("duration-75");
     fireEvent.click(temporaryToggle);
     expect(window.location.hash).toBe("#/new");
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
-    await waitFor(() => expect(temporaryOutline).toHaveAttribute("data-expanded", "true"));
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "start temporary chat" },
