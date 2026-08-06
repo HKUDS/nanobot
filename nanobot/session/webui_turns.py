@@ -215,6 +215,17 @@ async def maybe_generate_webui_title(
             response.finish_reason,
         )
         return False
+
+    # Re-fetch the cached session after the LLM await: the session may have
+    # been replaced by /new or a concurrent reset while we were waiting.
+    current = sessions.get_cached(session_key)
+    if current is not session:
+        logger.debug(
+            "Skipping title update for {} (session was replaced while title was generating)",
+            session_key,
+        )
+        return False
+
     session.metadata[WEBUI_TITLE_METADATA_KEY] = title
     sessions.save(session)
     return True
