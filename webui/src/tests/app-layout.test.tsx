@@ -372,44 +372,44 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const temporaryButton = within(sidebar).getByRole("button", { name: "Temporary chat" });
+    expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    const temporaryButton = screen.getByRole("button", { name: "Temporary chat" });
 
     fireEvent.click(temporaryButton);
 
-    expect(temporaryButton).toHaveAttribute("aria-current", "page");
-    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
-      "data-active-id",
-      "temporary-chat",
-    );
+    expect(temporaryButton).toHaveAttribute("aria-pressed", "true");
     expect(window.location.hash).toBe("#/temporary");
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
+    expect(temporaryButton).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(temporaryButton);
     expect(window.location.hash).toBe("#/temporary");
-    expect(temporaryButton).toHaveAttribute("aria-current", "page");
+    expect(temporaryButton).toHaveAttribute("aria-pressed", "true");
 
     unmount();
     await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledOnce());
     expect(discardTemporaryChatSpy.mock.calls[0][0]).toMatch(/^temporary-/);
   });
 
-  it("clears a temporary chat explicitly without leaving it", async () => {
+  it("moves the temporary-chat control into the composer and removes header actions", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Temporary chat" }));
+    expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    const temporaryButton = screen.getByRole("button", { name: "Temporary chat" });
+    fireEvent.click(temporaryButton);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Clear temporary chat" }));
+    expect(screen.queryByText("Not saved")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear temporary chat" })).not.toBeInTheDocument();
+    expect(temporaryButton).toHaveAttribute("aria-pressed", "true");
 
-    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledOnce());
-    expect(window.location.hash).toBe("#/temporary");
-    expect(within(sidebar).getByRole("button", { name: "Temporary chat" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    fireEvent.click(temporaryButton);
+    expect(window.location.hash).toBe("#/new");
+    expect(temporaryButton).toHaveAttribute("aria-pressed", "false");
+    expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
   });
 
   it("starts temporary chat with restricted on-demand workspace controls", async () => {
@@ -430,8 +430,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Temporary chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
 
     expect(await screen.findByRole("button", { name: "Choose project" })).toBeInTheDocument();
     expect(screen.queryByText("Full Access")).not.toBeInTheDocument();

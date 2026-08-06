@@ -33,6 +33,7 @@ import {
   ImageIcon,
   Loader2,
   MessageCircle,
+  MessageCircleDashed,
   Mic,
   Plus,
   Quote,
@@ -195,6 +196,8 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
+  temporary?: boolean;
+  onToggleTemporaryChat?: () => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
@@ -922,6 +925,8 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
+  temporary = false,
+  onToggleTemporaryChat,
   onTranscribeAudio,
   runStartedAt = null,
   goalState,
@@ -2319,6 +2324,39 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
+            {onToggleTemporaryChat && !voiceRecorder.isRecording ? (
+              <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={disabled || isStreaming}
+                      aria-label={t("temporaryChat.title")}
+                      aria-pressed={temporary}
+                      onClick={onToggleTemporaryChat}
+                      className={cn(
+                        "thread-composer-action touch-target shrink-0 gap-1.5 rounded-full border border-dashed px-2.5 text-[12px] font-medium transition-colors",
+                        isHero ? "h-8" : "h-9",
+                        temporary
+                          ? "border-foreground/45 bg-foreground/[0.07] text-foreground hover:bg-foreground/[0.10]"
+                          : "border-border/80 bg-card/75 text-muted-foreground hover:border-foreground/30 hover:bg-card hover:text-foreground",
+                      )}
+                    >
+                      <MessageCircleDashed className="h-4 w-4" aria-hidden />
+                      <span className="hidden sm:inline">{t("temporaryChat.title")}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    align="center"
+                    className="max-w-72 rounded-xl border border-border/70 bg-popover px-3 py-2 text-[12px]/[1.4] text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10"
+                  >
+                    {t("temporaryChat.description")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
             {modelLabel && !voiceRecorder.isRecording ? (
               <ModelPresetBadge
                 label={modelLabel}

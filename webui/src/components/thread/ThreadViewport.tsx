@@ -35,6 +35,7 @@ export interface ThreadViewportHandle {
 
 interface ThreadViewportProps {
   messages: UIMessage[];
+  temporary?: boolean;
   isStreaming: boolean;
   composer: ReactNode;
   emptyState?: ReactNode;
@@ -152,6 +153,7 @@ function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
 
 export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages,
+  temporary = false,
   isStreaming,
   composer,
   emptyState,
@@ -665,6 +667,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
+                  temporary={temporary}
                   isStreaming={isStreaming}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}

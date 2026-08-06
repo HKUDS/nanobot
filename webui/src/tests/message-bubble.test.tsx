@@ -113,6 +113,25 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("outlines temporary-chat user messages with a short dashed border", () => {
+    const message: UIMessage = {
+      id: "u-temporary",
+      role: "user",
+      content: "private question",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(<MessageBubble message={message} temporary />);
+    const bubble = screen.getByText("private question");
+
+    expect(bubble).toHaveAttribute("data-temporary-message", "true");
+    expect(bubble).toHaveClass("border-dashed", "border-muted-foreground/40", "bg-transparent");
+
+    rerender(<MessageBubble message={message} />);
+    expect(bubble).not.toHaveClass("border-dashed");
+    expect(bubble).toHaveClass("bg-secondary/70");
+  });
+
   it("does not replay an entrance animation when persisted messages mount", () => {
     const messages: UIMessage[] = [
       {

@@ -1474,11 +1474,13 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [navigate, temporaryChatActive, temporarySession]);
 
-  const onClearTemporaryChat = useCallback(() => {
-    if (!temporaryChatActive) return;
-    setTemporarySession(createTemporaryChatSession());
-    setWorkspaceError(null);
-  }, [temporaryChatActive]);
+  const onToggleTemporaryChat = useCallback(() => {
+    if (temporaryChatActive) {
+      onNewChat();
+      return;
+    }
+    onOpenTemporaryChat();
+  }, [onNewChat, onOpenTemporaryChat, temporaryChatActive]);
 
   const onNewChatInProject = useCallback(
     (projectPath: string, projectName: string) => {
@@ -1987,9 +1989,7 @@ function Shell({
     activeKey: view === "chat" ? activeKey : null,
     loading,
     newChatActive: view === "chat" && activeKey === null,
-    temporaryChatActive,
     onNewChat,
-    onOpenTemporaryChat,
     onSelect: onSelectChat,
     onRequestDelete,
     onTogglePin,
@@ -2175,7 +2175,7 @@ function Shell({
                 sessions={sessions}
                 title={headerTitle}
                 temporary={temporaryChatActive}
-                onClearTemporaryChat={onClearTemporaryChat}
+                onToggleTemporaryChat={onToggleTemporaryChat}
                 workspaceConnected={!!temporarySession?.workspaceScope}
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}

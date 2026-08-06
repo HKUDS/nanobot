@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
-import { Button } from "@/components/ui/button";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -298,7 +296,7 @@ interface ThreadShellProps {
   sessions?: ChatSummary[];
   title: string;
   temporary?: boolean;
-  onClearTemporaryChat?: () => void;
+  onToggleTemporaryChat?: () => void;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
@@ -586,7 +584,7 @@ export function ThreadShell({
   sessions = [],
   title,
   temporary = false,
-  onClearTemporaryChat,
+  onToggleTemporaryChat,
   onToggleSidebar,
   onCreateChat,
   onForkChat,
@@ -1418,6 +1416,8 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           onStop={stop}
+          temporary={temporary}
+          onToggleTemporaryChat={onToggleTemporaryChat}
           onTranscribeAudio={transcribeAudio}
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
@@ -1462,6 +1462,8 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
+          temporary={temporary}
+          onToggleTemporaryChat={onToggleTemporaryChat}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1491,29 +1493,6 @@ export function ThreadShell({
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
-  ) : temporary ? (
-    <div className="flex items-center gap-1">
-      <span
-        className="rounded-full border border-border/70 bg-muted/35 px-2 py-1 text-[11px] text-muted-foreground"
-        title={t("temporaryChat.description")}
-      >
-        {t("temporaryChat.notSaved")}
-      </span>
-      {onClearTemporaryChat ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={turnActive}
-          aria-label={t("temporaryChat.clear")}
-          title={t("temporaryChat.clear")}
-          onClick={onClearTemporaryChat}
-          className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
-      ) : null}
-    </div>
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
@@ -1545,6 +1524,7 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
+            temporary={temporary}
             isStreaming={turnActive}
             emptyState={emptyState}
             composer={composer}
