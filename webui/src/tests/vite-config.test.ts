@@ -1,8 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { webuiManualChunk } from "../../vite.config";
+import { entryLazyFeatureImports, webuiManualChunk } from "../../vite.config";
+
+describe("entryLazyFeatureImports", () => {
+  it("allows the core runtime but rejects heavy lazy feature chunks", () => {
+    expect(entryLazyFeatureImports(["assets/react-vendor-abc.js"])).toEqual([]);
+    expect(entryLazyFeatureImports([
+      "assets/markdown-vendor-abc.js",
+      "assets/syntax-highlight-def.js",
+      "assets/katex-ghi.js",
+    ])).toEqual([
+      "assets/markdown-vendor-abc.js",
+      "assets/syntax-highlight-def.js",
+      "assets/katex-ghi.js",
+    ]);
+  });
+});
 
 describe("webuiManualChunk", () => {
+  it("keeps the React runtime outside lazy feature chunks", () => {
+    expect(webuiManualChunk("/repo/node_modules/react/index.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/react-dom/client.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/scheduler/index.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/clsx/dist/clsx.mjs")).toBe("react-vendor");
+    expect(webuiManualChunk("\0vite/preload-helper.js")).toBe("react-vendor");
+  });
+
   it("keeps Refractor's selector parser in the syntax highlighting chunk", () => {
     expect(
       webuiManualChunk("/repo/node_modules/hast-util-parse-selector/index.js"),

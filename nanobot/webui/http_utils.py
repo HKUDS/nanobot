@@ -75,7 +75,7 @@ def host_for_url(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
-def _accepts_gzip(value: str) -> bool:
+def accepts_gzip(value: str) -> bool:
     wildcard_quality: float | None = None
     for item in value.split(","):
         name, *params = (part.strip() for part in item.split(";"))
@@ -109,7 +109,7 @@ def http_json_response(
     ]
     if accept_encoding is not None:
         headers.append(("Vary", "Accept-Encoding"))
-        if len(body) >= _JSON_GZIP_MIN_BYTES and _accepts_gzip(accept_encoding):
+        if len(body) >= _JSON_GZIP_MIN_BYTES and accepts_gzip(accept_encoding):
             body = gzip.compress(body, compresslevel=_JSON_GZIP_LEVEL, mtime=0)
             headers.append(("Content-Encoding", "gzip"))
     headers.append(("Content-Length", str(len(body))))

@@ -37,6 +37,9 @@ from nanobot.webui.file_preview import (
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
+    accepts_gzip as _accepts_gzip,
+)
+from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
 from nanobot.webui.http_utils import (
@@ -336,7 +339,10 @@ class GatewayHTTPHandler:
 
         # Static SPA serving
         if self.static_dist_path is not None:
-            response = self._serve_static(got)
+            response = self._serve_static(
+                got,
+                accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            )
             if response is not None:
                 return response
 
@@ -1143,7 +1149,12 @@ class GatewayHTTPHandler:
 
     # -- Static file serving ------------------------------------------------
 
-    def _serve_static(self, request_path: str) -> Response | None:
+    def _serve_static(
+        self,
+        request_path: str,
+        *,
+        accept_encoding: str = "",
+    ) -> Response | None:
         assert self.static_dist_path is not None
         rel = request_path.lstrip("/")
         if not rel:
@@ -1161,15 +1172,28 @@ class GatewayHTTPHandler:
                 candidate = index
             else:
                 return None
-        try:
-            body = candidate.read_bytes()
-        except OSError as e:
-            self._log.warning("static: failed to read {}: {}", candidate, e)
-            return _http_error(500, "Internal Server Error")
         ctype, _ = mimetypes.guess_type(candidate.name)
         if ctype is None:
             ctype = "application/octet-stream"
-        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+        utf8_text = ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+        }
+        compressible = utf8_text or ctype == "image/svg+xml"
+        response_path = candidate
+        extra_headers: list[tuple[str, str]] = []
+        if compressible:
+            extra_headers.append(("Vary", "Accept-Encoding"))
+            gzip_candidate = candidate.with_name(f"{candidate.name}.gz")
+            if _accepts_gzip(accept_encoding) and gzip_candidate.is_file():
+                response_path = gzip_candidate
+                extra_headers.append(("Content-Encoding", "gzip"))
+        try:
+            body = response_path.read_bytes()
+        except OSError as e:
+            self._log.warning("static: failed to read {}: {}", response_path, e)
+            return _http_error(500, "Internal Server Error")
+        if utf8_text:
             ctype = f"{ctype}; charset=utf-8"
         if candidate.name == "index.html":
             cache = "no-cache"
@@ -1179,7 +1203,7 @@ class GatewayHTTPHandler:
             body,
             status=200,
             content_type=ctype,
-            extra_headers=[("Cache-Control", cache)],
+            extra_headers=[("Cache-Control", cache), *extra_headers],
         )
 
 
