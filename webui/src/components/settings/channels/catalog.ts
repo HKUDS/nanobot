@@ -68,6 +68,7 @@ export type ChannelConfigField = {
   optional?: boolean;
   help?: string;
   inputType?: "text" | "number";
+  boolean?: boolean;
   defaultValue?: string;
   options?: ChannelConfigOption[];
 };

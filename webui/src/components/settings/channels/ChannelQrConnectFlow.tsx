@@ -53,6 +53,7 @@ export function ChannelQrConnectFlow({
   onFeaturesUpdate,
   pausePolling,
   renderPending,
+  resolveMessage,
 }: {
   token: string;
   channelName: string;
@@ -64,6 +65,7 @@ export function ChannelQrConnectFlow({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   pausePolling?: (payload: ChannelConnectPayload) => boolean;
   renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
+  resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
 }) {
   const pageVisible = usePageVisibility();
   const { t } = useTranslation();
@@ -86,6 +88,9 @@ export function ChannelQrConnectFlow({
   const succeeded = connect?.status === "succeeded";
   const canStart = !pending && !busy;
   const pollingPaused = Boolean(connect && pausePolling?.(connect));
+  const displayMessage = connect
+    ? resolveMessage?.(connect) ?? connect.message
+    : undefined;
 
   useEffect(() => {
     if (!connect?.qr_url) {
@@ -294,13 +299,13 @@ export function ChannelQrConnectFlow({
       {succeeded ? (
         <div className="flex items-center gap-2 rounded-[12px] border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
           <Check className="h-3.5 w-3.5" aria-hidden />
-          {connect.message ?? labels.connected}
+          {displayMessage ?? labels.connected}
         </div>
       ) : null}
 
       {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
         <div className="rounded-[12px] border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
-          {connect.message || labels.stopped}
+          {displayMessage || labels.stopped}
         </div>
       ) : null}
 

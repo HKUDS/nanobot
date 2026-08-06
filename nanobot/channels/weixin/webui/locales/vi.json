@@ -20,7 +20,21 @@
       "token": {
         "label": "Token",
         "placeholder": "Được lưu khi đăng nhập QR"
-      }
+      },
+      "sendProgress": { "label": "Gửi tiến trình" },
+      "sendToolHints": { "label": "Gửi gợi ý công cụ" },
+      "streaming": { "label": "Sử dụng API phát trực tiếp" },
+      "replyProgressMessages": { "label": "Gửi tiến trình có cấu trúc" },
+      "replyProgressMaxMessages": { "label": "Giới hạn tiến trình có cấu trúc" },
+      "contextMessageBudget": { "label": "Ngân sách tin nhắn ngữ cảnh" },
+      "blockStreaming": { "label": "Gửi phản hồi theo khối" },
+      "blockStreamingMinChars": { "label": "Kích thước khối tối thiểu" },
+      "blockStreamingMaxMessages": { "label": "Giới hạn tin nhắn theo khối" },
+      "baseUrl": { "label": "URL API" },
+      "cdnBaseUrl": { "label": "URL CDN" },
+      "routeTag": { "label": "Thẻ định tuyến" },
+      "stateDir": { "label": "Thư mục trạng thái" },
+      "pollTimeout": { "label": "Thời gian chờ thăm dò" }
     }
   },
   "custom": {
@@ -33,6 +47,9 @@
     "connecting": "Đang kết nối...",
     "verifyTitle": "Cần xác minh",
     "verifyDescription": "Nhập số hiển thị trong WeChat để tiếp tục.",
+    "verifyMismatch": "Mã không khớp. Nhập số mới hiển thị trong WeChat.",
+    "expired": "Đăng nhập WeChat đã hết hạn. Hãy bắt đầu lại.",
+    "failed": "Không thể kết nối WeChat. Hãy thử lại.",
     "verifyPlaceholder": "Mã",
     "verifySubmit": "Xác minh"
   }

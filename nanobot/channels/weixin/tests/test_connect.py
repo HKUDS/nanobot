@@ -240,3 +240,36 @@ async def test_weixin_connect_store_treats_existing_binding_as_success(
     assert completed["status"] == "succeeded"
     assert "already connected" in completed["message"]
     assert json.loads((state_dir / "account.json").read_text())["token"] == "working-token"
+
+
+@pytest.mark.asyncio
+async def test_weixin_connect_store_rejects_existing_binding_without_local_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "weixin-state"
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"weixin": {"stateDir": str(state_dir)}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+        return "qr-missing", "https://qr.example/missing"
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        **_kwargs: Any,
+    ) -> dict[str, str]:
+        return {"status": "binded_redirect"}
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
+
+    store = WeixinConnectStore()
+    started = await store.start(force=True)
+    completed = await store.poll(started["session_id"])
+
+    assert completed["status"] == "failed"
+    assert "no local credentials" in completed["message"]

@@ -18,6 +18,7 @@ import {
 } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
+  channelValuesForSave,
   channelValuesForSubmit,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
@@ -289,7 +290,11 @@ function ChannelSetupSurface({
   const optionalFields = fields.filter((field) => field.optional);
   const manualFields = setup.manualFields ?? [];
   const advancedFields = mode === "connect" ? manualFields : optionalFields;
-  const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
+  const editableFields = mode === "credentials"
+    ? fields
+    : mode === "connect"
+      ? [...fields, ...manualFields]
+      : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
   const summary = setup.summary ?? tx(
@@ -372,6 +377,27 @@ function ChannelSetupSurface({
     }
   };
 
+  const saveConnectSettings = async () => {
+    setSaving(true);
+    setNotice(null);
+    try {
+      const payload = await configureChannel(
+        token,
+        feature.name,
+        channelValuesForSave(editableFields, fieldValues),
+      );
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
+      setTouchedFields(new Set());
+      setNotice(tx("settings.channels.savedSettings", "Saved settings."));
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const checkCurrentSettings = async () => {
     setValidating(true);
     setNotice(null);
@@ -431,13 +457,28 @@ function ChannelSetupSurface({
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
         {mode === "connect" && ConnectFlow ? (
-          <ConnectFlow
-            token={token}
-            feature={feature}
-            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-            connectRequestId={connectRequestId}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
+          <>
+            <ConnectFlow
+              token={token}
+              feature={feature}
+              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+              connectRequestId={connectRequestId}
+              onFeaturesUpdate={onFeaturesUpdate}
+            />
+            {fields.length ? (
+              <div className="mt-5">
+                <CredentialForm
+                  fields={fields}
+                  values={fieldValues}
+                  configuredFields={configuredFields}
+                  visibleSecrets={visibleSecrets}
+                  onChange={setFieldValue}
+                  onToggleSecret={toggleSecret}
+                  compact
+                />
+              </div>
+            ) : null}
+          </>
         ) : mode === "connect" ? (
           <>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -561,6 +602,24 @@ function ChannelSetupSurface({
             </div>
           ) : null}
         </details>
+      ) : null}
+
+      {mode === "connect" && editableFields.length ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold hover:bg-muted"
+            onClick={() => void saveConnectSettings()}
+            disabled={saving}
+          >
+            {saving ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : null}
+            {tx("settings.channels.saveSettings", "Save settings")}
+          </Button>
+        </div>
       ) : null}
     </form>
   );

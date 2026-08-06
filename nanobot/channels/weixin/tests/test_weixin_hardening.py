@@ -12,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.weixin.manifest import SETUP_SPEC
 from nanobot.channels.weixin.runtime import (
     ITEM_TOOL_CALL_RESULT,
     ITEM_TOOL_CALL_START,
@@ -58,6 +59,12 @@ def test_weixin_defaults_protect_context_quota() -> None:
     assert config.reply_progress_messages is False
     assert config.context_message_budget == 8
     assert config.block_streaming is False
+
+
+def test_weixin_webui_manifest_covers_runtime_configuration() -> None:
+    runtime_fields = set(WeixinConfig().model_dump(mode="json", by_alias=True))
+
+    assert set(SETUP_SPEC.fields) == runtime_fields - {"enabled"}
 
 
 def test_reply_progress_opt_in_enables_progress_transport() -> None:

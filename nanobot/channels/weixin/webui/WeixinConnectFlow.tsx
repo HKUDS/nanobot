@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { channelTranslator } from "@/channel-plugins/i18n";
+import {
+  channelTranslator,
+  type ChannelTranslator,
+} from "@/channel-plugins/i18n";
 import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
 import {
   ChannelQrConnectFlow,
@@ -27,6 +30,37 @@ function isVerificationChallenge(
       || typeof payload.verification_failed === "boolean"
     )
   );
+}
+
+function weixinConnectMessage(
+  payload: ChannelConnectPayload,
+  tx: ChannelTranslator,
+): string {
+  if (payload.status === "succeeded") {
+    return tx("custom.connected", "WeChat is connected.");
+  }
+  if (payload.status === "expired") {
+    return tx("custom.expired", "This WeChat login expired. Start again.");
+  }
+  if (payload.status === "failed") {
+    return payload.message
+      ?? tx("custom.failed", "Unable to connect WeChat. Try again.");
+  }
+  if (payload.status === "cancelled") {
+    return tx("custom.stopped", "WeChat login stopped.");
+  }
+  if (isVerificationChallenge(payload)) {
+    return payload.verification_failed
+      ? tx(
+        "custom.verifyMismatch",
+        "That code did not match. Enter the new number shown in WeChat.",
+      )
+      : tx(
+        "custom.verifyDescription",
+        "Enter the number shown in WeChat to continue.",
+      );
+  }
+  return tx("custom.waiting", "Waiting for WeChat scan...");
 }
 
 export function WeixinConnectFlow({
@@ -63,11 +97,7 @@ export function WeixinConnectFlow({
           {tx("custom.verifyTitle", "Verification required")}
         </div>
         <p className="text-[12px] leading-5 text-muted-foreground">
-          {connect.message
-            ?? tx(
-              "custom.verifyDescription",
-              "Enter the number shown in WeChat to continue.",
-            )}
+          {weixinConnectMessage(connect, tx)}
         </p>
         <div className="flex gap-2">
           <Input
@@ -102,6 +132,7 @@ export function WeixinConnectFlow({
       onFeaturesUpdate={onFeaturesUpdate}
       pausePolling={isVerificationChallenge}
       renderPending={renderVerification}
+      resolveMessage={(payload) => weixinConnectMessage(payload, tx)}
       labels={{
         qrAlt: tx("custom.qrAlt", "WeChat login QR code"),
         scanTitle: tx("custom.scanTitle", "Scan with WeChat"),

@@ -204,6 +204,16 @@ class WeixinConnectStore:
             )
 
         if status == "binded_redirect":
+            if not session.channel.connect_load_state():
+                self._sessions.pop(session_id, None)
+                await self._close_channel(session.channel)
+                return {
+                    "session_id": session_id,
+                    "status": "failed",
+                    "message": (
+                        "WeChat reports an existing binding, but no local credentials were found."
+                    ),
+                }
             self._sessions.pop(session_id, None)
             await self._close_channel(session.channel)
             return {

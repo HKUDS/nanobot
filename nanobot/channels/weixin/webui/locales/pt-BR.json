@@ -20,7 +20,21 @@
       "token": {
         "label": "Token",
         "placeholder": "Salvo pelo login via QR"
-      }
+      },
+      "sendProgress": { "label": "Enviar progresso" },
+      "sendToolHints": { "label": "Enviar dicas de ferramentas" },
+      "streaming": { "label": "Usar API de streaming" },
+      "replyProgressMessages": { "label": "Enviar progresso estruturado" },
+      "replyProgressMaxMessages": { "label": "Limite de progresso estruturado" },
+      "contextMessageBudget": { "label": "Orçamento de mensagens do contexto" },
+      "blockStreaming": { "label": "Enviar resposta em blocos" },
+      "blockStreamingMinChars": { "label": "Tamanho mínimo do bloco" },
+      "blockStreamingMaxMessages": { "label": "Limite de mensagens em blocos" },
+      "baseUrl": { "label": "URL da API" },
+      "cdnBaseUrl": { "label": "URL da CDN" },
+      "routeTag": { "label": "Etiqueta de rota" },
+      "stateDir": { "label": "Diretório de estado" },
+      "pollTimeout": { "label": "Tempo limite da consulta" }
     }
   },
   "custom": {
@@ -33,6 +47,9 @@
     "connecting": "Conectando...",
     "verifyTitle": "Verificação necessária",
     "verifyDescription": "Digite o número exibido no WeChat para continuar.",
+    "verifyMismatch": "O código não corresponde. Digite o novo número exibido no WeChat.",
+    "expired": "O login do WeChat expirou. Comece novamente.",
+    "failed": "Não foi possível conectar o WeChat. Tente novamente.",
     "verifyPlaceholder": "Código",
     "verifySubmit": "Verificar"
   }
