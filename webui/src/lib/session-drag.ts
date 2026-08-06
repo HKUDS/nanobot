@@ -13,6 +13,6 @@ export function writeDraggedSession(
   dataTransfer: DataTransfer,
   sessionKey: string,
 ): void {
-  dataTransfer.effectAllowed = "copy";
+  dataTransfer.effectAllowed = "copyMove";
   dataTransfer.setData(SESSION_DRAG_TYPE, sessionKey);
 }

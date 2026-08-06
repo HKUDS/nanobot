@@ -964,6 +964,7 @@ describe("webui API helpers", () => {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
       archived_keys: ["websocket:old"],
+      session_order: ["websocket:chat-1", "websocket:old"],
       title_overrides: { "websocket:chat-1": "Release" },
       project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},

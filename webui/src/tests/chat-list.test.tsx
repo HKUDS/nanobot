@@ -48,7 +48,7 @@ describe("ChatList", () => {
     vi.unstubAllGlobals();
   });
 
-  it("exposes inactive chats as session mention drag sources", () => {
+  it("exposes chats as drag sources", () => {
     const dataTransfer = {
       effectAllowed: "",
       setData: vi.fn(),
@@ -69,7 +69,7 @@ describe("ChatList", () => {
     );
 
     expect(screen.getByRole("button", { name: "Active chat" }))
-      .toHaveAttribute("draggable", "false");
+      .toHaveAttribute("draggable", "true");
     const reference = screen.getByRole("button", { name: "Reference chat" });
     expect(reference).toHaveAttribute("draggable", "true");
 
@@ -79,6 +79,67 @@ describe("ChatList", () => {
       SESSION_DRAG_TYPE,
       "websocket:reference",
     );
+  });
+
+  it("reorders chats around a Codex-style insertion line", () => {
+    const onReorderSessions = vi.fn();
+    const sessions = [
+      session({ chatId: "alpha", title: "Alpha" }),
+      session({ chatId: "bravo", title: "Bravo" }),
+      session({ chatId: "charlie", title: "Charlie" }),
+    ];
+    const { rerender } = render(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onReorderSessions={onReorderSessions}
+      />,
+    );
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByRole("button", { name: "Alpha" }), { dataTransfer });
+    const charlieRow = screen.getByRole("button", { name: "Charlie" }).closest("li")!;
+    fireEvent.dragOver(charlieRow, { clientY: 1, dataTransfer });
+    expect(charlieRow.querySelector("[data-session-drop-edge='after']"))
+      .toBeInTheDocument();
+    fireEvent.drop(charlieRow, { clientY: 1, dataTransfer });
+
+    expect(onReorderSessions).toHaveBeenCalledWith([
+      "websocket:bravo",
+      "websocket:charlie",
+      "websocket:alpha",
+    ]);
+
+    rerender(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onReorderSessions={onReorderSessions}
+        sessionOrder={[
+          "websocket:bravo",
+          "websocket:charlie",
+          "websocket:alpha",
+        ]}
+        sort="manual"
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Topics" });
+    const text = section.textContent ?? "";
+    expect(text.indexOf("Bravo")).toBeLessThan(text.indexOf("Charlie"));
+    expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
   });
 
   it("orders chats by latest session activity by default", () => {

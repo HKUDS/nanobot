@@ -2280,6 +2280,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         payload = {
             "pinned_keys": ["websocket:sidebar"],
             "archived_keys": ["websocket:old"],
+            "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
         }
@@ -2291,6 +2292,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
 
