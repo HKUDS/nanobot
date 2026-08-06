@@ -47,7 +47,10 @@ class WeixinConnectStore:
         if not session_id:
             raise ChannelConnectError("missing WeChat connect session")
         if action == "poll":
-            return await self.poll(session_id)
+            return await self.poll(
+                session_id,
+                verify_code=(query_first(query, "verify_code") or "").strip(),
+            )
         if action == "cancel":
             return await self.cancel(session_id)
         raise ChannelConnectError(f"unsupported WeChat connect action: {action}", status=404)
@@ -91,7 +94,7 @@ class WeixinConnectStore:
         )
         return self._start_payload(self._sessions[session_id])
 
-    async def poll(self, session_id: str) -> dict[str, Any]:
+    async def poll(self, session_id: str, *, verify_code: str = "") -> dict[str, Any]:
         await self._cleanup()
         session = self._sessions.get(session_id)
         if session is None:
@@ -105,6 +108,7 @@ class WeixinConnectStore:
             status_data = await session.channel.connect_poll_qr_code(
                 base_url=session.current_poll_base_url,
                 qrcode_id=session.qrcode_id,
+                verify_code=verify_code,
             )
         except Exception as exc:
             if session.channel.connect_poll_error_is_retryable(exc):
@@ -120,6 +124,8 @@ class WeixinConnectStore:
 
         status_payload = status_data
         status = status_payload.get("status", "")
+        from nanobot.channels.weixin.runtime import MAX_QR_REFRESH_COUNT
+
         if status == "confirmed":
             if self._sessions.get(session_id) is not session:
                 return {
@@ -157,9 +163,56 @@ class WeixinConnectStore:
                 )
             return self._pending_payload(session)
 
-        if status == "expired":
-            from nanobot.channels.weixin.runtime import MAX_QR_REFRESH_COUNT
+        if status == "need_verifycode":
+            return self._pending_payload(
+                session,
+                challenge="verify_code",
+                message=(
+                    "That verification code did not match. Enter the new number shown in WeChat."
+                    if verify_code
+                    else "Enter the number shown in WeChat to continue."
+                ),
+                verification_failed=bool(verify_code),
+            )
 
+        if status == "verify_code_blocked":
+            session.refresh_count += 1
+            if session.refresh_count > MAX_QR_REFRESH_COUNT:
+                self._sessions.pop(session_id, None)
+                await self._close_channel(session.channel)
+                return {
+                    "session_id": session_id,
+                    "status": "failed",
+                    "message": "Too many incorrect verification attempts. Try again later.",
+                }
+            try:
+                session.qrcode_id, session.qr_url = (
+                    await session.channel.connect_fetch_qr_code()
+                )
+            except Exception as exc:
+                self._sessions.pop(session_id, None)
+                await self._close_channel(session.channel)
+                return {
+                    "session_id": session_id,
+                    "status": "failed",
+                    "message": f"Could not refresh WeChat QR code: {exc}",
+                }
+            session.current_poll_base_url = session.channel.connect_base_url
+            return self._pending_payload(
+                session,
+                message="Verification was blocked. Scan the refreshed QR code to try again.",
+            )
+
+        if status == "binded_redirect":
+            self._sessions.pop(session_id, None)
+            await self._close_channel(session.channel)
+            return {
+                "session_id": session_id,
+                "status": "succeeded",
+                "message": "WeChat is already connected to this nanobot instance.",
+            }
+
+        if status == "expired":
             session.refresh_count += 1
             if session.refresh_count > MAX_QR_REFRESH_COUNT:
                 self._sessions.pop(session_id, None)
@@ -238,15 +291,25 @@ class WeixinConnectStore:
         }
 
     @staticmethod
-    def _pending_payload(session: WeixinConnectSession) -> dict[str, Any]:
-        return {
+    def _pending_payload(
+        session: WeixinConnectSession,
+        *,
+        challenge: str = "",
+        message: str = "Waiting for WeChat scan.",
+        verification_failed: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "session_id": session.id,
             "status": "pending",
             "qr_url": session.qr_url,
             "interval_ms": 2000,
             "expires_at_ms": int((session.created_wall + 600) * 1000),
-            "message": "Waiting for WeChat scan.",
+            "message": message,
         }
+        if challenge:
+            payload["challenge"] = challenge
+            payload["verification_failed"] = verification_failed
+        return payload
 
 
 __all__ = ["WeixinConnectStore"]

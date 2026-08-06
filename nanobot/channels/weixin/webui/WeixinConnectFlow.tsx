@@ -31,6 +31,13 @@ export function WeixinConnectFlow({
         connected: tx("custom.connected", "WeChat is connected."),
         stopped: tx("custom.stopped", "WeChat login stopped."),
         connecting: tx("custom.connecting", "Connecting..."),
+        verifyTitle: tx("custom.verifyTitle", "Verification required"),
+        verifyDescription: tx(
+          "custom.verifyDescription",
+          "Enter the number shown in WeChat to continue.",
+        ),
+        verifyPlaceholder: tx("custom.verifyPlaceholder", "Code"),
+        verifySubmit: tx("custom.verifySubmit", "Verify"),
         scanAgain: t("settings.channels.scanAgain", { defaultValue: "Scan again" }),
         connect: t("settings.channels.connect", { defaultValue: "Connect" }),
       }}

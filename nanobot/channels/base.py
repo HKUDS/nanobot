@@ -101,6 +101,15 @@ class BaseChannel(ABC):
         """
         pass
 
+    def should_retry_send_error(self, error: Exception) -> bool:
+        """Return whether the channel manager may retry a failed delivery.
+
+        Channels with protocol-level business errors can override this hook to
+        prevent retries that cannot succeed until external state changes.
+        Transport and unexpected errors remain retryable by default.
+        """
+        return True
+
     async def send_delta(
         self,
         chat_id: str,

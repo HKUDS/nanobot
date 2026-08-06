@@ -31,6 +31,10 @@
     "waiting": "正在等待微信扫码...",
     "connected": "微信已连接。",
     "stopped": "微信登录已停止。",
-    "connecting": "正在连接..."
+    "connecting": "正在连接...",
+    "verifyTitle": "需要验证",
+    "verifyDescription": "输入手机微信中显示的数字以继续。",
+    "verifyPlaceholder": "验证码",
+    "verifySubmit": "验证"
   }
 }

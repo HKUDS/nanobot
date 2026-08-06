@@ -147,3 +147,96 @@ async def test_weixin_cancel_wins_over_inflight_confirmation(
     assert cancelled["status"] == "cancelled"
     assert completed["status"] == "cancelled"
     assert not (state_dir / "account.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_weixin_connect_store_handles_verification_code(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "weixin-state"
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"weixin": {"stateDir": str(state_dir)}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+        return "qr-verify", "https://qr.example/verify"
+
+    responses = [
+        {"status": "need_verifycode"},
+        {
+            "status": "confirmed",
+            "bot_token": "verified-token",
+            "ilink_user_id": "wx-user",
+        },
+    ]
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        *,
+        params: dict[str, Any],
+        **_kwargs: Any,
+    ) -> dict[str, str]:
+        if len(responses) == 1:
+            assert params == {"qrcode": "qr-verify", "verify_code": "1234"}
+        return responses.pop(0)
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
+
+    store = WeixinConnectStore()
+    started = await store.start()
+    challenged = await store.poll(started["session_id"])
+    completed = await store.handle(
+        "poll",
+        {
+            "session_id": [started["session_id"]],
+            "verify_code": ["1234"],
+        },
+    )
+
+    assert challenged["status"] == "pending"
+    assert challenged["challenge"] == "verify_code"
+    assert completed["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_weixin_connect_store_treats_existing_binding_as_success(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "weixin-state"
+    state_dir.mkdir()
+    (state_dir / "account.json").write_text(
+        json.dumps({"token": "working-token"}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"weixin": {"stateDir": str(state_dir)}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+        return "qr-existing", "https://qr.example/existing"
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        **_kwargs: Any,
+    ) -> dict[str, str]:
+        return {"status": "binded_redirect"}
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
+
+    store = WeixinConnectStore()
+    started = await store.start(force=True)
+    completed = await store.poll(started["session_id"])
+
+    assert completed["status"] == "succeeded"
+    assert "already connected" in completed["message"]
+    assert json.loads((state_dir / "account.json").read_text())["token"] == "working-token"

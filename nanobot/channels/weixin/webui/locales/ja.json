@@ -30,6 +30,10 @@
     "waiting": "WeChat のスキャンを待っています...",
     "connected": "WeChat に接続しました。",
     "stopped": "WeChat ログインを停止しました。",
-    "connecting": "接続中..."
+    "connecting": "接続中...",
+    "verifyTitle": "確認が必要です",
+    "verifyDescription": "WeChat に表示された数字を入力してください。",
+    "verifyPlaceholder": "コード",
+    "verifySubmit": "確認"
   }
 }

@@ -30,6 +30,10 @@
     "waiting": "Menunggu pemindaian WeChat...",
     "connected": "WeChat sudah terhubung.",
     "stopped": "Login WeChat dihentikan.",
-    "connecting": "Menghubungkan..."
+    "connecting": "Menghubungkan...",
+    "verifyTitle": "Verifikasi diperlukan",
+    "verifyDescription": "Masukkan angka yang ditampilkan di WeChat untuk melanjutkan.",
+    "verifyPlaceholder": "Kode",
+    "verifySubmit": "Verifikasi"
   }
 }

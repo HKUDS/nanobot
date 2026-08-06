@@ -4,6 +4,7 @@ import { Check, Loader2, Network, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import {
   cancelChannelConnect,
@@ -25,6 +26,10 @@ export type ChannelQrConnectLabels = {
   connecting: string;
   scanAgain: string;
   connect: string;
+  verifyTitle?: string;
+  verifyDescription?: string;
+  verifyPlaceholder?: string;
+  verifySubmit?: string;
 };
 
 export type ChannelConnectStartOptions = {
@@ -60,8 +65,10 @@ export function ChannelQrConnectFlow({
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState("");
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
+  const ignoredPollSessions = useRef(new Set<string>());
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const startDomain = startOptions.domain;
@@ -96,8 +103,14 @@ export function ChannelQrConnectFlow({
   }, [connect?.qr_url]);
 
   useEffect(() => {
-    if (!connect?.session_id || connect.status !== "pending" || !pageVisible) return;
+    if (
+      !connect?.session_id
+      || connect.status !== "pending"
+      || connect.challenge
+      || !pageVisible
+    ) return;
     let cancelled = false;
+    const sessionId = connect.session_id;
     const poll = async () => {
       if (pollInFlight.current) return;
       pollInFlight.current = true;
@@ -105,9 +118,9 @@ export function ChannelQrConnectFlow({
         const payload = await pollChannelConnect(
           tokenRef.current,
           channelName,
-          connect.session_id,
+          sessionId,
         );
-        if (cancelled) return;
+        if (cancelled || ignoredPollSessions.current.has(sessionId)) return;
         setConnect((current) => ({
           ...(current ?? payload),
           ...payload,
@@ -138,6 +151,7 @@ export function ChannelQrConnectFlow({
   }, [
     channelName,
     connect?.interval_ms,
+    connect?.challenge,
     connect?.session_id,
     connect?.status,
     onFeaturesUpdate,
@@ -145,6 +159,7 @@ export function ChannelQrConnectFlow({
   ]);
 
   const start = useCallback(async (force = false) => {
+    ignoredPollSessions.current.clear();
     setBusy(true);
     setError(null);
     try {
@@ -173,14 +188,42 @@ export function ChannelQrConnectFlow({
       setConnect(null);
       return;
     }
+    const sessionId = connect.session_id;
+    ignoredPollSessions.current.add(sessionId);
     setBusy(true);
     try {
       const payload = await cancelChannelConnect(
         tokenRef.current,
         channelName,
-        connect.session_id,
+        sessionId,
       );
       setConnect(payload);
+    } catch (err) {
+      ignoredPollSessions.current.delete(sessionId);
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitVerification = async () => {
+    if (!connect?.session_id || !verificationCode.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await pollChannelConnect(
+        tokenRef.current,
+        channelName,
+        connect.session_id,
+        "",
+        { verifyCode: verificationCode.trim() },
+      );
+      setConnect((current) => ({
+        ...(current ?? payload),
+        ...payload,
+        qr_url: payload.qr_url ?? current?.qr_url,
+      }));
+      if (!payload.challenge) setVerificationCode("");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -210,10 +253,48 @@ export function ChannelQrConnectFlow({
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
               {labels.scanDescription}
             </p>
-            <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              {labels.waiting}
-            </div>
+            {connect.challenge === "verify_code" ? (
+              <form
+                className="mt-3 space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitVerification();
+                }}
+              >
+                <div className="text-[12px] font-semibold text-foreground">
+                  {labels.verifyTitle ?? "Verification required"}
+                </div>
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  {connect.message
+                    ?? labels.verifyDescription
+                    ?? "Enter the number shown in WeChat."}
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    value={verificationCode}
+                    onChange={(event) => setVerificationCode(event.target.value)}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder={labels.verifyPlaceholder ?? "Code"}
+                    className="h-8 max-w-40"
+                    aria-invalid={connect.verification_failed || undefined}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                    disabled={busy || !verificationCode.trim()}
+                  >
+                    {labels.verifySubmit ?? "Verify"}
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                {labels.waiting}
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               <Button
                 type="button"

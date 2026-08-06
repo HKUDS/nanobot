@@ -30,6 +30,10 @@
     "waiting": "WeChat 스캔을 기다리는 중...",
     "connected": "WeChat이 연결되었습니다.",
     "stopped": "WeChat 로그인이 중지되었습니다.",
-    "connecting": "연결 중..."
+    "connecting": "연결 중...",
+    "verifyTitle": "인증 필요",
+    "verifyDescription": "계속하려면 WeChat에 표시된 숫자를 입력하세요.",
+    "verifyPlaceholder": "코드",
+    "verifySubmit": "인증"
   }
 }

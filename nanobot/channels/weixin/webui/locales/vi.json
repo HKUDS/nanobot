@@ -30,6 +30,10 @@
     "waiting": "Đang chờ quét WeChat...",
     "connected": "WeChat đã kết nối.",
     "stopped": "Đăng nhập WeChat đã dừng.",
-    "connecting": "Đang kết nối..."
+    "connecting": "Đang kết nối...",
+    "verifyTitle": "Cần xác minh",
+    "verifyDescription": "Nhập số hiển thị trong WeChat để tiếp tục.",
+    "verifyPlaceholder": "Mã",
+    "verifySubmit": "Xác minh"
   }
 }

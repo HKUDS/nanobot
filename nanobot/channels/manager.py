@@ -187,11 +187,21 @@ class ChannelManager:
         channel = cls(section, self.bus, **kwargs)
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
+        # Channel-owned config models may deliberately choose safer transport
+        # defaults than the global channel policy (for example, a quota-limited
+        # platform can disable progress messages).  Preserve those defaults
+        # while still letting an explicit per-channel value win below.
+        progress_default = getattr(
+            channel.config, "send_progress", self.config.channels.send_progress,
+        )
+        tool_hints_default = getattr(
+            channel.config, "send_tool_hints", self.config.channels.send_tool_hints,
+        )
         channel.send_progress = self._resolve_bool_override(
-            section, "send_progress", self.config.channels.send_progress,
+            section, "send_progress", progress_default,
         )
         channel.send_tool_hints = self._resolve_bool_override(
-            section, "send_tool_hints", self.config.channels.send_tool_hints,
+            section, "send_tool_hints", tool_hints_default,
         )
         channel.show_reasoning = self._resolve_bool_override(
             section, "show_reasoning", self.config.channels.show_reasoning,
@@ -912,6 +922,14 @@ class ChannelManager:
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
+                if not channel.should_retry_send_error(e):
+                    logger.error(
+                        "Send to {} failed with a non-retryable {}: {}",
+                        msg.channel,
+                        type(e).__name__,
+                        e,
+                    )
+                    return
                 loop = asyncio.get_running_loop()
                 exhausted = (
                     attempt >= max_attempts

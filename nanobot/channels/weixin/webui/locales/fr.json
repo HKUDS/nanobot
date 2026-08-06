@@ -30,6 +30,10 @@
     "waiting": "En attente du scan WeChat...",
     "connected": "WeChat est connecté.",
     "stopped": "Connexion WeChat arrêtée.",
-    "connecting": "Connexion..."
+    "connecting": "Connexion...",
+    "verifyTitle": "Vérification requise",
+    "verifyDescription": "Saisissez le nombre affiché dans WeChat pour continuer.",
+    "verifyPlaceholder": "Code",
+    "verifySubmit": "Vérifier"
   }
 }

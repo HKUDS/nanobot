@@ -249,6 +249,16 @@ describe("webui API helpers", () => {
       }),
     );
 
+    await pollChannelConnect("tok", "weixin", "session+/=", "", {
+      verifyCode: "1234",
+    });
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/settings/channels/weixin/connect/poll?session_id=session%2B%2F%3D&verify_code=1234",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
     await cancelChannelConnect("tok", "weixin", "session+/=");
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/settings/channels/weixin/connect/cancel?session_id=session%2B%2F%3D",
