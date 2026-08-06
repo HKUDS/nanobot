@@ -1647,6 +1647,28 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("rejects session drops that are unavailable to the composer", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        sessions={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Message input");
+    const dataTransfer = {
+      types: [SESSION_DRAG_TYPE],
+      effectAllowed: "copyMove",
+      dropEffect: "copy",
+      files: [],
+      getData: () => "websocket:current",
+    };
+
+    expect(fireEvent.dragEnter(input, { dataTransfer })).toBe(true);
+    expect(fireEvent.dragOver(input, { dataTransfer })).toBe(true);
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+  });
+
   it("disambiguates duplicate and capability-colliding session names", () => {
     render(
       <ThreadComposer

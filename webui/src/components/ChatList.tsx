@@ -221,7 +221,11 @@ export const ChatList = memo(function ChatList({
     const targetIndex = reordered.indexOf(targetKey);
     if (targetIndex < 0) return;
     reordered.splice(targetIndex + (edge === "after" ? 1 : 0), 0, draggedSessionKey);
-    onReorderSessions(reordered);
+    const groupedKeys = new Set(keys);
+    onReorderSessions([
+      ...reordered,
+      ...sessionOrder.filter((key) => !groupedKeys.has(key)),
+    ]);
   };
 
   return (

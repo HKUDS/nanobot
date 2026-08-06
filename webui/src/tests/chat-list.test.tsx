@@ -88,6 +88,8 @@ describe("ChatList", () => {
       session({ chatId: "alpha", title: "Alpha" }),
       session({ chatId: "bravo", title: "Bravo" }),
       session({ chatId: "charlie", title: "Charlie" }),
+      session({ chatId: "old-a", title: "Old A" }),
+      session({ chatId: "old-b", title: "Old B" }),
     ];
     const { rerender } = render(
       <ChatList
@@ -99,6 +101,8 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         onReorderSessions={onReorderSessions}
+        archivedKeys={["websocket:old-a", "websocket:old-b"]}
+        sessionOrder={sessions.map((item) => item.key)}
       />,
     );
     const dataTransfer = {
@@ -117,6 +121,8 @@ describe("ChatList", () => {
       "websocket:bravo",
       "websocket:charlie",
       "websocket:alpha",
+      "websocket:old-a",
+      "websocket:old-b",
     ]);
 
     rerender(
@@ -129,10 +135,13 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         onReorderSessions={onReorderSessions}
+        archivedKeys={["websocket:old-a", "websocket:old-b"]}
         sessionOrder={[
           "websocket:bravo",
           "websocket:charlie",
           "websocket:alpha",
+          "websocket:old-a",
+          "websocket:old-b",
         ]}
         sort="manual"
       />,

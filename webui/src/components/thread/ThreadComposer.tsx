@@ -1730,9 +1730,8 @@ export function ThreadComposer({
 
   const previewSessionDrop = useCallback((event: React.DragEvent) => {
     if (!hasDraggedSession(event.dataTransfer)) return false;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
     if (disabled) {
+      event.dataTransfer.dropEffect = "none";
       setSessionDragPreview(null);
       return true;
     }
@@ -1744,9 +1743,12 @@ export function ThreadComposer({
       (candidate) => candidate.session_key === mention.session_key,
     );
     if (!mention || (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT)) {
+      event.dataTransfer.dropEffect = "none";
       setSessionDragPreview(null);
       return true;
     }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
     const start = textareaRef.current?.selectionStart ?? value.length;
     const end = textareaRef.current?.selectionEnd ?? start;
     setSessionDragPreview((current) => (
