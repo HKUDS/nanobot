@@ -215,6 +215,34 @@ function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
 }
 
 describe("ThreadViewport", () => {
+  it("keeps reasoning disclosure anchored for pointer and keyboard toggles", () => {
+    const takeUserControl = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "takeUserControl",
+    );
+    render(
+      <ThreadViewport
+        messages={[{
+          id: "reasoning-1",
+          role: "assistant",
+          content: "",
+          reasoning: "A completed thought",
+          createdAt: 1,
+        }]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+
+    const disclosure = screen.getByRole("button", { name: "Thought" });
+    fireEvent.pointerDown(disclosure, { button: 0 });
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+
+    takeUserControl.mockClear();
+    fireEvent.keyDown(disclosure, { key: "Enter" });
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+  });
+
   it("top-aligns short threads in the message rendering area", () => {
     render(
       <ThreadViewport

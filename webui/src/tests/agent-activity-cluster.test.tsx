@@ -385,7 +385,7 @@ describe("AgentActivityCluster", () => {
 
       expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
       act(() => {
-        vi.advanceTimersByTime(901);
+        vi.advanceTimersByTime(301);
       });
       expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Thought" })).toHaveAttribute(
@@ -413,12 +413,13 @@ describe("AgentActivityCluster", () => {
     );
 
     const button = screen.getByRole("button", { name: "Thought" });
+    expect(button).toHaveAttribute("data-thread-disclosure");
     const chevron = button.querySelector("svg");
     expect(chevron).toBeInTheDocument();
     expect(chevron).toHaveClass("transition-colors", "duration-200");
     expect(chevron?.parentElement).toHaveClass(
       "transition-transform",
-      "[transition-duration:600ms]",
+      "[transition-duration:220ms]",
     );
   });
 

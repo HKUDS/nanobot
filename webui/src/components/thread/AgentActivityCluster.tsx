@@ -307,7 +307,7 @@ export function AgentActivityCluster({
     }
     if (!wasStreaming || userToggledOuter) return undefined;
     setCompletionHoldOpen(true);
-    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
+    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 300);
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 

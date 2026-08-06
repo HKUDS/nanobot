@@ -142,7 +142,7 @@
     pointer-events: none;
     background-color: rgb(236 141 49);
     opacity: 0;
-    transition: opacity 600ms ease-in-out;
+    transition: opacity 220ms ease-out;
   }
 
   .composer-model-badge[data-fallback="true"]::before {
@@ -352,8 +352,7 @@
    */
   .thread-layout {
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
-    transition:
-      grid-template-rows 900ms cubic-bezier(0.33, 1, 0.68, 1);
+    transition: grid-template-rows 220ms ease-out;
   }
   .thread-layout[data-layout="thread"] {
     grid-template-rows: minmax(0, 1fr) auto 0fr;
@@ -404,7 +403,7 @@
     animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
-    --composer-status-drawer-duration: 600ms;
+    --composer-status-drawer-duration: 220ms;
     --composer-status-drawer-easing: ease-out;
 
     display: grid;
@@ -501,14 +500,14 @@
       animation: none;
     }
     .composer-status-drawer {
-      transition-duration: 220ms;
+      transition-duration: 0.01ms;
     }
     .composer-status-drawer-content {
-      transform: translateY(2px);
-      transition-duration: 140ms, 220ms;
+      transform: none;
+      transition-duration: 120ms, 0.01ms;
     }
     .thread-layout {
-      transition-duration: 360ms;
+      transition-duration: 0.01ms;
     }
     .run-pulse-icon,
     .run-pulse-icon * {

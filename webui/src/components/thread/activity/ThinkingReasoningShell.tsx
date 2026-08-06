@@ -35,6 +35,7 @@ export function ThinkingReasoningShell({
     >
       <button
         type="button"
+        data-thread-disclosure=""
         className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
         onClick={onToggle}
         aria-expanded={expanded}
@@ -51,8 +52,8 @@ export function ThinkingReasoningShell({
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 transition-transform [transition-duration:600ms] ease-out",
-            "motion-reduce:[transition-duration:220ms]",
+            "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
+            "motion-reduce:transition-none",
             expanded && "rotate-180",
           )}
         >
@@ -69,7 +70,7 @@ export function ThinkingReasoningShell({
 
       <div
         className={cn(
-          "grid transition-[grid-template-rows,opacity] [transition-duration:600ms] ease-out motion-reduce:[transition-duration:220ms]",
+          "grid transition-[grid-template-rows,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
           expanded
             ? "grid-rows-[1fr] opacity-100"
             : "pointer-events-none grid-rows-[0fr] opacity-0",
