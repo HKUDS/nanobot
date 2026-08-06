@@ -1461,6 +1461,8 @@ export function useNanobotStream(
       return prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
     });
     suppressStreamUntilTurnEndRef.current = false;
+    setRunStartedAt(null);
+    client.finishRunLocally(chatId);
     client.sendMessage(chatId, "/stop");
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
 

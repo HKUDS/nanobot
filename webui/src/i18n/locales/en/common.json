@@ -51,9 +51,13 @@
   },
   "temporaryChat": {
     "title": "Temporary chat",
-    "description": "Not saved to history or memory. Requests still go to your model provider, and tool actions may leave changes.",
+    "description": "Not saved to history or memory. Reloading, closing, or losing the connection ends these chats. Requests still go to your model provider, and tool actions may leave changes.",
     "notSaved": "Not saved",
-    "clear": "Clear temporary chat"
+    "clear": "Clear temporary chat",
+    "sectionTitle": "Temporary chats",
+    "closeAction": "Close temporary chat",
+    "endedAfterReload": "Temporary chats ended when the page reloaded. They were not saved.",
+    "endedAfterDisconnect": "Temporary chats ended because the connection was interrupted. They were not saved."
   },
   "sidebar": {
     "navigation": "Sidebar navigation",

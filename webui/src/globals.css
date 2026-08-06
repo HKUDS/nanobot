@@ -33,6 +33,9 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 17 88% 32%;
+    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -67,6 +70,9 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 32 98% 73%;
+    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-accent: var(--background);

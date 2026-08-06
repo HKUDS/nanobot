@@ -107,6 +107,10 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    finishRunLocally: vi.fn((chatId: string) => {
+      runStartedAtByChatId.delete(chatId);
+      latestRunTurnIdByChatId.delete(chatId);
+    }),
     hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
@@ -986,6 +990,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
     expect(onNewChat).not.toHaveBeenCalled();
   });
 

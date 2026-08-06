@@ -317,7 +317,10 @@ interface ThreadShellProps {
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
-  onCreateChat?: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string | null>;
+  onCreateChat?: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    initialMessage?: string,
+  ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
@@ -856,7 +859,7 @@ export function ThreadShell({
         transitionDuration: temporaryChatOutlineTrackingLayout
           ? "0ms"
           : `${TEMPORARY_CHAT_OUTLINE_DURATION_MS}ms`,
-        transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+        transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
       } satisfies CSSProperties)
     : undefined;
 
@@ -1429,7 +1432,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope);
+      const newId = await onCreateChat?.(workspaceScope, content);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
@@ -1732,7 +1735,7 @@ export function ThreadShell({
           aria-hidden
           data-testid="temporary-chat-outline"
           data-expanded={temporaryChatOutlineExpanded ? "true" : "false"}
-          className="pointer-events-none absolute z-20 border-[1.5px] border-dashed border-[#F97316]/75 transition-[top,right,bottom,left,border-radius] motion-reduce:transition-none"
+          className="pointer-events-none absolute z-20 border-[1.5px] border-dashed border-[hsl(var(--temporary-border))] transition-[top,right,bottom,left,border-radius] motion-reduce:transition-none"
           style={temporaryChatOutlineStyle}
         />
       ) : null}

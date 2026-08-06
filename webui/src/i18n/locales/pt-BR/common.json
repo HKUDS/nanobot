@@ -51,9 +51,13 @@
   },
   "temporaryChat": {
     "title": "Chat temporário",
-    "description": "Não é salvo no histórico nem na memória. As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "description": "Não é salvo no histórico nem na memória. Recarregar, fechar ou perder a conexão encerra estes chats. As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
     "notSaved": "Não salvo",
-    "clear": "Limpar chat temporário"
+    "clear": "Limpar chat temporário",
+    "sectionTitle": "Chats temporários",
+    "closeAction": "Fechar chat temporário",
+    "endedAfterReload": "Os chats temporários foram encerrados quando a página foi recarregada. Eles não foram salvos.",
+    "endedAfterDisconnect": "Os chats temporários foram encerrados porque a conexão foi interrompida. Eles não foram salvos."
   },
   "sidebar": {
     "navigation": "Navegação da barra lateral",

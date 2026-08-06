@@ -284,6 +284,16 @@ export class NanobotClient {
     return v === undefined ? null : v;
   }
 
+  /** Clear the optimistic run state immediately after the user stops a turn. */
+  finishRunLocally(chatId: string): void {
+    const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
+    for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    if (this.runStartedAtByChatId.delete(chatId)) {
+      this.emitRunStatus(chatId, null);
+    }
+  }
+
   /** Refresh transport policy after bootstrap token renewal. */
   updateMaxFrameBytes(maxFrameBytes?: number): void {
     this.maxFrameBytes = this.normalizeMaxFrameBytes(maxFrameBytes);

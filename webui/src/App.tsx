@@ -87,6 +87,7 @@ const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
+const TEMPORARY_CHAT_RELOAD_NOTICE_KEY = "nanobot-webui.temporaryChat.reloaded";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
@@ -102,6 +103,20 @@ type ShellRoute = {
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
 };
+type TemporaryChatNotice = "reload" | "connection";
+
+function consumeTemporaryChatReloadNotice(): TemporaryChatNotice | null {
+  if (typeof window === "undefined") return null;
+  try {
+    if (window.sessionStorage.getItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY) !== "1") {
+      return null;
+    }
+    window.sessionStorage.removeItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY);
+    return "reload";
+  } catch {
+    return null;
+  }
+}
 
 const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
@@ -1007,6 +1022,8 @@ function Shell({
   } | null>(null);
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
+  const [temporaryChatNotice, setTemporaryChatNotice] =
+    useState<TemporaryChatNotice | null>(consumeTemporaryChatReloadNotice);
   const [isRestarting, setIsRestarting] = useState(false);
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
@@ -1040,9 +1057,15 @@ function Shell({
   const temporarySession = temporaryChatActive && activeKey
     ? temporarySessions[activeKey] ?? null
     : null;
-  const temporaryChatIds = useMemo(
-    () => Object.values(temporarySessions).map((session) => session.chatId),
+  const temporarySessionList = useMemo(
+    () => Object.values(temporarySessions).sort((a, b) => (
+      Date.parse(b.createdAt ?? "") - Date.parse(a.createdAt ?? "")
+    )),
     [temporarySessions],
+  );
+  const temporaryChatIds = useMemo(
+    () => temporarySessionList.map((session) => session.chatId),
+    [temporarySessionList],
   );
 
   const navigate = useCallback(
@@ -1084,6 +1107,29 @@ function Shell({
       client.discardTemporaryChat(session.chatId);
     }
   }, [client]);
+
+  useEffect(() => {
+    const hasTemporaryChats = () => Object.keys(temporarySessionsRef.current).length > 0;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasTemporaryChats()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (event.persisted || !hasTemporaryChats()) return;
+      try {
+        window.sessionStorage.setItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY, "1");
+      } catch {
+        // The native unload warning still protects the conversation.
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1466,14 +1512,19 @@ function Shell({
   }, [activeWorkspaceScope, createChat, navigate, t]);
 
   const onCreateTemporaryChat = useCallback(
-    async (workspaceScope?: WorkspaceScopePayload | null) => {
+    async (
+      workspaceScope?: WorkspaceScopePayload | null,
+      initialMessage?: string,
+    ) => {
       const session = createTemporaryChatSession();
       const restrictedScope = workspaceScope
         ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
         : null;
-      const nextSession = restrictedScope
-        ? { ...session, workspaceScope: restrictedScope }
-        : session;
+      const nextSession: ChatSummary = {
+        ...session,
+        preview: initialMessage ?? "",
+        ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
+      };
       setTemporarySessions((current) => ({
         ...current,
         [nextSession.key]: nextSession,
@@ -1559,7 +1610,8 @@ function Shell({
 
   const onSelectChat = useCallback(
     (key: string) => {
-      const selected = sessions.find((session) => session.key === key);
+      const selected = temporarySessionsRef.current[key]
+        ?? sessions.find((session) => session.key === key);
       const selectedChatId = selected?.chatId;
       if (selectedChatId) {
         setUpdatedChatIds((current) => {
@@ -1580,6 +1632,26 @@ function Shell({
     },
     [navigate, sessions],
   );
+
+  const onCloseTemporaryChat = useCallback((key: string) => {
+    const session = temporarySessionsRef.current[key];
+    if (!session) return;
+    const remaining = temporarySessionList.filter((item) => item.key !== key);
+    const nextSessions = Object.fromEntries(remaining.map((item) => [item.key, item]));
+    temporarySessionsRef.current = nextSessions;
+    setTemporarySessions(nextSessions);
+    client.discardTemporaryChat(session.chatId);
+    if (activeKey === key) {
+      if (remaining.length === 0) setDraftWorkspaceScope(null);
+      setWorkspaceError(null);
+      navigate({
+        view: "chat",
+        activeKey: remaining[0]?.key ?? null,
+        settingsSection: "overview",
+      }, { replace: true });
+    }
+    setMobileSidebarOpen(false);
+  }, [activeKey, client, navigate, temporarySessionList]);
 
   const onTogglePin = useCallback(
     (key: string) => {
@@ -1875,6 +1947,7 @@ function Shell({
       if (!wasOpen) return;
       wasOpen = false;
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
+      setTemporaryChatNotice("connection");
       temporarySessionsRef.current = {};
       setTemporarySessions({});
       if (temporaryChatIdFromSessionKey(readShellRoute().activeKey)) {
@@ -2044,11 +2117,13 @@ function Shell({
 
   const sidebarProps = {
     sessions,
+    temporarySessions: temporarySessionList,
     activeKey: view === "chat" ? activeKey : null,
     loading,
     newChatActive: view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectChat,
+    onCloseTemporaryChat,
     onRequestDelete,
     onTogglePin,
     onRequestRename,
@@ -2323,15 +2398,44 @@ function Shell({
             />
           </Suspense>
         ) : null}
-        {restartToast ? (
-          <div
-            role="status"
-            className={cn(
-              floatingSurfaceElevationClassName,
-              "fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-full px-4 py-2 text-sm font-medium",
-            )}
-          >
-            {restartToast}
+        {restartToast || temporaryChatNotice ? (
+          <div className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 flex w-[min(32rem,calc(100vw-1rem))] -translate-x-1/2 flex-col items-center gap-2">
+            {restartToast ? (
+              <div
+                role="status"
+                className={cn(
+                  floatingSurfaceElevationClassName,
+                  "max-w-full rounded-full px-4 py-2 text-sm font-medium",
+                )}
+              >
+                {restartToast}
+              </div>
+            ) : null}
+            {temporaryChatNotice ? (
+              <div
+                role="alert"
+                className={cn(
+                  floatingSurfaceElevationClassName,
+                  "flex max-w-full items-start gap-2 rounded-2xl py-2 pl-4 pr-2 text-sm font-medium",
+                )}
+              >
+                <span className="min-w-0 py-1 leading-5">
+                  {temporaryChatNotice === "reload"
+                    ? t("temporaryChat.endedAfterReload")
+                    : t("temporaryChat.endedAfterDisconnect")}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("common.close")}
+                  onClick={() => setTemporaryChatNotice(null)}
+                  className="h-7 w-7 shrink-0 rounded-full"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <PairingCodePopup

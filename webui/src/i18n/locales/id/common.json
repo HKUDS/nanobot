@@ -51,9 +51,13 @@
   },
   "temporaryChat": {
     "title": "Obrolan sementara",
-    "description": "Tidak disimpan ke riwayat atau memori. Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
+    "description": "Tidak disimpan ke riwayat atau memori. Memuat ulang, menutup, atau kehilangan koneksi akan mengakhiri obrolan ini. Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
     "notSaved": "Tidak disimpan",
-    "clear": "Hapus obrolan sementara"
+    "clear": "Hapus obrolan sementara",
+    "sectionTitle": "Obrolan sementara",
+    "closeAction": "Tutup obrolan sementara",
+    "endedAfterReload": "Obrolan sementara berakhir saat halaman dimuat ulang. Obrolan tidak disimpan.",
+    "endedAfterDisconnect": "Obrolan sementara berakhir karena koneksi terputus. Obrolan tidak disimpan."
   },
   "sidebar": {
     "navigation": "Navigasi bilah samping",

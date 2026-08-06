@@ -276,6 +276,31 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
+  it("clears the local run strip immediately when a stop is requested", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-stop",
+      status: "running",
+      started_at: 12_345,
+      turn_id: "turn-stop",
+    });
+
+    client.finishRunLocally("chat-stop");
+
+    expect(client.getRunStartedAt("chat-stop")).toBeNull();
+    expect(client.hasUnsettledRun("chat-stop")).toBe(false);
+    expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
+  });
+
   it("clears stale run strip when reconnecting after a dropped socket", async () => {
     const client = new NanobotClient({
       url: "ws://test",
