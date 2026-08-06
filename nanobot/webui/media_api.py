@@ -32,7 +32,10 @@ from nanobot.webui.http_utils import (
 
 MediaDirProvider = Callable[[str | None], Path]
 SignedMediaPath = Callable[[Path], dict[str, str] | None]
-SignedMediaUrl = Callable[[Path], str | None]
+# History and streaming both need staging for paths outside the media root.
+# Accept a bare URL string (legacy sign_media_path) or a {url, name} dict
+# (sign_or_stage_media_path).
+SignedMediaUrl = Callable[[Path], str | dict[str, str] | None]
 
 
 def b64url_encode(data: bytes) -> str:
@@ -215,7 +218,13 @@ def attach_signed_media_urls(
             signed = sign_path(Path(entry))
             if signed is None:
                 continue
-            urls.append({"url": signed, "name": Path(entry).name})
+            if isinstance(signed, str):
+                urls.append({"url": signed, "name": Path(entry).name})
+                continue
+            url = signed.get("url")
+            if not url:
+                continue
+            urls.append({"url": url, "name": signed.get("name") or Path(entry).name})
         if urls:
             message["media_urls"] = urls
         message.pop("media", None)

@@ -551,6 +551,54 @@ async def test_session_messages_exposes_signed_media_urls(
 
 
 @pytest.mark.asyncio
+async def test_session_messages_stages_media_outside_media_root(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """History must stage project/workspace attachments like the live WS path.
+
+    Files under e.g. ``projects/`` are outside the media root, so
+    ``sign_media_path`` alone returns None and drops ``media_urls``. The
+    history endpoint has to use ``sign_or_stage_media_path`` instead.
+    """
+    media = tmp_path / "media"
+    media.mkdir()
+    project_file = tmp_path / "projects" / "report.png"
+    project_file.parent.mkdir()
+    project_file.write_bytes(_PNG_BYTES)
+
+    sm = SessionManager(tmp_path / "ws_state")
+    sess = Session(key="websocket:stage-outside")
+    sess.add_message("assistant", "here is the report", media=[str(project_file)])
+    sm.save(sess)
+
+    channel = _ch(bus, session_manager=sm, port=29931)
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        server_task = asyncio.create_task(channel.start())
+        try:
+            token = channel.gateway.tokens.issue_api_token(300)
+            resp = await _http_get(
+                "http://127.0.0.1:29931/api/sessions/websocket:stage-outside/messages",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assistant_msg = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+            urls = assistant_msg["media_urls"]
+            assert len(urls) == 1
+            assert urls[0]["name"] == "report.png"
+            assert urls[0]["url"].startswith("/api/media/")
+            assert "media" not in assistant_msg
+
+            fetched = await _http_get(f"http://127.0.0.1:29931{urls[0]['url']}")
+            assert fetched.status_code == 200
+            assert fetched.content == _PNG_BYTES
+            staged = list((media / "websocket").iterdir())
+            assert len(staged) == 1
+            assert staged[0].read_bytes() == _PNG_BYTES
+        finally:
+            await channel.stop()
+            await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_messages_skips_vanished_media(
     bus: MagicMock, tmp_path: Path
 ) -> None:

@@ -100,7 +100,9 @@ class WebUIMediaGateway:
         )
 
     def augment_media_urls(self, payload: dict[str, Any]) -> None:
-        attach_signed_media_urls(payload, sign_path=self.sign_media_path)
+        # Match the streaming path: stage files outside the media root so
+        # history can emit the same media_urls clients see on live events.
+        attach_signed_media_urls(payload, sign_path=self.sign_or_stage_media_path)
 
     def augment_transcript_media(self, paths: list[str]) -> list[dict[str, Any]]:
         return signed_media_attachments(
