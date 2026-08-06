@@ -448,13 +448,19 @@ describe("App layout", () => {
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
+    expect(temporaryToggle).toHaveClass("rounded-full");
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
+    const temporaryOutline = screen.getByTestId("temporary-chat-outline");
+    expect(temporaryOutline).toHaveClass("border-dashed", "border-[#F97316]/75");
+    await waitFor(() => expect(temporaryOutline).toHaveAttribute("data-expanded", "true"));
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
+    expect(temporaryOutline).toHaveAttribute("data-expanded", "false");
     fireEvent.click(temporaryToggle);
     expect(window.location.hash).toBe("#/new");
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(temporaryOutline).toHaveAttribute("data-expanded", "true"));
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "start temporary chat" },

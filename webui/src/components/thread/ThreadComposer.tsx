@@ -114,7 +114,15 @@ const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 const VOICE_ERROR_VISIBLE_MS = 3_500;
 const VOICE_ERROR_FADE_MS = 500;
+const TEMPORARY_CHAT_OUTLINE_DURATION_MS = 620;
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+
+type TemporaryChatOutlineOrigin = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -957,9 +965,18 @@ export function ThreadComposer({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [temporaryChatOutlineOrigin, setTemporaryChatOutlineOrigin] =
+    useState<TemporaryChatOutlineOrigin | null>(null);
+  const [temporaryChatOutlineVisible, setTemporaryChatOutlineVisible] = useState(false);
+  const [temporaryChatOutlineExpanded, setTemporaryChatOutlineExpanded] = useState(false);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement>(null);
+  const temporaryChatButtonRef = useRef<HTMLButtonElement>(null);
+  const temporaryChatOutlineFrameRef = useRef<number | null>(null);
+  const temporaryChatOutlineHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousTemporaryChatEnabledRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
@@ -2073,6 +2090,84 @@ export function ThreadComposer({
       : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
   );
 
+  const clearTemporaryChatOutlineTimers = useCallback(() => {
+    if (temporaryChatOutlineFrameRef.current !== null) {
+      cancelAnimationFrame(temporaryChatOutlineFrameRef.current);
+      temporaryChatOutlineFrameRef.current = null;
+    }
+    if (temporaryChatOutlineHideTimerRef.current !== null) {
+      clearTimeout(temporaryChatOutlineHideTimerRef.current);
+      temporaryChatOutlineHideTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearTemporaryChatOutlineTimers, [clearTemporaryChatOutlineTimers]);
+
+  const measureTemporaryChatOutlineOrigin = useCallback(
+    (button: HTMLButtonElement): TemporaryChatOutlineOrigin | null => {
+      const surface = composerSurfaceRef.current;
+      if (!surface) return null;
+      const surfaceRect = surface.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        top: buttonRect.top - surfaceRect.top,
+        right: surfaceRect.right - buttonRect.right,
+        bottom: surfaceRect.bottom - buttonRect.bottom,
+        left: buttonRect.left - surfaceRect.left,
+      };
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const wasEnabled = previousTemporaryChatEnabledRef.current;
+    previousTemporaryChatEnabledRef.current = temporaryChatEnabled;
+    if (wasEnabled === temporaryChatEnabled) return;
+
+    clearTemporaryChatOutlineTimers();
+    const button = temporaryChatButtonRef.current;
+    const origin = button ? measureTemporaryChatOutlineOrigin(button) : null;
+    if (!isHero || !origin) {
+      setTemporaryChatOutlineVisible(false);
+      setTemporaryChatOutlineExpanded(false);
+      return;
+    }
+
+    setTemporaryChatOutlineOrigin(origin);
+    setTemporaryChatOutlineVisible(true);
+    setTemporaryChatOutlineExpanded(false);
+    if (temporaryChatEnabled) {
+      temporaryChatOutlineFrameRef.current = requestAnimationFrame(() => {
+        temporaryChatOutlineFrameRef.current = requestAnimationFrame(() => {
+          temporaryChatOutlineFrameRef.current = null;
+          setTemporaryChatOutlineExpanded(true);
+        });
+      });
+    } else {
+      temporaryChatOutlineHideTimerRef.current = setTimeout(() => {
+        temporaryChatOutlineHideTimerRef.current = null;
+        setTemporaryChatOutlineVisible(false);
+      }, TEMPORARY_CHAT_OUTLINE_DURATION_MS);
+    }
+  }, [
+    clearTemporaryChatOutlineTimers,
+    isHero,
+    measureTemporaryChatOutlineOrigin,
+    temporaryChatEnabled,
+  ]);
+
+  const temporaryChatOutlineStyle = temporaryChatOutlineOrigin
+    ? ({
+        top: temporaryChatOutlineExpanded ? -3 : temporaryChatOutlineOrigin.top,
+        right: temporaryChatOutlineExpanded ? -3 : temporaryChatOutlineOrigin.right,
+        bottom: temporaryChatOutlineExpanded ? -3 : temporaryChatOutlineOrigin.bottom,
+        left: temporaryChatOutlineExpanded ? -3 : temporaryChatOutlineOrigin.left,
+        borderRadius: temporaryChatOutlineExpanded ? 31 : 999,
+        transitionDuration: `${TEMPORARY_CHAT_OUTLINE_DURATION_MS}ms`,
+        transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+      } satisfies CSSProperties)
+    : undefined;
+
   return (
     <form
       ref={formRef}
@@ -2107,6 +2202,7 @@ export function ThreadComposer({
         />
       ) : null}
       <div
+        ref={composerSurfaceRef}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
@@ -2118,6 +2214,15 @@ export function ThreadComposer({
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
+        {isHero && temporaryChatOutlineVisible && temporaryChatOutlineStyle ? (
+          <div
+            aria-hidden
+            data-testid="temporary-chat-outline"
+            data-expanded={temporaryChatOutlineExpanded ? "true" : "false"}
+            className="pointer-events-none absolute z-20 border-[1.5px] border-dashed border-[#F97316]/75 transition-[top,right,bottom,left,border-radius] motion-reduce:transition-none"
+            style={temporaryChatOutlineStyle}
+          />
+        ) : null}
         {queuedPrompts.length > 0 ? (
           <QueuedPromptStack
             prompts={queuedPrompts}
@@ -2329,6 +2434,7 @@ export function ThreadComposer({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
+                      ref={temporaryChatButtonRef}
                       type="button"
                       variant="ghost"
                       disabled={disabled || isStreaming}
@@ -2336,9 +2442,9 @@ export function ThreadComposer({
                       aria-pressed={temporaryChatEnabled}
                       onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
                       className={cn(
-                        "thread-composer-action h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-[color,background-color,box-shadow] duration-200",
+                        "thread-composer-action relative z-30 h-8 shrink-0 gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-[color,background-color,box-shadow] duration-200",
                         temporaryChatEnabled
-                          ? "bg-[#2997FF]/[0.12] text-[#147bd1] shadow-[inset_0_0_0_1px_rgba(41,151,255,0.22)] hover:bg-[#2997FF]/[0.16] hover:text-[#147bd1] dark:text-[#69b7ff] dark:hover:text-[#69b7ff]"
+                          ? "bg-[#F97316]/[0.12] text-[#c65309] shadow-[inset_0_0_0_1px_rgba(249,115,22,0.28)] hover:bg-[#F97316]/[0.16] hover:text-[#c65309] dark:text-[#fb923c] dark:hover:text-[#fb923c]"
                           : "text-muted-foreground hover:bg-accent/45 hover:text-foreground",
                       )}
                     >
