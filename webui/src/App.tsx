@@ -1110,23 +1110,16 @@ function Shell({
 
   useEffect(() => {
     const hasTemporaryChats = () => Object.keys(temporarySessionsRef.current).length > 0;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!hasTemporaryChats()) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
     const handlePageHide = (event: PageTransitionEvent) => {
       if (event.persisted || !hasTemporaryChats()) return;
       try {
         window.sessionStorage.setItem(TEMPORARY_CHAT_RELOAD_NOTICE_KEY, "1");
       } catch {
-        // The native unload warning still protects the conversation.
+        // Reload still proceeds; temporary chats are intentionally memory-only.
       }
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("pagehide", handlePageHide);
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("pagehide", handlePageHide);
     };
   }, []);

@@ -519,7 +519,7 @@ describe("App layout", () => {
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
   });
 
-  it("warns before leaving a page that still has temporary chats", async () => {
+  it("allows leaving a page with temporary chats and records a reload notice", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
@@ -532,7 +532,7 @@ describe("App layout", () => {
 
     const beforeUnload = new Event("beforeunload", { cancelable: true });
     act(() => window.dispatchEvent(beforeUnload));
-    expect(beforeUnload.defaultPrevented).toBe(true);
+    expect(beforeUnload.defaultPrevented).toBe(false);
 
     const pageHide = new Event("pagehide") as PageTransitionEvent;
     Object.defineProperty(pageHide, "persisted", { value: false });
