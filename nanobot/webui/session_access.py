@@ -200,26 +200,7 @@ class WebuiSessionAccess:
         query: str,
         limit: int,
         exclude_session_key: str | None = None,
-        current_session_key: str | None = None,
     ) -> SessionMatch | None:
-        if session_key.casefold() == "current" and current_session_key:
-            session = self._sessions.get_cached(current_session_key)
-            if session is None or not session.transient:
-                return None
-            messages = _visible_messages(session.messages)
-            needle = query.casefold()
-            if needle:
-                messages = [
-                    message
-                    for message in messages
-                    if needle in message["content"].casefold()
-                ]
-            return {
-                "session_key": session.key,
-                "title": "Current conversation",
-                "updated_at": session.updated_at.isoformat(),
-                "messages": messages[-limit:],
-            }
         payload = self._metadata(session_key, exclude_session_key=exclude_session_key)
         if payload is None:
             return None

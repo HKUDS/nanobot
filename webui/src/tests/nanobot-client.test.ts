@@ -101,22 +101,37 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("forgets temporary chats when the socket drops", async () => {
+  it("forgets every temporary chat when the socket drops", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
       maxBackoffMs: 1,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
     client.connect();
     lastSocket().fakeOpen();
-    client.onChat("temporary-drop", vi.fn());
+    client.onChat("temporary-drop-a", firstHandler);
+    client.onChat("temporary-drop-b", secondHandler);
     lastSocket().close();
 
     await vi.advanceTimersByTimeAsync(1);
     lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temporary-drop-a",
+      text: "stale first chat",
+    });
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temporary-drop-b",
+      text: "stale second chat",
+    });
 
     expect(lastSocket().sent).toEqual([]);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).not.toHaveBeenCalled();
   });
 
   it("routes events to the matching chat handler", () => {
@@ -260,6 +275,31 @@ describe("NanobotClient", () => {
       status: "idle",
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
+  });
+
+  it("clears the local run strip immediately when a stop is requested", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-stop",
+      status: "running",
+      started_at: 12_345,
+      turn_id: "turn-stop",
+    });
+
+    client.finishRunLocally("chat-stop");
+
+    expect(client.getRunStartedAt("chat-stop")).toBeNull();
+    expect(client.hasUnsettledRun("chat-stop")).toBe(false);
+    expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
   });
 
   it("clears stale run strip when reconnecting after a dropped socket", async () => {

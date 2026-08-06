@@ -21,8 +21,10 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
-    INBOUND_META_TRANSIENT_SESSION,
+    INBOUND_META_RUNTIME_CONTROL,
     OUTBOUND_META_AGENT_UI,
+    RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
@@ -37,11 +39,6 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.websocket.temporary_chat import (
-    TEMPORARY_COMMANDS,
-    TemporaryChats,
-    has_temporary_chat_prefix,
-)
 from nanobot.command.builtin import builtin_command_starts_agent_turn
 from nanobot.config.schema import Base
 from nanobot.runtime_context import (
@@ -313,6 +310,13 @@ def _parse_inbound_payload(raw: str) -> str | None:
 # Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
 # namespace small enough to rule out path traversal / quote injection tricks.
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
+_TEMPORARY_CHAT_PREFIX = "temporary-"
+_TEMPORARY_CHAT_DISABLED_TOOLS = frozenset({
+    "create_goal",
+    "update_goal",
+    "spawn",
+    "cron",
+})
 
 
 def _is_valid_chat_id(value: Any) -> TypeGuard[str]:
@@ -320,7 +324,7 @@ def _is_valid_chat_id(value: Any) -> TypeGuard[str]:
 
 
 def _is_temporary_chat_id(value: Any) -> TypeGuard[str]:
-    return _is_valid_chat_id(value) and has_temporary_chat_prefix(value)
+    return _is_valid_chat_id(value) and value.startswith(_TEMPORARY_CHAT_PREFIX)
 
 
 def _parse_envelope(raw: str) -> dict[str, Any] | None:
@@ -397,9 +401,9 @@ class WebSocketChannel(BaseChannel):
             if gateway.session_manager is not None
             else None
         )
-        self._temporary_chats = TemporaryChats(gateway.session_manager, self._media, bus)
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
+        self._temporary_media_paths: dict[str, set[str]] = {}
 
     # -- Subscription bookkeeping -------------------------------------------
 
@@ -428,31 +432,38 @@ class WebSocketChannel(BaseChannel):
             if key[0] == chat_id:
                 self._stream_text_buffers.pop(key, None)
 
-    def _claim_temporary_chat(
-        self,
-        connection: ServerConnection,
-        chat_id: str,
-    ) -> str | None:
-        """Create the connection's single in-memory chat on first use."""
-        if connection not in self._webui_connections:
-            return "temporary_chat_unavailable"
-        if detail := self._temporary_chats.claim(connection, chat_id):
-            return detail
-        self._attach(connection, chat_id)
-        return None
+    def _discard_temporary_media(self, chat_id: str) -> None:
+        """Remove uploads owned by one connection-scoped temporary chat."""
+        for raw_path in self._temporary_media_paths.pop(chat_id, set()):
+            try:
+                Path(raw_path).unlink(missing_ok=True)
+            except OSError:
+                self.logger.warning("failed to remove a temporary WebUI attachment")
 
     async def _discard_temporary_chat(
         self,
         connection: ServerConnection,
         chat_id: str,
-    ) -> str | None:
-        detail = await self._temporary_chats.discard(connection, chat_id)
-        if detail is not None:
-            return detail
+    ) -> None:
+        session_key = f"{self.name}:{chat_id}"
         self._detach(connection, chat_id)
         clear_websocket_turns(chat_id)
         self._clear_stream_buffers(chat_id)
-        return None
+        self._discard_temporary_media(chat_id)
+        if self.gateway.session_manager is not None:
+            self.gateway.session_manager.invalidate(session_key)
+        await self.bus.publish_inbound(
+            InboundMessage(
+                channel=self.name,
+                sender_id="webui",
+                chat_id=chat_id,
+                content="",
+                metadata={
+                    INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_SESSION_DISCARD,
+                },
+                session_key_override=session_key,
+            )
+        )
 
     async def send_webui_protocol_error(
         self,
@@ -484,15 +495,14 @@ class WebSocketChannel(BaseChannel):
 
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
-        try:
-            temporary_chat_id = self._temporary_chats.chat_id_for(connection)
-            if temporary_chat_id is not None:
-                await self._discard_temporary_chat(connection, temporary_chat_id)
-        finally:
-            for chat_id in tuple(self._conn_chats.get(connection, ())):
-                self._detach(connection, chat_id)
-            self._conn_default.pop(connection, None)
-            self._webui_connections.discard(connection)
+        chat_ids = tuple(self._conn_chats.get(connection, ()))
+        for cid in chat_ids:
+            if _is_temporary_chat_id(cid):
+                await self._discard_temporary_chat(connection, cid)
+            else:
+                self._detach(connection, cid)
+        self._conn_default.pop(connection, None)
+        self._webui_connections.discard(connection)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -813,21 +823,12 @@ class WebSocketChannel(BaseChannel):
             if not _is_temporary_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid temporary chat_id")
                 return
-            if detail := await self._discard_temporary_chat(connection, cid):
-                await self._send_event(connection, "error", detail=detail, chat_id=cid)
+            await self._discard_temporary_chat(connection, cid)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
-                return
-            if _is_temporary_chat_id(cid):
-                await self._send_event(
-                    connection,
-                    "error",
-                    detail="temporary_chat_cannot_attach",
-                    chat_id=cid,
-                )
                 return
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
@@ -861,14 +862,6 @@ class WebSocketChannel(BaseChannel):
             cid = envelope.get("chat_id")
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
-                return
-            if _is_temporary_chat_id(cid):
-                await self._send_event(
-                    connection,
-                    "error",
-                    detail="temporary_chat_scope_is_per_message",
-                    chat_id=cid,
-                )
                 return
             scope = await self._workspace_scope_or_error(
                 connection,
@@ -941,7 +934,7 @@ class WebSocketChannel(BaseChannel):
 
             if temporary:
                 command = content.strip().partition(" ")[0].lower()
-                if command.startswith("/") and command not in TEMPORARY_COMMANDS:
+                if command.startswith("/") and command not in {"/model", "/stop"}:
                     await self._send_event(
                         connection,
                         "error",
@@ -949,14 +942,18 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
-                if detail := self._claim_temporary_chat(connection, cid):
+                if self.gateway.session_manager is None:
                     await self._send_event(
                         connection,
                         "error",
-                        detail=detail,
+                        detail="temporary_chat_unavailable",
                         **rejection_fields,
                     )
                     return
+                self.gateway.session_manager.get_or_create_transient(
+                    f"{self.name}:{cid}",
+                    disabled_tools=_TEMPORARY_CHAT_DISABLED_TOOLS,
+                )
 
             raw_media = envelope.get("media")
             media_paths: list[str] = []
@@ -970,12 +967,7 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
-                store_attachments = (
-                    self._media.store_temporary_attachments
-                    if temporary
-                    else self._media.store_inbound_attachments
-                )
-                media_paths, reason = store_attachments(cast(list[Any], raw_media))
+                media_paths, reason = self._media.store_inbound_attachments(cast(list[Any], raw_media))
                 if reason is not None:
                     await self._send_event(
                         connection,
@@ -985,8 +977,9 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
-                if temporary:
-                    self._temporary_chats.remember_attachments(cid, media_paths)
+                if temporary and media_paths:
+                    self._temporary_media_paths.setdefault(cid, set()).update(media_paths)
+
             # Allow media-only turns (content may be empty when attachments are present).
             if not content.strip() and not media_paths:
                 await self._send_event(
@@ -996,19 +989,23 @@ class WebSocketChannel(BaseChannel):
                     **rejection_fields,
                 )
                 return
+            # Auto-attach on first use so clients can one-shot without a separate attach.
+            self._attach(connection, cid)
             if not temporary:
-                # Auto-attach on first use so clients can one-shot without a separate attach.
-                self._attach(connection, cid)
                 await self._hydrate_after_subscribe(cid)
 
             # Resolve after hydration so a concurrent downgrade cannot be overwritten.
             scope = await self._workspace_scope_or_error(
                 connection,
-                lambda: self._workspaces.scope_for_message(
-                    envelope,
-                    chat_id=cid,
-                    chat_running=websocket_turn_wall_started_at(cid) is not None,
-                    controls_available=self._workspace_controls_available(connection),
+                lambda: (
+                    self._workspaces.restricted_default_scope()
+                    if temporary
+                    else self._workspaces.scope_for_message(
+                        envelope,
+                        chat_id=cid,
+                        chat_running=websocket_turn_wall_started_at(cid) is not None,
+                        controls_available=self._workspace_controls_available(connection),
+                    )
                 ),
                 chat_id=cid,
                 turn_id=turn_id,
@@ -1029,8 +1026,6 @@ class WebSocketChannel(BaseChannel):
                 return
 
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
-            if temporary:
-                metadata[INBOUND_META_TRANSIENT_SESSION] = True
             if envelope.get("webui") is True:
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
@@ -1092,6 +1087,8 @@ class WebSocketChannel(BaseChannel):
                     media=media_paths or None,
                     metadata=metadata,
                     is_dm=False,
+                    session_key=f"{self.name}:{cid}" if temporary else None,
+                    require_existing_session=temporary,
                 )
                 accepted = True
             finally:
@@ -1147,13 +1144,13 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
-        for connection in tuple(self._conn_chats):
-            await self._cleanup_connection(connection)
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
         self._webui_connections.clear()
         self._tokens.clear()
+        for chat_id in tuple(self._temporary_media_paths):
+            self._discard_temporary_media(chat_id)
 
     async def _safe_send_to(
         self,

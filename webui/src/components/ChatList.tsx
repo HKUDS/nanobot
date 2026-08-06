@@ -4,17 +4,20 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import {
   Archive,
   ArchiveRestore,
   Folder,
+  MessageCircleDashed,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -50,8 +53,10 @@ const ACTION_MENU_CONTENT_CLASS = "w-[8.5rem] min-w-[8.5rem]";
 
 interface ChatListProps {
   sessions: ChatSummary[];
+  temporarySessions?: ChatSummary[];
   activeKey: string | null;
   onSelect: (key: string) => void;
+  onCloseTemporaryChat?: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
@@ -81,8 +86,10 @@ interface ChatListProps {
 
 export const ChatList = memo(function ChatList({
   sessions,
+  temporarySessions = [],
   activeKey,
   onSelect,
+  onCloseTemporaryChat,
   onRequestDelete,
   onTogglePin,
   onRequestRename,
@@ -188,7 +195,7 @@ export const ChatList = memo(function ChatList({
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
   }, [showArchived, sort]);
 
-  if (loading && sessions.length === 0) {
+  if (loading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] text-muted-foreground">
         {t("chat.loading")}
@@ -196,7 +203,7 @@ export const ChatList = memo(function ChatList({
     );
   }
 
-  if (sessions.length === 0) {
+  if (sessions.length === 0 && temporarySessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] leading-5 text-muted-foreground/80">
         {emptyLabel ?? t("chat.noSessions")}
@@ -237,6 +244,17 @@ export const ChatList = memo(function ChatList({
         data-chat-list-content
         className="relative min-w-0 space-y-3 px-2 py-1.5"
       >
+        {temporarySessions.length > 0 ? (
+          <TemporaryChatSection
+            sessions={temporarySessions}
+            activeKey={activeKey}
+            activeRowRef={activeRowRef}
+            running={running}
+            onSelect={onSelect}
+            onClose={onCloseTemporaryChat}
+            actionMenuPortalContainer={actionMenuPortalContainer}
+          />
+        ) : null}
         {limitedGroups.map((group, index) => {
           const foldableChatsGroup = isFoldableChatsGroup(group);
           const foldedChatsGroup = isFoldedChatsGroup(group, collapsedGroups);
@@ -496,6 +514,99 @@ export const ChatList = memo(function ChatList({
     </div>
   );
 });
+
+function TemporaryChatSection({
+  sessions,
+  activeKey,
+  activeRowRef,
+  running,
+  onSelect,
+  onClose,
+  actionMenuPortalContainer,
+}: {
+  sessions: ChatSummary[];
+  activeKey: string | null;
+  activeRowRef: RefObject<HTMLDivElement>;
+  running: ReadonlySet<string>;
+  onSelect: (key: string) => void;
+  onClose?: (key: string) => void;
+  actionMenuPortalContainer?: HTMLElement | null;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <section aria-label={t("temporaryChat.sectionTitle")} className="relative z-[1]">
+      <ChatsGroupHeader label={t("temporaryChat.sectionTitle")} />
+      <ul className="space-y-0.5">
+        {sessions.map((session) => {
+          const active = session.key === activeKey;
+          const title = deriveTitle(session.preview, t("temporaryChat.title"));
+          return (
+            <li key={session.key} className="min-w-0">
+              <div
+                ref={active ? activeRowRef : undefined}
+                data-temporary-chat-row={session.key}
+                className={cn(
+                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
+                  SIDEBAR_SELECTION_ITEM_CLASS,
+                  active
+                    ? "text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelect(session.key)}
+                  aria-current={active ? "page" : undefined}
+                  title={title}
+                  className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left"
+                >
+                  <MessageCircleDashed
+                    className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--temporary-foreground))]"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                    {title}
+                  </span>
+                </button>
+                <SessionActivityIndicator state={running.has(session.chatId) ? "running" : null} />
+                {onClose ? (
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger
+                      className={cn(
+                        "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
+                        "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
+                        "focus-visible:opacity-100",
+                        active && "opacity-100",
+                      )}
+                      aria-label={t("chat.actions", { title })}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className={ACTION_MENU_CONTENT_CLASS}
+                      portalContainer={actionMenuPortalContainer}
+                      onCloseAutoFocus={(event) => event.preventDefault()}
+                    >
+                      <DropdownMenuItem
+                        tone="destructive"
+                        onSelect={() => onClose(session.key)}
+                      >
+                        <X className="h-4 w-4 shrink-0" />
+                        {t("temporaryChat.closeAction")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 function ProjectGroupHeader({
   label,

@@ -174,8 +174,8 @@ export class NanobotClient {
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
-  /** Temporary chat is connection-owned and intentionally not reattached. */
-  private temporaryChatId: string | null = null;
+  /** Temporary chats are connection-owned and intentionally not reattached. */
+  private temporaryChatIds = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
@@ -283,6 +283,16 @@ export class NanobotClient {
   getRunStartedAt(chatId: string): number | null {
     const v = this.runStartedAtByChatId.get(chatId);
     return v === undefined ? null : v;
+  }
+
+  /** Clear the optimistic run state immediately after the user stops a turn. */
+  finishRunLocally(chatId: string): void {
+    const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
+    for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    if (this.runStartedAtByChatId.delete(chatId)) {
+      this.emitRunStatus(chatId, null);
+    }
   }
 
   /** Refresh transport policy after bootstrap token renewal. */
@@ -806,7 +816,7 @@ export class NanobotClient {
 
   attach(chatId: string): void {
     if (isTemporaryChatId(chatId)) {
-      this.temporaryChatId = chatId;
+      this.temporaryChatIds.add(chatId);
       return;
     }
     this.knownChats.add(chatId);
@@ -831,7 +841,7 @@ export class NanobotClient {
     },
   ): void {
     const temporary = isTemporaryChatId(chatId);
-    if (temporary) this.temporaryChatId = chatId;
+    if (temporary) this.temporaryChatIds.add(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
@@ -1261,11 +1271,13 @@ export class NanobotClient {
   }
 
   private clearTemporaryChats(): void {
-    if (this.temporaryChatId) this.forgetTemporaryChat(this.temporaryChatId);
+    for (const chatId of [...this.temporaryChatIds]) {
+      this.forgetTemporaryChat(chatId);
+    }
   }
 
   private forgetTemporaryChat(chatId: string): void {
-    if (this.temporaryChatId === chatId) this.temporaryChatId = null;
+    this.temporaryChatIds.delete(chatId);
     this.knownChats.delete(chatId);
     this.chatHandlers.delete(chatId);
     this.pendingInboundByChat.delete(chatId);

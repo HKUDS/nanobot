@@ -107,6 +107,10 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    finishRunLocally: vi.fn((chatId: string) => {
+      runStartedAtByChatId.delete(chatId);
+      latestRunTurnIdByChatId.delete(chatId);
+    }),
     hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
@@ -850,16 +854,22 @@ describe("ThreadShell", () => {
 
   it("keeps temporary messages across navigation and drops them after clear", async () => {
     const client = makeClient();
-    const view = (chatId: string, temporary: boolean) => wrap(
+    const view = (
+      chatId: string,
+      temporary: boolean,
+      temporaryChatIds: readonly string[],
+    ) => wrap(
       client,
       <ThreadShell
         session={session(chatId)}
         title={temporary ? "Temporary chat" : "Regular chat"}
         temporary={temporary}
+        temporaryChatIds={temporaryChatIds}
         onToggleSidebar={() => {}}
       />,
     );
-    const { rerender } = render(view("temporary-live", true));
+    const retainedTemporaryChats = ["temporary-live"];
+    const { rerender } = render(view("temporary-live", true, retainedTemporaryChats));
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "keep this only in memory" },
@@ -871,14 +881,14 @@ describe("ThreadShell", () => {
       "keep this only in memory",
     ));
 
-    rerender(view("regular", false));
+    rerender(view("regular", false, retainedTemporaryChats));
     await waitFor(() => {
       expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
     });
-    rerender(view("temporary-live", true));
+    rerender(view("temporary-live", true, retainedTemporaryChats));
     expect(screen.getByText("keep this only in memory")).toBeInTheDocument();
 
-    rerender(view("temporary-cleared", true));
+    rerender(view("temporary-cleared", true, ["temporary-cleared"]));
     await waitFor(() => {
       expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
     });
@@ -980,6 +990,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
@@ -1260,7 +1271,7 @@ describe("ThreadShell", () => {
 
     const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
     expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
-    expect(greeting).toHaveClass("whitespace-nowrap");
+    expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
     expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create a project plan" })).not.toBeInTheDocument();

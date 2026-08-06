@@ -191,6 +191,14 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
+    def restricted_default_scope(self) -> WorkspaceScope:
+        """Return the default workspace with access restricted for this request."""
+        return build_workspace_scope(
+            self._default_workspace,
+            "restricted",
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+
     def _scope_from_metadata_value(
         self,
         raw_scope: object,
@@ -222,20 +230,6 @@ class WebUIWorkspaceController:
     def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         if self._sessions is None:
             return self.default_scope()
-        cached = self._sessions.get_cached(session_key)
-        if cached is not None and cached.transient:
-            restricted = build_workspace_scope(
-                self._default_workspace,
-                "restricted",
-                source_channel=_WEBUI_SCOPE_CHANNEL,
-            )
-            raw_scope = cached.metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
-            if raw_scope is None:
-                return restricted
-            return self._scope_from_metadata_value(
-                raw_scope,
-                default_scope=restricted,
-            )
         data = self._sessions.read_session_metadata(session_key)
         if not isinstance(data, dict):
             return self.default_scope()

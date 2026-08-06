@@ -8,11 +8,7 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.bus.events import (
-    INBOUND_META_TRANSIENT_SESSION,
-    InboundMessage,
-    OutboundMessage,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -266,6 +262,7 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
         authorization_id: str | None = None,
+        require_existing_session: bool = False,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -306,8 +303,7 @@ class BaseChannel(ABC):
                 )
             return
 
-        meta = dict(metadata or {})
-        transient_session = meta.pop(INBOUND_META_TRANSIENT_SESSION, False) is True
+        meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
 
@@ -319,7 +315,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
-            transient_session=transient_session,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)

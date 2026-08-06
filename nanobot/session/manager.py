@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from loguru import logger
@@ -147,6 +147,15 @@ class RetentionResult:
     already_consolidated_count: int
 
 
+@dataclass(frozen=True)
+class SessionPolicy:
+    """Runtime rules that do not belong in durable session data."""
+
+    persist: bool = True
+    log_content: bool = True
+    disabled_tools: frozenset[str] = frozenset()
+
+
 @dataclass
 class Session:
     """A conversation session."""
@@ -158,7 +167,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
-    transient: bool = field(default=False, repr=False, compare=False)
+    policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -991,7 +1000,6 @@ class SessionManager:
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
-        self._transient_sessions: dict[str, Session] = {}
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
 
@@ -1005,10 +1013,6 @@ class SessionManager:
             self._overflow_cache[key] = evicted
 
     def _cached(self, key: str) -> Session | None:
-        transient = self._transient_sessions.get(key)
-        if transient is not None:
-            return transient
-
         session = self._cache.get(key)
         if session is not None:
             self._cache.move_to_end(key)
@@ -1085,21 +1089,23 @@ class SessionManager:
         self._remember(session)
         return session
 
-    def get_or_create_transient(self, key: str) -> Session:
-        """Return a live in-memory session that can never reach the store."""
-        session = self._transient_sessions.get(key)
-        if session is None:
-            self._cache.pop(key, None)
-            self._overflow_cache.pop(key, None)
-            session = Session(key=key, transient=True)
-            self._transient_sessions[key] = session
+    def get_or_create_transient(
+        self,
+        key: str,
+        *,
+        disabled_tools: Collection[str] = (),
+    ) -> Session:
+        """Return a fresh, non-persistent session without loading history."""
+        policy = SessionPolicy(
+            persist=False,
+            log_content=False,
+            disabled_tools=frozenset(disabled_tools),
+        )
+        session = self.get_cached(key)
+        if session is None or session.policy != policy:
+            session = Session(key=key, policy=policy)
+            self._remember(session)
         return session
-
-    def is_transient_active(self, key: str) -> bool:
-        return key in self._transient_sessions
-
-    def discard_transient(self, key: str) -> bool:
-        return self._transient_sessions.pop(key, None) is not None
 
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
@@ -1110,8 +1116,7 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
-        if session.transient:
-            session.enforce_file_cap()
+        if not session.policy.persist:
             return
 
         archiver = self._file_cap_archiver
@@ -1146,7 +1151,6 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
-        self._transient_sessions.pop(key, None)
         self._cache.pop(key, None)
         self._overflow_cache.pop(key, None)
 

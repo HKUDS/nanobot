@@ -5,7 +5,6 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 from websockets.http11 import Request as WsRequest
@@ -46,7 +45,6 @@ class WebUIMediaGateway:
         self._media_dir: Callable[[str | None], Path] = media_dir or _default_media_dir
         self.secret = secret or secrets.token_bytes(32)
         self.attachment_limits = attachment_limits or AttachmentIngressLimits()
-        self._temporary_uploads = TemporaryDirectory(prefix="nanobot-temporary-chat-")
 
     def store_inbound_attachments(self, media: list[Any]) -> AttachmentIngressResult:
         """Validate and persist attachments from an inbound WebUI message."""
@@ -56,28 +54,6 @@ class WebUIMediaGateway:
             logger=self.logger,
             limits=self.attachment_limits,
         )
-
-    def store_temporary_attachments(self, media: list[Any]) -> AttachmentIngressResult:
-        """Validate uploads into process-temporary storage."""
-        return store_inbound_attachments(
-            media,
-            media_dir=Path(self._temporary_uploads.name),
-            logger=self.logger,
-            limits=self.attachment_limits,
-        )
-
-    def discard_inbound_attachments(self, paths: list[str]) -> None:
-        """Remove WebUI uploads after an in-memory conversation is discarded."""
-        media_root = Path(self._temporary_uploads.name).resolve()
-        for raw_path in paths:
-            path = Path(raw_path).resolve()
-            if not path.is_relative_to(media_root):
-                self.logger.warning("refusing to remove media outside the WebUI upload directory")
-                continue
-            try:
-                path.unlink(missing_ok=True)
-            except OSError as exc:
-                self.logger.warning("failed to remove temporary attachment: {}", exc)
 
     def serve_signed_media(
         self,

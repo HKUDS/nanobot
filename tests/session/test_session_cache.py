@@ -1,7 +1,7 @@
 import gc
 import weakref
 
-from nanobot.session.manager import FILE_MAX_MESSAGES, SESSION_CACHE_MAX_SIZE, SessionManager
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, SessionManager
 
 
 def _bounded_manager(tmp_path, limit: int) -> SessionManager:
@@ -82,29 +82,8 @@ def test_transient_session_never_reaches_storage(tmp_path) -> None:
 
     manager.save(session, fsync=True)
 
-    assert manager.flush_all() == 0
+    assert manager.get_cached(session.key) is session
     assert manager.read_session_file(session.key) is None
     assert list(manager.sessions_dir.glob("*.jsonl")) == []
-
-
-def test_transient_session_history_is_bounded_in_memory(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-bounded")
-    for index in range(FILE_MAX_MESSAGES + 2):
-        session.add_message("user", f"message {index}")
-
-    manager.save(session)
-
-    assert len(session.messages) <= FILE_MAX_MESSAGES
-    assert session.messages[-1]["content"] == f"message {FILE_MAX_MESSAGES + 1}"
-    assert manager.read_session_file(session.key) is None
-
-
-def test_discard_transient_session_forgets_live_history(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-test")
-    session.add_message("user", "secret")
-
-    assert manager.discard_transient(session.key) is True
+    manager.invalidate(session.key)
     assert manager.get_cached(session.key) is None
-    assert manager.discard_transient(session.key) is False

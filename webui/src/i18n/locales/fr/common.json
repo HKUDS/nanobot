@@ -51,9 +51,11 @@
   },
   "temporaryChat": {
     "title": "Discussion temporaire",
-    "description": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire. Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
+    "description": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire. Recharger, fermer ou perdre la connexion met fin à ces discussions. Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
     "notSaved": "Non enregistrée",
-    "clear": "Effacer la discussion temporaire"
+    "clear": "Effacer la discussion temporaire",
+    "sectionTitle": "Discussions temporaires",
+    "closeAction": "Fermer la discussion temporaire"
   },
   "sidebar": {
     "navigation": "Navigation de la barre latérale",

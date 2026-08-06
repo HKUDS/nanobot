@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
-import { Button } from "@/components/ui/button";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -35,6 +33,7 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import { isTemporaryChatId } from "@/lib/temporary-chat";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -298,11 +297,16 @@ interface ThreadShellProps {
   sessions?: ChatSummary[];
   title: string;
   temporary?: boolean;
-  onClearTemporaryChat?: () => void;
+  temporaryChatIds?: readonly string[];
+  temporaryChatEnabled?: boolean;
+  onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
-  onCreateChat?: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string | null>;
+  onCreateChat?: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    initialMessage?: string,
+  ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
@@ -312,7 +316,6 @@ interface ThreadShellProps {
   hideThemeButton?: boolean;
   hideHeader?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
-  workspaceConnected?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -482,7 +485,7 @@ function HeroGreeting({ text }: { text: string }) {
       <h1
         ref={headingRef}
         data-testid="hero-greeting"
-        className="whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
+        className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
       >
         {text}
       </h1>
@@ -586,7 +589,9 @@ export function ThreadShell({
   sessions = [],
   title,
   temporary = false,
-  onClearTemporaryChat,
+  temporaryChatIds = [],
+  temporaryChatEnabled = false,
+  onTemporaryChatEnabledChange,
   onToggleSidebar,
   onCreateChat,
   onForkChat,
@@ -598,7 +603,6 @@ export function ThreadShell({
   hideThemeButton = false,
   hideHeader = false,
   workspaceScope = null,
-  workspaceConnected = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -665,6 +669,7 @@ export function ThreadShell({
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -672,7 +677,6 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
-  const temporaryChatIdRef = useRef<string | null>(null);
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -687,6 +691,8 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
+  const showTemporaryChatControl =
+    !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -746,13 +752,14 @@ export function ThreadShell({
   }, [historyKey]);
 
   useEffect(() => {
-    if (!temporary || !chatId) return;
-    const previous = temporaryChatIdRef.current;
-    temporaryChatIdRef.current = chatId;
-    if (!previous || previous === chatId) return;
-    messageCacheRef.current.delete(previous);
-    activeViewportTurnByChatIdRef.current.delete(previous);
-  }, [chatId, temporary]);
+    const retained = new Set(temporaryChatIds);
+    for (const cachedChatId of messageCacheRef.current.keys()) {
+      if (isTemporaryChatId(cachedChatId) && !retained.has(cachedChatId)) {
+        messageCacheRef.current.delete(cachedChatId);
+        activeViewportTurnByChatIdRef.current.delete(cachedChatId);
+      }
+    }
+  }, [temporaryChatIds]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
@@ -1256,7 +1263,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope);
+      const newId = await onCreateChat?.(workspaceScope, content);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
@@ -1422,8 +1429,7 @@ export function ThreadShell({
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
-          compactWorkspaceControls={temporary}
-          workspaceConnected={workspaceConnected}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
@@ -1462,12 +1468,12 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
+          surfaceRef={composerSurfaceRef}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
-          compactWorkspaceControls={temporary}
-          workspaceConnected={workspaceConnected}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
@@ -1491,29 +1497,6 @@ export function ThreadShell({
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
-  ) : temporary ? (
-    <div className="flex items-center gap-1">
-      <span
-        className="rounded-full border border-border/70 bg-muted/35 px-2 py-1 text-[11px] text-muted-foreground"
-        title={t("temporaryChat.description")}
-      >
-        {t("temporaryChat.notSaved")}
-      </span>
-      {onClearTemporaryChat ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={turnActive}
-          aria-label={t("temporaryChat.clear")}
-          title={t("temporaryChat.clear")}
-          onClick={onClearTemporaryChat}
-          className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
-      ) : null}
-    </div>
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
@@ -1537,6 +1520,11 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            temporaryChatEnabled={temporaryChatEnabled}
+            temporaryChatDisabled={booting || turnActive}
+            onTemporaryChatEnabledChange={
+              showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+            }
           />
         ) : null}
         <FilePreviewAvailabilityProvider
@@ -1545,6 +1533,7 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
+            temporary={temporary}
             isStreaming={turnActive}
             emptyState={emptyState}
             composer={composer}

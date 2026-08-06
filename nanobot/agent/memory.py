@@ -923,9 +923,11 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self._archive_session_chunk(session, chunk, runtime=runtime)
-        if session.transient is True and not summary:
-            return None
+        summary = await self.archive(
+            chunk,
+            runtime=runtime,
+            session_key=session.key,
+        )
         session.last_consolidated = end_idx
         session.provider_state = None
         self.sessions.save(session)
@@ -994,9 +996,8 @@ class Consolidator:
         runtime: LLMRuntime,
         session_key: str | None = None,
         summary_messages: list[dict[str, Any]] | None = None,
-        persist: bool = True,
     ) -> str | None:
-        """Summarize messages, optionally retaining the result in history.jsonl.
+        """Summarize messages and append the result to history.jsonl.
 
         ``summary_messages`` adds context but is excluded from raw fallback.
         """
@@ -1028,52 +1029,20 @@ class Consolidator:
                 reasoning_effort=runtime.generation.reasoning_effort,
             )
         except Exception:
-            logger.warning("Consolidation provider call failed")
-            if persist:
-                self.store.raw_archive(messages, session_key=session_key)
+            logger.warning("Consolidation provider call failed, raw-dumping to history")
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         if response.finish_reason == "error":
-            logger.warning("Consolidation provider returned an error")
-            if persist:
-                self.store.raw_archive(messages, session_key=session_key)
+            logger.warning("Consolidation provider returned an error, raw-dumping to history")
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         summary = response.content or "[no summary]"
-        if persist:
-            self.store.append_history(
-                summary,
-                max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
-                session_key=session_key,
-            )
-        return summary
-
-    async def _archive_session_chunk(
-        self,
-        session: Session,
-        chunk: list[dict[str, Any]],
-        *,
-        runtime: LLMRuntime,
-        previous_summary: str | None = None,
-    ) -> str | None:
-        """Archive normally, or retain a transient summary only on the session."""
-        if session.transient is not True:
-            return await self.archive(
-                chunk,
-                runtime=runtime,
-                session_key=session.key,
-            )
-        summary_messages = chunk
-        if previous_summary:
-            summary_messages = [{
-                "role": "assistant",
-                "content": f"Earlier conversation summary:\n{previous_summary}",
-            }, *chunk]
-        return await self.archive(
-            chunk,
-            runtime=runtime,
-            session_key=session.key,
-            summary_messages=summary_messages,
-            persist=False,
+        self.store.append_history(
+            summary,
+            max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
+            session_key=session_key,
         )
+        return summary
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -1106,11 +1075,6 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
-            if session.transient is True and not last_summary:
-                meta = session.metadata.get("_last_summary")
-                if isinstance(meta, dict):
-                    value = cast(dict[str, object], meta).get("text")
-                    last_summary = value if isinstance(value, str) and value else None
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
                 runtime=runtime,
@@ -1159,21 +1123,17 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self._archive_session_chunk(
-                    session,
+                summary = await self.archive(
                     chunk,
                     runtime=runtime,
-                    previous_summary=last_summary,
+                    session_key=session.key,
                 )
-                # Durable sessions advance after either a summary or their raw
-                # fallback. A transient failure has no fallback, so it retries
-                # later without moving the replay boundary.
+                # Advance the cursor either way: on success the chunk was
+                # summarized; on failure archive() already raw-archived it as
+                # a breadcrumb. Re-archiving the same chunk on the next call
+                # would just emit duplicate [RAW] entries.
                 if summary:
                     last_summary = summary
-                elif session.transient is True:
-                    # There is no durable raw fallback for a transient session,
-                    # so keep its replay boundary unchanged and retry later.
-                    break
                 session.last_consolidated = end_idx
                 session.provider_state = None
                 self.sessions.save(session)

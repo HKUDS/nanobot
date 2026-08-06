@@ -51,9 +51,11 @@
   },
   "temporaryChat": {
     "title": "临时聊天",
-    "description": "不会保存到历史记录或记忆。请求仍会发送给模型提供商，工具操作也可能留下更改。",
+    "description": "不会保存到历史记录或记忆。刷新、关闭页面或连接中断后，临时聊天会结束。请求仍会发送给模型提供商，工具操作也可能留下更改。",
     "notSaved": "不保存",
-    "clear": "清空临时聊天"
+    "clear": "清空临时聊天",
+    "sectionTitle": "临时聊天",
+    "closeAction": "关闭临时聊天"
   },
   "sidebar": {
     "navigation": "侧边栏导航",

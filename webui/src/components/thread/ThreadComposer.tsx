@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type Ref,
 } from "react";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
@@ -200,14 +201,14 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
+  surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
-  compactWorkspaceControls?: boolean;
-  workspaceConnected?: boolean;
+  workspaceControlsHidden?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -956,12 +957,12 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
+  surfaceRef,
   onTranscribeAudio,
   runStartedAt = null,
   goalState,
   workspaceScope = null,
-  compactWorkspaceControls = false,
-  workspaceConnected = false,
+  workspaceControlsHidden = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -1017,7 +1018,7 @@ export function ThreadComposer({
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
-  const showProjectPicker = projectPickerAvailable && !compactWorkspaceControls;
+  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
@@ -2249,6 +2250,7 @@ export function ThreadComposer({
         />
       ) : null}
       <div
+        ref={surfaceRef}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
@@ -2394,7 +2396,7 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "thread-composer-footer flex flex-nowrap items-center",
+            "thread-composer-footer flex flex-nowrap items-center motion-safe:transition-[padding-bottom] motion-safe:[transition-duration:220ms] motion-safe:ease-in-out",
             isHero
               ? cn(
                   "gap-x-1.5 px-3 sm:px-4",
@@ -2433,19 +2435,6 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            {compactWorkspaceControls && projectPickerAvailable ? (
-              <WorkspaceProjectPicker
-                compact
-                connected={workspaceConnected}
-                isHero={isHero}
-                disabled={disabled || workspaceScopeDisabled}
-                scope={workspaceScope}
-                defaultScope={workspaceDefaultScope}
-                controls={workspaceControls}
-                error={workspaceError}
-                onChange={onWorkspaceScopeChange}
-              />
-            ) : null}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2454,7 +2443,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : workspaceScope && (!compactWorkspaceControls || workspaceConnected) ? (
+            ) : workspaceScope && !workspaceControlsHidden ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
                 disabled={disabled || workspaceScopeDisabled}
@@ -2565,16 +2554,27 @@ export function ThreadComposer({
             </Button>
           </div>
         </div>
-        {showProjectPicker ? (
-          <WorkspaceProjectPicker
-            isHero={isHero}
-            disabled={disabled || workspaceScopeDisabled}
-            scope={workspaceScope}
-            defaultScope={workspaceDefaultScope}
-            controls={workspaceControls}
-            error={workspaceError}
-            onChange={onWorkspaceScopeChange}
-          />
+        {projectPickerAvailable ? (
+          <div
+            className="composer-workspace-drawer"
+            data-composer-workspace-drawer=""
+            data-state={showProjectPicker ? "open" : "closed"}
+            aria-hidden={showProjectPicker ? undefined : true}
+          >
+            <div className="composer-workspace-drawer-clip">
+              <div className="composer-workspace-drawer-content">
+                <WorkspaceProjectPicker
+                  isHero={isHero}
+                  disabled={disabled || workspaceScopeDisabled || !showProjectPicker}
+                  scope={workspaceScope}
+                  defaultScope={workspaceDefaultScope}
+                  controls={workspaceControls}
+                  error={workspaceError}
+                  onChange={onWorkspaceScopeChange}
+                />
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </form>

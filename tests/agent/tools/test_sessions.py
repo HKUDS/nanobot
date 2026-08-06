@@ -232,32 +232,6 @@ async def test_read_session_filters_by_query_and_returns_recent_matches(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_read_session_searches_current_temporary_chat_in_memory(tmp_path):
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create_transient("websocket:temporary-current")
-    session.messages = [
-        {"role": "user", "content": "the launch codename is firefly"},
-        {"role": "assistant", "content": "I will remember that during this chat"},
-        {"role": "user", "content": "unrelated recent message"},
-    ]
-    session.last_consolidated = 2
-
-    with _webui_request("websocket:temporary-current"):
-        result = _decode(await ReadSessionTool(manager).execute(
-            session_key="current",
-            query="firefly",
-        ))
-
-    assert result["session_key"] == "websocket:temporary-current"
-    assert result["session_ref"] is None
-    assert result["title"] == "Current conversation"
-    assert [message["content"] for message in result["messages"]] == [
-        "the launch codename is firefly",
-    ]
-    assert manager.read_session_file("websocket:temporary-current") is None
-
-
-@pytest.mark.asyncio
 async def test_read_session_reports_invalid_requests(tmp_path):
     with _webui_request():
         missing = await ReadSessionTool(SessionManager(tmp_path)).execute(
