@@ -6,6 +6,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
@@ -868,6 +869,10 @@ export class NanobotClient {
       chat_id: chatId,
       workspace_scope: workspaceScope,
     });
+  }
+
+  setSidebarState(state: SidebarStatePayload): void {
+    this.queueSend({ type: "set_sidebar_state", state });
   }
 
   // -- internals ---------------------------------------------------------

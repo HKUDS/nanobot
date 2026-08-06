@@ -560,6 +560,34 @@ def test_only_bootstrap_tokens_mark_webui_connections(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_webui_persists_sidebar_state_larger_than_http_request_line(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    session_order = [f"websocket:{index:04d}-{'x' * 48}" for index in range(160)]
+    envelope = {
+        "type": "set_sidebar_state",
+        "state": {
+            "session_order": session_order,
+            "view": {"sort": "manual"},
+        },
+    }
+    assert len(json.dumps(envelope).encode()) > 8_192
+
+    await channel._dispatch_envelope(conn, "webui-client", envelope)
+
+    saved = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
+    assert saved["session_order"] == session_order
+    assert saved["view"]["sort"] == "manual"
+    conn.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_client_cannot_self_assert_webui_quote_context(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = MagicMock()

@@ -1340,6 +1340,7 @@ export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
+  | { type: "set_sidebar_state"; state: SidebarStatePayload }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {

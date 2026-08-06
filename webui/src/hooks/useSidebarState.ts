@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import {
-  fetchSidebarState,
-  updateSidebarState as persistSidebarState,
-} from "@/lib/api";
+import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
@@ -144,10 +141,9 @@ export function useSidebarState(
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
 } {
-  const { token } = useClient();
+  const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
-  const persistVersionRef = useRef(0);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -178,23 +174,11 @@ export function useSidebarState(
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
-      const version = persistVersionRef.current + 1;
-      persistVersionRef.current = version;
       stateRef.current = next;
       setState(next);
-      try {
-        const persisted = normalizeSidebarState(
-          await persistSidebarState(tokenRef.current, next),
-        );
-        if (persistVersionRef.current !== version) return;
-        stateRef.current = persisted;
-        setState(persisted);
-      } catch {
-        // Keep the optimistic UI state. Older gateways or transient auth expiry
-        // should not break the chat list; the next refresh can try again.
-      }
+      client.setSidebarState(next);
     },
-    [],
+    [client],
   );
 
   const pruned = useMemo(() => {
