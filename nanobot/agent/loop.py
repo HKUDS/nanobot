@@ -83,6 +83,7 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
 )
+from nanobot.terminal.runtime import TerminalSessionManager
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -290,6 +291,7 @@ class AgentLoop:
         restart_mode: str = "auto",
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
+        terminal_session_manager: TerminalSessionManager | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -378,6 +380,7 @@ class AgentLoop:
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
         self._exec_session_manager = ExecSessionManager()
+        self.terminal_session_manager = terminal_session_manager
         self.runner = AgentRunner()
         self.subagents = SubagentManager(
             workspace=workspace,
@@ -612,6 +615,7 @@ class AgentLoop:
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
             exec_session_manager=self._exec_session_manager,
+            terminal_session_manager=self.terminal_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
@@ -1375,11 +1379,14 @@ class AgentLoop:
         finally:
             self._background_tasks.clear()
 
-        cleanup_steps = (
+        cleanup_steps: list[Callable[[], Awaitable[Any]]] = [
             self.subagents.close,
             self._exec_session_manager.close_all,
-            lambda: agent_context.close_mcp(self),
-        )
+        ]
+        terminal_session_manager = getattr(self, "terminal_session_manager", None)
+        if terminal_session_manager is not None:
+            cleanup_steps.append(terminal_session_manager.close_all)
+        cleanup_steps.append(lambda: agent_context.close_mcp(self))
         for cleanup in cleanup_steps:
             try:
                 await cleanup()

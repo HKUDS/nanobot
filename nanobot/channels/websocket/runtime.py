@@ -55,6 +55,10 @@ from nanobot.session.webui_turns import (
     websocket_turn_transcript_persistence_failed,
     websocket_turn_wall_started_at,
 )
+from nanobot.terminal.runtime import (
+    TRUSTED_TERMINAL_REQUEST_METADATA_KEY,
+    TerminalError,
+)
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -383,6 +387,9 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[ServerConnection, str] = {}
         # Connections authenticated with a one-time token from /webui/bootstrap.
         self._webui_connections: set[ServerConnection] = set()
+        self._terminal_pumps: dict[
+            tuple[ServerConnection, str], asyncio.Task[None]
+        ] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -393,6 +400,7 @@ class WebSocketChannel(BaseChannel):
         self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
+        self._terminals = gateway.terminal_manager
         self._session_access = (
             WebuiSessionAccess(gateway.session_manager)
             if gateway.session_manager is not None
@@ -451,6 +459,250 @@ class WebSocketChannel(BaseChannel):
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
         self._webui_connections.discard(connection)
+        for key, task in tuple(self._terminal_pumps.items()):
+            if key[0] is connection:
+                self._terminal_pumps.pop(key, None)
+                task.cancel()
+
+    async def _terminal_scope(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> tuple[str, Any] | None:
+        chat_id = envelope.get("chat_id")
+        if not _is_valid_chat_id(chat_id):
+            await self._send_event(
+                connection,
+                "terminal_error",
+                detail="invalid_chat_id",
+            )
+            return None
+        if (
+            self._terminals is None
+            or connection not in self._webui_connections
+            or not self._workspace_controls_available(connection)
+        ):
+            await self._send_event(
+                connection,
+                "terminal_error",
+                chat_id=chat_id,
+                detail="terminal_unavailable",
+                reason="Terminal access is limited to the trusted local WebUI",
+            )
+            return None
+        if not self.is_allowed(client_id):
+            await self._send_event(
+                connection,
+                "terminal_error",
+                chat_id=chat_id,
+                detail="access_denied",
+            )
+            return None
+        scope = self._workspaces.scope_for_session_key(f"{self.name}:{chat_id}")
+        if scope.access_mode != "full":
+            await self._send_event(
+                connection,
+                "terminal_error",
+                chat_id=chat_id,
+                detail="terminal_requires_full_access",
+                reason="Switch this project chat to Full access before opening a terminal",
+            )
+            return None
+        return chat_id, scope
+
+    def _cancel_terminal_pump(
+        self,
+        connection: ServerConnection,
+        terminal_id: str,
+    ) -> None:
+        task = self._terminal_pumps.pop((connection, terminal_id), None)
+        if task is not None:
+            task.cancel()
+
+    def _start_terminal_pump(
+        self,
+        connection: ServerConnection,
+        *,
+        chat_id: str,
+        terminal_id: str,
+        project_path: Path,
+        after_seq: int,
+    ) -> None:
+        self._cancel_terminal_pump(connection, terminal_id)
+
+        async def pump() -> None:
+            cursor = after_seq
+            try:
+                while self._terminals is not None:
+                    result = await self._terminals.read(
+                        terminal_id,
+                        after_seq=cursor,
+                        wait_ms=10_000,
+                        project_path=project_path,
+                    )
+                    cursor = result.next_seq
+                    if result.data or result.replay_reset:
+                        await self._send_event(
+                            connection,
+                            "terminal_output",
+                            chat_id=chat_id,
+                            terminal_id=terminal_id,
+                            data=result.data,
+                            seq=result.next_seq,
+                            replay_reset=result.replay_reset,
+                        )
+                    if not result.running:
+                        await self._send_event(
+                            connection,
+                            "terminal_exit",
+                            chat_id=chat_id,
+                            terminal_id=terminal_id,
+                            exit_code=result.exit_code,
+                        )
+                        return
+            except asyncio.CancelledError:
+                raise
+            except TerminalError as exc:
+                await self._send_event(
+                    connection,
+                    "terminal_error",
+                    chat_id=chat_id,
+                    terminal_id=terminal_id,
+                    detail="terminal_session_lost",
+                    reason=str(exc),
+                )
+            finally:
+                key = (connection, terminal_id)
+                if self._terminal_pumps.get(key) is asyncio.current_task():
+                    self._terminal_pumps.pop(key, None)
+
+        task = asyncio.create_task(
+            pump(),
+            name=f"webui-terminal-{terminal_id}",
+        )
+        self._terminal_pumps[(connection, terminal_id)] = task
+
+    async def _dispatch_terminal_envelope(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        event_type = envelope.get("type")
+        terminal_id = envelope.get("terminal_id")
+        if event_type == "terminal_detach":
+            chat_id = envelope.get("chat_id")
+            if _is_valid_chat_id(chat_id) and isinstance(terminal_id, str) and terminal_id:
+                # Detach only removes this connection's output pump. It remains
+                # safe and necessary after a project switch or permission downgrade.
+                self._cancel_terminal_pump(connection, terminal_id)
+                await self._send_event(
+                    connection,
+                    "terminal_detached",
+                    chat_id=chat_id,
+                    terminal_id=terminal_id,
+                )
+            return
+
+        resolved = await self._terminal_scope(connection, client_id, envelope)
+        if resolved is None or self._terminals is None:
+            return
+        chat_id, scope = resolved
+        try:
+            if event_type == "terminal_open":
+                raw_rows = envelope.get("rows")
+                raw_cols = envelope.get("cols")
+                rows = raw_rows if isinstance(raw_rows, int) and not isinstance(raw_rows, bool) else 30
+                cols = raw_cols if isinstance(raw_cols, int) and not isinstance(raw_cols, bool) else 100
+                info = await self._terminals.open(
+                    scope.project_path,
+                    rows=rows,
+                    cols=cols,
+                )
+                replay = await self._terminals.read(
+                    info.terminal_id,
+                    wait_ms=250,
+                    project_path=scope.project_path,
+                )
+                await self._send_event(
+                    connection,
+                    "terminal_ready",
+                    chat_id=chat_id,
+                    terminal_id=info.terminal_id,
+                    project_path=info.project_path,
+                    rows=info.rows,
+                    cols=info.cols,
+                    data=replay.data,
+                    seq=replay.next_seq,
+                    running=replay.running,
+                    exit_code=replay.exit_code,
+                    pty_backend=info.pty_backend,
+                    windows_build=info.windows_build,
+                )
+                if replay.running:
+                    self._start_terminal_pump(
+                        connection,
+                        chat_id=chat_id,
+                        terminal_id=info.terminal_id,
+                        project_path=scope.project_path,
+                        after_seq=replay.next_seq,
+                    )
+                return
+
+            if not isinstance(terminal_id, str) or not terminal_id:
+                raise TerminalError("terminal_id is required")
+            if event_type == "terminal_input":
+                data = envelope.get("data")
+                if not isinstance(data, str):
+                    raise TerminalError("terminal input must be a string")
+                await self._terminals.write(
+                    terminal_id,
+                    data,
+                    project_path=scope.project_path,
+                )
+                return
+            if event_type == "terminal_resize":
+                rows = envelope.get("rows")
+                cols = envelope.get("cols")
+                if (
+                    not isinstance(rows, int)
+                    or isinstance(rows, bool)
+                    or not isinstance(cols, int)
+                    or isinstance(cols, bool)
+                ):
+                    raise TerminalError("terminal rows and cols must be integers")
+                await self._terminals.resize(
+                    terminal_id,
+                    rows=rows,
+                    cols=cols,
+                    project_path=scope.project_path,
+                )
+                return
+            if event_type == "terminal_kill":
+                self._cancel_terminal_pump(connection, terminal_id)
+                await self._terminals.close(
+                    terminal_id,
+                    project_path=scope.project_path,
+                )
+                await self._send_event(
+                    connection,
+                    "terminal_exit",
+                    chat_id=chat_id,
+                    terminal_id=terminal_id,
+                    exit_code=-1,
+                )
+                return
+            raise TerminalError(f"Unknown terminal event: {event_type!r}")
+        except TerminalError as exc:
+            await self._send_event(
+                connection,
+                "terminal_error",
+                chat_id=chat_id,
+                **({"terminal_id": terminal_id} if isinstance(terminal_id, str) else {}),
+                detail="terminal_request_rejected",
+                reason=str(exc),
+            )
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -740,6 +992,9 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
+        if isinstance(t, str) and t.startswith("terminal_"):
+            await self._dispatch_terminal_envelope(connection, client_id, envelope)
+            return
         if t == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
@@ -916,6 +1171,8 @@ class WebSocketChannel(BaseChannel):
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
+            if trusted_webui and self._workspace_controls_available(connection):
+                metadata[TRUSTED_TERMINAL_REQUEST_METADATA_KEY] = True
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -1028,6 +1285,12 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
+        terminal_tasks = tuple(self._terminal_pumps.values())
+        self._terminal_pumps.clear()
+        for task in terminal_tasks:
+            task.cancel()
+        if terminal_tasks:
+            await asyncio.gather(*terminal_tasks, return_exceptions=True)
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()

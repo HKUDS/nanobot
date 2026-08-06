@@ -70,6 +70,70 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("routes terminal events separately from chat events", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const terminalHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onTerminal("chat-terminal", terminalHandler);
+    client.onChat("chat-terminal", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "terminal_output",
+      chat_id: "chat-terminal",
+      terminal_id: "term-1",
+      data: "hello",
+      seq: 2,
+    });
+
+    expect(terminalHandler).toHaveBeenCalledWith(expect.objectContaining({
+      event: "terminal_output",
+      data: "hello",
+    }));
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
+  it("sends typed terminal control frames", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.openTerminal("chat-terminal", 30, 100);
+    client.writeTerminal("chat-terminal", "term-1", "npm test\r");
+    client.resizeTerminal("chat-terminal", "term-1", 42, 132);
+    client.detachTerminal("chat-terminal", "term-1");
+    client.killTerminal("chat-terminal", "term-1");
+
+    const frames = lastSocket().sent.map((raw) => JSON.parse(raw));
+    expect(frames.slice(-5)).toEqual([
+      { type: "terminal_open", chat_id: "chat-terminal", rows: 30, cols: 100 },
+      {
+        type: "terminal_input",
+        chat_id: "chat-terminal",
+        terminal_id: "term-1",
+        data: "npm test\r",
+      },
+      {
+        type: "terminal_resize",
+        chat_id: "chat-terminal",
+        terminal_id: "term-1",
+        rows: 42,
+        cols: 132,
+      },
+      { type: "terminal_detach", chat_id: "chat-terminal", terminal_id: "term-1" },
+      { type: "terminal_kill", chat_id: "chat-terminal", terminal_id: "term-1" },
+    ]);
+  });
+
   it("routes events to the matching chat handler", () => {
     const client = new NanobotClient({
       url: "ws://test",

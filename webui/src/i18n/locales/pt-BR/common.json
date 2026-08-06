@@ -1342,6 +1342,20 @@
     "next": "Próxima imagem",
     "close": "Fechar pré-visualização"
   },
+  "terminal": {
+    "aria": "Terminal do projeto",
+    "toggle": "Mostrar ou ocultar o terminal do projeto",
+    "requiresFullAccess": "O terminal do projeto exige a WebUI local, acesso total e a ferramenta exec habilitada.",
+    "resize": "Redimensionar terminal",
+    "connected": "Conectado",
+    "connecting": "Conectando",
+    "stopping": "Parando",
+    "exited": "Encerrado",
+    "error": "Erro",
+    "restart": "Reiniciar terminal",
+    "kill": "Encerrar processo do terminal",
+    "detach": "Ocultar terminal"
+  },
   "filePreview": {
     "aria": "Pré-visualização de arquivo",
     "breadcrumb": "Caminho do arquivo",

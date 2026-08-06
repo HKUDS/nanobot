@@ -1328,6 +1328,20 @@
     "next": "次の画像",
     "close": "プレビューを閉じる"
   },
+  "terminal": {
+    "aria": "プロジェクトターミナル",
+    "toggle": "プロジェクトターミナルを切り替える",
+    "requiresFullAccess": "プロジェクトターミナルには、ローカル WebUI のフルアクセスと有効な exec ツールが必要です。",
+    "resize": "ターミナルのサイズを変更",
+    "connected": "接続済み",
+    "connecting": "接続中",
+    "stopping": "停止中",
+    "exited": "終了",
+    "error": "エラー",
+    "restart": "ターミナルを再起動",
+    "kill": "ターミナルプロセスを終了",
+    "detach": "ターミナルを隠す"
+  },
   "filePreview": {
     "aria": "ファイルプレビュー",
     "breadcrumb": "ファイルパス",

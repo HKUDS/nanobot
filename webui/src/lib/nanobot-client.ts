@@ -6,6 +6,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  TerminalEvent,
   GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
@@ -64,6 +65,7 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
 
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
+type TerminalEventHandler = (ev: TerminalEvent) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
 type SessionUpdateScope = "metadata" | "thread" | string;
@@ -167,6 +169,7 @@ export class NanobotClient {
   private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
+  private terminalHandlers = new Map<string, Set<TerminalEventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
   private static readonly PENDING_INBOUND_MAX = 2000;
@@ -699,6 +702,23 @@ export class NanobotClient {
     };
   }
 
+  /** Subscribe to the project PTY stream without mixing it into chat replay. */
+  onTerminal(chatId: string, handler: TerminalEventHandler): Unsubscribe {
+    let handlers = this.terminalHandlers.get(chatId);
+    if (!handlers) {
+      handlers = new Set();
+      this.terminalHandlers.set(chatId, handlers);
+    }
+    handlers.add(handler);
+    this.attach(chatId);
+    return () => {
+      const current = this.terminalHandlers.get(chatId);
+      if (!current) return;
+      current.delete(handler);
+      if (current.size === 0) this.terminalHandlers.delete(chatId);
+    };
+  }
+
   connect(): void {
     if (this.socket && this.socket.readyState < WS_CLOSING) return;
     this.intentionallyClosed = false;
@@ -870,6 +890,52 @@ export class NanobotClient {
     });
   }
 
+  openTerminal(chatId: string, rows: number, cols: number): void {
+    this.knownChats.add(chatId);
+    this.queueSend({ type: "terminal_open", chat_id: chatId, rows, cols });
+  }
+
+  writeTerminal(chatId: string, terminalId: string, data: string): void {
+    if (!data) return;
+    this.queueSend({
+      type: "terminal_input",
+      chat_id: chatId,
+      terminal_id: terminalId,
+      data,
+    });
+  }
+
+  resizeTerminal(
+    chatId: string,
+    terminalId: string,
+    rows: number,
+    cols: number,
+  ): void {
+    this.queueSend({
+      type: "terminal_resize",
+      chat_id: chatId,
+      terminal_id: terminalId,
+      rows,
+      cols,
+    });
+  }
+
+  detachTerminal(chatId: string, terminalId: string): void {
+    this.queueSend({
+      type: "terminal_detach",
+      chat_id: chatId,
+      terminal_id: terminalId,
+    });
+  }
+
+  killTerminal(chatId: string, terminalId: string): void {
+    this.queueSend({
+      type: "terminal_kill",
+      chat_id: chatId,
+      terminal_id: terminalId,
+    });
+  }
+
   // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {
@@ -915,6 +981,11 @@ export class NanobotClient {
 
     if (wsInboundDebugEnabled()) {
       console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
+    }
+
+    if (parsed.event.startsWith("terminal_")) {
+      this.dispatchTerminal(parsed as TerminalEvent);
+      return;
     }
 
     if (parsed.event === "error" && !parsed.turn_id) {
@@ -1085,6 +1156,14 @@ export class NanobotClient {
     if (over > 0) {
       q.splice(0, over);
     }
+  }
+
+  private dispatchTerminal(ev: TerminalEvent): void {
+    const chatId = "chat_id" in ev ? ev.chat_id : undefined;
+    if (!chatId) return;
+    const handlers = this.terminalHandlers.get(chatId);
+    if (!handlers) return;
+    for (const handler of handlers) handler(ev);
   }
 
   private handleClose(event?: { code?: number }): void {

@@ -10,6 +10,21 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
 
+vi.mock("@/components/TerminalPanel", () => ({
+  TerminalPanel: ({
+    projectPath,
+    onClose,
+  }: {
+    projectPath: string;
+    onClose: () => void;
+  }) => (
+    <aside data-testid="terminal-panel-mock">
+      <span>{projectPath}</span>
+      <button type="button" onClick={onClose}>Hide terminal</button>
+    </aside>
+  ),
+}));
+
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
@@ -410,6 +425,78 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("gates the terminal on local Full access and remembers the project preference", async () => {
+    const client = makeClient();
+    const projectPath = "/projects/terminal";
+    const preferenceKey = `nanobot:project-terminal:${encodeURIComponent(projectPath)}`;
+    window.localStorage.removeItem(preferenceKey);
+    const controls = {
+      can_change_project: true,
+      can_use_full_access: true,
+      can_use_terminal: true,
+    };
+    const { rerender, unmount } = render(wrap(
+      client,
+      <ThreadShell
+        session={session("terminal")}
+        title="Terminal project"
+        onToggleSidebar={() => {}}
+        workspaceScope={{ project_path: projectPath, access_mode: "restricted" }}
+        workspaceControls={controls}
+      />,
+    ));
+
+    expect(screen.getByTestId("terminal-toggle")).toBeDisabled();
+
+    rerender(wrap(
+      client,
+      <ThreadShell
+        session={session("terminal")}
+        title="Terminal project"
+        onToggleSidebar={() => {}}
+        workspaceScope={{ project_path: projectPath, access_mode: "full" }}
+        workspaceControls={{ ...controls, can_use_terminal: false }}
+      />,
+    ));
+    expect(screen.getByTestId("terminal-toggle")).toBeDisabled();
+
+    rerender(wrap(
+      client,
+      <ThreadShell
+        session={session("terminal")}
+        title="Terminal project"
+        onToggleSidebar={() => {}}
+        workspaceScope={{ project_path: projectPath, access_mode: "full" }}
+        workspaceControls={controls}
+      />,
+    ));
+    const toggle = screen.getByTestId("terminal-toggle");
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+
+    expect(await screen.findByTestId("terminal-panel-mock")).toHaveTextContent(projectPath);
+    expect(window.localStorage.getItem(preferenceKey)).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide terminal" }));
+    await waitFor(() => expect(screen.queryByTestId("terminal-panel-mock")).not.toBeInTheDocument());
+    expect(window.localStorage.getItem(preferenceKey)).toBe("0");
+
+    unmount();
+    window.localStorage.setItem(preferenceKey, "1");
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("terminal")}
+        title="Terminal project"
+        onToggleSidebar={() => {}}
+        workspaceScope={{ project_path: projectPath, access_mode: "full" }}
+        workspaceControls={controls}
+      />,
+    ));
+    expect(await screen.findByTestId("terminal-panel-mock")).toBeInTheDocument();
+    window.localStorage.removeItem(preferenceKey);
   });
 
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {

@@ -1328,6 +1328,20 @@
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
   },
+  "terminal": {
+    "aria": "Terminal dự án",
+    "toggle": "Bật hoặc tắt terminal dự án",
+    "requiresFullAccess": "Terminal dự án yêu cầu WebUI cục bộ, quyền truy cập đầy đủ và công cụ exec được bật.",
+    "resize": "Đổi kích thước terminal",
+    "connected": "Đã kết nối",
+    "connecting": "Đang kết nối",
+    "stopping": "Đang dừng",
+    "exited": "Đã thoát",
+    "error": "Lỗi",
+    "restart": "Khởi động lại terminal",
+    "kill": "Kết thúc tiến trình terminal",
+    "detach": "Ẩn terminal"
+  },
   "filePreview": {
     "aria": "Xem trước tệp",
     "breadcrumb": "Đường dẫn tệp",

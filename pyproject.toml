@@ -58,6 +58,7 @@ dependencies = [
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
+    "pywinpty>=3.0.5,<4.0.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
