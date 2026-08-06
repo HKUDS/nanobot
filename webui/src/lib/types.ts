@@ -1020,8 +1020,6 @@ export interface ChannelConnectPayload {
   expires_at_ms?: number;
   app_id?: string;
   account?: string;
-  challenge?: "verify_code";
-  verification_failed?: boolean;
   nanobot_features?: NanobotFeaturesPayload;
 }
 

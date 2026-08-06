@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import { Check, Loader2, Network, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import {
   cancelChannelConnect,
@@ -26,10 +25,6 @@ export type ChannelQrConnectLabels = {
   connecting: string;
   scanAgain: string;
   connect: string;
-  verifyTitle?: string;
-  verifyDescription?: string;
-  verifyPlaceholder?: string;
-  verifySubmit?: string;
 };
 
 export type ChannelConnectStartOptions = {
@@ -37,6 +32,14 @@ export type ChannelConnectStartOptions = {
   instanceId?: string;
   mode?: "replace" | "create";
   force?: boolean;
+};
+
+export type ChannelQrConnectPendingContext = {
+  connect: ChannelConnectPayload;
+  busy: boolean;
+  poll: (
+    params?: Readonly<Record<string, string>>,
+  ) => Promise<ChannelConnectPayload | null>;
 };
 
 export function ChannelQrConnectFlow({
@@ -48,6 +51,8 @@ export function ChannelQrConnectFlow({
   forceOnRepeat = false,
   labels,
   onFeaturesUpdate,
+  pausePolling,
+  renderPending,
 }: {
   token: string;
   channelName: string;
@@ -57,6 +62,8 @@ export function ChannelQrConnectFlow({
   forceOnRepeat?: boolean;
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  pausePolling?: (payload: ChannelConnectPayload) => boolean;
+  renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
 }) {
   const pageVisible = usePageVisibility();
   const { t } = useTranslation();
@@ -65,7 +72,6 @@ export function ChannelQrConnectFlow({
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [verificationCode, setVerificationCode] = useState("");
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
   const ignoredPollSessions = useRef(new Set<string>());
@@ -79,6 +85,7 @@ export function ChannelQrConnectFlow({
   const pending = connect?.status === "pending";
   const succeeded = connect?.status === "succeeded";
   const canStart = !pending && !busy;
+  const pollingPaused = Boolean(connect && pausePolling?.(connect));
 
   useEffect(() => {
     if (!connect?.qr_url) {
@@ -106,7 +113,7 @@ export function ChannelQrConnectFlow({
     if (
       !connect?.session_id
       || connect.status !== "pending"
-      || connect.challenge
+      || pollingPaused
       || !pageVisible
     ) return;
     let cancelled = false;
@@ -151,11 +158,11 @@ export function ChannelQrConnectFlow({
   }, [
     channelName,
     connect?.interval_ms,
-    connect?.challenge,
     connect?.session_id,
     connect?.status,
     onFeaturesUpdate,
     pageVisible,
+    pollingPaused,
   ]);
 
   const start = useCallback(async (force = false) => {
@@ -206,8 +213,10 @@ export function ChannelQrConnectFlow({
     }
   };
 
-  const submitVerification = async () => {
-    if (!connect?.session_id || !verificationCode.trim()) return;
+  const submitPoll = async (
+    params: Readonly<Record<string, string>> = {},
+  ): Promise<ChannelConnectPayload | null> => {
+    if (!connect?.session_id) return null;
     setBusy(true);
     setError(null);
     try {
@@ -216,16 +225,23 @@ export function ChannelQrConnectFlow({
         channelName,
         connect.session_id,
         "",
-        { verifyCode: verificationCode.trim() },
+        params,
       );
       setConnect((current) => ({
         ...(current ?? payload),
         ...payload,
         qr_url: payload.qr_url ?? current?.qr_url,
       }));
-      if (!payload.challenge) setVerificationCode("");
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
+      if (payload.status !== "pending") {
+        setError(null);
+      }
+      return payload;
     } catch (err) {
       setError((err as Error).message);
+      return null;
     } finally {
       setBusy(false);
     }
@@ -253,43 +269,7 @@ export function ChannelQrConnectFlow({
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
               {labels.scanDescription}
             </p>
-            {connect.challenge === "verify_code" ? (
-              <form
-                className="mt-3 space-y-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitVerification();
-                }}
-              >
-                <div className="text-[12px] font-semibold text-foreground">
-                  {labels.verifyTitle ?? "Verification required"}
-                </div>
-                <p className="text-[12px] leading-5 text-muted-foreground">
-                  {connect.message
-                    ?? labels.verifyDescription
-                    ?? "Enter the number shown in WeChat."}
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    value={verificationCode}
-                    onChange={(event) => setVerificationCode(event.target.value)}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder={labels.verifyPlaceholder ?? "Code"}
-                    className="h-8 max-w-40"
-                    aria-invalid={connect.verification_failed || undefined}
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="h-8 rounded-full px-3 text-[12px] font-semibold"
-                    disabled={busy || !verificationCode.trim()}
-                  >
-                    {labels.verifySubmit ?? "Verify"}
-                  </Button>
-                </div>
-              </form>
-            ) : (
+            {renderPending?.({ connect, busy, poll: submitPoll }) ?? (
               <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                 {labels.waiting}

@@ -66,7 +66,7 @@ describe("ChannelQrConnectFlow", () => {
     render(
       <ChannelQrConnectFlow
         token="token"
-        channelName="weixin"
+        channelName="feishu"
         labels={labels}
         onFeaturesUpdate={vi.fn()}
       />,
@@ -80,53 +80,5 @@ describe("ChannelQrConnectFlow", () => {
 
     expect(await screen.findByText("Cancelled cleanly")).toBeInTheDocument();
     expect(screen.queryByText("Expired stale poll")).not.toBeInTheDocument();
-  });
-
-  it("pauses automatic polling while submitting a verification challenge", async () => {
-    api.startChannelConnect.mockResolvedValue({
-      session_id: "session-verify",
-      status: "pending",
-      qr_url: "https://qr.test/session-verify",
-      interval_ms: 5000,
-    });
-    api.pollChannelConnect
-      .mockResolvedValueOnce({
-        session_id: "session-verify",
-        status: "pending",
-        challenge: "verify_code",
-        message: "Enter the number shown in WeChat.",
-      })
-      .mockResolvedValueOnce({
-        session_id: "session-verify",
-        status: "succeeded",
-        message: "Verified connection",
-      });
-
-    render(
-      <ChannelQrConnectFlow
-        token="token"
-        channelName="weixin"
-        labels={labels}
-        onFeaturesUpdate={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    expect(await screen.findByText("Verification required")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByPlaceholderText("Code"), {
-      target: { value: "1234" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
-
-    expect(await screen.findByText("Verified connection")).toBeInTheDocument();
-    expect(api.pollChannelConnect).toHaveBeenLastCalledWith(
-      "token",
-      "weixin",
-      "session-verify",
-      "",
-      { verifyCode: "1234" },
-    );
-    expect(api.pollChannelConnect).toHaveBeenCalledTimes(2);
   });
 });
