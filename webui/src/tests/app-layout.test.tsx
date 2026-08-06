@@ -489,14 +489,21 @@ describe("App layout", () => {
     expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
-    expect(temporaryToggle).toHaveClass("duration-150");
+    expect(temporaryToggle).toHaveClass("bg-transparent", "shadow-none", "hover:bg-transparent");
+    expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
+      "motion-safe:duration-150",
+      "text-[var(--temporary-control-active)]",
+    );
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "Reloading, closing, or losing the connection ends these chats.",
     );
     expect(screen.queryByTestId("temporary-chat-outline")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
-    expect(temporaryToggle).toHaveClass("duration-75");
+    expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
+      "motion-safe:duration-75",
+      "text-current",
+    );
     fireEvent.click(temporaryToggle);
     expect(window.location.hash).toBe("#/new");
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");

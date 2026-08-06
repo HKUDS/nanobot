@@ -1121,6 +1121,68 @@ describe("ThreadComposer", () => {
     })).toBeInTheDocument();
   });
 
+  it("slides workspace controls between the project row and compact button", () => {
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    const composer = (compactWorkspaceControls: boolean) => (
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        compactWorkspaceControls={compactWorkspaceControls}
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />
+    );
+    const { container, rerender } = render(composer(false));
+    const drawer = container.querySelector("[data-composer-workspace-drawer]");
+    const compact = container.querySelector("[data-composer-workspace-compact]");
+
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("aria-hidden");
+    expect(compact).toHaveAttribute("data-state", "closed");
+    expect(compact).toHaveAttribute("aria-hidden", "true");
+    expect(within(compact as HTMLElement).getByRole("button", {
+      hidden: true,
+      name: "Choose project",
+    })).toBeDisabled();
+
+    rerender(composer(true));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(container.querySelector("[data-composer-workspace-compact]")).toBe(compact);
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      hidden: true,
+      name: "Choose project",
+    })).toBeDisabled();
+    expect(compact).toHaveAttribute("data-state", "open");
+    expect(compact).not.toHaveAttribute("aria-hidden");
+    expect(within(compact as HTMLElement).getByRole("button", {
+      name: "Choose project",
+    })).toBeEnabled();
+
+    rerender(composer(false));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      name: "Choose project",
+    })).toBeEnabled();
+    expect(compact).toHaveAttribute("data-state", "closed");
+    expect(within(compact as HTMLElement).getByRole("button", {
+      hidden: true,
+      name: "Choose project",
+    })).toBeDisabled();
+  });
+
   it("uses the native folder picker for project selection on native host", async () => {
     const onWorkspaceScopeChange = vi.fn();
     const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");

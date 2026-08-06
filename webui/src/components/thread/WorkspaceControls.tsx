@@ -78,8 +78,12 @@ export function WorkspaceProjectPicker({
   }, [currentProjectScope?.project_path, open]);
 
   useEffect(() => {
-    if (error && visible) setOpen(true);
-  }, [error, visible]);
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    if (error && visible && !disabled) setOpen(true);
+  }, [disabled, error, visible]);
 
   const applyProjectPath = useCallback(
     (projectPath: string, projectName?: string) => {

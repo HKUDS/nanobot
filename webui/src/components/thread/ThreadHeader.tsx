@@ -94,13 +94,20 @@ export function ThreadHeader({
                     setTemporaryChatHelpOpen(enabled);
                   }}
                   className={cn(
-                    "host-no-drag h-8 w-8 shrink-0 rounded-full transition-[color,background-color,box-shadow]",
-                    temporaryChatEnabled
-                      ? "duration-150 bg-[hsl(var(--temporary-accent)/0.12)] text-[hsl(var(--temporary-foreground))] shadow-[inset_0_0_0_1px_hsl(var(--temporary-border)/0.35)] hover:bg-[hsl(var(--temporary-accent)/0.18)] hover:text-[hsl(var(--temporary-foreground))]"
-                      : "duration-75 text-muted-foreground hover:bg-accent/45 hover:text-foreground",
+                    "host-no-drag h-8 w-8 shrink-0 rounded-full bg-transparent text-muted-foreground shadow-none transition-none hover:text-foreground",
+                    temporaryChatEnabled ? "hover:bg-transparent" : "hover:bg-accent/45",
                   )}
                 >
-                  <MessageCircleDashed className="h-4 w-4" aria-hidden />
+                  <MessageCircleDashed
+                    data-testid="temporary-chat-icon"
+                    className={cn(
+                      "h-4 w-4 motion-safe:transition-colors",
+                      temporaryChatEnabled
+                        ? "text-[var(--temporary-control-active)] motion-safe:duration-150"
+                        : "text-current motion-safe:duration-75",
+                    )}
+                    aria-hidden
+                  />
                 </Button>
               </TooltipTrigger>
               <TooltipContent

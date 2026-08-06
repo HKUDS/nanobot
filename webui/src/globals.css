@@ -33,6 +33,7 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 17 88% 32%;
     --temporary-border: 17 88% 40%;
@@ -70,6 +71,7 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 32 98% 73%;
     --temporary-border: 27 96% 61%;
@@ -441,6 +443,66 @@
   .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
     opacity: 1;
     transform: translateY(0);
+  }
+  .composer-workspace-drawer {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .composer-workspace-drawer[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .composer-workspace-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .composer-workspace-compact {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-columns: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .composer-workspace-compact[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-columns: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .composer-workspace-compact-clip {
+    min-width: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .composer-workspace-drawer {
+      transition:
+        grid-template-rows var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-6px);
+      transition: transform var(--composer-workspace-drawer-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+      transform: translateY(0);
+    }
+    .composer-workspace-compact {
+      transition:
+        grid-template-columns var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
   }
   @keyframes run-pulse-dot {
     0%,
