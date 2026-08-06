@@ -33,6 +33,7 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import { isTemporaryChatId } from "@/lib/temporary-chat";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -296,7 +297,8 @@ interface ThreadShellProps {
   sessions?: ChatSummary[];
   title: string;
   temporary?: boolean;
-  onToggleTemporaryChat?: () => void;
+  temporaryChatIds?: readonly string[];
+  onOpenTemporaryChat?: () => void;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
@@ -584,7 +586,8 @@ export function ThreadShell({
   sessions = [],
   title,
   temporary = false,
-  onToggleTemporaryChat,
+  temporaryChatIds = [],
+  onOpenTemporaryChat,
   onToggleSidebar,
   onCreateChat,
   onForkChat,
@@ -670,7 +673,6 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
-  const temporaryChatIdRef = useRef<string | null>(null);
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -744,13 +746,14 @@ export function ThreadShell({
   }, [historyKey]);
 
   useEffect(() => {
-    if (!temporary || !chatId) return;
-    const previous = temporaryChatIdRef.current;
-    temporaryChatIdRef.current = chatId;
-    if (!previous || previous === chatId) return;
-    messageCacheRef.current.delete(previous);
-    activeViewportTurnByChatIdRef.current.delete(previous);
-  }, [chatId, temporary]);
+    const retained = new Set(temporaryChatIds);
+    for (const cachedChatId of messageCacheRef.current.keys()) {
+      if (isTemporaryChatId(cachedChatId) && !retained.has(cachedChatId)) {
+        messageCacheRef.current.delete(cachedChatId);
+        activeViewportTurnByChatIdRef.current.delete(cachedChatId);
+      }
+    }
+  }, [temporaryChatIds]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
@@ -1416,8 +1419,6 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           onStop={stop}
-          temporary={temporary}
-          onToggleTemporaryChat={onToggleTemporaryChat}
           onTranscribeAudio={transcribeAudio}
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
@@ -1462,8 +1463,7 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          temporary={temporary}
-          onToggleTemporaryChat={onToggleTemporaryChat}
+          onOpenTemporaryChat={onOpenTemporaryChat}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}

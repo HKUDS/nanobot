@@ -850,16 +850,22 @@ describe("ThreadShell", () => {
 
   it("keeps temporary messages across navigation and drops them after clear", async () => {
     const client = makeClient();
-    const view = (chatId: string, temporary: boolean) => wrap(
+    const view = (
+      chatId: string,
+      temporary: boolean,
+      temporaryChatIds: readonly string[],
+    ) => wrap(
       client,
       <ThreadShell
         session={session(chatId)}
         title={temporary ? "Temporary chat" : "Regular chat"}
         temporary={temporary}
+        temporaryChatIds={temporaryChatIds}
         onToggleSidebar={() => {}}
       />,
     );
-    const { rerender } = render(view("temporary-live", true));
+    const retainedTemporaryChats = ["temporary-live"];
+    const { rerender } = render(view("temporary-live", true, retainedTemporaryChats));
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "keep this only in memory" },
@@ -871,14 +877,14 @@ describe("ThreadShell", () => {
       "keep this only in memory",
     ));
 
-    rerender(view("regular", false));
+    rerender(view("regular", false, retainedTemporaryChats));
     await waitFor(() => {
       expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
     });
-    rerender(view("temporary-live", true));
+    rerender(view("temporary-live", true, retainedTemporaryChats));
     expect(screen.getByText("keep this only in memory")).toBeInTheDocument();
 
-    rerender(view("temporary-cleared", true));
+    rerender(view("temporary-cleared", true, ["temporary-cleared"]));
     await waitFor(() => {
       expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
     });

@@ -100,22 +100,37 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("forgets temporary chats when the socket drops", async () => {
+  it("forgets every temporary chat when the socket drops", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
       maxBackoffMs: 1,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
     client.connect();
     lastSocket().fakeOpen();
-    client.onChat("temporary-drop", vi.fn());
+    client.onChat("temporary-drop-a", firstHandler);
+    client.onChat("temporary-drop-b", secondHandler);
     lastSocket().close();
 
     await vi.advanceTimersByTimeAsync(1);
     lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temporary-drop-a",
+      text: "stale first chat",
+    });
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temporary-drop-b",
+      text: "stale second chat",
+    });
 
     expect(lastSocket().sent).toEqual([]);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).not.toHaveBeenCalled();
   });
 
   it("routes events to the matching chat handler", () => {
