@@ -40,7 +40,7 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
-import { writeDraggedSession } from "@/lib/session-drag";
+import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -357,6 +357,7 @@ export const ChatList = memo(function ChatList({
                               writeDraggedSession(event.dataTransfer, s.key);
                             }}
                             onDragEnd={() => {
+                              clearDraggedSession();
                               setDraggedSessionKey(null);
                               setSessionDropTarget(null);
                             }}

@@ -79,6 +79,7 @@ describe("ChatList", () => {
       SESSION_DRAG_TYPE,
       "websocket:reference",
     );
+    fireEvent.dragEnd(reference, { dataTransfer });
   });
 
   it("reorders chats around a Codex-style insertion line", () => {

@@ -1619,9 +1619,21 @@ describe("ThreadComposer", () => {
 
     fireEvent.dragEnter(input, { dataTransfer });
     fireEvent.dragOver(input, { dataTransfer });
+
+    expect(input).toHaveValue("Compare notes");
+    expect(screen.getByTestId("composer-session-drag-preview"))
+      .toHaveTextContent("@收费设计");
+
+    fireEvent.dragEnd(document);
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+
+    fireEvent.dragEnter(input, { dataTransfer });
+    fireEvent.dragOver(input, { dataTransfer });
+
     fireEvent.drop(input, { dataTransfer });
 
     expect(input).toHaveValue("Compare @收费设计 notes");
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
     expect(screen.getByTestId("composer-session-mention-收费设计"))
       .toHaveTextContent("@收费设计");
 

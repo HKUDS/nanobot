@@ -106,6 +106,7 @@ import {
   slashCommandLifecycle,
 } from "@/lib/slash-command";
 import {
+  clearDraggedSession,
   hasDraggedSession,
   readDraggedSession,
 } from "@/lib/session-drag";
@@ -320,6 +321,35 @@ type MentionCandidate = {
       initials: string;
     }
 );
+
+interface MentionInsertion {
+  value: string;
+  cursor: number;
+  tokenStart: number;
+  tokenEnd: number;
+}
+
+function mentionInsertion(
+  value: string,
+  name: string,
+  start: number,
+  end: number,
+): MentionInsertion {
+  const from = Math.min(Math.max(start, 0), value.length);
+  const to = Math.min(Math.max(end, from), value.length);
+  const prefix = value.slice(0, from);
+  const suffix = value.slice(to);
+  const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
+  const trailingSpace = /^\s/.test(suffix) ? "" : " ";
+  const tokenStart = prefix.length + leadingSpace.length;
+  const tokenEnd = tokenStart + name.length + 1;
+  return {
+    value: `${prefix}${leadingSpace}@${name}${trailingSpace}${suffix}`,
+    cursor: tokenEnd + trailingSpace.length,
+    tokenStart,
+    tokenEnd,
+  };
+}
 
 function sessionMentionBase(session: ChatSummary): string {
   const label = session.title?.trim() || session.preview.trim() || "session";
@@ -940,6 +970,11 @@ export function ThreadComposer({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
+  const [sessionDragPreview, setSessionDragPreview] = useState<{
+    mention: SessionMention;
+    start: number;
+    end: number;
+  } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
@@ -1267,6 +1302,22 @@ export function ThreadComposer({
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
     [cliApps, mcpPresets, selectedSessionMentions, value],
   );
+  const sessionDragInsertion = sessionDragPreview
+    ? mentionInsertion(
+        value,
+        sessionDragPreview.mention.name,
+        sessionDragPreview.start,
+        sessionDragPreview.end,
+      )
+    : null;
+  const displayMentionSegments = sessionDragInsertion && sessionDragPreview
+    ? splitCapabilityMentionSegments(
+        sessionDragInsertion.value,
+        cliApps,
+        mcpPresets,
+        [...selectedSessionMentions, sessionDragPreview.mention],
+      )
+    : mentionSegments;
   const activeSessionMentions = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1355,7 +1406,7 @@ export function ThreadComposer({
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
-  const hasMentionDecorations = mentionSegments.some(
+  const hasMentionDecorations = displayMentionSegments.some(
     (segment) => segment.kind !== "text",
   );
   const activeCliMentionApps = useMemo(() => {
@@ -1626,15 +1677,9 @@ export function ThreadComposer({
           candidate.mention,
         ]);
       }
-      const prefix = value.slice(0, start);
-      const suffix = value.slice(end);
-      const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
-      const trailingSpace = /^\s/.test(suffix) ? "" : " ";
-      const mention = `${leadingSpace}@${candidate.name}${trailingSpace}`;
-      const next = `${prefix}${mention}${suffix}`;
-      const nextCursor = prefix.length + mention.length;
-      setValue(next);
-      setCursorPosition(nextCursor);
+      const insertion = mentionInsertion(value, candidate.name, start, end);
+      setValue(insertion.value);
+      setCursorPosition(insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
@@ -1643,7 +1688,7 @@ export function ThreadComposer({
         const el = textareaRef.current;
         if (!el) return;
         el.focus();
-        el.setSelectionRange(nextCursor, nextCursor);
+        el.setSelectionRange(insertion.cursor, insertion.cursor);
       });
     },
     [activeSessionMentions, resizeTextarea, value],
@@ -1660,13 +1705,16 @@ export function ThreadComposer({
   const handleSessionDrop = useCallback((event: React.DragEvent) => {
     if (!hasDraggedSession(event.dataTransfer)) return false;
     event.preventDefault();
+    clearDraggedSession();
+    const preview = sessionDragPreview;
+    setSessionDragPreview(null);
     if (disabled) return true;
     const sessionKey = readDraggedSession(event.dataTransfer);
     const mention = availableSessionMentions.find(
-      (candidate) => candidate.session_key === sessionKey,
+      (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
     );
     if (!mention) return true;
-    const caret = textareaRef.current?.selectionStart ?? value.length;
+    const caret = preview?.start ?? textareaRef.current?.selectionStart ?? value.length;
     insertMentionCandidate(
       {
         kind: "session",
@@ -1675,10 +1723,51 @@ export function ThreadComposer({
         mention,
       },
       caret,
-      textareaRef.current?.selectionEnd ?? caret,
+      preview?.end ?? textareaRef.current?.selectionEnd ?? caret,
     );
     return true;
-  }, [availableSessionMentions, disabled, insertMentionCandidate, value.length]);
+  }, [availableSessionMentions, disabled, insertMentionCandidate, sessionDragPreview, value.length]);
+
+  const previewSessionDrop = useCallback((event: React.DragEvent) => {
+    if (!hasDraggedSession(event.dataTransfer)) return false;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (disabled) {
+      setSessionDragPreview(null);
+      return true;
+    }
+    const sessionKey = readDraggedSession(event.dataTransfer);
+    const mention = availableSessionMentions.find(
+      (candidate) => candidate.session_key === sessionKey,
+    );
+    const alreadySelected = mention && activeSessionMentions.some(
+      (candidate) => candidate.session_key === mention.session_key,
+    );
+    if (!mention || (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT)) {
+      setSessionDragPreview(null);
+      return true;
+    }
+    const start = textareaRef.current?.selectionStart ?? value.length;
+    const end = textareaRef.current?.selectionEnd ?? start;
+    setSessionDragPreview((current) => (
+      current?.mention.session_key === mention.session_key
+      && current.start === start
+      && current.end === end
+        ? current
+        : { mention, start, end }
+    ));
+    return true;
+  }, [activeSessionMentions, availableSessionMentions, disabled, value.length]);
+
+  useEffect(() => {
+    if (!sessionDragPreview) return;
+    const clearPreview = () => {
+      clearDraggedSession();
+      setSessionDragPreview(null);
+    };
+    document.addEventListener("dragend", clearPreview);
+    return () => document.removeEventListener("dragend", clearPreview);
+  }, [sessionDragPreview]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
@@ -2108,16 +2197,22 @@ export function ThreadComposer({
         e.preventDefault();
         submit();
       }}
-      onDragEnter={onDragEnter}
+      onDragEnter={(event) => {
+        if (!previewSessionDrop(event)) onDragEnter(event);
+      }}
       onDragOver={(event) => {
-        if (hasDraggedSession(event.dataTransfer)) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-        } else {
-          onDragOver(event);
+        if (!previewSessionDrop(event)) onDragOver(event);
+      }}
+      onDragLeave={(event) => {
+        if (!hasDraggedSession(event.dataTransfer)) {
+          onDragLeave(event);
+          return;
+        }
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setSessionDragPreview(null);
         }
       }}
-      onDragLeave={onDragLeave}
       onDrop={(event) => {
         if (!handleSessionDrop(event)) onDrop(event);
       }}
@@ -2150,6 +2245,7 @@ export function ThreadComposer({
             ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
           disabled && "opacity-60",
+          sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
           goalState?.active &&
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
@@ -2234,9 +2330,12 @@ export function ThreadComposer({
         <div className="relative">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
-              segments={mentionSegments}
+              segments={displayMentionSegments}
               isHero={isHero}
               className={inputTextClasses}
+              ghostRange={sessionDragInsertion
+                ? { start: sessionDragInsertion.tokenStart, end: sessionDragInsertion.tokenEnd }
+                : null}
             />
           ) : null}
           <textarea
@@ -2259,7 +2358,7 @@ export function ThreadComposer({
             onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onPaste={onPaste}
             rows={1}
-            placeholder={resolvedPlaceholder}
+            placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={disabled}
             aria-label={t("thread.composer.inputAria")}
             className={cn(
@@ -2646,11 +2745,14 @@ function ComposerCliMentionOverlay({
   segments,
   isHero,
   className,
+  ghostRange,
 }: {
   segments: CapabilityMentionSegment[];
   isHero: boolean;
   className: string;
+  ghostRange?: { start: number; end: number } | null;
 }) {
+  let offset = 0;
   return (
     <div
       aria-hidden
@@ -2660,16 +2762,24 @@ function ComposerCliMentionOverlay({
       )}
     >
       {segments.map((segment, index) => {
+        const start = offset;
+        offset += segment.text.length;
         if (segment.kind === "text") {
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
+        const isGhost = ghostRange?.start === start && ghostRange.end === offset;
         return (
-          <CapabilityMentionToken
+          <span
             key={`${segment.kind}-${index}`}
-            segment={segment}
-            variant="composer"
-            isHero={isHero}
-          />
+            data-testid={isGhost ? "composer-session-drag-preview" : undefined}
+            className={cn(isGhost && "opacity-45 transition-opacity duration-100")}
+          >
+            <CapabilityMentionToken
+              segment={segment}
+              variant="composer"
+              isHero={isHero}
+            />
+          </span>
         );
       })}
     </div>
