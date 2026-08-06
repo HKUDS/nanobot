@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
@@ -274,6 +274,20 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+const TEMPORARY_CHAT_OUTLINE_DURATION_MS = 620;
+const TEMPORARY_CHAT_LAYOUT_TRACKING_MS = 950;
+
+type TemporaryChatOutlineRect = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
+type TemporaryChatOutlineGeometry = {
+  origin: TemporaryChatOutlineRect;
+  target: TemporaryChatOutlineRect;
+};
 
 type FilePreviewAvailabilityCacheEntry = {
   available?: boolean;
@@ -667,7 +681,18 @@ export function ThreadShell({
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  const [temporaryChatOutlineGeometry, setTemporaryChatOutlineGeometry] =
+    useState<TemporaryChatOutlineGeometry | null>(null);
+  const [temporaryChatOutlineVisible, setTemporaryChatOutlineVisible] = useState(false);
+  const [temporaryChatOutlineExpanded, setTemporaryChatOutlineExpanded] = useState(false);
+  const [temporaryChatOutlineTrackingLayout, setTemporaryChatOutlineTrackingLayout] =
+    useState(false);
   const shellRef = useRef<HTMLElement | null>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const temporaryChatButtonRef = useRef<HTMLButtonElement | null>(null);
+  const temporaryChatOutlineFrameRef = useRef<number | null>(null);
+  const temporaryChatOutlineHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousTemporaryChatEnabledRef = useRef(false);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -689,6 +714,151 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
+  const showTemporaryChatControl =
+    !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
+
+  const clearTemporaryChatOutlineTimers = useCallback(() => {
+    if (temporaryChatOutlineFrameRef.current !== null) {
+      cancelAnimationFrame(temporaryChatOutlineFrameRef.current);
+      temporaryChatOutlineFrameRef.current = null;
+    }
+    if (temporaryChatOutlineHideTimerRef.current !== null) {
+      clearTimeout(temporaryChatOutlineHideTimerRef.current);
+      temporaryChatOutlineHideTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearTemporaryChatOutlineTimers, [clearTemporaryChatOutlineTimers]);
+
+  const measureTemporaryChatOutlineRect = useCallback(
+    (element: HTMLElement): TemporaryChatOutlineRect | null => {
+      const shell = shellRef.current;
+      if (!shell) return null;
+      const shellRect = shell.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      return {
+        top: elementRect.top - shellRect.top,
+        right: shellRect.right - elementRect.right,
+        bottom: shellRect.bottom - elementRect.bottom,
+        left: elementRect.left - shellRect.left,
+      };
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const wasEnabled = previousTemporaryChatEnabledRef.current;
+    previousTemporaryChatEnabledRef.current = temporaryChatEnabled;
+    clearTemporaryChatOutlineTimers();
+
+    if (!showTemporaryChatControl) {
+      setTemporaryChatOutlineVisible(false);
+      setTemporaryChatOutlineExpanded(false);
+      setTemporaryChatOutlineTrackingLayout(false);
+      return;
+    }
+    if (wasEnabled === temporaryChatEnabled) return;
+
+    const button = temporaryChatButtonRef.current;
+    const surface = composerSurfaceRef.current;
+    const origin = button ? measureTemporaryChatOutlineRect(button) : null;
+    const target = surface ? measureTemporaryChatOutlineRect(surface) : null;
+    if (!origin || !target) {
+      setTemporaryChatOutlineVisible(false);
+      setTemporaryChatOutlineExpanded(false);
+      setTemporaryChatOutlineTrackingLayout(false);
+      return;
+    }
+
+    setTemporaryChatOutlineGeometry({ origin, target });
+    setTemporaryChatOutlineVisible(true);
+    setTemporaryChatOutlineExpanded(false);
+    if (temporaryChatEnabled) {
+      temporaryChatOutlineFrameRef.current = requestAnimationFrame(() => {
+        temporaryChatOutlineFrameRef.current = requestAnimationFrame(() => {
+          temporaryChatOutlineFrameRef.current = null;
+          setTemporaryChatOutlineExpanded(true);
+        });
+      });
+    } else {
+      temporaryChatOutlineHideTimerRef.current = setTimeout(() => {
+        temporaryChatOutlineHideTimerRef.current = null;
+        setTemporaryChatOutlineVisible(false);
+      }, TEMPORARY_CHAT_OUTLINE_DURATION_MS);
+    }
+  }, [
+    clearTemporaryChatOutlineTimers,
+    measureTemporaryChatOutlineRect,
+    showTemporaryChatControl,
+    temporaryChatEnabled,
+  ]);
+
+  useEffect(() => {
+    if (!showTemporaryChatControl || !temporaryChatOutlineVisible) return;
+
+    let layoutFrame: number | null = null;
+    let trackingDeadline = 0;
+    const refreshOutlineGeometry = () => {
+      const button = temporaryChatButtonRef.current;
+      const surface = composerSurfaceRef.current;
+      const origin = button ? measureTemporaryChatOutlineRect(button) : null;
+      const target = surface ? measureTemporaryChatOutlineRect(surface) : null;
+      if (origin && target) setTemporaryChatOutlineGeometry({ origin, target });
+    };
+    const trackMovingLayout = () => {
+      refreshOutlineGeometry();
+      if (performance.now() < trackingDeadline) {
+        layoutFrame = requestAnimationFrame(trackMovingLayout);
+      } else {
+        layoutFrame = null;
+        setTemporaryChatOutlineTrackingLayout(false);
+      }
+    };
+    const handleWindowResize = () => {
+      trackingDeadline = performance.now() + TEMPORARY_CHAT_LAYOUT_TRACKING_MS;
+      setTemporaryChatOutlineTrackingLayout(true);
+      if (layoutFrame === null) layoutFrame = requestAnimationFrame(trackMovingLayout);
+    };
+    window.addEventListener("resize", handleWindowResize);
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(refreshOutlineGeometry);
+    if (resizeObserver) {
+      if (shellRef.current) resizeObserver.observe(shellRef.current);
+      if (composerSurfaceRef.current) resizeObserver.observe(composerSurfaceRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", handleWindowResize);
+      if (layoutFrame !== null) cancelAnimationFrame(layoutFrame);
+      resizeObserver?.disconnect();
+    };
+  }, [
+    measureTemporaryChatOutlineRect,
+    showTemporaryChatControl,
+    temporaryChatOutlineVisible,
+  ]);
+
+  const temporaryChatOutlineStyle = temporaryChatOutlineGeometry
+    ? ({
+        top: temporaryChatOutlineExpanded
+          ? temporaryChatOutlineGeometry.target.top - 3
+          : temporaryChatOutlineGeometry.origin.top - 2,
+        right: temporaryChatOutlineExpanded
+          ? temporaryChatOutlineGeometry.target.right - 3
+          : temporaryChatOutlineGeometry.origin.right - 2,
+        bottom: temporaryChatOutlineExpanded
+          ? temporaryChatOutlineGeometry.target.bottom - 3
+          : temporaryChatOutlineGeometry.origin.bottom - 2,
+        left: temporaryChatOutlineExpanded
+          ? temporaryChatOutlineGeometry.target.left - 3
+          : temporaryChatOutlineGeometry.origin.left - 2,
+        borderRadius: temporaryChatOutlineExpanded ? 31 : 999,
+        transitionDuration: temporaryChatOutlineTrackingLayout
+          ? "0ms"
+          : `${TEMPORARY_CHAT_OUTLINE_DURATION_MS}ms`,
+        transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+      } satisfies CSSProperties)
+    : undefined;
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -1465,8 +1635,7 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          temporaryChatEnabled={temporaryChatEnabled}
-          onTemporaryChatEnabledChange={onTemporaryChatEnabledChange}
+          surfaceRef={composerSurfaceRef}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1519,6 +1688,12 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            temporaryChatEnabled={temporaryChatEnabled}
+            temporaryChatDisabled={booting || turnActive}
+            onTemporaryChatEnabledChange={
+              showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+            }
+            temporaryChatButtonRef={temporaryChatButtonRef}
           />
         ) : null}
         <FilePreviewAvailabilityProvider
@@ -1550,6 +1725,17 @@ export function ThreadShell({
           />
         </FilePreviewAvailabilityProvider>
       </div>
+      {showTemporaryChatControl
+      && temporaryChatOutlineVisible
+      && temporaryChatOutlineStyle ? (
+        <div
+          aria-hidden
+          data-testid="temporary-chat-outline"
+          data-expanded={temporaryChatOutlineExpanded ? "true" : "false"}
+          className="pointer-events-none absolute z-20 border-[1.5px] border-dashed border-[#F97316]/75 transition-[top,right,bottom,left,border-radius] motion-reduce:transition-none"
+          style={temporaryChatOutlineStyle}
+        />
+      ) : null}
       {filePreviewPath && historyKey ? (
         <FilePreviewPanel
           sessionKey={historyKey}

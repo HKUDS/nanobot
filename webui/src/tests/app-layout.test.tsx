@@ -439,8 +439,19 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const heroHeader = screen.getByTestId("thread-header");
+    const heroTemporaryToggle = within(heroHeader).getByRole("button", {
+      name: "Temporary chat",
+    });
+    const themeToggle = within(heroHeader).getByRole("button", {
+      name: "Toggle theme from header",
+    });
     expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Temporary chat" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-composer-motion")).queryByRole("button", {
+      name: "Temporary chat",
+    })).not.toBeInTheDocument();
+    expect(heroTemporaryToggle.compareDocumentPosition(themeToggle)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(within(sidebar).getByText("Existing topic"));
     expect(window.location.hash).toBe("#/chat/websocket%3Aexisting-chat");
