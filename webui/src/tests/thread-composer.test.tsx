@@ -1534,7 +1534,10 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Tab" });
 
     expect(input).toHaveValue("use @browserbase ");
-    expect(screen.getByTestId("composer-mcp-mention-browserbase")).toHaveTextContent("@browserbase");
+    const mention = screen.getByTestId("composer-mcp-mention-browserbase");
+    expect(mention).toHaveTextContent("@browserbase");
+    expect(mention).toHaveClass("font-normal");
+    expect(mention).not.toHaveClass("font-[550]");
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -1581,6 +1584,8 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("参考 @收费设计 ");
     const mention = screen.getByTestId("composer-session-mention-收费设计");
     expect(mention).toHaveTextContent("@收费设计");
+    expect(mention).toHaveClass("font-normal");
+    expect(mention).not.toHaveClass("font-[550]");
     expect(mention.closest("a")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -1966,7 +1971,8 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("meeting in @gimp");
     const token = screen.getByTestId("composer-cli-mention-gimp");
     expect(token).toHaveTextContent("@gimp");
-    expect(token).toHaveClass("font-[550]");
+    expect(token).toHaveClass("font-normal");
+    expect(token).not.toHaveClass("font-[550]");
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
