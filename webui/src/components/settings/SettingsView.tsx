@@ -1467,10 +1467,21 @@ export function SettingsView({
     ) {
       return;
     }
+    const presetName = modelPresetPendingDelete.name;
+    const nextOrder = modelCallOrder.includes(presetName)
+      ? modelCallOrder.filter((name) => name !== presetName)
+      : null;
+    if (nextOrder?.length === 0) return;
     setSaving(true);
     try {
-      const payload = await deleteModelConfiguration(token, modelPresetPendingDelete.name);
+      if (nextOrder) {
+        const orderedPayload = await updateModelCallOrder(token, nextOrder);
+        applyPayload(orderedPayload);
+        onModelNameChange(orderedPayload.agent.model || null);
+      }
+      const payload = await deleteModelConfiguration(token, presetName);
       applyPayload(payload);
+      onModelNameChange(payload.agent.model || null);
       setModelPresetPendingDelete(null);
       setError(null);
     } catch (err) {
@@ -3371,7 +3382,12 @@ function ModelsSettings({
     form.temperature < 0 ||
     form.temperature > 2;
   const selectedPresetReferenced = Boolean(
-    selectedPreset && (settings.model_call_order ?? []).includes(selectedPreset.name),
+    selectedPreset && callOrder.includes(selectedPreset.name),
+  );
+  const selectedPresetOnlyActive = Boolean(
+    selectedPresetReferenced &&
+      selectedPreset &&
+      !callOrder.some((name) => name !== selectedPreset.name),
   );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (preset: SettingsPayload["model_presets"][number]) => {
@@ -3437,7 +3453,7 @@ function ModelsSettings({
       key={key}
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="divide-y divide-border/45 bg-muted/10 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+      className="divide-y divide-border/45 bg-muted/30 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
     >
       {creating ? (
         <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
@@ -3564,10 +3580,15 @@ function ModelsSettings({
           <Button
             size="sm"
             variant="ghost"
-            className="self-start rounded-full text-muted-foreground hover:text-destructive"
-            disabled={selectedPresetReferenced || saving || orderSaving}
+            className={cn(
+              "self-start rounded-full",
+              selectedPresetOnlyActive
+                ? "text-muted-foreground"
+                : "text-destructive hover:bg-destructive/10 hover:text-destructive",
+            )}
+            disabled={selectedPresetOnlyActive || saving || orderSaving}
             title={
-              selectedPresetReferenced
+              selectedPresetOnlyActive
                 ? tx(
                     "settings.models.removeBeforeDelete",
                     "Remove this preset from the call order before deleting it.",
