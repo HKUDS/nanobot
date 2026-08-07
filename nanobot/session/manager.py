@@ -36,6 +36,7 @@ from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 FILE_MAX_MESSAGES = 2000
 SESSION_CACHE_MAX_SIZE = 128
 MIN_REPLAY_MAX_MESSAGES = 120
+MIN_COMPACTED_REPLAY_MESSAGES = 8
 REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
@@ -191,19 +192,37 @@ class Session:
         extend_to_user: bool = False,
         include_runtime_context: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input.
+        """Return recent replayable messages for LLM input.
 
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
         """
-        unconsolidated = self.messages[self.last_consolidated:]
+        replay_start = self.last_consolidated
+        if replay_start:
+            # ``last_consolidated`` is archive progress, not a replay boundary.
+            # Keep a small raw suffix for continuity, extending back to the user
+            # that started an assistant/tool sequence when necessary.
+            recent_start = recent_message_start_index(
+                self.messages,
+                MIN_COMPACTED_REPLAY_MESSAGES,
+                extend_to_user=True,
+            )
+            replay_start = min(replay_start, recent_start)
+
+        replayable = self.messages[replay_start:]
         max_messages = max_messages if max_messages > 0 else FILE_MAX_MESSAGES
-        start_idx = recent_message_start_index(
-            unconsolidated,
-            max_messages,
-            extend_to_user=extend_to_user,
-        )
-        sliced = unconsolidated[start_idx:]
+        unarchived_count = len(self.messages) - self.last_consolidated
+        if replay_start < self.last_consolidated and unarchived_count < max_messages:
+            # The archived replay suffix can exceed the nominal count when one
+            # tool-heavy turn spans the boundary. Preserve that complete turn.
+            start_idx = 0
+        else:
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
+        sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
         # assistant deliveries that the user may be replying to.
