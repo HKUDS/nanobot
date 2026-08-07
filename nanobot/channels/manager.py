@@ -358,11 +358,12 @@ class ChannelManager:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            errors[name] = (
-                channel.start_error_message(exc)
-                or "Channel failed to start. Check gateway logs."
-            )
-            logger.exception("Failed to start channel {}", name)
+            public_error = channel.start_error_message(exc)
+            errors[name] = public_error or "Channel failed to start. Check gateway logs."
+            if public_error:
+                logger.error("Failed to start channel {}: {}", name, public_error)
+            else:
+                logger.exception("Failed to start channel {}", name)
 
     def _start_channel_task(self, name: str, channel: BaseChannel) -> asyncio.Task[None]:
         logger.info("Starting {} channel...", name)

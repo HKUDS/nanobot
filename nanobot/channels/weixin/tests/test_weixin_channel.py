@@ -681,8 +681,11 @@ async def test_start_uses_qr_replacement_for_configured_token(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manager_surfaces_actionable_weixin_auth_error(tmp_path) -> None:
-    from nanobot.channels.manager import ChannelManager
+async def test_manager_surfaces_actionable_weixin_auth_error_without_traceback(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels import manager as manager_mod
 
     channel = WeixinChannel(
         WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
@@ -695,7 +698,19 @@ async def test_manager_surfaces_actionable_weixin_auth_error(tmp_path) -> None:
             errmsg="stale",
         )
     )
-    manager = ChannelManager.__new__(ChannelManager)
+    errors: list[str] = []
+    tracebacks: list[str] = []
+    monkeypatch.setattr(
+        manager_mod.logger,
+        "error",
+        lambda message, *args: errors.append(message.format(*args)),
+    )
+    monkeypatch.setattr(
+        manager_mod.logger,
+        "exception",
+        lambda message, *args: tracebacks.append(message.format(*args)),
+    )
+    manager = manager_mod.ChannelManager.__new__(manager_mod.ChannelManager)
     manager._channel_errors = {}
 
     await manager._start_channel("weixin", channel)
@@ -703,6 +718,10 @@ async def test_manager_surfaces_actionable_weixin_auth_error(tmp_path) -> None:
     assert manager._channel_errors["weixin"] == (
         "WeChat login expired. Scan again to reconnect."
     )
+    assert errors == [
+        "Failed to start channel weixin: WeChat login expired. Scan again to reconnect."
+    ]
+    assert tracebacks == []
 
 
 @pytest.mark.asyncio
