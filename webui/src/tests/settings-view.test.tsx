@@ -2137,7 +2137,7 @@ describe("SettingsView Apps catalog", () => {
     expect(reasoningEffort).toHaveValue("provider-native-mode");
   });
 
-  it("associates preset selection with the responsive detail pane", async () => {
+  it("expands the model preset editor directly below the selected row", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -2157,22 +2157,23 @@ describe("SettingsView Apps catalog", () => {
 
     const row = await screen.findByTestId("model-call-order-row-primary");
     const trigger = within(row).getAllByRole("button")[0];
-    const detail = document.getElementById("model-preset-detail");
-    expect(detail).toHaveClass("hidden", "xl:block");
-    expect(trigger).toHaveAttribute("aria-controls", "model-preset-detail");
+    expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(trigger);
 
+    const editor = screen.getByTestId("model-preset-editor");
     expect(trigger).toHaveAttribute("aria-pressed", "true");
-    expect(detail).not.toHaveClass("hidden");
-    expect(within(detail as HTMLElement).getByDisplayValue("Primary")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", "model-preset-editor");
+    expect(row.nextElementSibling).toBe(editor);
+    expect(editor).toHaveClass("slide-in-from-top-1");
+    expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
 
-    const backButton = screen.getByRole("button", { name: "Back to model presets" });
-    expect(backButton).toHaveClass("xl:hidden");
-    fireEvent.click(backButton);
+    fireEvent.click(trigger);
 
-    expect(trigger).toHaveAttribute("aria-pressed", "false");
-    expect(detail).toHaveClass("hidden", "xl:block");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument();
   });
 
   it("drags model presets to reorder and saves the model call order immediately", async () => {
@@ -4048,10 +4049,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Fast writing")).toHaveValue("");
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back to model presets" }));
-    expect(screen.queryByPlaceholderText("Fast writing")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

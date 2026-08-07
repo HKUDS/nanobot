@@ -3375,9 +3375,10 @@ function ModelsSettings({
   );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (preset: SettingsPayload["model_presets"][number]) => {
+    const toggleCurrentPreset = !creating && selectedPreset?.name === preset.name;
     onSelectConfiguration();
-    if (!creating && selectedPreset?.name === preset.name) {
-      setEditorOpen(true);
+    if (toggleCurrentPreset) {
+      setEditorOpen((open) => !open);
       return;
     }
     setForm((prev) => ({
@@ -3392,11 +3393,6 @@ function ModelsSettings({
       reasoningEffort: preset.reasoning_effort ?? "",
     }));
     setEditorOpen(true);
-  };
-  const closeEditor = () => {
-    if (creatingSaving) return;
-    if (creating) onCancelCreate();
-    setEditorOpen(false);
   };
 
   const moveCallOrderItem = (index: number, offset: -1 | 1) => {
@@ -3435,6 +3431,177 @@ function ModelsSettings({
     setDragOverCallOrderIndex(null);
     onChangeCallOrder(next);
   };
+
+  const renderPresetEditor = (key: string) => (
+    <div
+      key={key}
+      id="model-preset-editor"
+      data-testid="model-preset-editor"
+      className="divide-y divide-border/45 bg-muted/10 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+    >
+      {creating ? (
+        <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
+          <span className="text-[13px] font-semibold text-foreground/85">
+            {tx("settings.models.newPreset", "New model preset")}
+          </span>
+        </div>
+      ) : null}
+      <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
+        <Input
+          autoFocus={creating}
+          value={form.presetLabel}
+          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
+          }
+          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+        />
+      </SettingsRow>
+      <SettingsRow title={t("settings.rows.provider")}>
+        <ProviderPicker
+          providers={providerOptions}
+          value={providerValue}
+          emptyLabel={t("settings.byok.noConfiguredProviders")}
+          showProviderLogos={showBrandLogos}
+          onChange={(provider) =>
+            setForm((prev) => ({
+              ...prev,
+              provider,
+              model: provider === prev.provider ? prev.model : "",
+            }))
+          }
+        />
+      </SettingsRow>
+      {selectedProviderNeedsSignIn ? (
+        <SettingsRow
+          title={tx("settings.oauth.signInRequired", "Sign in required")}
+          description={tx(
+            "settings.oauth.signInBeforeSaving",
+            "Sign in before saving this provider in the preset.",
+          )}
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
+            disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
+            className="rounded-full"
+          >
+            {selectedProviderSigningIn ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : null}
+            {selectedProviderSigningIn
+              ? tx("settings.oauth.signingIn", "Signing in...")
+              : tx("settings.oauth.signIn", "Sign in")}
+          </Button>
+        </SettingsRow>
+      ) : null}
+      <SettingsRow title={t("settings.rows.model")}>
+        <ModelIdPicker
+          token={token}
+          settings={settings}
+          provider={form.provider}
+          value={form.model}
+          showProviderLogos={showBrandLogos}
+          onChange={(model) => setForm((prev) => ({ ...prev, model }))}
+        />
+      </SettingsRow>
+      <button
+        type="button"
+        aria-expanded={advancedOpen}
+        onClick={() => setAdvancedOpen((value) => !value)}
+        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+      >
+        <span>
+          <span className="block text-[14px] font-medium text-foreground">
+            {tx("settings.models.advancedOptions", "Advanced options")}
+          </span>
+          <span className="mt-0.5 block text-[12px] text-muted-foreground">
+            {tx(
+              "settings.models.advancedSummary",
+              "Context {{context}} · Max {{max}} tokens",
+              {
+                context: formatModelContextWindow(form.contextWindowTokens),
+                max: formatContextWindow(form.maxTokens),
+              },
+            )}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            advancedOpen && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </button>
+      {advancedOpen ? (
+        <div className="bg-muted/12 px-4 py-4 sm:px-5">
+          <ModelAdvancedFields
+            maxTokens={form.maxTokens}
+            contextWindowTokens={form.contextWindowTokens}
+            temperature={form.temperature}
+            reasoningEffort={form.reasoningEffort}
+            onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+          />
+        </div>
+      ) : null}
+      <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        {creating ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start rounded-full text-muted-foreground"
+            disabled={creatingSaving}
+            onClick={() => {
+              setEditorOpen(false);
+              onCancelCreate();
+            }}
+          >
+            {tx("settings.actions.cancel", "Cancel")}
+          </Button>
+        ) : selectedPreset ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start rounded-full text-muted-foreground hover:text-destructive"
+            disabled={selectedPresetReferenced || saving || orderSaving}
+            title={
+              selectedPresetReferenced
+                ? tx(
+                    "settings.models.removeBeforeDelete",
+                    "Remove this preset from the call order before deleting it.",
+                  )
+                : undefined
+            }
+            onClick={() => onDeleteConfiguration(selectedPreset)}
+          >
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            {tx("settings.actions.delete", "Delete")}
+          </Button>
+        ) : null}
+        <div className="flex items-center justify-end gap-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-full"
+            disabled={
+              (!creating && !dirty) ||
+              !selectedProviderConfigured ||
+              modelFieldsMissing ||
+              saving ||
+              orderSaving
+            }
+            onClick={onSave}
+          >
+            {saving || creatingSaving
+              ? tx("settings.actions.saving", "Saving...")
+              : tx("settings.actions.savePreset", "Save preset")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-7">
@@ -3477,13 +3644,7 @@ function ModelsSettings({
               </Button>
             </div>
           ) : (
-            <div className="xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] xl:divide-x xl:divide-border/45">
-              <div
-                className={cn(
-                  "min-w-0 divide-y divide-border/45",
-                  editorOpen && "hidden xl:block",
-                )}
-              >
+            <>
               <div role="list" className="divide-y divide-border/45">
                 {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
@@ -3507,7 +3668,7 @@ function ModelsSettings({
                     draggedCallOrderIndex < orderIndex;
                   const isSelected =
                     editorOpen && !creating && selectedPreset?.name === name;
-                  return (
+                  return [
                     <div
                       key={key}
                       role="listitem"
@@ -3593,8 +3754,9 @@ function ModelsSettings({
                       )}
                       <button
                         type="button"
-                        aria-pressed={isSelected}
-                        aria-controls="model-preset-detail"
+                        aria-pressed={selectedPreset?.name === name}
+                        aria-expanded={isSelected}
+                        aria-controls={isSelected ? "model-preset-editor" : undefined}
                         disabled={!preset}
                         onClick={() => preset && selectPreset(preset)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-[12px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -3640,8 +3802,8 @@ function ModelsSettings({
                         </span>
                         <ChevronRight
                           className={cn(
-                            "h-4 w-4 shrink-0 text-muted-foreground transition-[color,transform] group-hover:translate-x-0.5",
-                            isSelected && "text-foreground",
+                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                            isSelected && "rotate-90",
                           )}
                           aria-hidden
                         />
@@ -3676,8 +3838,9 @@ function ModelsSettings({
                           aria-hidden
                         />
                       </button>
-                    </div>
-                  );
+                    </div>,
+                    isSelected ? renderPresetEditor(`editor:${key}`) : null,
+                  ];
                 })}
               </div>
               <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -3707,217 +3870,8 @@ function ModelsSettings({
                   </SettingsStatusMessage>
                 ) : null}
               </div>
-              </div>
-              <div
-                id="model-preset-detail"
-                className={cn(
-                  "min-w-0 divide-y divide-border/45",
-                  !editorOpen && "hidden xl:block",
-                )}
-              >
-                {editorOpen && (selectedPreset || creating) ? (
-                  <>
-                    <div className="flex min-h-[64px] items-center gap-2 bg-muted/15 px-4 py-3 sm:px-5">
-                      <button
-                        type="button"
-                        onClick={closeEditor}
-                        disabled={creatingSaving}
-                        aria-label={tx(
-                          "settings.models.backToPresets",
-                          "Back to model presets",
-                        )}
-                        className="-ml-2 grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 xl:hidden"
-                      >
-                        <ChevronLeft className="h-4 w-4" aria-hidden />
-                      </button>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[14px] font-semibold text-foreground/90">
-                          {creating
-                            ? tx("settings.models.newPreset", "New model preset")
-                            : selectedPreset?.label}
-                        </span>
-                        <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                          {creating
-                            ? tx(
-                                "settings.models.newPresetHelp",
-                                "Save a reusable model and its generation settings.",
-                              )
-                            : tx("settings.models.editPreset", "Edit preset")}
-                        </span>
-                      </span>
-                    </div>
-            <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
-              <Input
-                autoFocus={creating}
-                value={form.presetLabel}
-                placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
-                }
-                className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-              />
-            </SettingsRow>
-            <SettingsRow title={t("settings.rows.provider")}>
-              <ProviderPicker
-                providers={providerOptions}
-                value={providerValue}
-                emptyLabel={t("settings.byok.noConfiguredProviders")}
-                showProviderLogos={showBrandLogos}
-                onChange={(provider) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    provider,
-                    model: provider === prev.provider ? prev.model : "",
-                  }))
-                }
-              />
-            </SettingsRow>
-            {selectedProviderNeedsSignIn ? (
-              <SettingsRow
-                title={tx("settings.oauth.signInRequired", "Sign in required")}
-                description={tx(
-                  "settings.oauth.signInBeforeSaving",
-                  "Sign in before saving this provider in the preset.",
-                )}
-              >
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
-                  disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
-                  className="rounded-full"
-                >
-                  {selectedProviderSigningIn ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                  ) : null}
-                  {selectedProviderSigningIn
-                    ? tx("settings.oauth.signingIn", "Signing in...")
-                    : tx("settings.oauth.signIn", "Sign in")}
-                </Button>
-              </SettingsRow>
-            ) : null}
-            <SettingsRow title={t("settings.rows.model")}>
-              <ModelIdPicker
-                token={token}
-                settings={settings}
-                provider={form.provider}
-                value={form.model}
-                showProviderLogos={showBrandLogos}
-                onChange={(model) => setForm((prev) => ({ ...prev, model }))}
-              />
-            </SettingsRow>
-            <button
-              type="button"
-              aria-expanded={advancedOpen}
-              onClick={() => setAdvancedOpen((value) => !value)}
-              className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
-            >
-              <span>
-                <span className="block text-[14px] font-medium text-foreground">
-                  {tx("settings.models.advancedOptions", "Advanced options")}
-                </span>
-                <span className="mt-0.5 block text-[12px] text-muted-foreground">
-                  {tx(
-                    "settings.models.advancedSummary",
-                    "Context {{context}} · Max {{max}} tokens",
-                    {
-                      context: formatModelContextWindow(form.contextWindowTokens),
-                      max: formatContextWindow(form.maxTokens),
-                    },
-                  )}
-                </span>
-              </span>
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                  advancedOpen && "rotate-180",
-                )}
-                aria-hidden
-              />
-            </button>
-            {advancedOpen ? (
-              <div className="bg-muted/12 px-4 py-4 sm:px-5">
-                <ModelAdvancedFields
-                  maxTokens={form.maxTokens}
-                  contextWindowTokens={form.contextWindowTokens}
-                  temperature={form.temperature}
-                  reasoningEffort={form.reasoningEffort}
-                  onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
-                />
-              </div>
-            ) : null}
-            <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-              {creating ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="self-start rounded-full text-muted-foreground"
-                  disabled={creatingSaving}
-                  onClick={closeEditor}
-                >
-                  {tx("settings.actions.cancel", "Cancel")}
-                </Button>
-              ) : selectedPreset ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="self-start rounded-full text-muted-foreground hover:text-destructive"
-                  disabled={selectedPresetReferenced || saving || orderSaving}
-                  title={
-                    selectedPresetReferenced
-                      ? tx(
-                          "settings.models.removeBeforeDelete",
-                          "Remove this preset from the call order before deleting it.",
-                        )
-                      : undefined
-                  }
-                  onClick={() => onDeleteConfiguration(selectedPreset)}
-                >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.actions.delete", "Delete")}
-                </Button>
-              ) : null}
-              <div className="flex items-center justify-end gap-3">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full"
-                  disabled={
-                    (!creating && !dirty) ||
-                    !selectedProviderConfigured ||
-                    modelFieldsMissing ||
-                    saving ||
-                    orderSaving
-                  }
-                  onClick={onSave}
-                >
-                  {saving || creatingSaving
-                    ? tx("settings.actions.saving", "Saving...")
-                    : tx("settings.actions.savePreset", "Save preset")}
-                </Button>
-              </div>
-            </div>
-                  </>
-                ) : (
-                  <div className="flex min-h-[320px] items-center justify-center px-8 py-12 text-center">
-                    <div className="max-w-[16rem]">
-                      <span className="mx-auto grid h-10 w-10 place-items-center rounded-[14px] bg-muted text-muted-foreground">
-                        <Pencil className="h-4 w-4" aria-hidden />
-                      </span>
-                      <p className="mt-3 text-[14px] font-medium text-foreground">
-                        {tx("settings.models.selectPreset", "Select a preset")}
-                      </p>
-                      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                        {tx(
-                          "settings.models.selectPresetHelp",
-                          "Select a preset from the list to edit its model and generation settings.",
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+              {creating && editorOpen ? renderPresetEditor("editor:new") : null}
+            </>
           )}
         </SettingsGroup>
       </section>
