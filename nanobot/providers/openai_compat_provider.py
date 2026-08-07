@@ -586,7 +586,7 @@ class OpenAICompatProvider(LLMProvider):
                     if os.environ.get("LANGFUSE_SECRET_KEY"):
                         logger.warning(
                             "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
-                            "install with `pip install langfuse` to enable tracing"
+                            "run `nanobot plugins enable langfuse` to enable tracing"
                         )
                     from openai import AsyncOpenAI as _AsyncOpenAI
                 AsyncOpenAI = _AsyncOpenAI
