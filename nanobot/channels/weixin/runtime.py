@@ -85,6 +85,7 @@ BASE_INFO: dict[str, str] = {
 
 # Business error codes observed in the public iLink protocol.
 ERRCODE_CONTEXT_RESTRICTED = -2
+ERRCODE_INVALID_ARGUMENT = -3
 ERRCODE_STALE_TOKEN = -14
 WEIXIN_AUTH_EXPIRED_MESSAGE = "WeChat login expired. Scan again to reconnect."
 _REPLACED_CONFIG_TOKEN_HASH_KEY = "replaced_config_token_sha256"
@@ -724,12 +725,26 @@ class WeixinChannel(BaseChannel):
 
     async def _fetch_qr_code(self) -> tuple[str, str]:
         """Fetch a fresh QR code. Returns (qrcode_id, scan_url)."""
+        local_tokens = self._local_token_list()
         data = await self._api_post(
             "ilink/bot/get_bot_qrcode?bot_type=3",
-            {"local_token_list": self._local_token_list()},
+            {"local_token_list": local_tokens},
             auth=False,
             include_base_info=False,
         )
+        if local_tokens and ERRCODE_INVALID_ARGUMENT in {
+            self._response_int(data, "ret"),
+            self._response_int(data, "errcode"),
+        }:
+            self.logger.info(
+                "WeChat rejected saved login credentials; retrying QR login without them"
+            )
+            data = await self._api_post(
+                "ilink/bot/get_bot_qrcode?bot_type=3",
+                {"local_token_list": []},
+                auth=False,
+                include_base_info=False,
+            )
         self._raise_for_api_error("get_bot_qrcode", data)
         qrcode_img_content = cast(str, data.get("qrcode_img_content", ""))
         qrcode_id = cast(str, data.get("qrcode", ""))

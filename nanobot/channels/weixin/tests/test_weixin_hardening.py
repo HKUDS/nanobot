@@ -201,6 +201,40 @@ async def test_qr_fetch_posts_known_local_tokens(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_qr_fetch_retries_without_rejected_local_tokens(tmp_path) -> None:
+    state_dir = tmp_path / "weixin"
+    state_dir.mkdir()
+    (state_dir / "account.json").write_text(
+        json.dumps({"token": "invalid-token"}),
+        encoding="utf-8",
+    )
+    channel = _channel(stateDir=str(state_dir))
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"ret": -3},
+            {"ret": 0, "qrcode": "qr-1", "qrcode_img_content": "https://qr.test/1"},
+        ]
+    )
+
+    assert await channel._fetch_qr_code() == ("qr-1", "https://qr.test/1")
+    assert [call.args[1] for call in channel._api_post.await_args_list] == [
+        {"local_token_list": ["invalid-token"]},
+        {"local_token_list": []},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_qr_fetch_does_not_retry_invalid_request_without_local_tokens(tmp_path) -> None:
+    channel = _channel(stateDir=str(tmp_path / "weixin"))
+    channel._api_post = AsyncMock(return_value={"ret": -3})
+
+    with pytest.raises(WeixinAPIError, match="get_bot_qrcode failed.*ret=-3"):
+        await channel._fetch_qr_code()
+
+    channel._api_post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_notifications_are_best_effort() -> None:
     channel = _ready_channel()
     channel._api_post = AsyncMock(return_value={"ret": 0})
