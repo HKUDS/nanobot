@@ -49,7 +49,7 @@
     "verifyTitle": "需要驗證",
     "verifyDescription": "輸入手機微信中顯示的數字以繼續。",
     "verifyMismatch": "驗證碼不符，請輸入微信中顯示的新數字。",
-    "expired": "微信登入已過期，請重新開始。",
+    "expired": "微信登入已過期，請重新掃碼連線。",
     "failed": "無法連接微信，請重試。",
     "verifyPlaceholder": "驗證碼",
     "verifySubmit": "驗證"

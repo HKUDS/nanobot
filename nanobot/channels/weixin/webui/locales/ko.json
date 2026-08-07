@@ -48,7 +48,7 @@
     "verifyTitle": "인증 필요",
     "verifyDescription": "계속하려면 WeChat에 표시된 숫자를 입력하세요.",
     "verifyMismatch": "코드가 일치하지 않습니다. WeChat에 표시된 새 숫자를 입력하세요.",
-    "expired": "WeChat 로그인이 만료되었습니다. 다시 시작하세요.",
+    "expired": "WeChat 로그인이 만료되었습니다. 다시 연결하려면 다시 스캔하세요.",
     "failed": "WeChat에 연결할 수 없습니다. 다시 시도하세요.",
     "verifyPlaceholder": "코드",
     "verifySubmit": "인증"

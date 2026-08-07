@@ -48,7 +48,7 @@
     "verifyTitle": "Vérification requise",
     "verifyDescription": "Saisissez le nombre affiché dans WeChat pour continuer.",
     "verifyMismatch": "Le code ne correspond pas. Saisissez le nouveau nombre affiché dans WeChat.",
-    "expired": "La connexion WeChat a expiré. Recommencez.",
+    "expired": "La connexion WeChat a expiré. Scannez à nouveau pour vous reconnecter.",
     "failed": "Impossible de connecter WeChat. Réessayez.",
     "verifyPlaceholder": "Code",
     "verifySubmit": "Vérifier"

@@ -40,7 +40,7 @@ function weixinConnectMessage(
     return tx("custom.connected", "WeChat is connected.");
   }
   if (payload.status === "expired") {
-    return tx("custom.expired", "This WeChat login expired. Start again.");
+    return tx("custom.expired", "WeChat login expired. Scan again to reconnect.");
   }
   if (payload.status === "failed") {
     return payload.message
@@ -65,6 +65,7 @@ function weixinConnectMessage(
 
 export function WeixinConnectFlow({
   token,
+  feature,
   idleLabel,
   connectRequestId,
   onFeaturesUpdate,
@@ -131,6 +132,7 @@ export function WeixinConnectFlow({
       forceOnRepeat
       onFeaturesUpdate={onFeaturesUpdate}
       pausePolling={isVerificationChallenge}
+      suppressSucceeded={feature.runtime_status === "failed"}
       renderPending={renderVerification}
       resolveMessage={(payload) => weixinConnectMessage(payload, tx)}
       labels={{

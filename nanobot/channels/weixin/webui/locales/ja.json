@@ -48,7 +48,7 @@
     "verifyTitle": "確認が必要です",
     "verifyDescription": "WeChat に表示された数字を入力してください。",
     "verifyMismatch": "コードが一致しません。WeChat に表示された新しい数字を入力してください。",
-    "expired": "WeChat のログイン期限が切れました。もう一度開始してください。",
+    "expired": "WeChat のログイン期限が切れました。再接続するにはもう一度スキャンしてください。",
     "failed": "WeChat に接続できません。もう一度お試しください。",
     "verifyPlaceholder": "コード",
     "verifySubmit": "確認"

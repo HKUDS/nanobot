@@ -48,7 +48,7 @@
     "verifyTitle": "Cần xác minh",
     "verifyDescription": "Nhập số hiển thị trong WeChat để tiếp tục.",
     "verifyMismatch": "Mã không khớp. Nhập số mới hiển thị trong WeChat.",
-    "expired": "Đăng nhập WeChat đã hết hạn. Hãy bắt đầu lại.",
+    "expired": "Đăng nhập WeChat đã hết hạn. Hãy quét lại để kết nối lại.",
     "failed": "Không thể kết nối WeChat. Hãy thử lại.",
     "verifyPlaceholder": "Mã",
     "verifySubmit": "Xác minh"

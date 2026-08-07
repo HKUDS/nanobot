@@ -110,6 +110,14 @@ class BaseChannel(ABC):
         """
         return True
 
+    def start_error_message(self, error: Exception) -> str | None:
+        """Return an actionable public message for a channel startup failure.
+
+        Channel-specific exception handling stays in the owning channel. Returning
+        ``None`` keeps the manager's generic fallback.
+        """
+        return None
+
     async def send_delta(
         self,
         chat_id: str,

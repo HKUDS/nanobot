@@ -160,6 +160,29 @@ def test_save_state_persists_explicit_config_token_over_stale_state(tmp_path) ->
     assert saved["get_updates_buf"] == "current-cursor"
 
 
+def test_save_state_preserves_qr_replacement_of_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    old_runtime = WeixinChannel(config, MessageBus())
+    old_runtime._token = "configured-token"
+
+    replacement = WeixinChannel(config, MessageBus())
+    replacement.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    old_runtime._save_state()
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "replacement-token"
+    assert saved["base_url"] == "https://new.example"
+
+
 def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_path) -> None:
     channel = WeixinChannel(
         WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
@@ -594,6 +617,92 @@ async def test_poll_once_keeps_explicit_token_and_requires_login(
 
     assert channel._token == "configured-token"
     assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_loads_qr_replacement_for_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    replacement = WeixinChannel(config, MessageBus())
+    replacement.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    channel = WeixinChannel(config, MessageBus())
+    channel._token = "configured-token"
+    channel._client = object()
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"ret": 0, "errcode": -14, "errmsg": "stale"},
+            {"ret": 0},
+        ]
+    )
+
+    await channel._poll_once()
+
+    assert channel._token == "replacement-token"
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_start_uses_qr_replacement_for_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    connector = WeixinChannel(config, MessageBus())
+    connector.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    channel = WeixinChannel(config, MessageBus())
+    observed_tokens: list[str] = []
+
+    async def stop_after_first_poll() -> None:
+        observed_tokens.append(channel._token)
+        channel._running = False
+
+    channel._notify_lifecycle = AsyncMock()  # type: ignore[method-assign]
+    channel._poll_once = stop_after_first_poll  # type: ignore[method-assign]
+
+    await channel.start()
+    await channel.stop()
+
+    assert observed_tokens == ["replacement-token"]
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_manager_surfaces_actionable_weixin_auth_error(tmp_path) -> None:
+    from nanobot.channels.manager import ChannelManager
+
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel.start = AsyncMock(  # type: ignore[method-assign]
+        side_effect=WeixinAuthError(
+            "getupdates",
+            errcode=-14,
+            errmsg="stale",
+        )
+    )
+    manager = ChannelManager.__new__(ChannelManager)
+    manager._channel_errors = {}
+
+    await manager._start_channel("weixin", channel)
+
+    assert manager._channel_errors["weixin"] == (
+        "WeChat login expired. Scan again to reconnect."
+    )
 
 
 @pytest.mark.asyncio

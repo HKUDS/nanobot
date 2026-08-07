@@ -48,7 +48,7 @@
     "verifyTitle": "Verifikasi diperlukan",
     "verifyDescription": "Masukkan angka yang ditampilkan di WeChat untuk melanjutkan.",
     "verifyMismatch": "Kode tidak cocok. Masukkan angka baru yang ditampilkan di WeChat.",
-    "expired": "Login WeChat telah kedaluwarsa. Mulai lagi.",
+    "expired": "Login WeChat telah kedaluwarsa. Pindai lagi untuk menghubungkan kembali.",
     "failed": "Tidak dapat menghubungkan WeChat. Coba lagi.",
     "verifyPlaceholder": "Kode",
     "verifySubmit": "Verifikasi"

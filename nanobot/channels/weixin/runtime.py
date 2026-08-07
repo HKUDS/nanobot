@@ -86,6 +86,8 @@ BASE_INFO: dict[str, str] = {
 # Business error codes observed in the public iLink protocol.
 ERRCODE_CONTEXT_RESTRICTED = -2
 ERRCODE_STALE_TOKEN = -14
+WEIXIN_AUTH_EXPIRED_MESSAGE = "WeChat login expired. Scan again to reconnect."
+_REPLACED_CONFIG_TOKEN_HASH_KEY = "replaced_config_token_sha256"
 
 # iLink context_token is observed to expire server-side after ~90-160s of
 # agent inactivity (openclaw/openclaw#61174). Proactively refresh before
@@ -316,6 +318,7 @@ class WeixinChannel(BaseChannel):
         self._processed_ids: OrderedDict[str, None] = OrderedDict()
         self._state_dir: Path | None = None
         self._token: str = ""
+        self._replaced_config_token_hash: str = ""
         self._poll_task: asyncio.Task[None] | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._auth_required = False
@@ -342,6 +345,11 @@ class WeixinChannel(BaseChannel):
             return self._is_retryable_http_status(error.response.status_code)
         return True
 
+    def start_error_message(self, error: Exception) -> str | None:
+        if isinstance(error, WeixinAuthError):
+            return WEIXIN_AUTH_EXPIRED_MESSAGE
+        return None
+
     @staticmethod
     def _new_http_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
         """Create a direct-route client shared by login, connect, and polling."""
@@ -366,14 +374,27 @@ class WeixinChannel(BaseChannel):
         self._state_dir = d
         return d
 
-    def _load_state(self) -> bool:
+    @staticmethod
+    def _token_fingerprint(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest() if token else ""
+
+    def _load_state(self, *, required_replaced_config_token: str | None = None) -> bool:
         """Load saved account state. Returns True if a valid token was found."""
         state_file = self._get_state_dir() / "account.json"
         if not state_file.exists():
             return False
         try:
             data = cast(dict[str, Any], json.loads(state_file.read_text()))
+            replaced_config_token_hash = data.get(_REPLACED_CONFIG_TOKEN_HASH_KEY, "")
+            if not isinstance(replaced_config_token_hash, str):
+                replaced_config_token_hash = ""
+            if required_replaced_config_token is not None and (
+                replaced_config_token_hash
+                != self._token_fingerprint(required_replaced_config_token)
+            ):
+                return False
             self._token = data.get("token", "")
+            self._replaced_config_token_hash = replaced_config_token_hash
             self._get_updates_buf = data.get("get_updates_buf", "")
             context_tokens = data.get("context_tokens", {})
             if isinstance(context_tokens, dict):
@@ -411,11 +432,23 @@ class WeixinChannel(BaseChannel):
                 except Exception:
                     persisted = None
                 persisted_token = ""
+                persisted_replaced_config_token_hash = ""
                 if isinstance(persisted, dict):
                     persisted_mapping = cast(dict[str, object], persisted)
                     persisted_token = str(persisted_mapping.get("token", "") or "")
+                    persisted_hash = persisted_mapping.get(
+                        _REPLACED_CONFIG_TOKEN_HASH_KEY,
+                        "",
+                    )
+                    if isinstance(persisted_hash, str):
+                        persisted_replaced_config_token_hash = persisted_hash
+                persisted_replaces_config_token = bool(self.config.token) and (
+                    persisted_replaced_config_token_hash
+                    == self._token_fingerprint(self.config.token)
+                )
                 configured_token_is_authoritative: bool = bool(self.config.token) and (
                     self._token == self.config.token
+                    and not persisted_replaces_config_token
                 )
                 if (
                     persisted_token
@@ -432,7 +465,23 @@ class WeixinChannel(BaseChannel):
                 "typing_tickets": self._typing_tickets,
                 "base_url": self.config.base_url,
             }
+            if self._replaced_config_token_hash:
+                data[_REPLACED_CONFIG_TOKEN_HASH_KEY] = self._replaced_config_token_hash
             state_file.write_text(json.dumps(data, ensure_ascii=False))
+
+    def _commit_account(self, *, token: str, base_url: str) -> None:
+        self._token = token
+        self._auth_required = False
+        # A successful QR scan replaces only the configured token it was started
+        # against. A later manual token edit must become authoritative again.
+        self._replaced_config_token_hash = (
+            self._token_fingerprint(self.config.token)
+            if self.config.token and self.config.token != token
+            else ""
+        )
+        if base_url:
+            self.config.base_url = base_url
+        self._save_state(force=True)
 
     # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)
@@ -725,11 +774,7 @@ class WeixinChannel(BaseChannel):
                     base_url = status_data.get("baseurl", "")
                     user_id = status_data.get("ilink_user_id", "")
                     if token:
-                        self._token = token
-                        if base_url:
-                            self.config.base_url = base_url
-                        self._auth_required = False
-                        self._save_state(force=True)
+                        self._commit_account(token=token, base_url=base_url)
                         self.logger.info(
                             "login successful! bot_id={} user_id={}",
                             bot_id,
@@ -854,11 +899,7 @@ class WeixinChannel(BaseChannel):
         return self._is_retryable_qr_poll_error(err)
 
     def connect_commit_account(self, *, token: str, base_url: str) -> None:
-        self._token = token
-        self._auth_required = False
-        if base_url:
-            self.config.base_url = base_url
-        self._save_state(force=True)
+        self._commit_account(token=token, base_url=base_url)
 
     async def connect_close_client(self) -> None:
         self._running = False
@@ -910,7 +951,9 @@ class WeixinChannel(BaseChannel):
         )
 
         if self.config.token:
-            self._token = self.config.token
+            if not self._load_state(required_replaced_config_token=self.config.token):
+                self._token = self.config.token
+                self._replaced_config_token_hash = ""
         elif not self._load_state():
             if not await self._qr_login():
                 self.logger.error("login failed. Run 'nanobot channels login weixin' to authenticate.")
@@ -996,10 +1039,13 @@ class WeixinChannel(BaseChannel):
 
     def _reload_replacement_token(self) -> bool:
         """Reload credentials only when QR login persisted a newer token."""
-        if self.config.token:
-            return False
         previous_token = self._token
-        if not self._load_state() or self._token == previous_token:
+        loaded = (
+            self._load_state(required_replaced_config_token=self.config.token)
+            if self.config.token
+            else self._load_state()
+        )
+        if not loaded or self._token == previous_token:
             self._token = previous_token
             return False
         self._auth_required = False

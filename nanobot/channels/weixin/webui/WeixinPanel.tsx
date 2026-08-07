@@ -64,6 +64,7 @@ export function WeixinPanel({
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const channelTx = channelTranslator(t, "weixin");
+  const runtimeError = weixinRuntimeError(feature.runtime_error, channelTx);
   const displayName = channelTx("displayName", "WeChat");
   const enabledBusy = actionKey === `enable:${feature.name}`;
   const disabledBusy = actionKey === `disable:${feature.name}`;
@@ -262,9 +263,9 @@ export function WeixinPanel({
         </div>
       </div>
 
-      {feature.runtime_error ? (
+      {runtimeError ? (
         <div className="mt-4 rounded-[12px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive">
-          {feature.runtime_error}
+          {runtimeError}
         </div>
       ) : null}
 
@@ -518,6 +519,16 @@ function weixinStatusLabel(
   if (feature.runtime_status === "running") return tx("settings.values.on", "On");
   if (feature.enabled) return tx("settings.channels.runtimeStopped", "Not running");
   return tx("settings.values.off", "Off");
+}
+
+function weixinRuntimeError(
+  error: string | undefined,
+  tx: (key: string, fallback: string) => string,
+): string | undefined {
+  if (error === "WeChat login expired. Scan again to reconnect.") {
+    return tx("custom.expired", error);
+  }
+  return error;
 }
 
 function localizeBooleanFields(
