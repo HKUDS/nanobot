@@ -86,7 +86,6 @@ export function channelSetup(
       secret: field.kind === "secret",
       optional: !field.required,
       inputType: field.kind === "int" ? "number" : undefined,
-      boolean: field.kind === "bool",
       defaultValue: field.default_value,
       options:
         field.kind === "enum" || field.kind === "bool"

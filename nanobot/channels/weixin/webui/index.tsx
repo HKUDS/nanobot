@@ -2,8 +2,14 @@ import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 import { WeixinConnectFlow } from "./WeixinConnectFlow";
+import {
+  WEIXIN_ADVANCED_FIELD_KEYS,
+  WEIXIN_PRIMARY_FIELD_KEYS,
+  WeixinPanel,
+} from "./WeixinPanel";
 
 export default {
+  Panel: WeixinPanel,
   ConnectFlow: WeixinConnectFlow,
   canConnectBeforeConfigured: true,
   aliases: {
@@ -16,29 +22,10 @@ export default {
     logoUrl: "https://weixin.qq.com/favicon.ico",
     setup: {
       mode: "connect",
-      compact: true,
       command: "nanobot channels login weixin",
       docsUrl: chatAppGuideUrl("wechat"),
-      fields: [
-        { key: "channels.weixin.allowFrom" },
-        { key: "channels.weixin.sendProgress" },
-        { key: "channels.weixin.sendToolHints" },
-        { key: "channels.weixin.streaming" },
-      ],
-      manualFields: [
-        { key: "channels.weixin.token" },
-        { key: "channels.weixin.replyProgressMessages" },
-        { key: "channels.weixin.replyProgressMaxMessages" },
-        { key: "channels.weixin.contextMessageBudget" },
-        { key: "channels.weixin.blockStreaming" },
-        { key: "channels.weixin.blockStreamingMinChars" },
-        { key: "channels.weixin.blockStreamingMaxMessages" },
-        { key: "channels.weixin.baseUrl" },
-        { key: "channels.weixin.cdnBaseUrl" },
-        { key: "channels.weixin.routeTag" },
-        { key: "channels.weixin.stateDir" },
-        { key: "channels.weixin.pollTimeout" },
-      ],
+      fields: WEIXIN_PRIMARY_FIELD_KEYS.map((key) => ({ key })),
+      manualFields: WEIXIN_ADVANCED_FIELD_KEYS.map((key) => ({ key })),
     },
   },
 } satisfies ChannelUiContribution;

@@ -175,11 +175,7 @@ export function CredentialForm({
                         && "bg-background text-foreground ring-1 ring-inset ring-border/45",
                     )}
                   >
-                    {field.boolean && option.label.toLowerCase() === option.value
-                      ? option.value === "true"
-                        ? tx("settings.values.on", "On")
-                        : tx("settings.values.off", "Off")
-                      : option.label}
+                    {option.label}
                   </button>
                 ))}
               </span>

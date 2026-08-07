@@ -98,6 +98,32 @@ def test_channel_manager_preserves_weixin_quota_defaults(
 
 
 @pytest.mark.asyncio
+async def test_channel_manager_does_not_retry_permanent_weixin_error(monkeypatch) -> None:
+    manager = ChannelManager.__new__(ChannelManager)
+    manager.config = Config.model_validate({"channels": {"sendMaxRetries": 3}})
+    manager.bus = MessageBus()
+    channel = _channel()
+    channel.send = AsyncMock(
+        side_effect=WeixinAPIError(
+            "sendmessage",
+            errcode=-1,
+            errmsg="business rejection",
+            retryable=False,
+        )
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr("nanobot.channels.manager.asyncio.sleep", sleep)
+
+    await manager._send_with_retry(
+        channel,
+        OutboundMessage(channel="weixin", chat_id="wx-user", content="test"),
+    )
+
+    channel.send.assert_awaited_once()
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_weixin_http_clients_ignore_system_proxy(tmp_path, monkeypatch) -> None:
     captured: list[dict[str, object]] = []
 

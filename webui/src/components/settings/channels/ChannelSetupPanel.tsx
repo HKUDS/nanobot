@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Check,
   ChevronDown,
@@ -18,7 +18,6 @@ import {
 } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
-  channelValuesForSave,
   channelValuesForSubmit,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
@@ -35,7 +34,6 @@ import {
 } from "@/components/settings/channels/ChannelIdentity";
 import {
   ChannelProviderPresets,
-  ChannelGuideLink,
   ChannelSetupActions,
   ChannelSetupLinks,
   ChannelSetupSteps,
@@ -279,28 +277,19 @@ function ChannelSetupSurface({
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
-  const [autoSaveRevision, setAutoSaveRevision] = useState(0);
-  const [attemptedAutoSaveRevision, setAttemptedAutoSaveRevision] = useState(0);
-  const [autoSaveState, setAutoSaveState] = useState<"idle" | "saved">("idle");
-  const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
   const configValuesKey = JSON.stringify(feature.config_values ?? {});
   const configuredFields = useMemo(
     () => new Set(feature.configured_fields ?? []),
     [feature.configured_fields],
   );
   const mode = setup.mode ?? "credentials";
-  const compact = setup.compact ?? false;
   const fields = setup.fields ?? [];
   const requiredFields = fields.filter((field) => !field.optional);
   const primaryFields = requiredFields.length ? requiredFields : fields.slice(0, 1);
   const optionalFields = fields.filter((field) => field.optional);
   const manualFields = setup.manualFields ?? [];
   const advancedFields = mode === "connect" ? manualFields : optionalFields;
-  const editableFields = mode === "credentials"
-    ? fields
-    : mode === "connect"
-      ? [...fields, ...manualFields]
-      : [];
+  const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
   const summary = setup.summary ?? tx(
@@ -310,86 +299,33 @@ function ChannelSetupSurface({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
-  const fieldValuesRef = useRef(fieldValues);
-  const touchedFieldsRef = useRef(touchedFields);
-  const channelNameRef = useRef(feature.name);
-  const editableFieldsRef = useRef(editableFields);
-  const connectSaveContextRef = useRef({
-    token,
-    channelName: feature.name,
-    enabled: feature.enabled,
-    onFeaturesUpdate,
-  });
-  editableFieldsRef.current = editableFields;
-  connectSaveContextRef.current = {
-    token,
-    channelName: feature.name,
-    enabled: feature.enabled,
-    onFeaturesUpdate,
-  };
 
   useEffect(() => {
-    const channelChanged = channelNameRef.current !== feature.name;
-    channelNameRef.current = feature.name;
-    const dirtyFields = channelChanged ? new Set<string>() : touchedFieldsRef.current;
-    const nextValues = defaultChannelFieldValues(editableFields, feature.config_values);
-    if (mode === "connect") {
-      for (const key of dirtyFields) {
-        nextValues[key] = fieldValuesRef.current[key] ?? "";
-      }
-    }
-    fieldValuesRef.current = nextValues;
-    touchedFieldsRef.current = dirtyFields;
     setNotice(null);
     setVisibleSecrets({});
+    setSaving(false);
     setValidating(false);
     setValidation(null);
-    setTouchedFields(dirtyFields);
-    setFieldValues(nextValues);
-    if (channelChanged) {
-      setSaving(false);
-      setAutoSaveRevision(0);
-      setAttemptedAutoSaveRevision(0);
-      setAutoSaveState("idle");
-      setAutoSaveError(null);
-    }
+    setTouchedFields(new Set());
+    setFieldValues(defaultChannelFieldValues(editableFields, feature.config_values));
   }, [configValuesKey, feature.name]);
-
-  useEffect(() => {
-    if (autoSaveState !== "saved") return;
-    const timeout = window.setTimeout(() => setAutoSaveState("idle"), 1500);
-    return () => window.clearTimeout(timeout);
-  }, [autoSaveState]);
 
   const toggleSecret = (key: string) => {
     setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
   };
 
   const setFieldValue = (key: string, value: string) => {
-    if (fieldValuesRef.current[key] === value) return;
-    const nextValues = { ...fieldValuesRef.current, [key]: value };
-    const nextTouchedFields = new Set(touchedFieldsRef.current).add(key);
-    fieldValuesRef.current = nextValues;
-    touchedFieldsRef.current = nextTouchedFields;
-    setFieldValues(nextValues);
-    setTouchedFields(nextTouchedFields);
-    setNotice(null);
-    setAutoSaveError(null);
-    setAutoSaveState("idle");
-    if (mode === "connect") setAutoSaveRevision((current) => current + 1);
+    setFieldValues((current) => ({ ...current, [key]: value }));
+    setTouchedFields((current) => new Set(current).add(key));
   };
 
   const applyPreset = (preset: ChannelProviderPreset) => {
-    const nextValues = { ...fieldValuesRef.current, ...preset.values };
-    const nextTouchedFields = new Set(touchedFieldsRef.current);
-    for (const key of Object.keys(preset.values)) nextTouchedFields.add(key);
-    fieldValuesRef.current = nextValues;
-    touchedFieldsRef.current = nextTouchedFields;
-    setFieldValues(nextValues);
-    setTouchedFields(nextTouchedFields);
-    setAutoSaveError(null);
-    setAutoSaveState("idle");
-    if (mode === "connect") setAutoSaveRevision((current) => current + 1);
+    setFieldValues((current) => ({ ...current, ...preset.values }));
+    setTouchedFields((current) => {
+      const next = new Set(current);
+      for (const key of Object.keys(preset.values)) next.add(key);
+      return next;
+    });
   };
 
   const copyCommand = () => {
@@ -436,74 +372,6 @@ function ChannelSetupSurface({
     }
   };
 
-  const saveConnectSettings = useCallback(async (
-    values: Record<string, string>,
-    savedFields: Set<string>,
-  ) => {
-    const saveContext = connectSaveContextRef.current;
-    setSaving(true);
-    setAutoSaveError(null);
-    setAutoSaveState("idle");
-    try {
-      const payload = await configureChannel(
-        saveContext.token,
-        saveContext.channelName,
-        channelValuesForSave(editableFieldsRef.current, values),
-        { enable: saveContext.enabled },
-      );
-      const channelStillSelected =
-        connectSaveContextRef.current.channelName === saveContext.channelName;
-      if (!channelStillSelected) {
-        if (payload.nanobot_features) {
-          saveContext.onFeaturesUpdate(payload.nanobot_features);
-        }
-        return;
-      }
-      const remainingFields = new Set(touchedFieldsRef.current);
-      for (const key of savedFields) {
-        if (fieldValuesRef.current[key] === values[key]) remainingFields.delete(key);
-      }
-      touchedFieldsRef.current = remainingFields;
-      setTouchedFields(remainingFields);
-      setAutoSaveState(remainingFields.size ? "idle" : "saved");
-      if (payload.nanobot_features) {
-        saveContext.onFeaturesUpdate(payload.nanobot_features);
-      }
-    } catch (err) {
-      if (connectSaveContextRef.current.channelName === saveContext.channelName) {
-        setAutoSaveError((err as Error).message);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (
-      mode !== "connect"
-      || !editableFields.length
-      || !touchedFields.size
-      || saving
-      || autoSaveRevision <= attemptedAutoSaveRevision
-    ) return;
-    const timeout = window.setTimeout(() => {
-      setAttemptedAutoSaveRevision(autoSaveRevision);
-      void saveConnectSettings(
-        { ...fieldValuesRef.current },
-        new Set(touchedFieldsRef.current),
-      );
-    }, 500);
-    return () => window.clearTimeout(timeout);
-  }, [
-    attemptedAutoSaveRevision,
-    autoSaveRevision,
-    editableFields.length,
-    mode,
-    saveConnectSettings,
-    saving,
-    touchedFields.size,
-  ]);
-
   const checkCurrentSettings = async () => {
     setValidating(true);
     setNotice(null);
@@ -528,70 +396,48 @@ function ChannelSetupSurface({
 
   return (
     <form
-      className={compact ? "mt-4 space-y-4" : "mt-5 space-y-5"}
+      className="mt-5 space-y-5"
       onSubmit={(event) => {
         event.preventDefault();
         if (mode === "credentials") void saveCredentialSettings();
       }}
     >
       <section>
-        {!compact ? (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[13px] font-semibold text-foreground">
-                {tx("settings.channels.requiredSetup", "Required setup")}
-              </div>
-              <div className="flex max-w-full flex-wrap justify-end gap-2">
-                {mode !== "webui" ? (
-                  <ChannelValidationBadge
-                    validation={validation}
-                    validating={validating}
-                    feature={feature}
-                  />
-                ) : null}
-                {mode === "webui" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
-                    <Check className="h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.channels.managedByWebui", "Managed by WebUI")}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
-            <p className="mt-3 text-[12.5px] leading-5 text-muted-foreground">{summary}</p>
-            <ChannelValidationDetails validation={validation} />
-            <ChannelSetupLinks
-              feature={feature}
-              setup={setup}
-              chatAppsDocsUrl={chatAppsDocsUrl}
-            />
-            <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
-          </>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[13px] font-semibold text-foreground">
+            {tx("settings.channels.requiredSetup", "Required setup")}
+          </div>
+          <div className="flex max-w-full flex-wrap justify-end gap-2">
+            {mode !== "webui" ? (
+              <ChannelValidationBadge
+                validation={validation}
+                validating={validating}
+                feature={feature}
+              />
+            ) : null}
+            {mode === "webui" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tx("settings.channels.managedByWebui", "Managed by WebUI")}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
+
+        <p className="mt-3 text-[12.5px] leading-5 text-muted-foreground">{summary}</p>
+        <ChannelValidationDetails validation={validation} />
+        <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
+        <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
         {mode === "connect" && ConnectFlow ? (
-          <>
-            <ConnectFlow
-              token={token}
-              feature={feature}
-              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-              connectRequestId={connectRequestId}
-              onFeaturesUpdate={onFeaturesUpdate}
-            />
-            {fields.length ? (
-              <div className="mt-5">
-                <CredentialForm
-                  fields={fields}
-                  values={fieldValues}
-                  configuredFields={configuredFields}
-                  visibleSecrets={visibleSecrets}
-                  onChange={setFieldValue}
-                  onToggleSecret={toggleSecret}
-                  compact
-                />
-              </div>
-            ) : null}
-          </>
+          <ConnectFlow
+            token={token}
+            feature={feature}
+            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+            connectRequestId={connectRequestId}
+            onFeaturesUpdate={onFeaturesUpdate}
+          />
         ) : mode === "connect" ? (
           <>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -678,39 +524,6 @@ function ChannelSetupSurface({
         ) : null}
       </section>
 
-      {mode === "connect" && editableFields.length ? (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className={cn(
-            "flex items-center justify-end gap-1.5 text-[11px] leading-4 text-muted-foreground",
-            !saving && autoSaveState !== "saved" && "sr-only",
-          )}
-        >
-          {saving ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              {tx("settings.actions.saving", "Saving")}
-            </>
-          ) : autoSaveState === "saved" ? (
-            <>
-              <Check className="h-3 w-3" aria-hidden />
-              {tx("settings.channels.savedSettings", "Saved settings.")}
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {autoSaveError ? (
-        <div
-          role="alert"
-          className="rounded-[12px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive"
-        >
-          {autoSaveError}
-        </div>
-      ) : null}
-
       {notice ? (
         <div
           role="status"
@@ -720,7 +533,7 @@ function ChannelSetupSurface({
         </div>
       ) : null}
 
-      {!compact && setup.steps.length ? (
+      {setup.steps.length ? (
         <ChannelSetupSteps steps={setup.steps} tryIt={setup.tryIt} />
       ) : null}
 
@@ -743,16 +556,6 @@ function ChannelSetupSurface({
                 visibleSecrets={visibleSecrets}
                 onChange={setFieldValue}
                 onToggleSecret={toggleSecret}
-                compact
-              />
-            </div>
-          ) : null}
-          {compact ? (
-            <div className="mt-3 flex justify-end">
-              <ChannelGuideLink
-                feature={feature}
-                setup={setup}
-                chatAppsDocsUrl={chatAppsDocsUrl}
                 compact
               />
             </div>

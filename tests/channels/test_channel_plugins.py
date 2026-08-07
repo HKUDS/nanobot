@@ -3004,47 +3004,6 @@ async def test_send_with_retry_retries_on_failure():
 
 
 @pytest.mark.asyncio
-async def test_send_with_retry_honors_channel_non_retryable_error():
-    call_count = 0
-
-    class _RejectedChannel(BaseChannel):
-        name = "rejected"
-        display_name = "Rejected"
-
-        async def start(self) -> None:
-            pass
-
-        async def stop(self) -> None:
-            pass
-
-        async def send(self, msg: OutboundMessage) -> None:
-            nonlocal call_count
-            call_count += 1
-            raise RuntimeError("business rejection")
-
-        def should_retry_send_error(self, error: Exception) -> bool:
-            return False
-
-    fake_config = SimpleNamespace(
-        channels=ChannelsConfig(send_max_retries=3),
-        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
-    )
-    mgr = ChannelManager.__new__(ChannelManager)
-    mgr.config = fake_config
-    mgr.bus = MessageBus()
-    channel = _RejectedChannel(fake_config, mgr.bus)
-
-    with patch("nanobot.channels.manager.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        await mgr._send_with_retry(
-            channel,
-            OutboundMessage(channel="rejected", chat_id="123", content="test"),
-        )
-
-    assert call_count == 1
-    sleep.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_send_with_retry_no_retry_when_max_is_zero():
     """_send_with_retry should not retry when send_max_retries is 0."""
     call_count = 0

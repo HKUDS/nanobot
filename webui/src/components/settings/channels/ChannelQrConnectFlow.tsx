@@ -76,7 +76,6 @@ export function ChannelQrConnectFlow({
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
-  const ignoredPollSessions = useRef(new Set<string>());
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const startDomain = startOptions.domain;
@@ -132,7 +131,7 @@ export function ChannelQrConnectFlow({
           channelName,
           sessionId,
         );
-        if (cancelled || ignoredPollSessions.current.has(sessionId)) return;
+        if (cancelled) return;
         setConnect((current) => ({
           ...(current ?? payload),
           ...payload,
@@ -171,7 +170,6 @@ export function ChannelQrConnectFlow({
   ]);
 
   const start = useCallback(async (force = false) => {
-    ignoredPollSessions.current.clear();
     setBusy(true);
     setError(null);
     try {
@@ -200,18 +198,15 @@ export function ChannelQrConnectFlow({
       setConnect(null);
       return;
     }
-    const sessionId = connect.session_id;
-    ignoredPollSessions.current.add(sessionId);
     setBusy(true);
     try {
       const payload = await cancelChannelConnect(
         tokenRef.current,
         channelName,
-        sessionId,
+        connect.session_id,
       );
       setConnect(payload);
     } catch (err) {
-      ignoredPollSessions.current.delete(sessionId);
       setError((err as Error).message);
     } finally {
       setBusy(false);
