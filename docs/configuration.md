@@ -2331,6 +2331,11 @@ This initial compatibility layer loads the portable `skills/` component only. Ag
 need an explicit trust and approval flow. Configure a reviewed MCP server through **Apps** or
 `tools.mcpServers` for now.
 
+CLI Apps installed from the WebUI use the same package layout. nanobot installs the CLI through
+its catalog adapter, then writes a skills-only Agent Plugin under `<workspace>/plugins/`; updates
+refresh that package and uninstall removes it. The external executable remains managed by the
+CLI Apps installer rather than by the Agent Plugins manifest.
+
 ## Tool Hint Max Length
 
 Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.

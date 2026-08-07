@@ -39,7 +39,7 @@ def test_cli_app_mentions_inject_runtime_metadata(tmp_path, monkeypatch):
     assert "CLI App Mention: @zoom" in joined
     assert "tool=run_cli_app" in joined
     assert "entry_point=cli-anything-zoom" in joined
-    assert "skill=skills/cli-app-zoom/SKILL.md" in joined
+    assert "skill=plugins/cli-app-zoom/skills/cli-app-zoom/SKILL.md" in joined
 
 
 def test_structured_cli_app_attachment_injects_runtime_metadata(tmp_path):
@@ -61,4 +61,4 @@ def test_structured_cli_app_attachment_injects_runtime_metadata(tmp_path):
     assert "CLI App Attachment: @zoom" in joined
     assert "tool=run_cli_app" in joined
     assert "entry_point=cli-anything-zoom" in joined
-    assert "skill=skills/cli-app-zoom/SKILL.md" in joined
+    assert "skill=plugins/cli-app-zoom/skills/cli-app-zoom/SKILL.md" in joined

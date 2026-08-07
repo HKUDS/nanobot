@@ -18,6 +18,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
+import yaml
 from loguru import logger
 
 from nanobot.apps.protocol import app_manifest, compact_dict
@@ -27,6 +28,7 @@ from nanobot.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
+AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
 NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
 _CATALOG_SOURCES = (
@@ -41,6 +43,8 @@ _MAX_ARTIFACT_REPORT = 12
 _SAFE_NAME_RE = re.compile(r"[^a-z0-9_-]+")
 _SAFE_NPM_DIR_RE = re.compile(r"^[a-z0-9._-]+$", re.IGNORECASE)
 _MENTION_RE = re.compile(r"(^|[\s([{])@([a-z0-9_-]+)\b", re.IGNORECASE)
+_SKILL_FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", re.DOTALL)
+_SKILL_NAME_LINE_RE = re.compile(r"^name\s*:.*$", re.MULTILINE)
 _SHELL_META_CHARS = ("|", "&&", "||", ";", "$(", "`", ">", "<")
 _ENDORSEMENT_WORD_RE = re.compile(r"\bofficial\s+", re.IGNORECASE)
 _ARTIFACT_EXTENSIONS = frozenset({
@@ -211,8 +215,13 @@ def _as_object_dict(value: object) -> dict[str, Any] | None:
 
 
 def _safe_skill_name(name: str) -> str:
-    clean = _SAFE_NAME_RE.sub("-", name.lower()).strip("-")
+    clean = _SAFE_NAME_RE.sub("-", name.lower()).replace("_", "-").strip("-")
     return f"cli-app-{clean or 'app'}"
+
+
+def _skill_relative_path(name: str) -> str:
+    skill_name = _safe_skill_name(name)
+    return f"plugins/{skill_name}/skills/{skill_name}/SKILL.md"
 
 
 def _has_shell_meta(command: str) -> bool:
@@ -613,7 +622,7 @@ class CliAppManager:
                     "name": installed_name,
                     "entry_point": entry_point,
                     "source": str(data.get("source") or ""),
-                    "skill": f"skills/{_safe_skill_name(installed_name)}/SKILL.md",
+                    "skill": _skill_relative_path(installed_name),
                     "tool": "run_cli_app",
                 }
             )
@@ -640,6 +649,10 @@ class CliAppManager:
         return not _has_shell_meta(install_cmd)
 
     def _skill_path(self, name: str) -> Path:
+        skill_name = _safe_skill_name(name)
+        return self.workspace / "plugins" / skill_name / "skills" / skill_name / "SKILL.md"
+
+    def _legacy_skill_path(self, name: str) -> Path:
         return self.workspace / "skills" / _safe_skill_name(name) / "SKILL.md"
 
     def _app_payload(
@@ -713,7 +726,8 @@ class CliAppManager:
         name = str(app["name"])
         entry_point = str(app.get("entry_point") or "")
         strategy = self._strategy(app)
-        skill_path = f"skills/{_safe_skill_name(name)}/SKILL.md"
+        skill_path = _skill_relative_path(name)
+        plugin_path = f"plugins/{_safe_skill_name(name)}"
         capabilities = [
             compact_dict({
                 "type": "cli",
@@ -726,13 +740,13 @@ class CliAppManager:
         install = compact_dict({
             "supported": install_supported,
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": ["entry_point_available"] if entry_point else [],
         })
         remove = compact_dict({
             "supported": strategy != "unsupported",
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": (
                 ["package_manager_ok", "entry_point_absent", "managed_paths_absent"]
                 if strategy not in {"bundled", "unsupported"}
@@ -1032,11 +1046,10 @@ class CliAppManager:
         name = str(app.get("name") or "unknown")
         display = str(app.get("display_name") or name)
         entry = str(app.get("entry_point") or f"cli-anything-{name}")
-        description = _catalog_description(app) or f"Use {display} from nanobot."
+        description = (_catalog_description(app) or f"Use {display} from nanobot.")[:1024]
         return f"""---
 name: {_safe_skill_name(name)}
-description: >-
-  {description}
+description: {json.dumps(description, ensure_ascii=False)}
 ---
 
 # {display}
@@ -1072,18 +1085,53 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                     return "".join(lines[: index + 1]) + "\n" + note + "\n" + "".join(lines[index + 1 :])
         return note + "\n" + content
 
+    def _normalise_skill(self, content: str, app: dict[str, Any]) -> str:
+        """Give a catalog skill the identity required by its plugin directory."""
+        match = _SKILL_FRONTMATTER_RE.match(content)
+        if match is None:
+            return self._fallback_skill(app)
+        try:
+            metadata = _as_object_dict(cast(object, yaml.safe_load(match.group(1))))
+        except yaml.YAMLError:
+            return self._fallback_skill(app)
+        description = metadata.get("description") if metadata is not None else None
+        if not isinstance(description, str) or not 1 <= len(description.strip()) <= 1024:
+            return self._fallback_skill(app)
+
+        name = _safe_skill_name(str(app["name"]))
+        frontmatter, replaced = _SKILL_NAME_LINE_RE.subn(f"name: {name}", match.group(1), count=1)
+        if not replaced:
+            frontmatter = f"name: {name}\n{frontmatter}"
+        body = content[match.end():].lstrip()
+        return f"---\n{frontmatter.strip()}\n---\n\n{body}"
+
     def install_skill(self, app: dict[str, Any]) -> Path:
         path = self._skill_path(str(app["name"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         content = self._fetch_skill_content(app) or self._fallback_skill(app)
+        content = self._normalise_skill(content, app)
         content = self._with_nanobot_skill_note(content, app)
         path.write_text(content, encoding="utf-8")
+        plugin_root = path.parents[2]
+        manifest = compact_dict({
+            "$schema": AGENT_PLUGIN_SCHEMA,
+            "name": _safe_skill_name(str(app["name"])),
+            "version": str(app.get("version") or ""),
+            "description": _catalog_description(app),
+        })
+        _write_json(plugin_root / "plugin.json", manifest)
+        legacy_dir = self._legacy_skill_path(str(app["name"])).parent
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
         return path
 
     def remove_skill(self, name: str) -> None:
-        skill_dir = self._skill_path(name).parent
-        if skill_dir.is_dir():
-            shutil.rmtree(skill_dir)
+        plugin_root = self._skill_path(name).parents[2]
+        if plugin_root.is_dir():
+            shutil.rmtree(plugin_root)
+        legacy_dir = self._legacy_skill_path(name).parent
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
 
     def _record_installed(self, app: dict[str, Any]) -> dict[str, Any]:
         installed = self._load_installed()

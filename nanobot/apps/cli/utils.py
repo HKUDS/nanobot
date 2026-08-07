@@ -41,7 +41,8 @@ def runtime_lines_for_request(
                 f"@{str(item['name']).strip().lower()} "
                 f"(installed; tool=run_cli_app; "
                 f"entry_point={str(item.get('entry_point') or 'unknown')}; "
-                f"skill=skills/cli-app-{str(item['name']).strip().lower()}/SKILL.md). "
+                f"skill=plugins/cli-app-{str(item['name']).strip().lower()}/skills/"
+                f"cli-app-{str(item['name']).strip().lower()}/SKILL.md). "
                 "Read the skill when useful, then run this app with `run_cli_app`; do not bypass it with shell."
                 for item in mentions
                 if str(item.get("name") or "").strip()

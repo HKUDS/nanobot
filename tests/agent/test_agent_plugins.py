@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,21 @@ def test_skills_loader_discovers_agent_plugin_skill(tmp_path: Path) -> None:
     assert "Draft release notes" in (loader.load_skill("release-notes") or "")
     assert "### Agent Plugin skills" in loader.build_skills_summary()
     assert "`acme-tools/skills/release-notes/SKILL.md`" in loader.build_skills_summary()
+
+
+def test_skills_loader_sees_plugin_installed_after_startup(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=tmp_path / "builtin")
+    assert loader.list_skills() == []
+
+    plugin = _write_plugin(tmp_path, "acme-tools")
+    _write_skill(plugin, "release-notes")
+
+    assert [entry["name"] for entry in loader.list_skills()] == ["release-notes"]
+
+    shutil.rmtree(plugin)
+
+    assert loader.list_skills() == []
+    assert loader.build_skills_summary() == ""
 
 
 def test_agent_plugin_skills_are_direct_children_only(tmp_path: Path) -> None:

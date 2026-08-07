@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.agent_plugins import discover_agent_plugin_skills
 from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
 
 
@@ -391,6 +392,9 @@ def test_install_dispatches_safe_pip_and_installs_skill(
         "_fetch_skill_content",
         lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
     )
+    legacy = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("legacy", encoding="utf-8")
 
     payload = manager.install("gimp")
 
@@ -400,9 +404,21 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     assert "state_recorded" in payload["last_action"]["verification"]
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point"] == "cli-anything-gimp"
-    skill = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
+    plugin = manager.workspace / "plugins" / "cli-app-gimp"
+    skill = plugin / "skills" / "cli-app-gimp" / "SKILL.md"
     assert skill.is_file()
+    assert json.loads((plugin / "plugin.json").read_text(encoding="utf-8")) == {
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        "name": "cli-app-gimp",
+        "version": "1.0.0",
+        "description": "Public duplicate entry",
+    }
+    assert "name: cli-app-gimp" in skill.read_text(encoding="utf-8")
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
+    assert [item.name for item in discover_agent_plugin_skills(manager.workspace)] == [
+        "cli-app-gimp"
+    ]
+    assert not legacy.exists()
 
 
 def test_run_argv_logs_command_exit_and_output(
@@ -487,7 +503,14 @@ def test_install_records_available_cli_without_reinstalling(
     assert "entry_point_available" in payload["last_action"]["verification"]
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["feishu"]["entry_point_path"] == str(resolved)
-    skill = manager.workspace / "skills" / "cli-app-feishu" / "SKILL.md"
+    skill = (
+        manager.workspace
+        / "plugins"
+        / "cli-app-feishu"
+        / "skills"
+        / "cli-app-feishu"
+        / "SKILL.md"
+    )
     assert skill.is_file()
     assert 'run_cli_app` tool with `name="feishu"' in skill.read_text(encoding="utf-8")
 
@@ -704,7 +727,8 @@ def test_uninstall_removes_installed_state_and_generated_skill(
     manager = _manager(tmp_path)
     _seed_catalog(manager)
     manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
-    skill_dir = manager.workspace / "skills" / "cli-app-gimp"
+    plugin_dir = manager.workspace / "plugins" / "cli-app-gimp"
+    skill_dir = plugin_dir / "skills" / "cli-app-gimp"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# GIMP\n", encoding="utf-8")
     monkeypatch.setattr(
@@ -717,7 +741,7 @@ def test_uninstall_removes_installed_state_and_generated_skill(
 
     assert payload["last_action"]["ok"] is True
     assert "gimp" not in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
-    assert not skill_dir.exists()
+    assert not plugin_dir.exists()
 
 
 def test_uninstall_uses_safe_python_m_pip_uninstall_command(
@@ -845,14 +869,14 @@ def test_mentioned_installed_apps_only_returns_installed_mentions(tmp_path: Path
             "name": "zoom",
             "entry_point": "cli-anything-zoom",
             "source": "public",
-            "skill": "skills/cli-app-zoom/SKILL.md",
+            "skill": "plugins/cli-app-zoom/skills/cli-app-zoom/SKILL.md",
             "tool": "run_cli_app",
         },
         {
             "name": "gimp",
             "entry_point": "cli-anything-gimp",
             "source": "harness",
-            "skill": "skills/cli-app-gimp/SKILL.md",
+            "skill": "plugins/cli-app-gimp/skills/cli-app-gimp/SKILL.md",
             "tool": "run_cli_app",
         },
     ]

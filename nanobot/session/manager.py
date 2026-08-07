@@ -285,7 +285,7 @@ class Session:
                     )
                     cli_lines.append(
                         f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry_point}; "
-                        f"skill=skills/cli-app-{name}/SKILL.md]"
+                        f"skill=plugins/cli-app-{name}/skills/cli-app-{name}/SKILL.md]"
                     )
                 if cli_lines:
                     breadcrumbs = "\n".join(cli_lines)
