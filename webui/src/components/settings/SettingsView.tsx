@@ -1467,21 +1467,10 @@ export function SettingsView({
     ) {
       return;
     }
-    const presetName = modelPresetPendingDelete.name;
-    const nextOrder = modelCallOrder.includes(presetName)
-      ? modelCallOrder.filter((name) => name !== presetName)
-      : null;
-    if (nextOrder?.length === 0) return;
     setSaving(true);
     try {
-      if (nextOrder) {
-        const orderedPayload = await updateModelCallOrder(token, nextOrder);
-        applyPayload(orderedPayload);
-        onModelNameChange(orderedPayload.agent.model || null);
-      }
-      const payload = await deleteModelConfiguration(token, presetName);
+      const payload = await deleteModelConfiguration(token, modelPresetPendingDelete.name);
       applyPayload(payload);
-      onModelNameChange(payload.agent.model || null);
       setModelPresetPendingDelete(null);
       setError(null);
     } catch (err) {
@@ -3384,11 +3373,6 @@ function ModelsSettings({
   const selectedPresetReferenced = Boolean(
     selectedPreset && callOrder.includes(selectedPreset.name),
   );
-  const selectedPresetOnlyActive = Boolean(
-    selectedPresetReferenced &&
-      selectedPreset &&
-      !callOrder.some((name) => name !== selectedPreset.name),
-  );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (preset: SettingsPayload["model_presets"][number]) => {
     const toggleCurrentPreset = !creating && selectedPreset?.name === preset.name;
@@ -3453,7 +3437,7 @@ function ModelsSettings({
       key={key}
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="divide-y divide-border/45 bg-muted/10 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+      className="divide-y divide-border/45 bg-muted/30 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
     >
       {creating ? (
         <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
@@ -3582,16 +3566,16 @@ function ModelsSettings({
               size="sm"
               variant="ghost"
               className="rounded-full text-muted-foreground hover:text-destructive"
-              disabled={selectedPresetOnlyActive || saving || orderSaving}
+              disabled={selectedPresetReferenced || saving || orderSaving}
               aria-describedby={
-                selectedPresetOnlyActive ? "model-preset-delete-hint" : undefined
+                selectedPresetReferenced ? "model-preset-delete-hint" : undefined
               }
               onClick={() => onDeleteConfiguration(selectedPreset)}
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               {tx("settings.actions.delete", "Delete")}
             </Button>
-            {selectedPresetOnlyActive ? (
+            {selectedPresetReferenced ? (
               <span
                 id="model-preset-delete-hint"
                 className="text-[11px] leading-4 text-muted-foreground"

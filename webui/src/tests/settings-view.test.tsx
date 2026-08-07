@@ -2167,7 +2167,7 @@ describe("SettingsView Apps catalog", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveAttribute("aria-controls", "model-preset-editor");
     expect(row.nextElementSibling).toBe(editor);
-    expect(editor).toHaveClass("slide-in-from-top-1", "bg-muted/10");
+    expect(editor).toHaveClass("slide-in-from-top-1", "bg-muted/30");
     expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
     const deleteButton = within(editor).getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
@@ -2180,74 +2180,6 @@ describe("SettingsView Apps catalog", () => {
 
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument();
-  });
-
-  it("removes an active preset from the call order before deleting it", async () => {
-    const { payload, backupPreset } = settingsPayloadWithBackup();
-    const orderedPayload: SettingsPayload = {
-      ...payload,
-      agent: {
-        ...payload.agent,
-        model: backupPreset.model,
-        provider: backupPreset.provider,
-        resolved_provider: backupPreset.resolved_provider,
-        model_preset: backupPreset.name,
-      },
-      model_presets: payload.model_presets.map((preset) => ({
-        ...preset,
-        active: preset.name === backupPreset.name,
-      })),
-      model_call_order: [backupPreset.name],
-    };
-    const deletedPayload: SettingsPayload = {
-      ...orderedPayload,
-      model_presets: orderedPayload.model_presets.filter(
-        (preset) => preset.name !== "primary",
-      ),
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/settings") return jsonResponse(payload);
-      if (url === "/api/settings/cli-apps") {
-        return jsonResponse({ apps: [], installed_count: 0 });
-      }
-      if (url === "/api/settings/mcp-presets") {
-        return jsonResponse({ presets: [], installed_count: 0 });
-      }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return jsonResponse(orderedPayload);
-      }
-      if (url.startsWith("/api/settings/model-configurations/delete?")) {
-        return jsonResponse(deletedPayload);
-      }
-      return { ok: false, status: 404, json: async () => ({}) } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderSettingsView({ initialSection: "models", initialSettings: payload });
-
-    await togglePresetEditor();
-    const deleteButton = screen.getByRole("button", { name: "Delete" });
-    expect(deleteButton).toBeEnabled();
-    fireEvent.click(deleteButton);
-    const dialog = await screen.findByRole("dialog", { name: "Delete model preset?" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-
-    await waitFor(() => {
-      const urls = fetchMock.mock.calls.map(([input]) => String(input));
-      const orderCallIndex = urls.findIndex((url) =>
-        url.startsWith("/api/settings/model-call-order/update?"),
-      );
-      const deleteCallIndex = urls.findIndex((url) =>
-        url.startsWith("/api/settings/model-configurations/delete?"),
-      );
-      expect(orderCallIndex).toBeGreaterThanOrEqual(0);
-      expect(deleteCallIndex).toBeGreaterThan(orderCallIndex);
-      const orderUrl = new URL(urls[orderCallIndex], "http://nanobot.test");
-      expect(JSON.parse(orderUrl.searchParams.get("order") ?? "[]")).toEqual(["backup"]);
-    });
-    expect(screen.queryByTestId("model-call-order-row-primary")).not.toBeInTheDocument();
-    expect(screen.getByTestId("model-call-order-row-backup")).toBeInTheDocument();
   });
 
   it("drags model presets to reorder and saves the model call order immediately", async () => {
