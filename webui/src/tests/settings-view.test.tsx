@@ -2167,7 +2167,11 @@ describe("SettingsView Apps catalog", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveAttribute("aria-controls", "model-preset-editor");
     expect(row.nextElementSibling).toBe(editor);
-    expect(editor).toHaveClass("slide-in-from-top-1", "bg-background/70");
+    expect(editor).toHaveClass(
+      "slide-in-from-top-1",
+      "lg:max-w-6xl",
+      "rounded-[18px]",
+    );
     expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
     const deleteButton = within(editor).getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
