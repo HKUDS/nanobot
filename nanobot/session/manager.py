@@ -352,12 +352,14 @@ class Session:
 
         start_idx = max(0, len(self.messages) - max_messages)
         if extend_to_user:
-            start_idx = next(
+            recovered_user = next(
                 (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                start_idx,
+                None,
             )
-            if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
-                start_idx -= 1
+            if recovered_user is not None:
+                start_idx = recovered_user
+                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
+                    start_idx -= 1
 
         retained = self.messages[start_idx:]
 

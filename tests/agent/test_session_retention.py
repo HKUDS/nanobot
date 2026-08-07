@@ -120,6 +120,20 @@ def test_retain_extend_to_user_matches_get_history_boundary():
     assert _contents(session.messages) == _contents(expected)
 
 
+def test_retain_extend_to_user_does_not_extend_delivery_only_tail():
+    session = Session(key="test:extend-no-user")
+    for i in range(4):
+        session.messages.append(_delivery(f"notification {i}"))
+
+    session.retain_recent_legal_suffix(3, extend_to_user=True)
+
+    assert _contents(session.messages) == [
+        "notification 1",
+        "notification 2",
+        "notification 3",
+    ]
+
+
 # --- Only the immediately-preceding delivery is part of the anchor ---
 
 
