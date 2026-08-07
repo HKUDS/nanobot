@@ -1074,9 +1074,8 @@ async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path)
     """User turns that attach images must record the media paths alongside
     the text so the webui can rehydrate previews on session replay.
 
-    This is the producer half of the signed-media-URL round-trip: paths are
-    stored here, then :meth:`WebSocketChannel._augment_media_urls` maps them
-    onto signed URLs on the way out.
+    The WebUI transcript replay can use these paths to restore attachment
+    previews when it backfills from canonical session history.
     """
     img_a = tmp_path / "uuid-1.png"
     img_a.write_bytes(_PNG_1X1)

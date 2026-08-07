@@ -19,11 +19,6 @@ from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.optional_features import InstallResult
-from nanobot.runtime_context import (
-    RUNTIME_CONTEXT_HISTORY_META,
-    RuntimeContextBlock,
-    append_runtime_context,
-)
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -256,7 +251,7 @@ async def test_bootstrap_returns_token_for_localhost(
 
 
 @pytest.mark.asyncio
-async def test_sessions_routes_require_bearer_token(
+async def test_sessions_list_requires_bearer_token(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path, key="websocket:abc")
@@ -278,14 +273,26 @@ async def test_sessions_routes_require_bearer_token(
         # Server stays an opaque source: filesystem paths must not leak to the wire.
         assert all("path" not in s for s in listing.json()["sessions"])
 
-        msgs = await _http_get(
-            "http://127.0.0.1:29902/api/sessions/websocket:abc/messages",
-            headers=auth,
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_messages_route_is_not_exposed(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = _seed_session(tmp_path, key="websocket:legacy")
+    channel = _ch(bus, session_manager=sm, port=29919)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            "http://127.0.0.1:29919/api/sessions/websocket:legacy/messages",
+            headers={"Authorization": f"Bearer {token}"},
         )
-        assert msgs.status_code == 200
-        body = msgs.json()
-        assert body["key"] == "websocket:abc"
-        assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+
+        assert response.status_code == 404
     finally:
         await channel.stop()
         await server_task
@@ -2847,7 +2854,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
 
 
 @pytest.mark.asyncio
-async def test_session_routes_accept_percent_encoded_websocket_keys(
+async def test_session_delete_accepts_percent_encoded_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path, key="websocket:encoded-key")
@@ -2856,13 +2863,6 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
-
-        msgs = await _http_get(
-            "http://127.0.0.1:29910/api/sessions/websocket%3Aencoded-key/messages",
-            headers=auth,
-        )
-        assert msgs.status_code == 200
-        assert msgs.json()["key"] == "websocket:encoded-key"
 
         path = sm._get_session_path("websocket:encoded-key")
         assert path.exists()
@@ -2873,41 +2873,6 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
         assert not path.exists()
-    finally:
-        await channel.stop()
-        await server_task
-
-
-@pytest.mark.asyncio
-async def test_session_messages_hide_persisted_runtime_context(
-    bus: MagicMock, tmp_path: Path
-) -> None:
-    sm = SessionManager(tmp_path)
-    session = sm.get_or_create("websocket:runtime-context")
-    content, marker = append_runtime_context(
-        "visible user text",
-        [RuntimeContextBlock(source="goal", content="private goal context")],
-    )
-    session.add_message(
-        "user",
-        content,
-        **{RUNTIME_CONTEXT_HISTORY_META: marker},
-    )
-    sm.save(session)
-    channel = _ch(bus, session_manager=sm, port=29919)
-    server_task = asyncio.create_task(channel.start())
-    try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        response = await _http_get(
-            "http://127.0.0.1:29919/api/sessions/websocket:runtime-context/messages",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert response.status_code == 200
-        message = response.json()["messages"][0]
-        assert message["content"] == "visible user text"
-        assert RUNTIME_CONTEXT_HISTORY_META not in message
-        assert "private goal context" not in response.text
     finally:
         await channel.stop()
         await server_task
@@ -3116,7 +3081,7 @@ async def test_webui_thread_negotiates_gzip_for_large_payloads(
 
 
 @pytest.mark.asyncio
-async def test_session_routes_reject_non_websocket_keys(
+async def test_session_delete_rejects_non_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_many(
@@ -3133,14 +3098,6 @@ async def test_session_routes_reject_non_websocket_keys(
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
-        # The webui list already hides non-websocket sessions; handcrafted URLs
-        # should hit the same boundary rather than exposing or deleting them.
-        msgs = await _http_get(
-            "http://127.0.0.1:29909/api/sessions/cli:direct/messages",
-            headers=auth,
-        )
-        assert msgs.status_code == 404
-
         doomed = sm._get_session_path("slack:C123")
         assert doomed.exists()
         deny_delete = await _http_get(
@@ -3155,7 +3112,7 @@ async def test_session_routes_reject_non_websocket_keys(
 
 
 @pytest.mark.asyncio
-async def test_session_routes_reject_invalid_key(
+async def test_session_delete_rejects_invalid_key(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path)
@@ -3168,7 +3125,7 @@ async def test_session_routes_reject_invalid_key(
         # Invalid characters in the key -> regex match fails -> 404
         # (route doesn't match, falls through to channel 404).
         resp = await _http_get(
-            "http://127.0.0.1:29904/api/sessions/bad%20key/messages",
+            "http://127.0.0.1:29904/api/sessions/bad%20key/delete",
             headers=auth,
         )
         assert resp.status_code in {400, 404}

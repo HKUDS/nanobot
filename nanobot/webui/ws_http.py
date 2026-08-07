@@ -26,10 +26,8 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
-from nanobot.runtime_context import public_history_messages
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.triggers.local_types import LocalTrigger
-from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -462,10 +460,6 @@ class GatewayHTTPHandler:
     # -- Session routes -----------------------------------------------------
 
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
-        m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
-        if m:
-            return self._handle_session_messages(request, m.group(1))
-
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
@@ -526,34 +520,6 @@ class GatewayHTTPHandler:
             row["workspace_scope"] = scope.payload()
             cleaned.append(row)
         return {"sessions": cleaned}
-
-    def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if self.session_manager is None:
-            return _http_error(503, "session manager unavailable")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
-        data = self.session_manager.read_session_file(decoded_key)
-        if data is None:
-            return _http_error(404, "session not found")
-        messages = data.get("messages")
-        if isinstance(messages, list):
-            session_messages = cast(list[dict[str, Any]], messages)
-            scrub_subagent_messages_for_channel(session_messages)
-            raw_session_messages = cast(list[Any], messages)
-            data["messages"] = public_history_messages(
-                [
-                    cast(dict[str, Any], message)
-                    for message in raw_session_messages
-                    if isinstance(message, dict)
-                ]
-            )
-        self.media.augment_media_urls(data)
-        return _http_json_response(data)
 
     def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
