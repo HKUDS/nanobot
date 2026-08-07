@@ -19,6 +19,9 @@ type WeixinVerificationPayload = ChannelConnectPayload & {
   verification_failed?: boolean;
 };
 
+export const WEIXIN_AUTH_EXPIRED_MESSAGE =
+  "WeChat login expired. Scan again to reconnect.";
+
 function isVerificationChallenge(
   payload: ChannelConnectPayload,
 ): payload is WeixinVerificationPayload {
@@ -40,7 +43,7 @@ function weixinConnectMessage(
     return tx("custom.connected", "WeChat is connected.");
   }
   if (payload.status === "expired") {
-    return tx("custom.expired", "WeChat login expired. Scan again to reconnect.");
+    return tx("custom.expired", WEIXIN_AUTH_EXPIRED_MESSAGE);
   }
   if (payload.status === "failed") {
     return payload.message
@@ -73,6 +76,10 @@ export function WeixinConnectFlow({
   const { t } = useTranslation();
   const tx = channelTranslator(t, "weixin");
   const [verificationCode, setVerificationCode] = useState("");
+  const authExpired = feature.runtime_error === WEIXIN_AUTH_EXPIRED_MESSAGE;
+  const scanAgainLabel = t("settings.channels.scanAgain", {
+    defaultValue: "Scan again",
+  });
 
   const renderVerification = ({
     connect,
@@ -127,7 +134,8 @@ export function WeixinConnectFlow({
     <ChannelQrConnectFlow
       token={token}
       channelName="weixin"
-      idleLabel={idleLabel}
+      startOptions={{ force: authExpired }}
+      idleLabel={authExpired ? scanAgainLabel : idleLabel}
       connectRequestId={connectRequestId}
       forceOnRepeat
       onFeaturesUpdate={onFeaturesUpdate}
@@ -146,7 +154,7 @@ export function WeixinConnectFlow({
         connected: tx("custom.connected", "WeChat is connected."),
         stopped: tx("custom.stopped", "WeChat login stopped."),
         connecting: tx("custom.connecting", "Connecting..."),
-        scanAgain: t("settings.channels.scanAgain", { defaultValue: "Scan again" }),
+        scanAgain: scanAgainLabel,
         connect: t("settings.channels.connect", { defaultValue: "Connect" }),
       }}
     />

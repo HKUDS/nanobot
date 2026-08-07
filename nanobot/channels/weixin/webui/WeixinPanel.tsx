@@ -28,7 +28,10 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { WeixinConnectFlow } from "./WeixinConnectFlow";
+import {
+  WEIXIN_AUTH_EXPIRED_MESSAGE,
+  WeixinConnectFlow,
+} from "./WeixinConnectFlow";
 
 export const WEIXIN_PRIMARY_FIELD_KEYS = [
   "channels.weixin.allowFrom",
@@ -525,7 +528,7 @@ function weixinRuntimeError(
   error: string | undefined,
   tx: (key: string, fallback: string) => string,
 ): string | undefined {
-  if (error === "WeChat login expired. Scan again to reconnect.") {
+  if (error === WEIXIN_AUTH_EXPIRED_MESSAGE) {
     return tx("custom.expired", error);
   }
   return error;
