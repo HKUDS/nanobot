@@ -52,7 +52,6 @@
   "temporaryChat": {
     "title": "臨時聊天",
     "description": "不會儲存至歷史記錄或記憶。重新載入、關閉頁面或連線中斷後，臨時聊天會結束。請求仍會傳送給模型供應商，工具操作也可能留下變更。",
-    "notSaved": "不儲存",
     "clear": "清空臨時聊天",
     "sectionTitle": "臨時聊天",
     "closeAction": "關閉臨時聊天"

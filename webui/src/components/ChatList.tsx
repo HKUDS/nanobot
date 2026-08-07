@@ -590,11 +590,13 @@ function TemporaryChatSection({
                       onCloseAutoFocus={(event) => event.preventDefault()}
                     >
                       <DropdownMenuItem
+                        aria-label={t("temporaryChat.closeAction")}
+                        className="whitespace-nowrap"
                         tone="destructive"
                         onSelect={() => onClose(session.key)}
                       >
                         <X className="h-4 w-4 shrink-0" />
-                        {t("temporaryChat.closeAction")}
+                        {t("common.close")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
