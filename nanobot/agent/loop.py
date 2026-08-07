@@ -269,6 +269,7 @@ class AgentLoop:
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        per_session_sandbox: bool = False,
         session_manager: SessionManager | None = None,
         tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -370,6 +371,7 @@ class AgentLoop:
         self.workspace_scopes = WorkspaceScopeResolver(
             default_workspace=workspace,
             default_restrict_to_workspace=restrict_to_workspace,
+            per_session_sandbox=per_session_sandbox,
         )
         self._start_time = time.time()
         self._extra_hooks: list[AgentHook] = hooks or []
@@ -509,6 +511,7 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
+            per_session_sandbox=defaults.per_session_sandbox,
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
@@ -740,6 +743,7 @@ class AgentLoop:
             channel=ctx.delivery.route.channel,
             message_metadata=ctx.msg.metadata,
             session_metadata=ctx.session.metadata,
+            session_key=ctx.session.key,
         )
         return RequestContext(
             channel=ctx.delivery.route.channel,
@@ -1001,6 +1005,7 @@ class AgentLoop:
                         channel=pending_msg.channel,
                         message_metadata=metadata,
                         session_metadata=session.metadata if session is not None else None,
+                        session_key=session.key if session is not None else None,
                     )
                     pending_request = RequestContext(
                         channel=pending_msg.channel,
@@ -1102,6 +1107,7 @@ class AgentLoop:
             channel=request_ctx.channel,
             message_metadata=request_metadata,
             session_metadata=session.metadata if session is not None else None,
+            session_key=active_session_key,
         )
         transcript_builder = partial(
             self.context.build_transcript,
