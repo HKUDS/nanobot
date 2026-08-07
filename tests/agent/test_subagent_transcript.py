@@ -259,3 +259,15 @@ async def test_list_and_missing_read(store: SubagentTranscriptStore) -> None:
     store.write("abc12345", _messages({"role": "user", "content": "hi"}))
     assert store.list() == ["abc12345"]
     assert store.read("doesnotexist") == []
+
+
+async def test_write_without_o_nofollow_attribute(
+    store: SubagentTranscriptStore, monkeypatch
+) -> None:
+    """Platforms lacking os.O_NOFOLLOW (e.g. Windows) still write successfully."""
+    import nanobot.agent.subagent_transcript as module
+
+    monkeypatch.delattr(module.os, "O_NOFOLLOW", raising=False)
+    store.write("abc12345", _messages({"role": "user", "content": "hi"}))
+    assert store.path_for("abc12345").exists()
+    assert store.read("abc12345")[0]["content"] == "hi"

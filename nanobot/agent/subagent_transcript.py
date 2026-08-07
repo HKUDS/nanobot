@@ -174,13 +174,16 @@ class SubagentTranscriptStore:
 
         # Create the temp file with O_EXCL|O_NOFOLLOW so a planted symlink at
         # the predictable name can neither be followed nor race the rename.
+        # O_NOFOLLOW is POSIX-only (absent on Windows); getattr degrades to a
+        # no-op there instead of raising AttributeError.
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
         tmp_path = target.with_suffix(target.suffix + ".tmp")
         fd: int | None = None
         for attempt in range(3):
             try:
                 fd = os.open(
                     tmp_path,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
                     0o600,
                 )
                 break
