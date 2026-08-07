@@ -3437,7 +3437,7 @@ function ModelsSettings({
       key={key}
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="divide-y divide-border/45 bg-muted/30 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+      className="divide-y divide-border/45 bg-background/70 motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
     >
       {creating ? (
         <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
