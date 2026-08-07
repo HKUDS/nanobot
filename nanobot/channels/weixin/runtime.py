@@ -1683,7 +1683,10 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
         encryptor = cipher_obj.encryptor()
         return encryptor.update(padded) + encryptor.finalize()
     except ImportError:
-        logger.warning("Cannot encrypt media: install 'pycryptodome' or 'cryptography'")
+        logger.warning(
+            "Cannot encrypt media. Run `nanobot plugins enable weixin` "
+            "to install WeChat support."
+        )
         return data
 
 
@@ -1715,7 +1718,10 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
             decryptor = cipher_obj.decryptor()
             decrypted = decryptor.update(data) + decryptor.finalize()
         except ImportError:
-            logger.warning("Cannot decrypt media: install 'pycryptodome' or 'cryptography'")
+            logger.warning(
+                "Cannot decrypt media. Run `nanobot plugins enable weixin` "
+                "to install WeChat support."
+            )
             return data
 
     return _pkcs7_unpad_safe(decrypted)

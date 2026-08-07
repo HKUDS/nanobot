@@ -1624,7 +1624,10 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider({"provider": ["openai-codex"]})
 
-    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+    assert str(exc.value) == (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    )
 
 
 def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
@@ -1642,7 +1645,10 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider({"provider": ["github-copilot"]})
 
-    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+    assert str(exc.value) == (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    )
 
 
 def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(

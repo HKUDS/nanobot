@@ -686,7 +686,10 @@ def test_provider_login_openai_codex_handles_missing_oauth_symbol(monkeypatch):
     result = runner.invoke(app, ["provider", "login", "openai-codex"])
 
     assert result.exit_code == 1
-    assert "oauth_cli_kit not installed" in result.stdout
+    assert (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    ) in re.sub(r"\s+", " ", result.stdout)
     assert result.exception is not None
 
 

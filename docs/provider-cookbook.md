@@ -549,7 +549,7 @@ This recipe applies after the agent works and you want observability for OpenAI-
 Install the optional package in the same Python environment that runs nanobot:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 Set the environment variables before starting nanobot:
