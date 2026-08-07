@@ -252,7 +252,6 @@ export const ChatList = memo(function ChatList({
             running={running}
             onSelect={onSelect}
             onClose={onCloseTemporaryChat}
-            actionMenuPortalContainer={actionMenuPortalContainer}
           />
         ) : null}
         {limitedGroups.map((group, index) => {
@@ -522,7 +521,6 @@ function TemporaryChatSection({
   running,
   onSelect,
   onClose,
-  actionMenuPortalContainer,
 }: {
   sessions: ChatSummary[];
   activeKey: string | null;
@@ -530,7 +528,6 @@ function TemporaryChatSection({
   running: ReadonlySet<string>;
   onSelect: (key: string) => void;
   onClose?: (key: string) => void;
-  actionMenuPortalContainer?: HTMLElement | null;
 }) {
   const { t } = useTranslation();
 
@@ -571,35 +568,14 @@ function TemporaryChatSection({
                 </button>
                 <SessionActivityIndicator state={running.has(session.chatId) ? "running" : null} />
                 {onClose ? (
-                  <DropdownMenu modal={false}>
-                    <DropdownMenuTrigger
-                      className={cn(
-                        "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
-                        "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
-                        "focus-visible:opacity-100",
-                        active && "opacity-100",
-                      )}
-                      aria-label={t("chat.actions", { title })}
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="end"
-                      className={ACTION_MENU_CONTENT_CLASS}
-                      portalContainer={actionMenuPortalContainer}
-                      onCloseAutoFocus={(event) => event.preventDefault()}
-                    >
-                      <DropdownMenuItem
-                        aria-label={t("temporaryChat.closeAction")}
-                        className="whitespace-nowrap"
-                        tone="destructive"
-                        onSelect={() => onClose(session.key)}
-                      >
-                        <X className="h-4 w-4 shrink-0" />
-                        {t("common.close")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <button
+                    type="button"
+                    aria-label={t("temporaryChat.closeAction", { title })}
+                    onClick={() => onClose(session.key)}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                 ) : null}
               </div>
             </li>

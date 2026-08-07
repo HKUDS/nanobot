@@ -179,14 +179,9 @@ describe("ChatList", () => {
     fireEvent.click(within(section).getByRole("button", { name: "Private planning" }));
     expect(onSelect).toHaveBeenCalledWith("temporary:temporary-one");
 
-    fireEvent.pointerDown(
-      within(section).getByRole("button", { name: "Topic actions for Private planning" }),
-      { button: 0 },
-    );
-    const closeItem = await screen.findByRole("menuitem", { name: "Close temporary chat" });
-    expect(closeItem).toHaveTextContent("Close");
-    expect(closeItem).toHaveClass("whitespace-nowrap");
-    fireEvent.click(closeItem);
+    fireEvent.click(within(section).getByRole("button", {
+      name: "Close temporary chat: Private planning",
+    }));
     expect(onClose).toHaveBeenCalledWith("temporary:temporary-one");
   });
 

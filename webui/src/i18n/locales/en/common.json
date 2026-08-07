@@ -54,7 +54,7 @@
     "description": "Not saved to history or memory. Reloading, closing, or losing the connection ends these chats. Requests still go to your model provider, and tool actions may leave changes.",
     "clear": "Clear temporary chat",
     "sectionTitle": "Temporary chats",
-    "closeAction": "Close temporary chat"
+    "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
     "navigation": "Sidebar navigation",

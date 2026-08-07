@@ -469,10 +469,9 @@ describe("App layout", () => {
     expect(screen.getByText("Temporary chat")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
 
-    fireEvent.pointerDown(within(sidebar).getByRole("button", {
-      name: "Topic actions for first private message",
-    }), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Close temporary chat" }));
+    fireEvent.click(within(sidebar).getByRole("button", {
+      name: "Close temporary chat: first private message",
+    }));
     await waitFor(() => expect(window.location.hash).toBe(secondHash));
     expect(within(sidebar).queryByRole("button", {
       name: "first private message",

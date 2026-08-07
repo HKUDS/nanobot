@@ -54,7 +54,7 @@
     "description": "Tidak disimpan ke riwayat atau memori. Memuat ulang, menutup, atau kehilangan koneksi akan mengakhiri obrolan ini. Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
     "clear": "Hapus obrolan sementara",
     "sectionTitle": "Obrolan sementara",
-    "closeAction": "Tutup obrolan sementara"
+    "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
     "navigation": "Navigasi bilah samping",

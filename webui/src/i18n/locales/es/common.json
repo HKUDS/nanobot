@@ -54,7 +54,7 @@
     "description": "No se guarda en el historial ni en la memoria. Recargar, cerrar o perder la conexión finaliza estos chats. Las solicitudes siguen llegando al proveedor del modelo y las herramientas pueden dejar cambios.",
     "clear": "Borrar chat temporal",
     "sectionTitle": "Chats temporales",
-    "closeAction": "Cerrar chat temporal"
+    "closeAction": "Cerrar chat temporal: {{title}}"
   },
   "sidebar": {
     "navigation": "Navegación de la barra lateral",
