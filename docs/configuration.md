@@ -347,6 +347,36 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 }
 ```
 
+The WebUI's OpenAI web-search switch writes the corresponding `apiType` and `extraBody.tools`
+fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
+request, while other tools such as `web_fetch` remain available.
+
+</details>
+
+<details>
+<summary><b>DeepSeek native web search</b></summary>
+
+DeepSeek V4 Flash uses DeepSeek's native Responses API. Its provider-hosted web search is
+enabled by default because it does not require a separate paid add-on. Turn it off from the
+WebUI provider settings, or with:
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "extraBody": {
+        "tools": []
+      }
+    }
+  }
+}
+```
+
+The switch applies to `deepseek-v4-flash`; DeepSeek models that remain on Chat Completions
+cannot use this Responses tool. Native search calls appear in the WebUI activity stream, and
+their opaque output items are preserved for multi-turn Responses state replay.
+
 </details>
 
 <a id="responses-state-and-compaction"></a>
@@ -695,7 +725,7 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
-To opt in to Codex Fast mode, merge this provider setting into `config.json`:
+Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json
 {
@@ -709,9 +739,9 @@ To opt in to Codex Fast mode, merge this provider setting into `config.json`:
 }
 ```
 
-`priority` is the Responses API request value used by Codex Fast mode. The setting only works
-for models and accounts that support Fast mode; remove `service_tier` to return to standard
-processing. Fast mode consumes Codex credits at a higher rate. See the
+The switch sends the Responses API `service_tier: "priority"` value. It only works for models
+and accounts that support Fast mode; turn the switch off to return to standard processing.
+Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
@@ -735,6 +765,8 @@ The provider reads xAI's model catalog and includes the server-hosted `x_search`
 tool only when the selected model advertises `supportsBackendSearch`. Models
 without that capability continue normally without hosted X Search. When enabled,
 searches run inside xAI's Responses API and citations arrive as inline links.
+Hosted X Search is on by default to preserve this behavior. It can be turned off in the
+WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
 public OAuth client and proxy contract used by

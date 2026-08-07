@@ -27,7 +27,7 @@ export function describeTraceLine(
     !!parsedUrl && /\b(fetch(?:ing|ed)?|read(?:ing)?|opened?|opening)\b/i.test(trimmed);
 
   if (/search/i.test(name)) {
-    const query = traceFieldFromArgs(args, ["query", "q", "text"]) || args || trimmed;
+    const query = traceFieldFromArgs(args, ["query", "q", "text"]) || args;
     return {
       kind: "search",
       label: presentWebSearchAction(query, status, name === "x_search" ? "x" : "web"),

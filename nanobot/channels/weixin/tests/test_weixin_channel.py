@@ -1080,6 +1080,32 @@ def test_decrypt_aes_ecb_strips_valid_pkcs7_padding() -> None:
     assert decrypted == plaintext
 
 
+def test_missing_aes_dependency_recommends_weixin_plugin(monkeypatch) -> None:
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith(("Crypto", "cryptography")):
+            raise ImportError("missing AES dependency")
+        return real_import(name, *args, **kwargs)
+
+    warnings: list[str] = []
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    monkeypatch.setattr(
+        weixin_mod.logger,
+        "warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+    key_b64 = "MDEyMzQ1Njc4OWFiY2RlZg=="
+    data = b"unencrypted media"
+
+    assert _encrypt_aes_ecb(data, key_b64) == data
+    assert _decrypt_aes_ecb(data, key_b64) == data
+    assert warnings == [
+        "Cannot encrypt media. Run `nanobot plugins enable weixin` to install WeChat support.",
+        "Cannot decrypt media. Run `nanobot plugins enable weixin` to install WeChat support.",
+    ]
+
+
 class _DummyDownloadResponse:
     def __init__(self, content: bytes, status_code: int = 200) -> None:
         self.content = content

@@ -40,6 +40,7 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
+import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -55,11 +56,13 @@ interface ChatListProps {
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onReorderSessions?: (keys: string[]) => void;
   onToggleGroup?: (groupId: string) => void;
   onRequestRenameProject?: (projectKey: string, label: string) => void;
   onNewChatInProject?: (projectPath: string, projectName: string) => void;
   pinnedKeys?: string[];
   archivedKeys?: string[];
+  sessionOrder?: string[];
   titleOverrides?: Record<string, string>;
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
@@ -84,11 +87,13 @@ export const ChatList = memo(function ChatList({
   onTogglePin,
   onRequestRename,
   onToggleArchive,
+  onReorderSessions,
   onToggleGroup,
   onRequestRenameProject,
   onNewChatInProject,
   pinnedKeys = [],
   archivedKeys = [],
+  sessionOrder = [],
   titleOverrides = {},
   projectNameOverrides = {},
   collapsedGroups = {},
@@ -106,6 +111,11 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
+  const [draggedSessionKey, setDraggedSessionKey] = useState<string | null>(null);
+  const [sessionDropTarget, setSessionDropTarget] = useState<{
+    edge: "before" | "after";
+    key: string;
+  } | null>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
@@ -123,6 +133,7 @@ export const ChatList = memo(function ChatList({
       archivedKeys,
       titleOverrides,
       projectNameOverrides,
+      sessionOrder,
       showArchived,
       sort,
       defaultWorkspacePath,
@@ -136,6 +147,7 @@ export const ChatList = memo(function ChatList({
       sort,
       titleOverrides,
       projectNameOverrides,
+      sessionOrder,
       defaultWorkspacePath,
     ],
   );
@@ -155,6 +167,21 @@ export const ChatList = memo(function ChatList({
     () => limitedGroups.reduce((total, group) => total + group.sessions.length, 0),
     [limitedGroups],
   );
+  const pinned = useMemo(() => new Set(pinnedKeys), [pinnedKeys]);
+  const archived = useMemo(() => new Set(archivedKeys), [archivedKeys]);
+  const sessionLanes = useMemo(() => {
+    const lanes = new Map<string, string>();
+    for (const group of groups) {
+      const scope = group.id.startsWith("date:") ? "timeline" : group.id;
+      for (const session of group.sessions) {
+        const status = pinned.has(session.key)
+          ? "pinned"
+          : archived.has(session.key) ? "archived" : "normal";
+        lanes.set(session.key, `${scope}:${status}`);
+      }
+    }
+    return lanes;
+  }, [archived, groups, pinned]);
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
 
   useEffect(() => {
@@ -177,12 +204,29 @@ export const ChatList = memo(function ChatList({
     );
   }
 
-  const pinned = new Set(pinnedKeys);
-  const archived = new Set(archivedKeys);
   const running = new Set(runningChatIds);
   const updated = new Set(updatedChatIds);
   const compact = density === "compact";
   const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
+
+  const canReorderSession = (targetKey: string) => (
+    !!draggedSessionKey
+    && draggedSessionKey !== targetKey
+    && sessionLanes.get(draggedSessionKey) === sessionLanes.get(targetKey)
+  );
+  const reorderSession = (targetKey: string, edge: "before" | "after") => {
+    if (!draggedSessionKey || !canReorderSession(targetKey) || !onReorderSessions) return;
+    const keys = groups.flatMap((group) => group.sessions.map((session) => session.key));
+    const reordered = keys.filter((key) => key !== draggedSessionKey);
+    const targetIndex = reordered.indexOf(targetKey);
+    if (targetIndex < 0) return;
+    reordered.splice(targetIndex + (edge === "after" ? 1 : 0), 0, draggedSessionKey);
+    const groupedKeys = new Set(keys);
+    onReorderSessions([
+      ...reordered,
+      ...sessionOrder.filter((key) => !groupedKeys.has(key)),
+    ]);
+  };
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
@@ -260,7 +304,41 @@ export const ChatList = memo(function ChatList({
                         ? "updated"
                         : null;
                     return (
-                      <li key={s.key} className="min-w-0">
+                      <li
+                        key={s.key}
+                        className="relative min-w-0"
+                        onDragOver={(event) => {
+                          if (!canReorderSession(s.key)) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setSessionDropTarget({
+                            key: s.key,
+                            edge: event.clientY < rect.top + rect.height / 2 ? "before" : "after",
+                          });
+                        }}
+                        onDrop={(event) => {
+                          if (!canReorderSession(s.key)) return;
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const edge = event.clientY < rect.top + rect.height / 2
+                            ? "before"
+                            : "after";
+                          reorderSession(s.key, edge);
+                          setDraggedSessionKey(null);
+                          setSessionDropTarget(null);
+                        }}
+                      >
+                        {sessionDropTarget?.key === s.key ? (
+                          <span
+                            aria-hidden
+                            data-session-drop-edge={sessionDropTarget.edge}
+                            className={cn(
+                              "pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-primary",
+                              sessionDropTarget.edge === "before" ? "-top-px" : "-bottom-px",
+                            )}
+                          />
+                        ) : null}
                         <div
                           ref={active ? activeRowRef : undefined}
                           data-chat-row={s.key}
@@ -276,10 +354,22 @@ export const ChatList = memo(function ChatList({
                           <button
                             type="button"
                             onClick={() => onSelect(s.key)}
+                            draggable
+                            onDragStart={(event) => {
+                              setDraggedSessionKey(s.key);
+                              setSessionDropTarget(null);
+                              writeDraggedSession(event.dataTransfer, s.key);
+                            }}
+                            onDragEnd={() => {
+                              clearDraggedSession();
+                              setDraggedSessionKey(null);
+                              setSessionDropTarget(null);
+                            }}
                             aria-current={active ? "page" : undefined}
                             title={tooltipTitle}
                             className={cn(
                               "min-w-0 flex-1 overflow-hidden text-left",
+                              "cursor-grab active:cursor-grabbing",
                               compact ? "py-1" : "py-1.5",
                               projectMode && "pl-7",
                             )}

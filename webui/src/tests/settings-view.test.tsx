@@ -2137,6 +2137,57 @@ describe("SettingsView Apps catalog", () => {
     expect(reasoningEffort).toHaveValue("provider-native-mode");
   });
 
+  it("expands the model preset editor directly below the selected row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const row = await screen.findByTestId("model-call-order-row-primary");
+    const trigger = within(row).getAllByRole("button")[0];
+    expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+
+    const editor = screen.getByTestId("model-preset-editor");
+    expect(trigger).toHaveAttribute("aria-pressed", "true");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", "model-preset-editor");
+    expect(row.parentElement).toHaveAttribute("role", "listitem");
+    expect(row.parentElement?.parentElement).toHaveAttribute("role", "list");
+    expect(row.nextElementSibling).toBe(editor);
+    expect(editor).toHaveClass(
+      "slide-in-from-top-1",
+      "lg:max-w-6xl",
+      "rounded-[18px]",
+    );
+    expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
+    const deleteButton = within(editor).getByRole("button", { name: "Delete" });
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute("aria-describedby", "model-preset-delete-hint");
+    expect(
+      within(editor).getByText("Remove this preset from the call order before deleting it."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument();
+  });
+
   it("drags model presets to reorder and saves the model call order immediately", async () => {
     const { payload, backupPreset } = settingsPayloadWithBackup();
     const updatedPayload: SettingsPayload = {
@@ -2268,7 +2319,17 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models", initialSettings: initialPayload });
 
     const primaryRow = screen.getByTestId("model-call-order-row-primary");
-    const firstBackupRow = screen.getAllByTestId("model-call-order-row-backup")[0];
+    const backupRows = screen.getAllByTestId("model-call-order-row-backup");
+    const firstBackupRow = backupRows[0];
+    const secondBackupRow = backupRows[1];
+    const secondBackupTrigger = within(secondBackupRow).getAllByRole("button")[0];
+    fireEvent.click(secondBackupTrigger);
+    expect(screen.getAllByTestId("model-preset-editor")).toHaveLength(1);
+    expect(secondBackupRow.nextElementSibling).toBe(
+      screen.getByTestId("model-preset-editor"),
+    );
+    fireEvent.click(secondBackupTrigger);
+
     const dataTransfer = {
       dropEffect: "move",
       effectAllowed: "move",
@@ -3099,6 +3160,200 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
+  });
+
+  it("maps provider request switches to raw extraBody fields", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "grok@example.com",
+        oauth_login_supported: true,
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "codex@example.com",
+        oauth_login_supported: true,
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
+      },
+      {
+        name: "deepseek",
+        label: "DeepSeek",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "deep••••test",
+        api_base: "https://api.deepseek.com",
+        advanced_fields: ["extra_body"],
+        extra_body: null,
+      },
+      {
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        api_type: "auto",
+        advanced_fields: ["api_type", "extra_body"],
+        extra_body: null,
+      },
+    ];
+    const payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const [input] = args;
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    const xSearch = screen.getByRole("switch", { name: "X Search" });
+    expect(xSearch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(xSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=xai_grok",
+      expect.anything(),
+    ));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Save provider" }),
+    ).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=openai_codex",
+      expect.anything(),
+    ));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Save provider" }),
+    ).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
+    expect(screen.getByText(/DeepSeek V4 Flash/)).toBeInTheDocument();
+    const deepSeekSearch = screen.getByRole("switch", { name: "DeepSeek web search" });
+    expect(deepSeekSearch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(deepSeekSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(
+      screen.queryByRole("switch", { name: "DeepSeek web search" }),
+    ).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(
+      screen.queryByRole("switch", { name: "OpenAI web search" }),
+    ).not.toBeInTheDocument());
+
+    await waitFor(() => {
+      const requestUpdates = fetchMock.mock.calls
+        .filter(([input]) => String(input).startsWith("/api/settings/provider/update?"))
+        .map(([input, init]) => {
+          const provider = new URLSearchParams(String(input).split("?")[1]).get("provider");
+          const headers = init?.headers as Record<string, string>;
+          const values = JSON.parse(decodeURIComponent(
+            headers["X-Nanobot-Provider-Values"],
+          )) as { apiType?: string; extraBody?: string };
+          return [provider, {
+            ...(values.apiType ? { apiType: values.apiType } : {}),
+            extraBody: JSON.parse(values.extraBody ?? "{}"),
+          }] as const;
+        });
+      expect(requestUpdates).toEqual([
+        ["xai_grok", { extraBody: { tools: [] } }],
+        ["openai_codex", { extraBody: { service_tier: "priority" } }],
+        ["deepseek", { extraBody: { tools: [] } }],
+        ["openai", {
+          apiType: "responses",
+          extraBody: { tools: [{ type: "web_search" }] },
+        }],
+      ]);
+    });
+  });
+
+  it("recognizes and removes versioned web search tools without losing raw settings", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      providers: [{
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        api_type: "auto",
+        advanced_fields: ["api_type", "extra_body"],
+        extra_body: {
+          metadata: { owner: "legacy-config" },
+          tools: [
+            { type: "web_search_preview", search_context_size: "medium" },
+            { type: "file_search", vector_store_ids: ["vs_legacy"] },
+          ],
+        },
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    expect(searchSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = fetchMock.mock.calls.find(
+        ([input]) => String(input).startsWith("/api/settings/provider/update?"),
+      );
+      expect(updateCall).toBeTruthy();
+      const headers = updateCall?.[1]?.headers as Record<string, string>;
+      const values = JSON.parse(decodeURIComponent(
+        headers["X-Nanobot-Provider-Values"],
+      )) as { extraBody: string };
+      expect(JSON.parse(values.extraBody)).toEqual({
+        metadata: { owner: "legacy-config" },
+        tools: [{ type: "file_search", vector_store_ids: ["vs_legacy"] }],
+      });
+    });
   });
 
   it("creates a custom provider with folded advanced request settings", async () => {

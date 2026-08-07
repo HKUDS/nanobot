@@ -365,7 +365,15 @@
       "profile": "設定檔",
       "extraHeaders": "額外請求標頭",
       "extraBody": "額外請求本文",
-      "extraQuery": "額外查詢參數"
+      "extraQuery": "額外查詢參數",
+      "capabilityFastMode": "Fast 模式",
+      "capabilityFastModeHelp": "透過 OpenAI 優先服務層取得更快回應，也會更快消耗額度。",
+      "capabilityDeepSeekSearch": "DeepSeek 網路搜尋",
+      "capabilityDeepSeekSearchHelp": "允許 DeepSeek V4 Flash 透過 Responses API 搜尋網路，並在對話中顯示搜尋過程。",
+      "capabilityXSearch": "X 搜尋",
+      "capabilityXSearchHelp": "允許支援的 Grok 模型使用 xAI 託管的 X Search，並在對話中顯示搜尋過程。",
+      "capabilityOpenAISearch": "OpenAI 網路搜尋",
+      "capabilityOpenAISearchHelp": "允許相容 Responses API 的模型搜尋網路，並在對話中顯示搜尋過程。"
     },
     "image": {
       "selectProvider": "選擇供應商",

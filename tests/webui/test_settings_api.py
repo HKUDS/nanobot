@@ -733,15 +733,19 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
         },
     )
 
-    payload = update_provider_settings(
-        {"provider": [provider_name], "proxy": [" http://127.0.0.1:7890 "]}
-    )
+    payload = update_provider_settings({
+        "provider": [provider_name],
+        "proxy": [" http://127.0.0.1:7890 "],
+        "extraBody": [json.dumps({"tools": []})],
+    })
 
     providers = {row["name"]: row for row in payload["providers"]}
     assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
     assert getattr(load_config(config_path).providers, config_attr).proxy == (
         "http://127.0.0.1:7890"
     )
+    assert providers[provider_name]["extra_body"] == {"tools": []}
+    assert getattr(load_config(config_path).providers, config_attr).extra_body == {"tools": []}
 
     cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
 
@@ -1620,7 +1624,10 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider({"provider": ["openai-codex"]})
 
-    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+    assert str(exc.value) == (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    )
 
 
 def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
@@ -1638,7 +1645,10 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider({"provider": ["github-copilot"]})
 
-    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+    assert str(exc.value) == (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    )
 
 
 def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(

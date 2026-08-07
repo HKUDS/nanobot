@@ -89,6 +89,77 @@ def _response_object_list(value: object) -> list[dict[str, Any]]:
     ]
 
 
+def _hosted_web_search_event(
+    event: object,
+    event_type: object,
+) -> dict[str, Any] | None:
+    """Map the official web-search output item pair onto normal tool progress."""
+    if event_type not in {"response.output_item.added", "response.output_item.done"}:
+        return None
+    event_object = _response_object(event) or {}
+    item = _response_object(event_object.get("item")) or {}
+    if item.get("type") != "web_search_call":
+        return None
+    call_id = item.get("id") or item.get("call_id") or event_object.get("item_id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+
+    action = _response_object(item.get("action")) or {}
+    raw_queries = action.get("queries")
+    queries = (
+        [
+            query.strip()
+            for query in cast(list[object], raw_queries)
+            if isinstance(query, str) and query.strip()
+        ][:4]
+        if isinstance(raw_queries, list)
+        else []
+    )
+    query = " · ".join(queries)
+    if not query:
+        query = next(
+            (
+                value.strip()
+                for key in ("query", "pattern", "url")
+                if isinstance((value := action.get(key)), str) and value.strip()
+            ),
+            "",
+        )
+    arguments = {"query": query[:1000]} if query else {}
+
+    phase = "start" if event_type == "response.output_item.added" else "end"
+    result: dict[str, Any] | None = None
+    if phase == "end":
+        status = item.get("status")
+        result = {"status": status if isinstance(status, str) else "completed"}
+        raw_sources = action.get("sources")
+        if isinstance(raw_sources, list):
+            sources: list[dict[str, str]] = []
+            for raw_source in cast(list[object], raw_sources):
+                source = _response_object(raw_source) or {}
+                url = source.get("url")
+                if not isinstance(url, str) or not url.strip():
+                    continue
+                visible_source = {"url": url.strip()[:2048]}
+                title = source.get("title")
+                if isinstance(title, str) and title.strip():
+                    visible_source["title"] = title.strip()[:300]
+                sources.append(visible_source)
+                if len(sources) == 8:
+                    break
+            if sources:
+                result["sources"] = sources
+
+    return {
+        "kind": "hosted_tool",
+        "phase": phase,
+        "call_id": call_id,
+        "name": "web_search",
+        "arguments": arguments,
+        "result": result,
+    }
+
+
 def map_finish_reason(status: str | None) -> str:
     """Map a Responses API status string to a Chat-Completions-style finish_reason."""
     return FINISH_REASON_MAP.get(status or "completed", "stop")
@@ -269,11 +340,14 @@ async def consume_sse_with_reasoning(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-
     async for event in iter_sse(response):
         if on_response_event:
             await on_response_event(event)
         event_type = event.get("type")
+        if on_tool_call_delta and (
+            hosted_event := _hosted_web_search_event(event, event_type)
+        ):
+            await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = _as_json_object(event.get("item")) or {}
             if item.get("type") == "function_call":
@@ -555,10 +629,13 @@ async def consume_sdk_stream(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-
     async for raw_event in stream:
         event: Any = raw_event
         event_type = getattr(event, "type", None)
+        if on_tool_call_delta and (
+            hosted_event := _hosted_web_search_event(event, event_type)
+        ):
+            await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = getattr(event, "item", None)
             if item and getattr(item, "type", None) == "function_call":

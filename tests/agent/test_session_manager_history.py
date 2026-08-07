@@ -208,6 +208,71 @@ def test_orphan_trim_with_last_consolidated():
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
 
 
+def test_get_history_replays_recent_messages_after_full_archive():
+    session = Session(key="test:fully-archived")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_consolidated = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert [message["content"] for message in history] == [
+        "u6",
+        "a6",
+        "u7",
+        "a7",
+        "u8",
+        "a8",
+        "u9",
+        "a9",
+    ]
+
+
+def test_get_history_extends_compacted_replay_to_preceding_user():
+    session = Session(key="test:compacted-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run tools"},
+            *_tool_turn("keep", 0),
+            *_tool_turn("keep", 1),
+            *_tool_turn("keep", 2),
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    session.last_consolidated = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history[0]["content"] == "run tools"
+    assert history[-1]["content"] == "done"
+    _assert_no_orphans(history)
+
+
+def test_compacted_tool_turn_can_extend_past_message_cap():
+    session = Session(key="test:long-compacted-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run many tools"},
+        ]
+    )
+    for i in range(50):
+        session.messages.extend(_tool_turn("keep", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+    session.last_consolidated = len(session.messages)
+
+    history = session.get_history(max_messages=120)
+
+    assert len(history) > 120
+    assert history[0]["content"] == "run many tools"
+    assert history[-1]["content"] == "done"
+    _assert_no_orphans(history)
+
+
 # --- Edge: no tool messages at all ---
 
 def test_no_tool_messages_unchanged():

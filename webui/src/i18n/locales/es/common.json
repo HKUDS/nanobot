@@ -365,7 +365,15 @@
       "profile": "Perfil",
       "extraHeaders": "Cabeceras adicionales",
       "extraBody": "Cuerpo adicional",
-      "extraQuery": "Parámetros de consulta adicionales"
+      "extraQuery": "Parámetros de consulta adicionales",
+      "capabilityFastMode": "Modo rápido",
+      "capabilityFastModeHelp": "Usa el nivel de servicio prioritario de OpenAI para responder más rápido. Esto consume créditos más deprisa.",
+      "capabilityDeepSeekSearch": "Búsqueda web de DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Permite que DeepSeek V4 Flash busque en la web mediante Responses API. La actividad de búsqueda aparece en el chat.",
+      "capabilityXSearch": "Búsqueda en X",
+      "capabilityXSearchHelp": "Permite que los modelos Grok compatibles usen X Search alojado por xAI. La actividad de búsqueda aparece en el chat.",
+      "capabilityOpenAISearch": "Búsqueda web de OpenAI",
+      "capabilityOpenAISearchHelp": "Permite que los modelos compatibles con Responses API busquen en la web. La actividad de búsqueda aparece en el chat."
     },
     "image": {
       "selectProvider": "Seleccionar proveedor",

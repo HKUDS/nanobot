@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import {
-  fetchSidebarState,
-  updateSidebarState as persistSidebarState,
-} from "@/lib/api";
+import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
   pinned_keys: [],
   archived_keys: [],
+  session_order: [],
   title_overrides: {},
   project_name_overrides: {},
   tags_by_key: {},
@@ -83,13 +81,14 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     ? value.view
     : DEFAULT_SIDEBAR_STATE.view;
   const density = view.density === "compact" ? "compact" : "comfortable";
-  const sort = ["updated_desc", "created_desc", "title_asc"].includes(view.sort)
+  const sort = ["updated_desc", "created_desc", "title_asc", "manual"].includes(view.sort)
     ? view.sort
     : "updated_desc";
   return {
     schema_version: 1,
     pinned_keys: uniqueStrings(value.pinned_keys),
     archived_keys: uniqueStrings(value.archived_keys),
+    session_order: uniqueStrings(value.session_order),
     title_overrides: stringMap(value.title_overrides),
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
@@ -122,6 +121,7 @@ function pruneMissingSessions(
     ...state,
     pinned_keys: filterKeys(state.pinned_keys),
     archived_keys: filterKeys(state.archived_keys),
+    session_order: filterKeys(state.session_order),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
   };
@@ -141,10 +141,9 @@ export function useSidebarState(
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
 } {
-  const { token } = useClient();
+  const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
-  const persistVersionRef = useRef(0);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -175,23 +174,11 @@ export function useSidebarState(
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
-      const version = persistVersionRef.current + 1;
-      persistVersionRef.current = version;
       stateRef.current = next;
       setState(next);
-      try {
-        const persisted = normalizeSidebarState(
-          await persistSidebarState(tokenRef.current, next),
-        );
-        if (persistVersionRef.current !== version) return;
-        stateRef.current = persisted;
-        setState(persisted);
-      } catch {
-        // Keep the optimistic UI state. Older gateways or transient auth expiry
-        // should not break the chat list; the next refresh can try again.
-      }
+      client.setSidebarState(next);
     },
-    [],
+    [client],
   );
 
   const pruned = useMemo(() => {

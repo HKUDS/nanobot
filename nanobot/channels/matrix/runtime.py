@@ -24,10 +24,12 @@ try:
     import nh3
     from mistune import HTMLRenderer, create_markdown
     from nio import (
+        Api,
         AsyncClient,
         AsyncClientConfig,
         InviteEvent,
         JoinError,
+        JoinResponse,
         KeyVerificationCancel,
         KeyVerificationEvent,
         KeyVerificationKey,
@@ -43,6 +45,7 @@ try:
         RoomSendResponse,
         RoomTypingError,
         SyncError,
+        SyncResponse,
         ToDeviceError,
         UploadError,
     )
@@ -701,6 +704,7 @@ class MatrixChannel(BaseChannel):
         client.add_response_callback(self._on_sync_error, SyncError)
         client.add_response_callback(self._on_join_error, JoinError)
         client.add_response_callback(self._on_send_error, RoomSendError)
+        client.add_response_callback(self._on_sync_invite_fallback, SyncResponse)
 
     def _is_sas_sender_allowed(self, sender: str) -> bool:
         return bool(sender and self.is_allowed(sender))
@@ -782,6 +786,49 @@ class MatrixChannel(BaseChannel):
                 with suppress(Exception):
                     self.client.stop_sync_forever()
 
+    async def _join_room_safe(self, room_id: str) -> bool:
+        """Join a room, sending a non-empty POST body.
+
+        nio's ``Api.join()`` produces a POST with no body. Some homeservers
+        (notably Continuwuity) reject empty bodies with ``M_BAD_JSON``.
+        Sending ``"{}"`` satisfies both strict and lenient servers.
+        """
+        client = self._require_client()
+        method, path = Api.join(client.access_token, room_id)
+        try:
+            resp = cast(
+                JoinResponse | JoinError,
+                await client._send(  # type: ignore[reportPrivateUsage, reportUnknownMemberType]
+                    JoinResponse, method, path, data="{}"
+                ),
+            )
+        except Exception:
+            self.logger.error("Matrix join request exception for room={}", room_id, exc_info=True)
+            return False
+        if isinstance(resp, JoinError):
+            self.logger.error("Matrix auto-join failed for room={}: {}", room_id, resp)
+            return False
+        self.logger.info("Matrix auto-join succeeded: {}", room_id)
+        return True
+
+    async def _on_sync_invite_fallback(self, response: SyncResponse) -> None:
+        """Safety net: join pending invites that the event callback may have missed.
+
+        Some homeservers (e.g. Continuwuity) deliver each invite only once.
+        If ``_on_room_invite`` fires but the join fails, the sync token
+        advances and the invite is never re-delivered. This callback inspects
+        the same ``SyncResponse`` for pending invites and joins them, acting
+        as a fallback alongside the event-based callback.
+        """
+        if not response.rooms or not response.rooms.invite:
+            return
+        for room_id, invite_info in response.rooms.invite.items():
+            for event in cast(list[Any], invite_info.invite_state):
+                sender = getattr(event, "sender", None)
+                if sender and self.is_allowed(cast(str, sender)):
+                    await self._join_room_safe(room_id)
+                    break
+
     async def _on_join_error(self, response: JoinError) -> None:
         self._log_response_error("join", response)
 
@@ -838,8 +885,7 @@ class MatrixChannel(BaseChannel):
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         if self.is_allowed(event.sender):
-            client = self._require_client()
-            await client.join(room.room_id)
+            await self._join_room_safe(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
         count = getattr(room, "member_count", None)

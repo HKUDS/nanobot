@@ -56,6 +56,32 @@ if TYPE_CHECKING:
 # that ``unittest.mock.patch`` can find and replace it.
 AsyncOpenAI: Any = None
 
+
+def _is_hosted_web_search_type(value: object) -> bool:
+    return isinstance(value, str) and (
+        value == "web_search" or value.startswith("web_search_")
+    )
+
+
+def _is_hosted_web_search_tool(tool: object) -> bool:
+    if not isinstance(tool, dict):
+        return False
+    tool_type = cast(dict[object, object], tool).get("type")
+    return _is_hosted_web_search_type(tool_type)
+
+
+def _is_named_function_tool(tool: object, name: str) -> bool:
+    """Return whether a Responses tool is a function with the given name."""
+    if not isinstance(tool, dict):
+        return False
+    record = cast(dict[object, object], tool)
+    if record.get("type") != "function":
+        return False
+    function = record.get("function")
+    if isinstance(function, dict):
+        return cast(dict[object, object], function).get("name") == name
+    return record.get("name") == name
+
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
     "reasoning_content", "extra_content",
@@ -469,7 +495,7 @@ class OpenAICompatProvider(LLMProvider):
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
-        self._extra_body = extra_body or {}
+        self._extra_body = dict(extra_body or {})
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
@@ -560,7 +586,7 @@ class OpenAICompatProvider(LLMProvider):
                     if os.environ.get("LANGFUSE_SECRET_KEY"):
                         logger.warning(
                             "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
-                            "install with `pip install langfuse` to enable tracing"
+                            "run `nanobot plugins enable langfuse` to enable tracing"
                         )
                     from openai import AsyncOpenAI as _AsyncOpenAI
                 AsyncOpenAI = _AsyncOpenAI
@@ -974,8 +1000,8 @@ class OpenAICompatProvider(LLMProvider):
         provider_responses = spec_name in ("openai", "github_copilot")
         if not provider_responses and not model_responses:
             return False
-        if self._api_type == "responses":
-            # Explicit configuration means Responses is mandatory; do not
+        if self._responses_is_required():
+            # Explicit Responses-only request fields are mandatory; do not
             # consult the circuit breaker or fall back to Chat Completions.
             return True
         if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
@@ -993,6 +1019,25 @@ class OpenAICompatProvider(LLMProvider):
             return False
 
         return self._responses_circuit_allows_probe(model, reasoning_effort)
+
+    def _responses_is_required(self) -> bool:
+        return self._api_type == "responses" or self._hosted_web_search_enabled()
+
+    def _hosted_web_search_enabled(self) -> bool:
+        extra_body = getattr(self, "_extra_body", {})
+        configured_tools = extra_body.get("tools")
+        if "tools" in extra_body:
+            return isinstance(configured_tools, list) and any(
+                _is_hosted_web_search_tool(tool)
+                for tool in cast(list[object], configured_tools)
+            )
+        return bool(
+            self._spec
+            and any(
+                _is_hosted_web_search_type(tool_type)
+                for tool_type in getattr(self._spec, "responses_default_tools", ())
+            )
+        )
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
@@ -1157,8 +1202,37 @@ class OpenAICompatProvider(LLMProvider):
             body["tool_choice"] = tool_choice or "auto"
 
         extra_body = getattr(self, "_extra_body", {})
+        default_tools = getattr(self._spec, "responses_default_tools", ())
+        if "tools" not in extra_body and default_tools:
+            body["tools"] = [
+                *cast(list[object], body.get("tools", [])),
+                *({"type": tool_type} for tool_type in default_tools),
+            ]
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
+
+        if self._hosted_web_search_enabled():
+            configured_tools = body.get("tools")
+            if isinstance(configured_tools, list):
+                managed_tools: list[object] = []
+                hosted_search_seen = False
+                for tool in cast(list[object], configured_tools):
+                    if _is_named_function_tool(tool, "web_search"):
+                        continue
+                    if _is_hosted_web_search_tool(tool):
+                        if hosted_search_seen:
+                            continue
+                        hosted_search_seen = True
+                    managed_tools.append(tool)
+                body["tools"] = managed_tools
+            if self._spec and self._spec.name == "openai":
+                source_include = "web_search_call.action.sources"
+                configured_include = body.get("include")
+                if isinstance(configured_include, list):
+                    if source_include not in configured_include:
+                        body["include"] = [*configured_include, source_include]
+                else:
+                    body["include"] = [source_include]
 
         return body
 
@@ -1771,7 +1845,7 @@ class OpenAICompatProvider(LLMProvider):
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
                         raise
-                    if self._api_type == "responses":
+                    if self._responses_is_required():
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
@@ -1867,7 +1941,7 @@ class OpenAICompatProvider(LLMProvider):
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
                         raise
-                    if self._api_type == "responses":
+                    if self._responses_is_required():
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise

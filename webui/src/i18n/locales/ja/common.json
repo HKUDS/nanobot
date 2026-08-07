@@ -365,7 +365,15 @@
       "profile": "プロファイル",
       "extraHeaders": "追加ヘッダー",
       "extraBody": "追加ボディ",
-      "extraQuery": "追加クエリ"
+      "extraQuery": "追加クエリ",
+      "capabilityFastMode": "高速モード",
+      "capabilityFastModeHelp": "OpenAI の優先サービス階層を使用して応答を高速化します。クレジットの消費も速くなります。",
+      "capabilityDeepSeekSearch": "DeepSeek ウェブ検索",
+      "capabilityDeepSeekSearchHelp": "DeepSeek V4 Flash が Responses API 経由でウェブを検索できるようにします。検索状況はチャットに表示されます。",
+      "capabilityXSearch": "X 検索",
+      "capabilityXSearchHelp": "対応する Grok モデルが xAI ホストの X Search を使用できるようにします。検索状況はチャットに表示されます。",
+      "capabilityOpenAISearch": "OpenAI ウェブ検索",
+      "capabilityOpenAISearchHelp": "Responses API 対応モデルがウェブを検索できるようにします。検索状況はチャットに表示されます。"
     },
     "image": {
       "selectProvider": "プロバイダーを選択",

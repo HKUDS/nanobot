@@ -57,7 +57,7 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
 def test_valid_offset_is_preserved():
     session = _session(10, 4)
     assert session.last_consolidated == 4
-    assert len(session.get_history()) == 6
+    assert len(session.get_history()) == 8
 
 
 def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):

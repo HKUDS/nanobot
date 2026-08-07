@@ -2,6 +2,7 @@
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1386,6 +1387,91 @@ class TestConsumeSdkStream:
         assert content == "Hello world"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_hosted_web_search_lifecycle_is_streamed_as_tool_progress(self):
+        search_added = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="in_progress",
+            action=SimpleNamespace(type="search"),
+        )
+        search_done = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="completed",
+            action=SimpleNamespace(
+                type="search",
+                queries=["nanobot DeepSeek", "nanobot latest release"],
+                sources=[
+                    SimpleNamespace(
+                        title="DeepSeek Responses API",
+                        url="https://api-docs.deepseek.com/guides/responses_api/",
+                    ),
+                ],
+            ),
+        )
+        response = SimpleNamespace(status="completed", usage=None, output=[search_done])
+        events = [
+            SimpleNamespace(
+                type="response.output_item.added",
+                output_index=0,
+                item=search_added,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.searching",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.completed",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.output_item.done",
+                output_index=0,
+                item=search_done,
+            ),
+            SimpleNamespace(type="response.completed", response=response),
+        ]
+        tool_events: list[dict] = []
+
+        async def stream():
+            for event in events:
+                yield event
+
+        async def on_tool_event(event: dict) -> None:
+            tool_events.append(event)
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=on_tool_event)
+
+        assert tool_events == [
+            {
+                "kind": "hosted_tool",
+                "phase": "start",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {},
+                "result": None,
+            },
+            {
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {
+                    "query": "nanobot DeepSeek · nanobot latest release",
+                },
+                "result": {
+                    "status": "completed",
+                    "sources": [{
+                        "title": "DeepSeek Responses API",
+                        "url": "https://api-docs.deepseek.com/guides/responses_api/",
+                    }],
+                },
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_refusal_events_reconcile_parts_and_terminal_output(self):

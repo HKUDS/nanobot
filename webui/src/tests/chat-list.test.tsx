@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -45,6 +46,110 @@ describe("ChatList", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("exposes chats as drag sources", () => {
+    const dataTransfer = {
+      effectAllowed: "",
+      setData: vi.fn(),
+    };
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "active", title: "Active chat" }),
+          session({ chatId: "reference", title: "Reference chat" }),
+        ]}
+        activeKey="websocket:active"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Active chat" }))
+      .toHaveAttribute("draggable", "true");
+    const reference = screen.getByRole("button", { name: "Reference chat" });
+    expect(reference).toHaveAttribute("draggable", "true");
+
+    fireEvent.dragStart(reference, { dataTransfer });
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      SESSION_DRAG_TYPE,
+      "websocket:reference",
+    );
+    fireEvent.dragEnd(reference, { dataTransfer });
+  });
+
+  it("reorders chats around a Codex-style insertion line", () => {
+    const onReorderSessions = vi.fn();
+    const sessions = [
+      session({ chatId: "alpha", title: "Alpha" }),
+      session({ chatId: "bravo", title: "Bravo" }),
+      session({ chatId: "charlie", title: "Charlie" }),
+      session({ chatId: "old-a", title: "Old A" }),
+      session({ chatId: "old-b", title: "Old B" }),
+    ];
+    const { rerender } = render(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onReorderSessions={onReorderSessions}
+        archivedKeys={["websocket:old-a", "websocket:old-b"]}
+        sessionOrder={sessions.map((item) => item.key)}
+      />,
+    );
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByRole("button", { name: "Alpha" }), { dataTransfer });
+    const charlieRow = screen.getByRole("button", { name: "Charlie" }).closest("li")!;
+    fireEvent.dragOver(charlieRow, { clientY: 1, dataTransfer });
+    expect(charlieRow.querySelector("[data-session-drop-edge='after']"))
+      .toBeInTheDocument();
+    fireEvent.drop(charlieRow, { clientY: 1, dataTransfer });
+
+    expect(onReorderSessions).toHaveBeenCalledWith([
+      "websocket:bravo",
+      "websocket:charlie",
+      "websocket:alpha",
+      "websocket:old-a",
+      "websocket:old-b",
+    ]);
+
+    rerender(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onReorderSessions={onReorderSessions}
+        archivedKeys={["websocket:old-a", "websocket:old-b"]}
+        sessionOrder={[
+          "websocket:bravo",
+          "websocket:charlie",
+          "websocket:alpha",
+          "websocket:old-a",
+          "websocket:old-b",
+        ]}
+        sort="manual"
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Topics" });
+    const text = section.textContent ?? "";
+    expect(text.indexOf("Bravo")).toBeLessThan(text.indexOf("Charlie"));
+    expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
   });
 
   it("orders chats by latest session activity by default", () => {

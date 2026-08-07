@@ -1004,6 +1004,7 @@ function Shell({
     useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
+  const pendingCreatedSessionKeyRef = useRef<string | null>(null);
   const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
@@ -1181,8 +1182,15 @@ function Shell({
   }, [loading, sessions]);
 
   useEffect(() => {
-    if (loading || !activeKey) return;
-    if (sessions.some((session) => session.key === activeKey)) return;
+    if (loading) return;
+    const pendingCreatedKey = pendingCreatedSessionKeyRef.current;
+    if (pendingCreatedKey && sessions.some((session) => session.key === pendingCreatedKey)) {
+      pendingCreatedSessionKeyRef.current = null;
+    }
+    if (!activeKey || sessions.some((session) => session.key === activeKey)) return;
+    // WebKit can commit the route before useSessions' optimistic insert.
+    // Keep that just-created destination valid until the session list catches up.
+    if (pendingCreatedKey === activeKey) return;
     const currentRoute = readShellRoute();
     navigate(
       currentRoute.view === "chat"
@@ -1366,9 +1374,11 @@ function Shell({
     try {
       const scope = workspaceScope ?? activeWorkspaceScope;
       const chatId = await createChat(scope);
+      const key = `websocket:${chatId}`;
+      pendingCreatedSessionKeyRef.current = key;
       navigate({
         view: "chat",
-        activeKey: `websocket:${chatId}`,
+        activeKey: key,
         settingsSection: "overview",
       });
       setMobileSidebarOpen(false);
@@ -1594,6 +1604,17 @@ function Shell({
       }
     },
     [activeKey, navigate, sessions, sidebarState.archived_keys, updateSidebarState],
+  );
+
+  const onReorderSessions = useCallback(
+    (sessionOrder: string[]) => {
+      void updateSidebarState((current) => ({
+        ...current,
+        session_order: sessionOrder,
+        view: { ...current.view, sort: "manual" },
+      }));
+    },
+    [updateSidebarState],
   );
 
   const onToggleArchived = useCallback(() => {
@@ -1916,6 +1937,7 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onReorderSessions,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -1929,6 +1951,7 @@ function Shell({
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
+    sessionOrder: sidebarState.session_order,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
     collapsedGroups: sidebarState.collapsed_groups,

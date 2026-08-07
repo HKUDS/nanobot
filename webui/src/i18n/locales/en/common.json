@@ -514,7 +514,15 @@
       "profile": "Profile",
       "extraHeaders": "Extra headers",
       "extraBody": "Extra body",
-      "extraQuery": "Extra query"
+      "extraQuery": "Extra query",
+      "capabilityFastMode": "Fast mode",
+      "capabilityFastModeHelp": "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+      "capabilityDeepSeekSearch": "DeepSeek web search",
+      "capabilityDeepSeekSearchHelp": "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
+      "capabilityXSearch": "X Search",
+      "capabilityXSearchHelp": "Allow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
+      "capabilityOpenAISearch": "OpenAI web search",
+      "capabilityOpenAISearchHelp": "Allow compatible Responses API models to search the web. Search activity appears in chat."
     },
     "legal": {
       "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."

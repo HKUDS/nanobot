@@ -365,7 +365,15 @@
       "profile": "프로필",
       "extraHeaders": "추가 헤더",
       "extraBody": "추가 본문",
-      "extraQuery": "추가 쿼리"
+      "extraQuery": "추가 쿼리",
+      "capabilityFastMode": "고속 모드",
+      "capabilityFastModeHelp": "OpenAI 우선 서비스 등급을 사용해 더 빠르게 응답합니다. 크레딧도 더 빠르게 소모됩니다.",
+      "capabilityDeepSeekSearch": "DeepSeek 웹 검색",
+      "capabilityDeepSeekSearchHelp": "DeepSeek V4 Flash가 Responses API를 통해 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
+      "capabilityXSearch": "X 검색",
+      "capabilityXSearchHelp": "지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
+      "capabilityOpenAISearch": "OpenAI 웹 검색",
+      "capabilityOpenAISearchHelp": "Responses API 호환 모델이 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다."
     },
     "image": {
       "selectProvider": "제공자 선택",

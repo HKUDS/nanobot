@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NanobotClient } from "@/lib/nanobot-client";
+import type { SidebarStatePayload } from "@/lib/types";
 
 /**
  * Minimal fake WebSocket implementing the subset NanobotClient touches.
@@ -933,6 +934,44 @@ describe("NanobotClient", () => {
     });
 
     expect(client.hasUnsettledRun("chat-scope-control")).toBe(true);
+  });
+
+  it("sends large sidebar ordering state outside the HTTP request line", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const sessionOrder = Array.from(
+      { length: 160 },
+      (_, index) => `websocket:${index.toString().padStart(4, "0")}-${"x".repeat(48)}`,
+    );
+    const state: SidebarStatePayload = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      session_order: sessionOrder,
+      title_overrides: {},
+      project_name_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "manual",
+      },
+      updated_at: null,
+    };
+
+    client.connect();
+    lastSocket().fakeOpen();
+    client.setSidebarState(state);
+
+    const [serialized] = lastSocket().sent;
+    expect(new TextEncoder().encode(serialized).byteLength).toBeGreaterThan(8_192);
+    expect(JSON.parse(serialized)).toEqual({ type: "set_sidebar_state", state });
   });
 
   it("does not correlate a new-chat scope rejection to an unrelated sent turn", async () => {

@@ -4,7 +4,7 @@ The WebSocket channel owns transport/authentication. This module owns the
 settings payload shape and the allowlisted config mutations exposed to WebUI.
 """
 
-# oauth-cli-kit is an optional dependency and does not publish type stubs.
+# oauth-cli-kit does not publish type stubs.
 # pyright: reportMissingTypeStubs=false
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
+from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.security.network import is_loopback_host
 from nanobot.security.workspace_access import workspace_sandbox_status
@@ -1794,9 +1795,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         try:
             from nanobot.providers.openai_codex_oauth import start_openai_codex_oauth_login
         except ImportError:
-            raise WebUISettingsError(
-                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
-            ) from None
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -1834,9 +1833,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 login_github_copilot,
             )
         except ImportError:
-            raise WebUISettingsError(
-                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
-            ) from None
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         token = get_github_copilot_login_status()
         if not token:
@@ -1934,18 +1931,14 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
             from oauth_cli_kit.storage import FileTokenStorage
         except ImportError:
-            raise WebUISettingsError(
-                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
-            ) from None
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
         _clear_webui_oauth_flows(spec.name)
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
-            raise WebUISettingsError(
-                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
-            ) from None
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
         token_path = get_storage().get_token_path()
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth

@@ -116,6 +116,10 @@ class ProviderSpec:
     # Flash is supported before V4 Pro).
     responses_models: tuple[str, ...] = ()
 
+    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
+    # supplies the hosted-tool selection. Values are raw Responses tool types.
+    responses_default_tools: tuple[str, ...] = ()
+
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
     # reasoning_content. Mistral's Magistral / reasoning-enabled responses use
@@ -479,6 +483,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
         responses_models=("deepseek-v4-flash",),
+        responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

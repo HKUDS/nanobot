@@ -4,7 +4,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
 import {
   mergeToolProgressEvents,
-  mergeUniqueToolTraceLines,
+  mergeToolProgressTraceLines,
   normalizeToolProgressEvents,
   toolTraceLinesFromEvents,
 } from "@/lib/tool-traces";
@@ -1213,18 +1213,24 @@ export function useNanobotStream(
                 : last.content
                   ? [last.content]
                   : [];
+              const mergedEvents = visibleStructuredEvents.length > 0
+                ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
+                : last.toolEvents;
               const mergedLines = visibleStructuredEvents.length > 0
-                ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
+                ? mergeToolProgressTraceLines(
+                    previousTraces,
+                    last.toolEvents,
+                    structuredLines,
+                    visibleStructuredEvents,
+                  )
                 : null;
               const merged: UIMessage = {
                 ...last,
-                traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
+                traces: mergedLines ?? [...previousTraces, ...lines],
                 content: mergedLines
-                  ? mergedLines.traces[mergedLines.traces.length - 1]
+                  ? mergedLines[mergedLines.length - 1]
                   : lines[lines.length - 1],
-                toolEvents: visibleStructuredEvents.length
-                  ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
-                  : last.toolEvents,
+                toolEvents: mergedEvents,
                 activitySegmentId: last.activitySegmentId ?? segmentId,
                 ...turn,
               };

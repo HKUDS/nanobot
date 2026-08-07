@@ -81,6 +81,7 @@ from nanobot.webui.session_access import (
     WebuiSessionAccess,
     session_mentions_runtime_context,
 )
+from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
@@ -774,6 +775,30 @@ class WebSocketChannel(BaseChannel):
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
             await self._hydrate_after_subscribe(cid)
+            return
+        if t == "set_sidebar_state":
+            if connection not in self._webui_connections:
+                await self._send_event(connection, "error", detail="access_denied")
+                return
+            state = envelope.get("state")
+            if not isinstance(state, dict):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="invalid_sidebar_state",
+                )
+                return
+            try:
+                await asyncio.to_thread(
+                    write_webui_sidebar_state,
+                    cast(dict[str, Any], state),
+                )
+            except (OSError, ValueError):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="invalid_sidebar_state",
+                )
             return
         if t == "set_workspace_scope":
             cid = envelope.get("chat_id")

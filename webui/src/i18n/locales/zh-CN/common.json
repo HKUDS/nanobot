@@ -514,7 +514,15 @@
       "profile": "配置档案",
       "extraHeaders": "额外请求头",
       "extraBody": "额外请求体",
-      "extraQuery": "额外查询参数"
+      "extraQuery": "额外查询参数",
+      "capabilityFastMode": "Fast 模式",
+      "capabilityFastModeHelp": "通过 OpenAI 优先服务层获取更快响应，会更快消耗额度。",
+      "capabilityDeepSeekSearch": "DeepSeek 联网搜索",
+      "capabilityDeepSeekSearchHelp": "允许 DeepSeek V4 Flash 通过 Responses API 搜索网络，并在对话中展示搜索过程。",
+      "capabilityXSearch": "X 搜索",
+      "capabilityXSearchHelp": "允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
+      "capabilityOpenAISearch": "OpenAI 联网搜索",
+      "capabilityOpenAISearchHelp": "允许兼容 Responses API 的模型搜索网络，并在对话中展示搜索过程。"
     },
     "legal": {
       "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
