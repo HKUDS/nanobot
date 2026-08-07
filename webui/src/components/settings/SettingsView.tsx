@@ -3312,6 +3312,7 @@ function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
@@ -3338,6 +3339,10 @@ function ModelsSettings({
     })),
   ];
   const selectedPreset = namedPresetsByName.get(form.modelPreset) ?? null;
+  const activeEditorRowKey =
+    editorRowKey ??
+    presetRows.find((row) => row.name === selectedPreset?.name)?.key ??
+    null;
   useEffect(() => {
     setAdvancedOpen(false);
   }, [editorOpen, selectedPreset?.name]);
@@ -3374,8 +3379,12 @@ function ModelsSettings({
     selectedPreset && callOrder.includes(selectedPreset.name),
   );
   const callOrderBusy = orderSaving || saving;
-  const selectPreset = (preset: SettingsPayload["model_presets"][number]) => {
-    const toggleCurrentPreset = !creating && selectedPreset?.name === preset.name;
+  const selectPreset = (
+    preset: SettingsPayload["model_presets"][number],
+    rowKey: string,
+  ) => {
+    const toggleCurrentPreset =
+      !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
     onSelectConfiguration();
     if (toggleCurrentPreset) {
       setEditorOpen((open) => !open);
@@ -3392,6 +3401,7 @@ function ModelsSettings({
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
     }));
+    setEditorRowKey(rowKey);
     setEditorOpen(true);
   };
 
@@ -3432,9 +3442,8 @@ function ModelsSettings({
     onChangeCallOrder(next);
   };
 
-  const renderPresetEditor = (key: string) => (
+  const renderPresetEditor = () => (
     <div
-      key={key}
       id="model-preset-editor"
       data-testid="model-preset-editor"
       className="mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-[18px] border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl"
@@ -3675,11 +3684,12 @@ function ModelsSettings({
                     draggedCallOrderIndex !== null &&
                     draggedCallOrderIndex < orderIndex;
                   const isSelected =
-                    editorOpen && !creating && selectedPreset?.name === name;
-                  return [
+                    editorOpen &&
+                    !creating &&
+                    activeEditorRowKey === key &&
+                    selectedPreset?.name === name;
+                  const presetRow = (
                     <div
-                      key={key}
-                      role="listitem"
                       tabIndex={ordered ? 0 : -1}
                       draggable={ordered && !callOrderBusy}
                       aria-label={
@@ -3731,7 +3741,7 @@ function ModelsSettings({
                           moveCallOrderItem(orderIndex, 1);
                         } else if ((event.key === "Enter" || event.key === " ") && preset) {
                           event.preventDefault();
-                          selectPreset(preset);
+                          selectPreset(preset, key);
                         }
                       }}
                       className={cn(
@@ -3766,7 +3776,7 @@ function ModelsSettings({
                         aria-expanded={isSelected}
                         aria-controls={isSelected ? "model-preset-editor" : undefined}
                         disabled={!preset}
-                        onClick={() => preset && selectPreset(preset)}
+                        onClick={() => preset && selectPreset(preset, key)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-[12px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {ordered ? (
@@ -3846,9 +3856,14 @@ function ModelsSettings({
                           aria-hidden
                         />
                       </button>
-                    </div>,
-                    isSelected ? renderPresetEditor(`editor:${key}`) : null,
-                  ];
+                    </div>
+                  );
+                  return (
+                    <div key={key} role="listitem">
+                      {presetRow}
+                      {isSelected ? renderPresetEditor() : null}
+                    </div>
+                  );
                 })}
               </div>
               <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -3859,6 +3874,7 @@ function ModelsSettings({
                     className="rounded-full"
                     disabled={callOrderBusy}
                     onClick={() => {
+                      setEditorRowKey(null);
                       setEditorOpen(true);
                       onBeginCreate();
                     }}
@@ -3878,7 +3894,7 @@ function ModelsSettings({
                   </SettingsStatusMessage>
                 ) : null}
               </div>
-              {creating && editorOpen ? renderPresetEditor("editor:new") : null}
+              {creating && editorOpen ? renderPresetEditor() : null}
             </>
           )}
         </SettingsGroup>

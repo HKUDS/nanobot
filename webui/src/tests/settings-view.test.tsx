@@ -2166,6 +2166,8 @@ describe("SettingsView Apps catalog", () => {
     expect(trigger).toHaveAttribute("aria-pressed", "true");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveAttribute("aria-controls", "model-preset-editor");
+    expect(row.parentElement).toHaveAttribute("role", "listitem");
+    expect(row.parentElement?.parentElement).toHaveAttribute("role", "list");
     expect(row.nextElementSibling).toBe(editor);
     expect(editor).toHaveClass(
       "slide-in-from-top-1",
@@ -2317,7 +2319,17 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models", initialSettings: initialPayload });
 
     const primaryRow = screen.getByTestId("model-call-order-row-primary");
-    const firstBackupRow = screen.getAllByTestId("model-call-order-row-backup")[0];
+    const backupRows = screen.getAllByTestId("model-call-order-row-backup");
+    const firstBackupRow = backupRows[0];
+    const secondBackupRow = backupRows[1];
+    const secondBackupTrigger = within(secondBackupRow).getAllByRole("button")[0];
+    fireEvent.click(secondBackupTrigger);
+    expect(screen.getAllByTestId("model-preset-editor")).toHaveLength(1);
+    expect(secondBackupRow.nextElementSibling).toBe(
+      screen.getByTestId("model-preset-editor"),
+    );
+    fireEvent.click(secondBackupTrigger);
+
     const dataTransfer = {
       dropEffect: "move",
       effectAllowed: "move",
