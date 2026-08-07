@@ -2944,7 +2944,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
-        pendingQueueKey="temporary-private"
+        pendingQueueKey={null}
         placeholder="Type your message..."
       />,
     );
@@ -2966,7 +2966,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
-        pendingQueueKey="temporary-private"
+        pendingQueueKey={null}
         placeholder="Type your message..."
       />,
     );

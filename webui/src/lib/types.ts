@@ -1162,7 +1162,7 @@ export interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "attached"; chat_id: string; temporary?: boolean }
   | { event: "message_accepted"; chat_id: string; turn_id: string }
   | ({
       event: "message";
@@ -1338,6 +1338,7 @@ export interface FilePreviewPayload {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "new_temporary_chat" }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_sidebar_state"; state: SidebarStatePayload }

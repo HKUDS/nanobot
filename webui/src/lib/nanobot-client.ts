@@ -11,7 +11,6 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
-import { isTemporaryChatId } from "./temporary-chat";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -109,6 +108,10 @@ interface PendingRequest<T> {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingChatRequest extends PendingRequest<string> {
+  temporary: boolean;
+}
+
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 const TURN_REJECTION_DETAILS = new Set([
   "access_denied",
@@ -197,7 +200,7 @@ export class NanobotClient {
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingRequest<string> | null = null;
+  private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   // Frames queued while the socket is not yet OPEN
@@ -743,7 +746,7 @@ export class NanobotClient {
   }
 
   discardTemporaryChat(chatId: string): void {
-    if (!isTemporaryChatId(chatId)) return;
+    if (!this.temporaryChatIds.has(chatId)) return;
     if (this.socket?.readyState === WS_OPEN) {
       this.rawSend({ type: "discard_temporary_chat", chat_id: chatId });
     }
@@ -760,11 +763,26 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("newChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
       });
+    });
+  }
+
+  /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
+  newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
+    if (this.pendingNewChat) {
+      return Promise.reject(new Error("newChat already in flight"));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNewChat = null;
+        reject(new Error("newTemporaryChat timed out"));
+      }, timeoutMs);
+      this.pendingNewChat = { resolve, reject, timer, temporary: true };
+      this.queueSend({ type: "new_temporary_chat" });
     });
   }
 
@@ -804,7 +822,7 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("forkChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "fork_chat",
         source_chat_id: sourceChatId,
@@ -815,10 +833,7 @@ export class NanobotClient {
   }
 
   attach(chatId: string): void {
-    if (isTemporaryChatId(chatId)) {
-      this.temporaryChatIds.add(chatId);
-      return;
-    }
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
@@ -840,8 +855,7 @@ export class NanobotClient {
       startsNewRun?: boolean;
     },
   ): void {
-    const temporary = isTemporaryChatId(chatId);
-    if (temporary) this.temporaryChatIds.add(chatId);
+    const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
@@ -891,7 +905,7 @@ export class NanobotClient {
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
-    if (isTemporaryChatId(chatId)) return;
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     this.queueSend({
       type: "set_workspace_scope",
@@ -1016,8 +1030,15 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
-      this.knownChats.add(parsed.chat_id);
-      if (this.pendingNewChat) {
+      if (parsed.temporary === true) {
+        this.temporaryChatIds.add(parsed.chat_id);
+      } else {
+        this.knownChats.add(parsed.chat_id);
+      }
+      if (
+        this.pendingNewChat
+        && this.pendingNewChat.temporary === (parsed.temporary === true)
+      ) {
         clearTimeout(this.pendingNewChat.timer);
         this.pendingNewChat.resolve(parsed.chat_id);
         this.pendingNewChat = null;

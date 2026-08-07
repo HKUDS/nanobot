@@ -20,6 +20,7 @@ const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
+const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
@@ -238,6 +239,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
     newChat = vi.fn();
+    newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
     discardTemporaryChat = discardTemporaryChatSpy;
@@ -270,6 +272,10 @@ describe("App layout", () => {
     attachSpy.mockReset();
     setSidebarStateSpy.mockReset();
     discardTemporaryChatSpy.mockReset();
+    let temporaryChatCounter = 0;
+    newTemporaryChatSpy.mockImplementation(async () => (
+      `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
+    ));
     sendMessageSpy.mockReset();
     statusHandlers.clear();
     runStatusHandlers.clear();
@@ -425,9 +431,9 @@ describe("App layout", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/temporary-/));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
     const firstHash = window.location.hash;
-    expect(firstHash).toMatch(/^#\/temporary\/temporary-/);
+    expect(firstHash).toMatch(/^#\/temporary\/[0-9a-f-]+$/);
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
     expect(createChatSpy).not.toHaveBeenCalled();
 
@@ -441,9 +447,9 @@ describe("App layout", () => {
       target: { value: "second private message" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/temporary-/));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
     const secondHash = window.location.hash;
-    expect(secondHash).toMatch(/^#\/temporary\/temporary-/);
+    expect(secondHash).toMatch(/^#\/temporary\/[0-9a-f-]+$/);
     expect(secondHash).not.toBe(firstHash);
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
     expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
@@ -481,8 +487,8 @@ describe("App layout", () => {
     const discardedChatIds = discardTemporaryChatSpy.mock.calls.map(([chatId]) => chatId);
     expect(new Set(discardedChatIds).size).toBe(2);
     expect(discardedChatIds).toEqual([
-      expect.stringMatching(/^temporary-/),
-      expect.stringMatching(/^temporary-/),
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
     ]);
   });
 
@@ -544,7 +550,7 @@ describe("App layout", () => {
       target: { value: "start temporary chat" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/temporary-/));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
 
     expect(screen.queryByText("Not saved")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear temporary chat" })).not.toBeInTheDocument();
@@ -560,7 +566,7 @@ describe("App layout", () => {
       target: { value: "do not lose this" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/temporary-/));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
 
     const beforeUnload = new Event("beforeunload", { cancelable: true });
     act(() => window.dispatchEvent(beforeUnload));
@@ -579,7 +585,7 @@ describe("App layout", () => {
       target: { value: "connection-sensitive message" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/temporary-/));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
 
     act(() => {
       statusHandlers.forEach((handler) => handler("reconnecting"));

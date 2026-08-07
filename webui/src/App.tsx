@@ -64,8 +64,6 @@ import {
 import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
 import {
   createTemporaryChatSession,
-  isTemporaryChatId,
-  temporaryChatIdFromSessionKey,
 } from "@/lib/temporary-chat";
 
 type BootState =
@@ -101,6 +99,7 @@ type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
+  temporary?: boolean;
 };
 const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
@@ -235,11 +234,12 @@ function readShellRoute(): ShellRoute {
     const encoded = path.slice("/temporary/".length);
     try {
       const chatId = decodeURIComponent(encoded).trim();
-      return isTemporaryChatId(chatId)
+      return chatId
         ? {
             view: "chat",
             activeKey: `websocket:${chatId}`,
             settingsSection: "overview",
+            temporary: true,
           }
         : defaultShellRoute();
     } catch {
@@ -262,8 +262,10 @@ function readShellRoute(): ShellRoute {
 
 function shellRouteHash(route: ShellRoute): string {
   if (route.view === "chat") {
-    const temporaryChatId = temporaryChatIdFromSessionKey(route.activeKey);
-    if (temporaryChatId) return `#/temporary/${encodeURIComponent(temporaryChatId)}`;
+    if (route.temporary && route.activeKey?.startsWith("websocket:")) {
+      const chatId = route.activeKey.slice("websocket:".length);
+      return `#/temporary/${encodeURIComponent(chatId)}`;
+    }
     return route.activeKey
       ? `#/chat/${encodeURIComponent(route.activeKey)}`
       : "#/new";
@@ -1034,7 +1036,8 @@ function Shell({
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
   const showHostChrome = effectiveRuntimeSurface === "native";
   const showMainSidebar = view !== "settings";
-  const temporaryChatId = temporaryChatIdFromSessionKey(activeKey);
+  const activeTemporarySession = activeKey ? temporarySessions[activeKey] ?? null : null;
+  const temporaryChatId = activeTemporarySession?.chatId ?? null;
   const temporaryChatActive = view === "chat" && temporaryChatId !== null;
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
@@ -1173,9 +1176,7 @@ function Shell({
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
-    if (temporaryChatIdFromSessionKey(activeKey)) {
-      return temporarySessions[activeKey] ?? null;
-    }
+    if (temporarySessions[activeKey]) return temporarySessions[activeKey];
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey, temporarySessions]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
@@ -1249,7 +1250,8 @@ function Shell({
       pendingCreatedSessionKeyRef.current = null;
     }
     if (!activeKey) return;
-    if (temporaryChatIdFromSessionKey(activeKey)) {
+    const currentRoute = readShellRoute();
+    if (currentRoute.temporary) {
       if (temporarySessions[activeKey]) return;
       navigate(defaultShellRoute(), { replace: true });
       return;
@@ -1258,7 +1260,6 @@ function Shell({
     // WebKit can commit the route before useSessions' optimistic insert.
     // Keep that just-created destination valid until the session list catches up.
     if (pendingCreatedKey === activeKey) return;
-    const currentRoute = readShellRoute();
     navigate(
       currentRoute.view === "chat"
         ? defaultShellRoute()
@@ -1478,31 +1479,38 @@ function Shell({
       workspaceScope?: WorkspaceScopePayload | null,
       initialMessage?: string,
     ) => {
-      const session = createTemporaryChatSession();
-      const restrictedScope = workspaceScope
-        ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
-        : null;
-      const nextSession: ChatSummary = {
-        ...session,
-        preview: initialMessage ?? "",
-        ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
-      };
-      setTemporarySessions((current) => ({
-        ...current,
-        [nextSession.key]: nextSession,
-      }));
-      setTemporaryChatEnabled(false);
-      setWorkspaceError(null);
-      setSessionSearchOpen(false);
-      navigate({
-        view: "chat",
-        activeKey: nextSession.key,
-        settingsSection: "overview",
-      });
-      setMobileSidebarOpen(false);
-      return nextSession.chatId;
+      try {
+        const chatId = await client.newTemporaryChat();
+        const session = createTemporaryChatSession(chatId);
+        const restrictedScope = workspaceScope
+          ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
+          : null;
+        const nextSession: ChatSummary = {
+          ...session,
+          preview: initialMessage ?? "",
+          ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
+        };
+        setTemporarySessions((current) => ({
+          ...current,
+          [nextSession.key]: nextSession,
+        }));
+        setTemporaryChatEnabled(false);
+        setWorkspaceError(null);
+        setSessionSearchOpen(false);
+        navigate({
+          view: "chat",
+          activeKey: nextSession.key,
+          settingsSection: "overview",
+          temporary: true,
+        });
+        setMobileSidebarOpen(false);
+        return nextSession.chatId;
+      } catch (error) {
+        console.error("Failed to create temporary chat", error);
+        return null;
+      }
     },
-    [navigate],
+    [client, navigate],
   );
 
   const onForkChat = useCallback(async (
@@ -1572,7 +1580,8 @@ function Shell({
 
   const onSelectChat = useCallback(
     (key: string) => {
-      const selected = temporarySessionsRef.current[key]
+      const selectedTemporary = temporarySessionsRef.current[key];
+      const selected = selectedTemporary
         ?? sessions.find((session) => session.key === key);
       const selectedChatId = selected?.chatId;
       if (selectedChatId) {
@@ -1589,7 +1598,12 @@ function Shell({
         setDraftWorkspaceScope(null);
       }
       setWorkspaceError(null);
-      navigate({ view: "chat", activeKey: key, settingsSection: "overview" });
+      navigate({
+        view: "chat",
+        activeKey: key,
+        settingsSection: "overview",
+        ...(selectedTemporary ? { temporary: true } : {}),
+      });
       setMobileSidebarOpen(false);
     },
     [navigate, sessions],
@@ -1610,6 +1624,7 @@ function Shell({
         view: "chat",
         activeKey: remaining[0]?.key ?? null,
         settingsSection: "overview",
+        ...(remaining[0] ? { temporary: true } : {}),
       }, { replace: true });
     }
     setMobileSidebarOpen(false);
@@ -1897,7 +1912,11 @@ function Shell({
       nextRunning.delete(chatId);
       runningChatIdsRef.current = nextRunning;
       setRunningChatIds(nextRunning);
-      if (isTemporaryChatId(chatId)) return;
+      if (
+        Object.values(temporarySessionsRef.current).some(
+          (session) => session.chatId === chatId,
+        )
+      ) return;
       setUpdatedChatIds((current) => {
         const next = new Set(current);
         if (activeChatIdRef.current === chatId) {
@@ -1922,7 +1941,7 @@ function Shell({
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
       temporarySessionsRef.current = {};
       setTemporarySessions({});
-      if (temporaryChatIdFromSessionKey(readShellRoute().activeKey)) {
+      if (readShellRoute().temporary) {
         navigate(defaultShellRoute(), { replace: true });
       }
     });

@@ -33,7 +33,6 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import { isTemporaryChatId } from "@/lib/temporary-chat";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -677,6 +676,7 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
+  const knownTemporaryChatIdsRef = useRef(new Set<string>());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -753,10 +753,12 @@ export function ThreadShell({
 
   useEffect(() => {
     const retained = new Set(temporaryChatIds);
-    for (const cachedChatId of messageCacheRef.current.keys()) {
-      if (isTemporaryChatId(cachedChatId) && !retained.has(cachedChatId)) {
+    for (const chatId of retained) knownTemporaryChatIdsRef.current.add(chatId);
+    for (const cachedChatId of knownTemporaryChatIdsRef.current) {
+      if (!retained.has(cachedChatId)) {
         messageCacheRef.current.delete(cachedChatId);
         activeViewportTurnByChatIdRef.current.delete(cachedChatId);
+        knownTemporaryChatIdsRef.current.delete(cachedChatId);
       }
     }
   }, [temporaryChatIds]);
@@ -1435,7 +1437,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
-          pendingQueueKey={chatId}
+          pendingQueueKey={temporary ? null : chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}

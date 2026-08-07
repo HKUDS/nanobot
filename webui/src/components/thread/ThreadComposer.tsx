@@ -85,7 +85,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
-import { isTemporaryChatId } from "@/lib/temporary-chat";
 import type {
   CliAppInfo,
   ChatSummary,
@@ -444,9 +443,7 @@ function storeSlashRecents(commands: string[]): void {
 
 function queuedPromptsStorageKey(key?: string | null): string | null {
   const clean = key?.trim();
-  return clean && !isTemporaryChatId(clean)
-    ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}`
-    : null;
+  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
 }
 
 function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
