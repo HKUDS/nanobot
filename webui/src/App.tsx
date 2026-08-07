@@ -1004,6 +1004,7 @@ function Shell({
     useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
+  const pendingCreatedSessionKeyRef = useRef<string | null>(null);
   const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
@@ -1181,8 +1182,15 @@ function Shell({
   }, [loading, sessions]);
 
   useEffect(() => {
-    if (loading || !activeKey) return;
-    if (sessions.some((session) => session.key === activeKey)) return;
+    if (loading) return;
+    const pendingCreatedKey = pendingCreatedSessionKeyRef.current;
+    if (pendingCreatedKey && sessions.some((session) => session.key === pendingCreatedKey)) {
+      pendingCreatedSessionKeyRef.current = null;
+    }
+    if (!activeKey || sessions.some((session) => session.key === activeKey)) return;
+    // WebKit can commit the route before useSessions' optimistic insert.
+    // Keep that just-created destination valid until the session list catches up.
+    if (pendingCreatedKey === activeKey) return;
     const currentRoute = readShellRoute();
     navigate(
       currentRoute.view === "chat"
@@ -1366,9 +1374,11 @@ function Shell({
     try {
       const scope = workspaceScope ?? activeWorkspaceScope;
       const chatId = await createChat(scope);
+      const key = `websocket:${chatId}`;
+      pendingCreatedSessionKeyRef.current = key;
       navigate({
         view: "chat",
-        activeKey: `websocket:${chatId}`,
+        activeKey: key,
         settingsSection: "overview",
       });
       setMobileSidebarOpen(false);

@@ -367,6 +367,23 @@ describe("App layout", () => {
     );
   });
 
+  it("keeps a just-created topic route while the session list catches up", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "/model" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(
+        `#/chat/${encodeURIComponent("websocket:chat-1")}`,
+      ),
+    );
+  });
+
   it("restores the Settings route after a restart fallback hash", async () => {
     localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
     localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
