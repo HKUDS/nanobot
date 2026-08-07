@@ -2,9 +2,11 @@
 
 import base64
 import errno
+import hashlib
 import json
 import os
 import re
+import shutil
 from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
@@ -485,8 +487,43 @@ class JsonlSessionStore:
     """JSONL implementation of session persistence."""
 
     def __init__(self, workspace: Path):
-        self.sessions_dir = ensure_dir(workspace / "sessions")
-        self.legacy_sessions_dir = get_legacy_sessions_dir()
+        root = get_legacy_sessions_dir()
+        self.sessions_dir = ensure_dir(root / self._workspace_hash(workspace))
+        self.legacy_sessions_dir = root
+        self._write_workspace_marker(self.sessions_dir, workspace)
+        self._migrate_from_workspace(workspace)
+
+    @staticmethod
+    def _workspace_hash(workspace: Path) -> str:
+        canonical = str(Path(workspace).expanduser().resolve(strict=False))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _write_workspace_marker(sessions_dir: Path, workspace: Path) -> None:
+        marker = sessions_dir / ".workspace"
+        if marker.exists():
+            return
+        try:
+            marker.write_text(
+                str(Path(workspace).expanduser().resolve(strict=False)),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.debug("Failed to write sessions workspace marker: {}", exc)
+
+    def _migrate_from_workspace(self, workspace: Path) -> None:
+        """Move legacy in-workspace session files into the out-of-workspace store."""
+        old_dir = Path(workspace).expanduser() / "sessions"
+        if not old_dir.is_dir():
+            return
+        for src in old_dir.glob("*.jsonl"):
+            dst = self.sessions_dir / src.name
+            if dst.exists():
+                continue
+            try:
+                shutil.move(str(src), str(dst))
+            except OSError as exc:
+                logger.warning("Failed to migrate session {}: {}", src, exc)
 
     @staticmethod
     def safe_key(key: str) -> str:

@@ -6,6 +6,7 @@ import os
 import ssl
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 
 import certifi
 import pytest
@@ -20,6 +21,19 @@ def _isolate_nanobot_log_activation() -> Iterator[None]:
         yield
     finally:
         logger.enable("nanobot")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Redirect session storage away from the real ~/.nanobot/sessions.
+
+    Session storage lives under get_legacy_sessions_dir() (outside the workspace,
+    per ADR-0001), so without redirection tests would write into the real home.
+    """
+    root = tmp_path / "sessions-root"
+    monkeypatch.setattr("nanobot.session.manager.get_legacy_sessions_dir", lambda: root)
+    monkeypatch.setattr("nanobot.config.paths.get_legacy_sessions_dir", lambda: root)
+    yield
 
 
 @pytest.fixture(scope="session", autouse=True)
