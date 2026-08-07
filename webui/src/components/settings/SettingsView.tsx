@@ -3577,24 +3577,32 @@ function ModelsSettings({
             {tx("settings.actions.cancel", "Cancel")}
           </Button>
         ) : selectedPreset ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="self-start rounded-full text-muted-foreground hover:text-destructive"
-            disabled={selectedPresetOnlyActive || saving || orderSaving}
-            title={
-              selectedPresetOnlyActive
-                ? tx(
-                    "settings.models.removeBeforeDelete",
-                    "Remove this preset from the call order before deleting it.",
-                  )
-                : undefined
-            }
-            onClick={() => onDeleteConfiguration(selectedPreset)}
-          >
-            <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {tx("settings.actions.delete", "Delete")}
-          </Button>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="rounded-full text-muted-foreground hover:text-destructive"
+              disabled={selectedPresetOnlyActive || saving || orderSaving}
+              aria-describedby={
+                selectedPresetOnlyActive ? "model-preset-delete-hint" : undefined
+              }
+              onClick={() => onDeleteConfiguration(selectedPreset)}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {tx("settings.actions.delete", "Delete")}
+            </Button>
+            {selectedPresetOnlyActive ? (
+              <span
+                id="model-preset-delete-hint"
+                className="text-[11px] leading-4 text-muted-foreground"
+              >
+                {tx(
+                  "settings.models.removeBeforeDelete",
+                  "Remove this preset from the call order before deleting it.",
+                )}
+              </span>
+            ) : null}
+          </div>
         ) : null}
         <div className="flex items-center justify-end gap-3">
           <Button

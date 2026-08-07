@@ -2169,7 +2169,12 @@ describe("SettingsView Apps catalog", () => {
     expect(row.nextElementSibling).toBe(editor);
     expect(editor).toHaveClass("slide-in-from-top-1", "bg-muted/10");
     expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
-    expect(within(editor).getByRole("button", { name: "Delete" })).toBeDisabled();
+    const deleteButton = within(editor).getByRole("button", { name: "Delete" });
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute("aria-describedby", "model-preset-delete-hint");
+    expect(
+      within(editor).getByText("Remove this preset from the call order before deleting it."),
+    ).toBeInTheDocument();
 
     fireEvent.click(trigger);
 
