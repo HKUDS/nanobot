@@ -100,7 +100,8 @@ export function WeixinPanel({
   const primaryFields = localizeBooleanFields(setupFields.primary, onLabel, offLabel);
   const advancedFields = localizeBooleanFields(setupFields.advanced, onLabel, offLabel);
   const editableFields = [...primaryFields, ...advancedFields];
-  const docsUrl = docsUrlWithBase(chatAppGuideUrl("wechat"), chatAppsDocsUrl);
+  const docsUrl = docsUrlWithBase(chatAppGuideUrl("wechat"), chatAppsDocsUrl)
+    ?? chatAppGuideUrl("wechat");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
