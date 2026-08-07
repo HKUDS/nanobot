@@ -516,6 +516,7 @@ class TelegramChannel(BaseChannel):
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
         self._last_poll_ok: float = 0.0  # monotonic time of last getUpdates round trip
         self._app_ready = asyncio.Event()  # cleared while the app is being rebuilt
+        self._teardown_lock = asyncio.Lock()
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -768,21 +769,22 @@ class TelegramChannel(BaseChannel):
 
     async def _teardown_app(self) -> None:
         """Shut down the application, tolerating partially started state."""
-        app, self._app = self._app, None
-        self._app_ready.clear()
-        if not app:
-            return
-        for step in (cast(Any, app.updater).stop, app.stop, app.shutdown):
+        async with self._teardown_lock:
+            app, self._app = self._app, None
+            self._app_ready.clear()
+            if not app:
+                return
+            for step in (cast(Any, app.updater).stop, app.stop, app.shutdown):
+                try:
+                    await step()
+                except Exception as e:
+                    self.logger.debug("teardown step failed: {}", e)
+            # Application.shutdown() skips the HTTPX pools unless initialize()
+            # finished, so a failed startup leaks one per retry. This is idempotent.
             try:
-                await step()
+                await app.bot.shutdown()
             except Exception as e:
-                self.logger.debug("teardown step failed: {}", e)
-        # Application.shutdown() skips the HTTPX pools unless initialize()
-        # finished, so a failed startup leaks one per retry. This is idempotent.
-        try:
-            await app.bot.shutdown()
-        except Exception as e:
-            self.logger.debug("bot shutdown failed: {}", e)
+                self.logger.debug("bot shutdown failed: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -804,7 +806,9 @@ class TelegramChannel(BaseChannel):
 
         if self._app:
             self.logger.info("Stopping bot...")
-            await self._teardown_app()
+        # Join an in-flight supervisor teardown before ChannelManager cancels
+        # start(), otherwise cancellation can strand the old HTTPX pools.
+        await self._teardown_app()
 
     @staticmethod
     def _get_media_type(path: str) -> str:

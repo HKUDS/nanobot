@@ -564,6 +564,46 @@ async def test_stop_during_startup_does_not_leak_app(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_waits_for_inflight_watchdog_teardown(monkeypatch) -> None:
+    """Manager cancellation after stop() must not interrupt an active teardown."""
+    _FakeHTTPXRequest.clear()
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    teardown_started = asyncio.Event()
+    finish_teardown = asyncio.Event()
+    app = _FakeApp(lambda: None)
+
+    async def slow_updater_stop() -> None:
+        teardown_started.set()
+        await finish_teardown.wait()
+
+    app.updater.stop = slow_updater_stop
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: _FakeBuilder(app)),
+    )
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.POLL_STALE_SECONDS", -1.0)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.POLL_WATCH_INTERVAL", 0.0)
+
+    start_task = asyncio.create_task(channel.start())
+    await teardown_started.wait()
+    assert channel._app is None
+
+    stop_task = asyncio.create_task(channel.stop())
+    await asyncio.sleep(0)
+    assert not stop_task.done()
+
+    finish_teardown.set()
+    await stop_task
+    await start_task
+
+    assert app.bot.shutdown_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_send_during_rebuild_fails_instead_of_dropping(monkeypatch) -> None:
     """A send that cannot reach Telegram must raise so the manager can retry."""
     monkeypatch.setattr("nanobot.channels.telegram.runtime.APP_RESTART_SEND_WAIT_SECONDS", 0.0)
