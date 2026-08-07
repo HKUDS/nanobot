@@ -64,6 +64,7 @@ import {
 import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
 import {
   createTemporaryChatSession,
+  deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
 
 type BootState =
@@ -2069,7 +2070,7 @@ function Shell({
   }, []);
 
   const headerTitle = temporaryChatActive
-    ? t("temporaryChat.title")
+    ? deriveTemporaryChatTitle(activeSession?.preview, t("temporaryChat.title"))
     : activeSession
     ? sidebarState.title_overrides[activeSession.key] ||
       activeSession.title ||

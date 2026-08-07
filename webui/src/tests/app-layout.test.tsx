@@ -466,7 +466,10 @@ describe("App layout", () => {
       name: "first private message",
     }));
     await waitFor(() => expect(window.location.hash).toBe(firstHash));
-    expect(screen.getByText("Temporary chat")).toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-header")).getByText(
+      "first private message",
+    )).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("first private message · nanobot"));
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
 
     fireEvent.click(within(sidebar).getByRole("button", {

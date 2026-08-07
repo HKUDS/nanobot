@@ -44,6 +44,7 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
+import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -537,7 +538,7 @@ function TemporaryChatSection({
       <ul className="space-y-0.5">
         {sessions.map((session) => {
           const active = session.key === activeKey;
-          const title = deriveTitle(session.preview, t("temporaryChat.title"));
+          const title = deriveTemporaryChatTitle(session.preview, t("temporaryChat.title"));
           return (
             <li key={session.key} className="min-w-0">
               <div

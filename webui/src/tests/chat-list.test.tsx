@@ -156,7 +156,7 @@ describe("ChatList", () => {
     const temporarySession = session({
       key: "temporary:temporary-one",
       chatId: "temporary-one",
-      preview: "Private planning",
+      preview: "hi",
     });
     const onSelect = vi.fn();
     const onClose = vi.fn();
@@ -176,11 +176,11 @@ describe("ChatList", () => {
     );
 
     const section = screen.getByRole("region", { name: "Temporary chats" });
-    fireEvent.click(within(section).getByRole("button", { name: "Private planning" }));
+    fireEvent.click(within(section).getByRole("button", { name: "hi" }));
     expect(onSelect).toHaveBeenCalledWith("temporary:temporary-one");
 
     fireEvent.click(within(section).getByRole("button", {
-      name: "Close temporary chat: Private planning",
+      name: "Close temporary chat: hi",
     }));
     expect(onClose).toHaveBeenCalledWith("temporary:temporary-one");
   });
