@@ -1,19 +1,19 @@
-"""Tests for the computer_use tool, its config wiring, and coordinate scaling.
-
-Backend actuation is exercised through an injected fake backend, so these tests
-need neither pyautogui nor playwright (only Pillow, for screenshot downscaling).
-"""
+"""Tests for screenshot-based computer control."""
 
 from __future__ import annotations
 
 import io
+import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.agent.tools.computer_use import ComputerUseTool, ComputerUseToolConfig
-from nanobot.agent.tools.computer_use_backends.base import ComputerBackend
-from nanobot.utils.screen_scale import ScreenScaler, fit_target_size
+from nanobot.agent.tools.computer_use_backends.base import ComputerBackend, SessionBackendPool
+from nanobot.agent.tools.computer_use_backends.desktop_pyautogui import DesktopBackend
+from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.config.schema import ToolsConfig
 
 
 class _FakeBackend(ComputerBackend):
@@ -24,6 +24,7 @@ class _FakeBackend(ComputerBackend):
     def __init__(self, width: int = 2560, height: int = 1600):
         self.calls: list[tuple] = []
         self._w, self._h = width, height
+        self.closed = False
 
     async def dimensions(self) -> tuple[int, int]:
         return (self._w, self._h)
@@ -52,6 +53,9 @@ class _FakeBackend(ComputerBackend):
 
     async def key(self, combo):
         self.calls.append(("key", combo))
+
+    async def close(self):
+        self.closed = True
     # navigate() inherited -> raises NotImplementedError (desktop has no navigate)
 
 
@@ -64,33 +68,9 @@ def _split(result):
 
 def _tool(**kw):
     fb = _FakeBackend(width=kw.pop("w", 2560), height=kw.pop("h", 1600))
-    tool = ComputerUseTool(backend_impl=fb, target_width=1280, target_height=800, **kw)
+    config = ComputerUseToolConfig(target_width=1280, target_height=800, **kw)
+    tool = ComputerUseTool(config, backend_impl=fb)
     return tool, fb
-
-
-# --------------------------- coordinate scaling (pure) ---------------------------
-
-class TestScreenScale:
-    def test_fit_never_upscales(self):
-        assert fit_target_size(800, 600, 1280, 800) == (800, 600)
-
-    def test_fit_preserves_aspect(self):
-        # 2560x1600 (16:10) into 1280x800 box -> exactly halved.
-        assert fit_target_size(2560, 1600, 1280, 800) == (1280, 800)
-
-    def test_fit_landscape_into_box(self):
-        # 3000x1000 into 1280x800 -> width-bound: scale 1280/3000.
-        w, h = fit_target_size(3000, 1000, 1280, 800)
-        assert w == 1280 and h == round(1000 * 1280 / 3000)
-
-    def test_to_real_scales_up(self):
-        sc = ScreenScaler.for_screen(2560, 1600, 1280, 800)
-        assert sc.to_real(100, 50) == (200, 100)
-
-    def test_to_real_clamps_in_bounds(self):
-        sc = ScreenScaler.for_screen(1000, 1000, 1000, 1000)
-        assert sc.to_real(5000, 5000) == (999, 999)
-        assert sc.to_real(-10, -10) == (0, 0)
 
 
 # --------------------------- config + metadata ---------------------------
@@ -101,7 +81,19 @@ class TestConfigAndMetadata:
         assert cfg.enable is False
         assert cfg.backend == "desktop"
         assert (cfg.target_width, cfg.target_height) == (1280, 800)
-        assert cfg.require_approval is True
+        assert "require_approval" not in type(cfg).model_fields
+
+    def test_tools_config_accepts_camel_case(self):
+        cfg = ToolsConfig.model_validate({
+            "browser": {"enable": True},
+            "computerUse": {"enable": True, "backend": "browser"},
+        })
+
+        assert cfg.browser.enable is True
+        assert cfg.computer_use.enable is True
+        assert cfg.computer_use.backend == "browser"
+        dumped = cfg.model_dump(by_alias=True)
+        assert "computerUse" in dumped
 
     def test_enabled_reads_config(self):
         ctx = MagicMock()
@@ -117,8 +109,8 @@ class TestConfigAndMetadata:
         )
         tool = ComputerUseTool.create(ctx)
         assert isinstance(tool, ComputerUseTool)
-        assert tool.backend_name == "browser"
-        assert (tool.target_width, tool.target_height) == (1024, 768)
+        assert tool.config.backend == "browser"
+        assert (tool.config.target_width, tool.config.target_height) == (1024, 768)
 
     def test_tool_metadata(self):
         tool, _ = _tool()
@@ -159,49 +151,35 @@ class TestExecute:
         assert "left_click at (200, 100)" in texts[-1]["text"]
 
     @pytest.mark.asyncio
-    async def test_click_accepts_coordinate_array(self):
-        # Some models emit a combined [x, y] array (Anthropic's native convention).
+    async def test_click_clamps_coordinates_to_screen(self):
         tool, fb = _tool()
-        await tool.execute(action="left_click", x=[100, 50])
-        assert fb.calls == [("click", 200, 100, "left", 1)]
+        await tool.execute(action="left_click", x=5000, y=-10)
+        assert fb.calls == [("click", 2559, 0, "left", 1)]
 
     @pytest.mark.asyncio
-    async def test_double_and_triple_click_counts(self):
-        tool, fb = _tool()
-        await tool.execute(action="double_click", x=10, y=10)
-        await tool.execute(action="triple_click", x=10, y=10)
-        assert fb.calls[0] == ("click", 20, 20, "left", 2)
-        assert fb.calls[1] == ("click", 20, 20, "left", 3)
-
+    @pytest.mark.parametrize(
+        ("action", "kwargs", "expected"),
+        [
+            ("double_click", {"x": 10, "y": 10}, ("click", 20, 20, "left", 2)),
+            ("triple_click", {"x": 10, "y": 10}, ("click", 20, 20, "left", 3)),
+            ("right_click", {"x": 5, "y": 5}, ("click", 10, 10, "right", 1)),
+            ("middle_click", {"x": 5, "y": 5}, ("click", 10, 10, "middle", 1)),
+            (
+                "scroll",
+                {"x": 100, "y": 100, "scroll_direction": "down", "scroll_amount": 5},
+                ("scroll", 200, 200, "down", 5),
+            ),
+            ("type", {"text": "hello"}, ("type", "hello")),
+            ("key", {"text": "ctrl+s"}, ("key", "ctrl+s")),
+            ("mouse_move", {"x": 10, "y": 10}, ("move", 20, 20)),
+            ("left_click_drag", {"x": 20, "y": 30}, ("drag", 40, 60)),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_right_and_middle_click_buttons(self):
+    async def test_actions_dispatch_to_backend(self, action, kwargs, expected):
         tool, fb = _tool()
-        await tool.execute(action="right_click", x=5, y=5)
-        await tool.execute(action="middle_click", x=5, y=5)
-        assert fb.calls[0][3] == "right"
-        assert fb.calls[1][3] == "middle"
-
-    @pytest.mark.asyncio
-    async def test_scroll_defaults_and_args(self):
-        tool, fb = _tool()
-        await tool.execute(action="scroll", x=100, y=100, scroll_direction="down", scroll_amount=5)
-        assert fb.calls == [("scroll", 200, 200, "down", 5)]
-
-    @pytest.mark.asyncio
-    async def test_type_and_key(self):
-        tool, fb = _tool()
-        await tool.execute(action="type", text="hello")
-        await tool.execute(action="key", text="ctrl+s")
-        assert ("type", "hello") in fb.calls
-        assert ("key", "ctrl+s") in fb.calls
-
-    @pytest.mark.asyncio
-    async def test_drag_and_move(self):
-        tool, fb = _tool()
-        await tool.execute(action="mouse_move", x=10, y=10)
-        await tool.execute(action="left_click_drag", x=20, y=30)
-        assert ("move", 20, 20) in fb.calls
-        assert ("drag", 40, 60) in fb.calls
+        await tool.execute(action=action, **kwargs)
+        assert fb.calls == [expected]
 
     @pytest.mark.asyncio
     async def test_wait(self):
@@ -210,67 +188,73 @@ class TestExecute:
         _, texts = _split(result)
         assert "Waited" in texts[-1]["text"]
 
-    # ---- error paths return a plain string (model can self-correct) ----
-
+    @pytest.mark.parametrize(
+        ("kwargs", "error"),
+        [
+            ({"action": "frobnicate"}, "unknown action"),
+            ({"action": "left_click"}, "requires"),
+            ({"action": "navigate", "url": "https://example.com"}, "Error"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_unknown_action_errors(self):
+    async def test_errors_are_returned_to_model(self, kwargs, error):
         tool, _ = _tool()
-        result = await tool.execute(action="frobnicate")
-        assert isinstance(result, str) and "unknown action" in result
-
-    @pytest.mark.asyncio
-    async def test_click_requires_coordinates(self):
-        tool, _ = _tool()
-        result = await tool.execute(action="left_click")
-        assert isinstance(result, str) and "requires" in result
-
-    @pytest.mark.asyncio
-    async def test_navigate_unsupported_on_desktop(self):
-        tool, _ = _tool()
-        result = await tool.execute(action="navigate", url="https://example.com")
-        assert isinstance(result, str) and "Error" in result
+        result = await tool.execute(**kwargs)
+        assert isinstance(result, str) and error in result
 
 
-class _BrowserFakeBackend(_FakeBackend):
-    environment = "browser"
+@pytest.mark.asyncio
+async def test_backend_pool_isolates_sessions_and_closes_all():
+    created: list[_FakeBackend] = []
+    finalized: list[bool] = []
 
-    async def navigate(self, url):
-        self.calls.append(("navigate", url))
+    def factory():
+        backend = _FakeBackend()
+        created.append(backend)
+        return backend
+
+    async def finalize():
+        finalized.append(all(backend.closed for backend in created))
+
+    pool = SessionBackendPool(factory, finalizer=finalize)
+    with request_context(RequestContext(channel="test", chat_id="a", session_key="test:a")):
+        first = pool.get()
+        assert pool.get() is first
+    with request_context(RequestContext(channel="test", chat_id="b", session_key="test:b")):
+        second = pool.get()
+
+    assert first is not second
+    await pool.close()
+    assert len(created) == 2
+    assert all(backend.closed for backend in created)
+    assert finalized == [True]
+
+    await pool.close()
+    assert finalized == [True]
 
 
-class TestAllowedDomainsPolicy:
-    def _browser_tool(self, allowed):
-        fb = _BrowserFakeBackend(width=1280, height=800)
-        tool = ComputerUseTool(
-            backend_impl=fb,
-            backend="browser",
-            target_width=1280,
-            target_height=800,
-            allowed_domains=allowed,
-        )
-        return tool, fb
+@pytest.mark.asyncio
+async def test_desktop_backend_uses_safe_pyautogui_calls():
+    pg = MagicMock()
+    pg.easeInOutQuad = object()
+    backend = DesktopBackend()
+    backend._pg = pg
 
-    @pytest.mark.asyncio
-    async def test_empty_allowlist_allows_all(self):
-        tool, fb = self._browser_tool([])
-        await tool.execute(action="navigate", url="https://anything.example/")
-        assert ("navigate", "https://anything.example/") in fb.calls
+    await backend.drag(10, 20)
+    await backend.scroll(10, 20, "down", 3)
 
-    @pytest.mark.asyncio
-    async def test_exact_domain_allowed(self):
-        tool, fb = self._browser_tool(["example.com"])
-        await tool.execute(action="navigate", url="https://example.com/path")
-        assert any(c[0] == "navigate" for c in fb.calls)
+    assert pg.dragTo.call_args.kwargs == {
+        "duration": 0.3,
+        "tween": pg.easeInOutQuad,
+        "button": "left",
+    }
+    pg.scroll.assert_called_once_with(-3)
 
-    @pytest.mark.asyncio
-    async def test_subdomain_allowed(self):
-        tool, fb = self._browser_tool(["example.com"])
-        await tool.execute(action="navigate", url="https://app.example.com/")
-        assert any(c[0] == "navigate" for c in fb.calls)
 
-    @pytest.mark.asyncio
-    async def test_disallowed_domain_blocked(self):
-        tool, fb = self._browser_tool(["example.com"])
-        result = await tool.execute(action="navigate", url="https://evil.test/")
-        assert isinstance(result, str) and "blocked by the allowed_domains" in result
-        assert not any(c[0] == "navigate" for c in fb.calls)
+def test_desktop_backend_preserves_pyautogui_failsafe(monkeypatch):
+    pg = SimpleNamespace(FAILSAFE=True)
+    monkeypatch.setitem(sys.modules, "pyautogui", pg)
+
+    backend = DesktopBackend()
+    assert backend._ensure() is pg
+    assert pg.FAILSAFE is True

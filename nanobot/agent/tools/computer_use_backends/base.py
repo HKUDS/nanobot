@@ -13,7 +13,12 @@ backends never deal with the downscaled space.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from nanobot.agent.tools.context import current_request_session_key
 
 
 class ComputerBackend(ABC):
@@ -63,3 +68,48 @@ class ComputerBackend(ABC):
     async def close(self) -> None:
         """Release any resources (browser process, etc.). Safe to call repeatedly."""
         return None
+
+
+class SessionBackendPool:
+    """Keep stateful backends isolated by nanobot session."""
+
+    def __init__(
+        self,
+        factory: Callable[[], Any],
+        injected: Any = None,
+        *,
+        finalizer: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self._factory = factory
+        self._injected = injected
+        self._finalizer = finalizer
+        self._backends: dict[str, Any] = {}
+
+    def get(self) -> Any:
+        if self._injected is not None:
+            return self._injected
+        key = current_request_session_key() or "default"
+        backend = self._backends.get(key)
+        if backend is None:
+            backend = self._backends[key] = self._factory()
+        return backend
+
+    async def close(self) -> None:
+        backends = [self._injected] if self._injected is not None else list(self._backends.values())
+        self._injected = None
+        self._backends.clear()
+        results = await asyncio.gather(
+            *(backend.close() for backend in backends if backend is not None),
+            return_exceptions=True,
+        )
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if self._finalizer is not None:
+            try:
+                await self._finalizer()
+            except BaseException as exc:
+                errors.append(exc)
+            self._finalizer = None
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("failed to close computer-use backends", errors)

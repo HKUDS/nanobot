@@ -1,38 +1,26 @@
-"""computer_use tool: control a desktop or browser via screenshots + mouse/keyboard.
+"""Screenshot-based computer control."""
 
-Model-agnostic by design. The tool returns each screenshot as ``image_url``
-content blocks; the runner delivers those to the model as a follow-up user
-message, so any vision + tool-calling model works (Claude, GPT, Gemini, ... via
-any gateway such as OpenRouter) without provider-specific plumbing.
-
-Backends (selected via config) are pluggable:
-- ``desktop`` — PyAutoGUI, controls the local GUI (Codex-style).
-- ``browser`` — Playwright, controls a headless web page (also supports navigate).
-
-Both heavy deps are optional and imported lazily, so importing this module at
-tool auto-discovery time is cheap and never requires pyautogui/playwright.
-"""
+# pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 import asyncio
 import io
-from typing import Any
-from urllib.parse import urlparse
+from typing import Any, Literal
 
-from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.computer_use_backends.base import SessionBackendPool
+from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.schema import (
     IntegerSchema,
     NumberSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.utils.helpers import build_image_content_blocks
-from nanobot.utils.screen_scale import ScreenScaler, fit_target_size
 
 _ACTIONS = [
     "screenshot",
@@ -60,20 +48,41 @@ _CLICK_BUTTONS = {
 _CLICK_COUNTS = {"double_click": 2, "triple_click": 3}
 
 _MAX_WAIT_S = 10.0
-_ENABLE_WARNED = False  # log the security warning at most once per process
 
 
 class ComputerUseToolConfig(Base):
     """computer_use tool configuration."""
 
-    enable: bool = False  # off by default — security-sensitive, opt-in
-    backend: str = "desktop"  # "desktop" | "browser"
-    target_width: int = 1280  # screenshot is downscaled to fit this box (model space)
-    target_height: int = 800
-    require_approval: bool = True  # gate destructive actions (enforced by the agent layer)
-    allowed_domains: list[str] = Field(default_factory=list)  # browser allowlist; empty = all
-    start_url: str = "about:blank"  # browser initial page
-    headless: bool = True  # browser headless mode
+    enable: bool = False
+    backend: Literal["desktop", "browser"] = "desktop"
+    target_width: int = Field(default=1280, ge=320, le=4096)
+    target_height: int = Field(default=800, ge=240, le=4096)
+    allowed_domains: list[str] = Field(default_factory=list)
+    start_url: str = "about:blank"
+    headless: bool = True
+
+
+def _fit_size(width: int, height: int, max_width: int, max_height: int) -> tuple[int, int]:
+    if width <= 0 or height <= 0:
+        return max(1, max_width), max(1, max_height)
+    scale = min(max_width / width, max_height / height, 1.0)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def _scale_point(
+    x: int,
+    y: int,
+    source: tuple[int, int],
+    target: tuple[int, int],
+) -> tuple[int, int]:
+    width, height = source
+    target_width, target_height = target
+    real_x = round(x * width / target_width) if target_width else x
+    real_y = round(y * height / target_height) if target_height else y
+    return (
+        max(0, min(real_x, max(0, width - 1))),
+        max(0, min(real_y, max(0, height - 1))),
+    )
 
 
 @tool_parameters(
@@ -95,9 +104,17 @@ class ComputerUseToolConfig(Base):
             "Scroll direction (action=scroll).", enum=["up", "down", "left", "right"], nullable=True
         ),
         scroll_amount=IntegerSchema(
-            description="Number of scroll clicks (action=scroll).", nullable=True
+            description="Number of scroll clicks (action=scroll).",
+            minimum=1,
+            maximum=100,
+            nullable=True,
         ),
-        duration=NumberSchema(description="Seconds to wait (action=wait).", nullable=True),
+        duration=NumberSchema(
+            description="Seconds to wait (action=wait).",
+            minimum=0,
+            maximum=_MAX_WAIT_S,
+            nullable=True,
+        ),
         url=StringSchema("URL to open (action=navigate, browser backend only).", nullable=True),
         required=["action"],
     )
@@ -107,8 +124,8 @@ class ComputerUseTool(Tool):
 
     _scopes = {"core"}  # never exposed to subagents — security-sensitive
 
-    name = "computer_use"
-    description = (
+    name = "computer_use"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
+    description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         "Control a computer via screenshots and mouse/keyboard. Each call performs ONE "
         "action and returns a fresh screenshot of the resulting screen. Coordinates (x, y) "
         "are in the pixel space of the screenshot you were last shown (top-left is 0,0). "
@@ -124,53 +141,30 @@ class ComputerUseTool(Tool):
         return ComputerUseToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return bool(ctx.config.computer_use.enable)
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        cfg = ctx.config.computer_use
-        global _ENABLE_WARNED
-        if not _ENABLE_WARNED:
-            logger.warning(
-                "computer_use tool is ENABLED (backend={}). It can control the real "
-                "{} and affect state outside the workspace. Run nanobot in a sandbox/VM, "
-                "restrict to trusted models/inputs, and beware prompt injection from "
-                "on-screen/web content.",
-                cfg.backend,
-                "browser" if cfg.backend == "browser" else "desktop",
-            )
-            _ENABLE_WARNED = True
-        return cls(
-            backend=cfg.backend,
-            target_width=cfg.target_width,
-            target_height=cfg.target_height,
-            require_approval=cfg.require_approval,
-            allowed_domains=list(cfg.allowed_domains),
-            start_url=cfg.start_url,
-            headless=cfg.headless,
-        )
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(ctx.config.computer_use)
 
     def __init__(
         self,
+        config: ComputerUseToolConfig | None = None,
         *,
-        backend: str = "desktop",
-        target_width: int = 1280,
-        target_height: int = 800,
-        require_approval: bool = True,
-        allowed_domains: list[str] | None = None,
-        start_url: str = "about:blank",
-        headless: bool = True,
         backend_impl: Any = None,
     ) -> None:
-        self.backend_name = backend
-        self.target_width = target_width
-        self.target_height = target_height
-        self.require_approval = require_approval
-        self.allowed_domains = allowed_domains or []
-        self.start_url = start_url
-        self.headless = headless
-        self._backend = backend_impl  # injectable for tests
+        self.config = config or ComputerUseToolConfig()
+        runtime = None
+        if backend_impl is None and self.config.backend == "browser":
+            from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserRuntime
+            runtime = BrowserRuntime(headless=self.config.headless)
+        self._runtime = runtime
+        self._backends = SessionBackendPool(
+            self._make_backend,
+            backend_impl,
+            finalizer=runtime.close if runtime is not None else None,
+        )
 
     @property
     def read_only(self) -> bool:
@@ -181,21 +175,18 @@ class ComputerUseTool(Tool):
         # Stateful single environment; must not run alongside other tools.
         return True
 
-    async def _get_backend(self) -> Any:
-        if self._backend is not None:
-            return self._backend
-        if self.backend_name == "browser":
+    def _make_backend(self) -> Any:
+        if self.config.backend == "browser":
             from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserBackend
-            self._backend = BrowserBackend(
-                width=self.target_width,
-                height=self.target_height,
-                headless=self.headless,
-                start_url=self.start_url,
+            return BrowserBackend(
+                width=self.config.target_width,
+                height=self.config.target_height,
+                start_url=self.config.start_url,
+                allowed_domains=self.config.allowed_domains,
+                runtime=self._runtime,
             )
-        else:
-            from nanobot.agent.tools.computer_use_backends.desktop_pyautogui import DesktopBackend
-            self._backend = DesktopBackend()
-        return self._backend
+        from nanobot.agent.tools.computer_use_backends.desktop_pyautogui import DesktopBackend
+        return DesktopBackend()
 
     @staticmethod
     def _downscale_png(png: bytes, target: tuple[int, int]) -> bytes:
@@ -209,45 +200,31 @@ class ComputerUseTool(Tool):
         with Image.open(io.BytesIO(png)) as img:
             if (img.width, img.height) == (tw, th):
                 return png
-            resized = img.convert("RGB").resize((tw, th))
+            resized = img.convert("RGB").resize((tw, th))  # pyright: ignore[reportUnknownMemberType]
             out = io.BytesIO()
             resized.save(out, format="PNG")
             return out.getvalue()
 
-    def _domain_allowed(self, url: str) -> bool:
-        """Check a navigation URL against the browser allowed_domains policy.
-
-        Empty allowlist = allow all. A domain entry matches the exact host or any
-        subdomain of it (``example.com`` allows ``app.example.com``).
-        """
-        if not self.allowed_domains:
-            return True
-        host = (urlparse(url).hostname or "").lower()
-        if not host:
-            return False
-        for dom in self.allowed_domains:
-            d = dom.lower().lstrip(".")
-            if d and (host == d or host.endswith("." + d)):
-                return True
-        return False
-
-    async def _dispatch(self, backend: Any, scaler: ScreenScaler, action: str, params: dict[str, Any]) -> str:
+    async def _dispatch(
+        self,
+        backend: Any,
+        action: str,
+        params: dict[str, Any],
+        source: tuple[int, int],
+        target: tuple[int, int],
+    ) -> str:
         def _xy() -> tuple[int, int]:
             x, y = params.get("x"), params.get("y")
-            # Some models emit a combined [x, y] array in the x field (this is
-            # Anthropic's native ``coordinate`` convention). Accept that too so
-            # the tool is not tied to one provider's calling style.
-            if isinstance(x, (list, tuple)) and len(x) == 2 and y is None:
-                x, y = x[0], x[1]
             if x is None or y is None:
                 raise ValueError(f"action '{action}' requires integer 'x' and 'y'")
-            return scaler.to_real(int(x), int(y))
+            return _scale_point(int(x), int(y), source, target)
 
         if action == "screenshot":
             return "Took a screenshot"
 
         if action == "wait":
-            secs = float(params.get("duration") or 1.0)
+            duration = params.get("duration")
+            secs = 1.0 if duration is None else float(duration)
             secs = max(0.0, min(secs, _MAX_WAIT_S))
             await asyncio.sleep(secs)
             return f"Waited {secs:g}s"
@@ -294,10 +271,6 @@ class ComputerUseTool(Tool):
             url = params.get("url")
             if not url:
                 raise ValueError("action 'navigate' requires 'url'")
-            if not self._domain_allowed(str(url)):
-                raise ValueError(
-                    f"navigation to '{url}' is blocked by the allowed_domains policy"
-                )
             await backend.navigate(str(url))
             return f"Navigated to {url}"
 
@@ -309,17 +282,20 @@ class ComputerUseTool(Tool):
             return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
 
         try:
-            backend = await self._get_backend()
+            backend = self._backends.get()
             real_w, real_h = await backend.dimensions()
         except ImportError as exc:
             return f"Error: {exc}"
         except Exception as exc:
             return f"Error: could not initialize computer_use backend: {type(exc).__name__}: {exc}"
 
-        scaler = ScreenScaler.for_screen(real_w, real_h, self.target_width, self.target_height)
+        source = (real_w, real_h)
+        target = _fit_size(real_w, real_h, self.config.target_width, self.config.target_height)
 
         try:
-            status = await self._dispatch(backend, scaler, action, kwargs)
+            status = await self._dispatch(backend, action, kwargs, source, target)
+            if blocked := getattr(backend, "pop_blocked_navigation", lambda: None)():
+                raise ValueError(f"navigation was blocked: {blocked}")
         except ValueError as exc:
             return f"Error: {exc}"
         except NotImplementedError as exc:
@@ -330,7 +306,6 @@ class ComputerUseTool(Tool):
         # Return a fresh screenshot so the model sees the result of its action.
         try:
             png = await backend.screenshot()
-            target = fit_target_size(real_w, real_h, self.target_width, self.target_height)
             png = self._downscale_png(png, target)
         except ImportError as exc:
             return f"Error: {exc}"
@@ -341,5 +316,4 @@ class ComputerUseTool(Tool):
         return build_image_content_blocks(png, "image/png", "", label)
 
     async def close(self) -> None:
-        if self._backend is not None:
-            await self._backend.close()
+        await self._backends.close()

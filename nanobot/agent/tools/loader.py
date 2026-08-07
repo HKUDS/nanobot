@@ -187,5 +187,8 @@ class _LegacyErrorPrefixTool(Tool):
             return ToolResult.error(result)
         return result
 
+    async def close(self) -> None:
+        await self._wrapped.close()
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._wrapped, name)

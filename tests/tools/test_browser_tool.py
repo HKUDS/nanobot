@@ -1,16 +1,16 @@
-"""Tests for the DOM-based browser tool (model-agnostic web actions).
-
-Backend is a duck-typed fake, so no playwright is needed (only Pillow for the
-optional screenshot path)."""
+"""Tests for DOM-based browser control."""
 
 from __future__ import annotations
 
 import io
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.tools.browser_tool import BrowserTool, BrowserToolConfig
+from nanobot.agent.tools.computer_use_backends import browser_playwright
+from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserBackend
 
 
 class _FakeDomBackend:
@@ -65,7 +65,18 @@ class _FakeDomBackend:
 
 def _tool(**kw):
     fb = _FakeDomBackend()
-    return BrowserTool(backend_impl=fb, **kw), fb
+    return BrowserTool(BrowserToolConfig(**kw), backend_impl=fb), fb
+
+
+def _route(url: str, *, navigation: bool):
+    return SimpleNamespace(
+        request=SimpleNamespace(
+            url=url,
+            is_navigation_request=MagicMock(return_value=navigation),
+        ),
+        abort=AsyncMock(),
+        continue_=AsyncMock(),
+    )
 
 
 class TestConfigAndMetadata:
@@ -88,7 +99,7 @@ class TestConfigAndMetadata:
         ctx.config.browser = BrowserToolConfig(enable=True, allowed_domains=["example.com"])
         tool = BrowserTool.create(ctx)
         assert isinstance(tool, BrowserTool)
-        assert tool.allowed_domains == ["example.com"]
+        assert tool.config.allowed_domains == ["example.com"]
 
     def test_metadata(self):
         tool, _ = _tool()
@@ -117,25 +128,20 @@ class TestDispatch:
         assert '[2] input[text] "your name"' in result
 
     @pytest.mark.asyncio
-    async def test_click_by_ref(self):
+    @pytest.mark.parametrize(
+        ("action", "kwargs", "expected"),
+        [
+            ("click", {"ref": 1}, ("click", 1)),
+            ("type", {"ref": 2, "text": "Ada", "submit": True}, ("fill", 2, "Ada", True)),
+            ("select", {"ref": 2, "value": "opt1"}, ("select", 2, "opt1")),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_element_actions(self, action, kwargs, expected):
         tool, fb = _tool()
-        result = await tool.execute(action="click", ref=1)
-        assert ("click", 1) in fb.calls
-        assert "Clicked element [1]" in result
-        # fresh snapshot returned so refs stay current
+        result = await tool.execute(action=action, **kwargs)
+        assert expected in fb.calls
         assert "Interactive elements" in result
-
-    @pytest.mark.asyncio
-    async def test_type_with_submit(self):
-        tool, fb = _tool()
-        await tool.execute(action="type", ref=2, text="Ada", submit=True)
-        assert ("fill", 2, "Ada", True) in fb.calls
-
-    @pytest.mark.asyncio
-    async def test_select(self):
-        tool, fb = _tool()
-        await tool.execute(action="select", ref=2, value="opt1")
-        assert ("select", 2, "opt1") in fb.calls
 
     @pytest.mark.asyncio
     async def test_scroll_and_key_and_back(self):
@@ -167,27 +173,115 @@ class TestDispatch:
 
 
 class TestErrorsAndPolicy:
+    @pytest.mark.parametrize(
+        ("kwargs", "error"),
+        [
+            ({"action": "teleport"}, "unknown action"),
+            ({"action": "click"}, "requires an element 'ref'"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_unknown_action(self):
+    async def test_tool_errors_are_returned_to_model(self, kwargs, error):
         tool, _ = _tool()
-        result = await tool.execute(action="teleport")
-        assert isinstance(result, str) and "unknown action" in result
+        result = await tool.execute(**kwargs)
+        assert isinstance(result, str) and error in result
 
     @pytest.mark.asyncio
-    async def test_click_requires_ref(self):
-        tool, _ = _tool()
-        result = await tool.execute(action="click")
-        assert isinstance(result, str) and "requires an element 'ref'" in result
+    async def test_backend_blocks_disallowed_navigation(self):
+        backend = BrowserBackend(allowed_domains=["example.com"])
+        page = SimpleNamespace(goto=AsyncMock())
+        backend._page = page
+
+        with pytest.raises(ValueError, match="allowed_domains"):
+            await backend.navigate("https://evil.test/")
+
+        page.goto.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_navigate_blocked_by_allowlist(self):
-        tool, fb = _tool(allowed_domains=["example.com"])
-        result = await tool.execute(action="navigate", url="https://evil.test/")
-        assert "blocked by the allowed_domains" in result
-        assert not any(c[0] == "navigate" for c in fb.calls)
+    async def test_backend_allows_subdomain_navigation(self, monkeypatch: pytest.MonkeyPatch):
+        check = MagicMock(return_value=(True, ""))
+        monkeypatch.setattr(browser_playwright, "validate_url_target", check)
+        backend = BrowserBackend(allowed_domains=["example.com"])
+        page = SimpleNamespace(goto=AsyncMock())
+        backend._page = page
+
+        await backend.navigate("https://app.example.com/x")
+
+        page.goto.assert_awaited_once_with("https://app.example.com/x")
+        check.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "http://127.0.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "ws://localhost/socket",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_browser_network_policy_blocks_local_targets(self, url: str):
+        backend = BrowserBackend()
+        with pytest.raises(ValueError, match="blocked"):
+            await backend.navigate(url)
 
     @pytest.mark.asyncio
-    async def test_navigate_allowed_subdomain(self):
-        tool, fb = _tool(allowed_domains=["example.com"])
-        await tool.execute(action="navigate", url="https://app.example.com/x")
-        assert ("navigate", "https://app.example.com/x") in fb.calls
+    async def test_backend_intercepts_blocked_navigation(self):
+        backend = BrowserBackend(allowed_domains=["example.com"])
+        route = _route("https://evil.test/", navigation=True)
+
+        await backend._route_request(route)
+
+        route.abort.assert_awaited_once_with("blockedbyclient")
+        route.continue_.assert_not_awaited()
+        assert "allowed_domains" in (backend.pop_blocked_navigation() or "")
+
+    @pytest.mark.asyncio
+    async def test_backend_intercepts_private_subresource(self):
+        backend = BrowserBackend()
+        route = _route(
+            "http://169.254.169.254/latest/meta-data/",
+            navigation=False,
+        )
+
+        await backend._route_request(route)
+
+        route.abort.assert_awaited_once_with("blockedbyclient")
+        assert backend.pop_blocked_navigation() is None
+
+    @pytest.mark.asyncio
+    async def test_backend_does_not_apply_navigation_allowlist_to_subresources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(
+            browser_playwright,
+            "validate_url_target",
+            MagicMock(return_value=(True, "")),
+        )
+        backend = BrowserBackend(allowed_domains=["example.com"])
+        route = _route("https://cdn.other.test/app.js", navigation=False)
+
+        await backend._route_request(route)
+
+        route.continue_.assert_awaited_once()
+        route.abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_backend_intercepts_private_websocket(self):
+        backend = BrowserBackend()
+        web_socket = SimpleNamespace(
+            url="ws://127.0.0.1/socket",
+            close=AsyncMock(),
+            connect_to_server=AsyncMock(),
+        )
+
+        await backend._route_web_socket(web_socket)
+
+        web_socket.close.assert_awaited_once()
+        web_socket.connect_to_server.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_backend_rejects_file_start_url_before_launch(self):
+        backend = BrowserBackend(start_url="file:///etc/passwd")
+        with pytest.raises(ValueError, match="start_url is blocked"):
+            await backend.dimensions()

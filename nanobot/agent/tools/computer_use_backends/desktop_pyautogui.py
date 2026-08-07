@@ -1,15 +1,4 @@
-"""Desktop GUI backend using PyAutoGUI (the Codex-style "control the real machine").
-
-Drives the local desktop: screenshots via PyAutoGUI/Pillow, mouse + keyboard via
-PyAutoGUI. Works on macOS (needs Screen Recording + Accessibility permissions),
-Windows, and Linux/X11 (incl. a headless Xvfb display, which is how the e2e
-sandbox runs it).
-
-Retina / HiDPI note: on macOS the screenshot is in *physical* pixels (e.g. 2x)
-while PyAutoGUI's mouse API uses *logical* points. We compute the ratio from the
-screenshot size vs ``pyautogui.size()`` and convert real (screenshot-pixel)
-coordinates to logical points before actuating.
-"""
+"""PyAutoGUI desktop backend with HiDPI coordinate correction."""
 
 from __future__ import annotations
 
@@ -40,15 +29,12 @@ _KEY_ALIASES = {
     "escape": "esc",
 }
 
-_SCROLL_CLICK_PIXELS = 100  # one "scroll click" ~= this many pixels
-
 
 class DesktopBackend(ComputerBackend):
     environment = "desktop"
 
     def __init__(self) -> None:
         self._pg: Any = None
-        self._image_mod: Any = None
         self._ratio_x = 1.0
         self._ratio_y = 1.0
         self._dims: tuple[int, int] | None = None
@@ -58,12 +44,9 @@ class DesktopBackend(ComputerBackend):
             return self._pg
         try:
             import pyautogui  # noqa: PLC0415
-            from PIL import Image  # noqa: PLC0415
         except Exception as exc:  # ImportError, or platform display errors
             raise ImportError(_MISSING) from exc
-        pyautogui.FAILSAFE = False
         self._pg = pyautogui
-        self._image_mod = Image
         return pyautogui
 
     def _grab_png_and_size(self) -> tuple[bytes, int, int]:
@@ -98,7 +81,7 @@ class DesktopBackend(ComputerBackend):
     async def click(self, x: int, y: int, button: str = "left", count: int = 1) -> None:
         pg = self._ensure()
         lx, ly = self._to_logical(x, y)
-        await asyncio.to_thread(pg.click, lx, ly, count, 0.0, button)
+        await asyncio.to_thread(pg.click, lx, ly, clicks=count, button=button)
 
     async def move(self, x: int, y: int) -> None:
         pg = self._ensure()
@@ -108,12 +91,19 @@ class DesktopBackend(ComputerBackend):
     async def drag(self, x: int, y: int) -> None:
         pg = self._ensure()
         lx, ly = self._to_logical(x, y)
-        await asyncio.to_thread(pg.dragTo, lx, ly, 0.3, pg.easeInOutQuad, False, "left")
+        await asyncio.to_thread(
+            pg.dragTo,
+            lx,
+            ly,
+            duration=0.3,
+            tween=pg.easeInOutQuad,
+            button="left",
+        )
 
     async def scroll(self, x: int, y: int, direction: str, amount: int) -> None:
         pg = self._ensure()
         lx, ly = self._to_logical(x, y)
-        clicks = max(1, amount) * _SCROLL_CLICK_PIXELS
+        clicks = max(1, amount)
         await asyncio.to_thread(pg.moveTo, lx, ly)
         if direction in ("up", "down"):
             await asyncio.to_thread(pg.scroll, clicks if direction == "up" else -clicks)

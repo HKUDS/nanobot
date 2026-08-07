@@ -1,17 +1,17 @@
-"""Browser backend using Playwright (DOM-aware, deterministic, sandbox-friendly).
-
-Drives a headless Chromium page via pixel coordinates + screenshots, mirroring
-the desktop backend's surface so the same model/tool loop works against the web.
-The viewport uses ``deviceScaleFactor=1`` so screenshot pixels == mouse
-coordinates (no HiDPI scaling to undo). The browser/page persist across actions
-within one tool instance so navigation and state carry between turns.
-"""
+"""Playwright backend shared by browser and computer_use."""
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import importlib
+from collections.abc import Sequence
+from typing import Any, cast
+from urllib.parse import urlparse, urlunparse
+
+from loguru import logger
 
 from nanobot.agent.tools.computer_use_backends.base import ComputerBackend
+from nanobot.security.network import validate_url_target
 
 _MISSING = (
     "Browser computer-use backend needs 'playwright'. Install with: "
@@ -70,6 +70,36 @@ _KEYS = {
 }
 
 
+def _validate_browser_url(
+    url: str,
+    allowed_domains: Sequence[str] = (),
+    *,
+    navigation: bool = True,
+) -> tuple[bool, str]:
+    if url == "about:blank":
+        return True, ""
+
+    parsed = urlparse(url)
+    if not navigation and parsed.scheme in {"blob", "data"}:
+        return True, ""
+
+    target = url
+    if parsed.scheme in {"ws", "wss"}:
+        target = urlunparse(parsed._replace(scheme="https" if parsed.scheme == "wss" else "http"))
+
+    if navigation and allowed_domains:
+        host = (parsed.hostname or "").rstrip(".").lower()
+        allowed = any(
+            normalized and (host == normalized or host.endswith(f".{normalized}"))
+            for domain in allowed_domains
+            if (normalized := domain.strip().lstrip(".").rstrip(".").lower())
+        )
+        if not allowed:
+            return False, f"host {host or '<missing>'} is not in allowed_domains"
+
+    return validate_url_target(target)
+
+
 def _playwright_key(combo: str) -> str:
     parts = [p.strip() for p in combo.split("+") if p.strip()]
     out: list[str] = []
@@ -86,6 +116,57 @@ def _playwright_key(combo: str) -> str:
     return "+".join(out)
 
 
+class BrowserRuntime:
+    """One lazily started browser process shared by isolated session contexts."""
+
+    def __init__(self, *, headless: bool = True) -> None:
+        self._headless = headless
+        self._lock = asyncio.Lock()
+        self._playwright: Any = None
+        self._browser: Any = None
+
+    async def get(self) -> Any:
+        if self._browser is not None:
+            return self._browser
+        async with self._lock:
+            if self._browser is not None:
+                return self._browser
+            try:
+                playwright = importlib.import_module("playwright.async_api")
+                async_playwright = cast(Any, playwright).async_playwright
+            except ImportError as exc:
+                raise ImportError(_MISSING) from exc
+            self._playwright = await async_playwright().start()
+            try:
+                self._browser = await self._playwright.chromium.launch(
+                    headless=self._headless
+                )
+            except BaseException:
+                await self.close()
+                raise
+        return self._browser
+
+    async def close(self) -> None:
+        browser, playwright = self._browser, self._playwright
+        self._browser = self._playwright = None
+        errors: list[BaseException] = []
+        closers = (
+            browser.close if browser is not None else None,
+            playwright.stop if playwright is not None else None,
+        )
+        for close in closers:
+            if close is None:
+                continue
+            try:
+                await close()
+            except BaseException as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("failed to close browser runtime", errors)
+
+
 class BrowserBackend(ComputerBackend):
     environment = "browser"
 
@@ -96,33 +177,84 @@ class BrowserBackend(ComputerBackend):
         height: int = 800,
         headless: bool = True,
         start_url: str = "about:blank",
+        allowed_domains: Sequence[str] = (),
+        runtime: BrowserRuntime | None = None,
     ) -> None:
         self._width = width
         self._height = height
-        self._headless = headless
         self._start_url = start_url
-        self._pw: Any = None
-        self._browser: Any = None
+        self._allowed_domains = tuple(allowed_domains)
+        self._runtime = runtime or BrowserRuntime(headless=headless)
+        self._owns_runtime = runtime is None
+        self._context: Any = None
         self._page: Any = None
         self._last_pos = (0, 0)
+        self._blocked_navigation: str | None = None
+
+    async def _require_url(self, url: str, label: str) -> None:
+        ok, error = await asyncio.to_thread(
+            _validate_browser_url,
+            url,
+            self._allowed_domains,
+        )
+        if not ok:
+            raise ValueError(f"{label} is blocked: {error}")
+
+    async def _route_request(self, route: Any) -> None:
+        request = route.request
+        navigation = bool(request.is_navigation_request())
+        ok, error = await asyncio.to_thread(
+            _validate_browser_url,
+            request.url,
+            self._allowed_domains,
+            navigation=navigation,
+        )
+        if ok:
+            await route.continue_()
+            return
+        if navigation:
+            self._blocked_navigation = error
+        logger.warning("Blocked browser request to {}: {}", request.url, error)
+        await route.abort("blockedbyclient")
+
+    async def _route_web_socket(self, web_socket: Any) -> None:
+        ok, error = await asyncio.to_thread(
+            _validate_browser_url,
+            web_socket.url,
+            self._allowed_domains,
+            navigation=False,
+        )
+        if not ok:
+            logger.warning("Blocked browser WebSocket to {}: {}", web_socket.url, error)
+            await web_socket.close(code=1008, reason="Blocked by nanobot network policy")
+            return
+        await web_socket.connect_to_server()
+
+    def pop_blocked_navigation(self) -> str | None:
+        error = self._blocked_navigation
+        self._blocked_navigation = None
+        return error
 
     async def _ensure(self) -> Any:
         if self._page is not None:
             return self._page
+        await self._require_url(self._start_url, "start_url")
         try:
-            from playwright.async_api import async_playwright  # noqa: PLC0415
-        except Exception as exc:
-            raise ImportError(_MISSING) from exc
-        self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(headless=self._headless)
-        context = await self._browser.new_context(
-            viewport={"width": self._width, "height": self._height},
-            device_scale_factor=1,
-        )
-        self._page = await context.new_page()
-        if self._start_url and self._start_url != "about:blank":
-            await self._page.goto(self._start_url)
-        return self._page
+            browser = await self._runtime.get()
+            self._context = await browser.new_context(
+                viewport={"width": self._width, "height": self._height},
+                device_scale_factor=1,
+                service_workers="block",
+            )
+            await self._context.route("**/*", self._route_request)
+            await self._context.route_web_socket("**/*", self._route_web_socket)
+            self._page = await self._context.new_page()
+            if self._start_url != "about:blank":
+                await self._page.goto(self._start_url)
+            return self._page
+        except BaseException:
+            await self.close()
+            raise
 
     async def dimensions(self) -> tuple[int, int]:
         await self._ensure()
@@ -171,36 +303,37 @@ class BrowserBackend(ComputerBackend):
             await page.keyboard.press(key)
 
     async def navigate(self, url: str) -> None:
+        await self._require_url(url, "navigation")
         page = await self._ensure()
         await page.goto(url)
         self._last_pos = (0, 0)
 
     # --- DOM / accessibility mode (act by element ref, not pixels) ---
 
-    async def dom_snapshot(self, max_elements: int = 200) -> list[dict]:
+    async def dom_snapshot(self, max_elements: int = 200) -> list[dict[str, Any]]:
         """Tag visible interactive elements with ``data-nanobot-ref`` and return them.
 
         Each entry: ``{ref, tag, role, type, name, href}``. Refs are reassigned on
         every snapshot, so callers should act on the latest snapshot.
         """
         page = await self._ensure()
-        return await page.evaluate(_SNAPSHOT_JS, max_elements)
+        return cast(list[dict[str, Any]], await page.evaluate(_SNAPSHOT_JS, max_elements))
 
-    def _ref_selector(self, ref) -> str:
+    def _ref_selector(self, ref: int) -> str:
         return f'[data-nanobot-ref="{int(ref)}"]'
 
-    async def click_ref(self, ref) -> None:
+    async def click_ref(self, ref: int) -> None:
         page = await self._ensure()
         await page.click(self._ref_selector(ref), timeout=5000)
 
-    async def fill_ref(self, ref, text: str, submit: bool = False) -> None:
+    async def fill_ref(self, ref: int, text: str, submit: bool = False) -> None:
         page = await self._ensure()
         sel = self._ref_selector(ref)
         await page.fill(sel, text, timeout=5000)
         if submit:
             await page.press(sel, "Enter")
 
-    async def select_ref(self, ref, value: str) -> None:
+    async def select_ref(self, ref: int, value: str) -> None:
         page = await self._ensure()
         sel = self._ref_selector(ref)
         try:
@@ -230,12 +363,20 @@ class BrowserBackend(ComputerBackend):
         return page.url
 
     async def close(self) -> None:
-        try:
-            if self._browser is not None:
-                await self._browser.close()
-        finally:
-            if self._pw is not None:
-                await self._pw.stop()
-            self._browser = None
-            self._page = None
-            self._pw = None
+        context = self._context
+        self._context = self._page = None
+        error: BaseException | None = None
+        if context is not None:
+            try:
+                await context.close()
+            except BaseException as exc:
+                error = exc
+        if self._owns_runtime:
+            try:
+                await self._runtime.close()
+            except BaseException as exc:
+                if error is not None:
+                    raise BaseExceptionGroup("failed to close browser backend", [error, exc])
+                raise
+        if error is not None:
+            raise error

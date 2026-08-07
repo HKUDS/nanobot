@@ -101,6 +101,3 @@ exp/
 .playwright-mcp/
 bridge/node_modules/
 webui/.verify-*
-
-# Computer-use E2E run artifacts
-tests/e2e/runs/

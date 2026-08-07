@@ -1,33 +1,23 @@
-"""browser tool: DOM/accessibility-based web automation (model-agnostic actions).
+"""DOM-based browser automation by element reference."""
 
-Unlike the pixel-based ``computer_use`` tool, this drives the page by **element
-ref** instead of by screen coordinates. Each action returns a fresh snapshot of
-the page's interactive elements (a numbered list), and the model acts by picking
-a ``[ref]`` — no pixel grounding required. This makes web *actions* reliable
-across ANY tool-calling model (including non-vision models), which pixel-based
-computer use cannot do (only computer-use-trained models ground pixels well).
-
-It reuses the Playwright ``BrowserBackend`` from ``computer_use_backends``. The
-heavy ``playwright`` dependency is imported lazily, so importing this module at
-tool auto-discovery time stays cheap.
-"""
+# pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlparse
 
-from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.computer_use_backends.base import SessionBackendPool
+from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.utils.helpers import build_image_content_blocks
 
 _ACTIONS = [
@@ -41,35 +31,34 @@ _ACTIONS = [
     "back",
     "read_text",
 ]
-_ENABLE_WARNED = False
 
 
 class BrowserToolConfig(Base):
     """browser (DOM) tool configuration."""
 
-    enable: bool = False  # off by default — opt-in
+    enable: bool = False
     start_url: str = "about:blank"
     headless: bool = True
-    width: int = 1280
-    height: int = 800
-    allowed_domains: list[str] = Field(default_factory=list)  # empty = all
-    include_screenshot: bool = False  # also attach a screenshot (for vision models)
-    max_elements: int = 200  # cap interactive elements per snapshot
+    width: int = Field(default=1280, ge=320, le=4096)
+    height: int = Field(default=800, ge=240, le=4096)
+    allowed_domains: list[str] = Field(default_factory=list)
+    include_screenshot: bool = False
+    max_elements: int = Field(default=200, ge=1, le=1000)
 
 
-def _format_elements(elements: list[dict]) -> str:
+def _format_elements(elements: list[dict[str, Any]]) -> str:
     if not elements:
         return "Interactive elements: (none found — try scrolling or read_text)"
-    lines = []
+    lines: list[str] = []
     for e in elements:
-        tag = e.get("tag", "")
-        typ = e.get("type") or ""
+        tag = str(e.get("tag") or "")
+        typ = str(e.get("type") or "")
         label = tag + (f"[{typ}]" if typ else "")
         line = f"[{e.get('ref')}] {label}"
-        name = (e.get("name") or "").strip()
+        name = str(e.get("name") or "").strip()
         if name:
             line += f' "{name}"'
-        href = e.get("href") or ""
+        href = str(e.get("href") or "")
         if href and tag == "a":
             line += f" -> {href[:60]}"
         lines.append(line)
@@ -81,6 +70,7 @@ def _format_elements(elements: list[dict]) -> str:
         action=StringSchema("The action to perform.", enum=_ACTIONS),
         ref=IntegerSchema(
             description="Element ref number from the latest snapshot (click/type/select).",
+            minimum=1,
             nullable=True,
         ),
         text=StringSchema(
@@ -93,7 +83,12 @@ def _format_elements(elements: list[dict]) -> str:
         scroll_direction=StringSchema(
             "Scroll direction (action=scroll).", enum=["up", "down", "left", "right"], nullable=True
         ),
-        scroll_amount=IntegerSchema(description="Scroll clicks (action=scroll).", nullable=True),
+        scroll_amount=IntegerSchema(
+            description="Scroll clicks (action=scroll).",
+            minimum=1,
+            maximum=100,
+            nullable=True,
+        ),
         required=["action"],
     )
 )
@@ -102,8 +97,8 @@ class BrowserTool(Tool):
 
     _scopes = {"core"}
 
-    name = "browser"
-    description = (
+    name = "browser"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
+    description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         "Control a web browser by acting on page elements by their [ref] number. "
         "Each call returns the current page URL plus a fresh numbered list of the page's "
         "interactive elements; pick a [ref] to click/type/select — no pixel coordinates "
@@ -120,50 +115,30 @@ class BrowserTool(Tool):
         return BrowserToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return bool(ctx.config.browser.enable)
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        cfg = ctx.config.browser
-        global _ENABLE_WARNED
-        if not _ENABLE_WARNED:
-            logger.warning(
-                "browser tool is ENABLED — it can navigate and act on web pages. "
-                "Restrict with allowed_domains, run in a sandbox, and beware prompt "
-                "injection from page content."
-            )
-            _ENABLE_WARNED = True
-        return cls(
-            start_url=cfg.start_url,
-            headless=cfg.headless,
-            width=cfg.width,
-            height=cfg.height,
-            allowed_domains=list(cfg.allowed_domains),
-            include_screenshot=cfg.include_screenshot,
-            max_elements=cfg.max_elements,
-        )
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(ctx.config.browser)
 
     def __init__(
         self,
+        config: BrowserToolConfig | None = None,
         *,
-        start_url: str = "about:blank",
-        headless: bool = True,
-        width: int = 1280,
-        height: int = 800,
-        allowed_domains: list[str] | None = None,
-        include_screenshot: bool = False,
-        max_elements: int = 200,
         backend_impl: Any = None,
     ) -> None:
-        self.start_url = start_url
-        self.headless = headless
-        self.width = width
-        self.height = height
-        self.allowed_domains = allowed_domains or []
-        self.include_screenshot = include_screenshot
-        self.max_elements = max_elements
-        self._backend = backend_impl
+        self.config = config or BrowserToolConfig()
+        runtime = None
+        if backend_impl is None:
+            from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserRuntime
+            runtime = BrowserRuntime(headless=self.config.headless)
+        self._runtime = runtime
+        self._backends = SessionBackendPool(
+            self._make_backend,
+            backend_impl,
+            finalizer=runtime.close if runtime is not None else None,
+        )
 
     @property
     def read_only(self) -> bool:
@@ -173,29 +148,15 @@ class BrowserTool(Tool):
     def exclusive(self) -> bool:
         return True
 
-    async def _get_backend(self) -> Any:
-        if self._backend is not None:
-            return self._backend
+    def _make_backend(self) -> Any:
         from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserBackend
-        self._backend = BrowserBackend(
-            width=self.width,
-            height=self.height,
-            headless=self.headless,
-            start_url=self.start_url,
+        return BrowserBackend(
+            width=self.config.width,
+            height=self.config.height,
+            start_url=self.config.start_url,
+            allowed_domains=self.config.allowed_domains,
+            runtime=self._runtime,
         )
-        return self._backend
-
-    def _domain_allowed(self, url: str) -> bool:
-        if not self.allowed_domains:
-            return True
-        host = (urlparse(url).hostname or "").lower()
-        if not host:
-            return False
-        for dom in self.allowed_domains:
-            d = dom.lower().lstrip(".")
-            if d and (host == d or host.endswith("." + d)):
-                return True
-        return False
 
     @staticmethod
     def _req_ref(params: dict[str, Any], action: str) -> Any:
@@ -211,8 +172,6 @@ class BrowserTool(Tool):
             url = p.get("url")
             if not url:
                 raise ValueError("action 'navigate' requires 'url'")
-            if not self._domain_allowed(str(url)):
-                raise ValueError(f"navigation to '{url}' is blocked by the allowed_domains policy")
             await backend.navigate(str(url))
             return f"Navigated to {url}", None
 
@@ -271,7 +230,7 @@ class BrowserTool(Tool):
             return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
 
         try:
-            backend = await self._get_backend()
+            backend = self._backends.get()
         except ImportError as exc:
             return f"Error: {exc}"
         except Exception as exc:
@@ -279,6 +238,8 @@ class BrowserTool(Tool):
 
         try:
             status, direct = await self._dispatch(backend, action, kwargs)
+            if blocked := getattr(backend, "pop_blocked_navigation", lambda: None)():
+                raise ValueError(f"navigation was blocked: {blocked}")
         except ValueError as exc:
             return f"Error: {exc}"
         except Exception as exc:
@@ -288,7 +249,7 @@ class BrowserTool(Tool):
             return direct
 
         try:
-            elements = await backend.dom_snapshot(self.max_elements)
+            elements = await backend.dom_snapshot(self.config.max_elements)
             snapshot = _format_elements(elements)
         except Exception as exc:
             snapshot = f"(could not read page elements: {type(exc).__name__}: {exc})"
@@ -299,7 +260,7 @@ class BrowserTool(Tool):
         header = f"{status}\nCurrent page: {current}" if current else status
         text_out = f"{header}\n\n{snapshot}"
 
-        if self.include_screenshot:
+        if self.config.include_screenshot:
             try:
                 png = await backend.screenshot()
                 return build_image_content_blocks(png, "image/png", "", text_out)
@@ -308,5 +269,4 @@ class BrowserTool(Tool):
         return text_out
 
     async def close(self) -> None:
-        if self._backend is not None:
-            await self._backend.close()
+        await self._backends.close()

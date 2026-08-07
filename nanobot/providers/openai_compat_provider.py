@@ -671,6 +671,73 @@ class OpenAICompatProvider(LLMProvider):
             dumped = str(content)
         return dumped or "(empty)"
 
+    @classmethod
+    def _move_tool_images_to_user(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Adapt multimodal tool results to Chat Completions' text-only tool role."""
+        updated: list[dict[str, Any]] = []
+        pending_images: list[dict[str, Any]] = []
+
+        def flush_images(next_message: dict[str, Any] | None = None) -> None:
+            if not pending_images:
+                if next_message is not None:
+                    updated.append(next_message)
+                return
+            content: list[dict[str, Any]] = [
+                *pending_images,
+                {"type": "text", "text": "Images returned by the preceding tool call(s)."},
+            ]
+            pending_images.clear()
+            if next_message is not None and next_message.get("role") == "user":
+                existing = next_message.get("content")
+                if isinstance(existing, str):
+                    content.append({"type": "text", "text": existing})
+                elif isinstance(existing, list):
+                    content.extend(cast(list[dict[str, Any]], existing))
+                updated.append({**next_message, "content": content})
+            else:
+                updated.append({"role": "user", "content": content})
+                if next_message is not None:
+                    updated.append(next_message)
+
+        for message in messages:
+            content = message.get("content")
+            if message.get("role") == "tool" and isinstance(content, list):
+                blocks = cast(list[object], content)
+                images: list[dict[str, Any]] = []
+                text_blocks: list[object] = []
+                for block in blocks:
+                    if isinstance(block, dict):
+                        block_data = cast(dict[str, Any], block)
+                        image_url = block_data.get("image_url")
+                        if block_data.get("type") == "image_url" and isinstance(
+                            image_url, dict
+                        ):
+                            images.append({"type": "image_url", "image_url": image_url})
+                            continue
+                        text_blocks.append(block_data)
+                    else:
+                        text_blocks.append(block)
+                if images:
+                    updated.append({
+                        **message,
+                        "content": (
+                            cls._coerce_content_to_string(text_blocks)
+                            if text_blocks
+                            else "(image returned)"
+                        ),
+                    })
+                    pending_images.extend(images)
+                    continue
+            if message.get("role") != "tool":
+                flush_images(message)
+            else:
+                updated.append(message)
+        flush_images()
+        return updated
+
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
@@ -824,9 +891,10 @@ class OpenAICompatProvider(LLMProvider):
 
         model_name = self._request_model_name(model_name)
 
+        sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         kwargs: dict[str, Any] = {
             "model": model_name,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._move_tool_images_to_user(sanitized_messages),
         }
 
         # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
