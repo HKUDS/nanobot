@@ -681,34 +681,6 @@
     container-type: inline-size;
   }
 
-  /* Soften only the activity edges that have clipped content beyond them. */
-  .activity-scroll-fade[data-fade-top="true"][data-fade-bottom="false"] {
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
-    mask-image: linear-gradient(to bottom, transparent, #000 14px);
-  }
-
-  .activity-scroll-fade[data-fade-top="false"][data-fade-bottom="true"] {
-    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
-  }
-
-  .activity-scroll-fade[data-fade-top="true"][data-fade-bottom="true"] {
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 14px,
-      #000 calc(100% - 14px),
-      transparent
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 14px,
-      #000 calc(100% - 14px),
-      transparent
-    );
-  }
-
   @supports (content-visibility: auto) {
     .thread-render-unit {
       content-visibility: auto;
