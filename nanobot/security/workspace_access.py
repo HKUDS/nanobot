@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,7 @@ class WorkspaceScopeResolver:
     default_workspace: str | Path
     default_restrict_to_workspace: bool
     scoped_channel: str = "websocket"
+    per_session_sandbox: bool = False
 
     @property
     def sandbox_status(self) -> WorkspaceSandboxStatus:
@@ -128,11 +130,14 @@ class WorkspaceScopeResolver:
         self,
         msg: Any,
         session_metadata: Any,
+        *,
+        session_key: str | None = None,
     ) -> WorkspaceScope:
         return self.for_turn(
             channel=getattr(msg, "channel", None),
             message_metadata=getattr(msg, "metadata", None),
             session_metadata=session_metadata,
+            session_key=session_key,
         )
 
     def for_turn(
@@ -141,16 +146,24 @@ class WorkspaceScopeResolver:
         channel: str | None,
         message_metadata: Any,
         session_metadata: Any,
+        session_key: str | None = None,
     ) -> WorkspaceScope:
-        if channel != self.scoped_channel:
-            return self.default()
-        return resolve_effective_workspace_scope(
-            message_metadata=message_metadata,
-            session_metadata=session_metadata,
-            default_workspace=self.default_workspace,
-            default_restrict_to_workspace=self.default_restrict_to_workspace,
-            source_channel=channel,
-        )
+        if channel == self.scoped_channel:
+            return resolve_effective_workspace_scope(
+                message_metadata=message_metadata,
+                session_metadata=session_metadata,
+                default_workspace=self.default_workspace,
+                default_restrict_to_workspace=self.default_restrict_to_workspace,
+                source_channel=channel,
+            )
+        if self.per_session_sandbox and session_key:
+            return self._per_session_scope(channel, session_key)
+        return self.default()
+
+    def _per_session_scope(self, channel: str | None, session_key: str) -> WorkspaceScope:
+        root = Path(self.default_workspace).expanduser() / "workspaces" / _sanitize_session_key(session_key)
+        root.mkdir(parents=True, exist_ok=True)
+        return build_workspace_scope(root, "restricted", source_channel=channel)
 
     def persist_message_scope(self, session: Any, msg: Any) -> None:
         if getattr(msg, "channel", None) != self.scoped_channel:
@@ -421,6 +434,14 @@ def _provider_label(provider: str) -> str:
     if provider in _PROVIDER_LABELS:
         return _PROVIDER_LABELS[provider]
     return provider.replace("_", " ").title()
+
+
+_SANDBOX_NAME_SAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _sanitize_session_key(key: str) -> str:
+    """Make a session key safe for use as a per-session sandbox directory name."""
+    return _SANDBOX_NAME_SAFE.sub("_", key)
 
 
 def _normalize_access_mode(value: str) -> WorkspaceAccessMode:

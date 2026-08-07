@@ -21,6 +21,7 @@ from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, Too
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     bind_workspace_scope,
     default_workspace_scope,
     reset_workspace_scope,
@@ -508,3 +509,82 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
 
     assert result == "spawned"
     assert manager.seen["workspace_scope"] == scope
+
+
+def test_resolver_off_by_default_for_non_websocket_channel(tmp_path: Path) -> None:
+    """per_session_sandbox defaults to off: non-WebUI channels stay on the global workspace."""
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+    )
+    scope = resolver.for_turn(
+        channel="telegram",
+        message_metadata={},
+        session_metadata={},
+        session_key="telegram:123",
+    )
+    default = resolver.default()
+    assert scope.project_path == default.project_path
+    assert scope.access_mode == default.access_mode
+    assert scope.restrict_to_workspace == default.restrict_to_workspace
+
+
+def test_resolver_per_session_sandbox_isolates_non_websocket_channel(tmp_path: Path) -> None:
+    """per_session_sandbox on: a non-WebUI session gets its own restricted sandbox dir."""
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+        per_session_sandbox=True,
+    )
+    scope = resolver.for_turn(
+        channel="telegram",
+        message_metadata={},
+        session_metadata={},
+        session_key="telegram:123",
+    )
+    expected = (tmp_path / "workspaces" / "telegram_123").resolve()
+    assert scope.project_path == expected
+    assert scope.access_mode == "restricted"
+    assert scope.restrict_to_workspace is True
+    assert scope.source_channel == "telegram"
+    assert expected.is_dir()  # lazily created
+
+
+def test_resolver_per_session_sandbox_does_not_affect_websocket(tmp_path: Path) -> None:
+    """WebUI (websocket) keeps its manual project selection even with per_session_sandbox on."""
+    project = tmp_path / "chosen-project"
+    project.mkdir()
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+        per_session_sandbox=True,
+    )
+    scope = resolver.for_turn(
+        channel="websocket",
+        message_metadata={
+            WORKSPACE_SCOPE_METADATA_KEY: {"project_path": str(project), "access_mode": "full"}
+        },
+        session_metadata={},
+        session_key="websocket:abc",
+    )
+    assert scope.project_path == project.resolve()
+    assert scope.access_mode == "full"  # manual selection, not the auto sandbox
+    assert not (tmp_path / "workspaces" / "websocket_abc").exists()
+
+
+def test_resolver_per_session_sandbox_keys_get_distinct_dirs(tmp_path: Path) -> None:
+    """Two different session keys resolve to two different sandbox directories."""
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+        per_session_sandbox=True,
+    )
+    a = resolver.for_turn(
+        channel="telegram", message_metadata={}, session_metadata={}, session_key="telegram:1"
+    )
+    b = resolver.for_turn(
+        channel="telegram", message_metadata={}, session_metadata={}, session_key="telegram:2"
+    )
+    assert a.project_path != b.project_path
+    assert a.project_path == (tmp_path / "workspaces" / "telegram_1").resolve()
+    assert b.project_path == (tmp_path / "workspaces" / "telegram_2").resolve()
