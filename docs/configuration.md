@@ -2306,6 +2306,31 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
 
+### Agent Plugins v1 skills
+
+nanobot also discovers portable [Agent Plugins](https://agent-plugins.org/) placed under
+`<workspace>/plugins/<plugin>/`. A supported package has a root `plugin.json` that targets
+Agent Plugins v1 and one or more direct-child skills:
+
+```text
+plugins/
+└── release-tools/
+    ├── plugin.json
+    └── skills/
+        └── release-notes/
+            └── SKILL.md
+```
+
+Plugin skills use the same progressive loading and `$skill-name` invocation as workspace
+skills. A workspace skill wins when it has the same name as a plugin skill; plugin skills win
+over built-in skills. Invalid manifests, invalid Agent Skills, nested skill directories, and
+paths that resolve outside the plugin root are ignored.
+
+This initial compatibility layer loads the portable `skills/` component only. Agent Plugins
+`mcp.json` is not started automatically: local MCP servers execute third-party processes and
+need an explicit trust and approval flow. Configure a reviewed MCP server through **Apps** or
+`tools.mcpServers` for now.
+
 ## Tool Hint Max Length
 
 Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.

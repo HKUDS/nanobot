@@ -9,6 +9,8 @@ from typing import Any, cast
 
 import yaml
 
+from nanobot.agent.agent_plugins import discover_agent_plugin_skills
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -33,6 +35,7 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self.plugin_skills = discover_agent_plugin_skills(workspace)
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -61,10 +64,22 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        workspace_names = {entry["name"] for entry in skills}
+        seen_names = {entry["name"] for entry in skills}
+        for plugin_skill in self.plugin_skills:
+            if plugin_skill.name in seen_names:
+                continue
+            skills.append(
+                {
+                    "name": plugin_skill.name,
+                    "path": str(plugin_skill.path),
+                    "source": "plugin",
+                    "plugin": plugin_skill.plugin,
+                }
+            )
+            seen_names.add(plugin_skill.name)
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
+                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=seen_names)
             )
 
         if self.disabled_skills:
@@ -84,13 +99,16 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        roots = [self.workspace_skills]
+        workspace_path = self.workspace_skills / name / "SKILL.md"
+        if workspace_path.exists():
+            return workspace_path.read_text(encoding="utf-8")
+        for plugin_skill in self.plugin_skills:
+            if plugin_skill.name == name:
+                return plugin_skill.path.read_text(encoding="utf-8")
         if self.builtin_skills:
-            roots.append(self.builtin_skills)
-        for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
+            builtin_path = self.builtin_skills / name / "SKILL.md"
+            if builtin_path.exists():
+                return builtin_path.read_text(encoding="utf-8")
         return None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
@@ -145,6 +163,7 @@ class SkillsLoader:
         sections: list[str] = []
         groups = (
             ("Workspace skills", "workspace", self.workspace_skills),
+            ("Agent Plugin skills", "plugin", self.workspace / "plugins"),
             ("Built-in skills", "builtin", self.builtin_skills),
         )
         for label, source, root in groups:
