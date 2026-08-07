@@ -339,6 +339,9 @@ class WeixinChannel(BaseChannel):
         self._reply_run_ids: dict[str, str] = {}
         self._reply_progress_counts: dict[str, int] = {}
 
+    def progress_transport_defaults(self) -> tuple[bool, bool]:
+        return self.config.send_progress, self.config.send_tool_hints
+
     def should_retry_send_error(self, error: Exception) -> bool:
         if isinstance(error, WeixinAPIError):
             return error.retryable

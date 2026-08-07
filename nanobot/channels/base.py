@@ -101,6 +101,14 @@ class BaseChannel(ABC):
         """
         pass
 
+    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
+        """Return channel-owned defaults for progress and tool-hint messages.
+
+        ``None`` keeps the global channel policy. Channels should override this
+        only when their transport requires different defaults.
+        """
+        return None
+
     def should_retry_send_error(self, error: Exception) -> bool:
         """Return whether the channel manager may retry a failed delivery.
 

@@ -187,15 +187,9 @@ class ChannelManager:
         channel = cls(section, self.bus, **kwargs)
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
-        # Channel-owned config models may deliberately choose safer transport
-        # defaults than the global channel policy (for example, a quota-limited
-        # platform can disable progress messages).  Preserve those defaults
-        # while still letting an explicit per-channel value win below.
-        progress_default = getattr(
-            channel.config, "send_progress", self.config.channels.send_progress,
-        )
-        tool_hints_default = getattr(
-            channel.config, "send_tool_hints", self.config.channels.send_tool_hints,
+        progress_default, tool_hints_default = channel.progress_transport_defaults() or (
+            self.config.channels.send_progress,
+            self.config.channels.send_tool_hints,
         )
         channel.send_progress = self._resolve_bool_override(
             section, "send_progress", progress_default,
