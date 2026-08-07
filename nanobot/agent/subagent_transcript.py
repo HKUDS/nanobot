@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, cast
 
@@ -19,6 +18,7 @@ from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.utils.helpers import ensure_dir, timestamp
 
 #: Keep the newest N transcripts per workspace.
 TRANSCRIPT_RETENTION_COUNT = 50
@@ -27,7 +27,7 @@ TRANSCRIPT_RETENTION_COUNT = 50
 #: silent.
 TRANSCRIPT_MAX_BYTES = 1 * 1024 * 1024
 
-_TRUNCATION_MARKER = "transcript truncated at 1 MiB"
+_TRUNCATION_MARKER = f"transcript truncated at {TRANSCRIPT_MAX_BYTES // (1024 * 1024)} MiB"
 
 _THINKING_KEYS = frozenset({"reasoning_content", "thinking_blocks"})
 
@@ -47,6 +47,10 @@ class SubagentTranscriptStore:
         """Return the transcript file path for *task_id*."""
         return self._root / f"{task_id}.jsonl"
 
+    def relative_path_for(self, task_id: str) -> str:
+        """Workspace-relative path for *task_id* (for announce metadata)."""
+        return f"memory/subagents/{task_id}.jsonl"
+
     def write(
         self,
         task_id: str,
@@ -61,8 +65,9 @@ class SubagentTranscriptStore:
         terminal marker record is appended; a line is never truncated
         mid-record.
         """
-        self._root.mkdir(parents=True, exist_ok=True)
+        ensure_dir(self._root)
         target = self.path_for(task_id)
+        now = timestamp()
         records: list[dict[str, Any]] = []
         for message in public_history_messages(messages):
             if is_hidden_history_message(message):
@@ -72,7 +77,7 @@ class SubagentTranscriptStore:
                 for key, value in message.items()
                 if key not in _THINKING_KEYS
             }
-            record.setdefault("timestamp", datetime.now().isoformat())
+            record.setdefault("timestamp", now)
             records.append(record)
 
         lines = self._serialize(task_id, records)
@@ -85,34 +90,47 @@ class SubagentTranscriptStore:
         return target
 
     def read(self, task_id: str) -> list[dict[str, Any]]:
-        """Return parsed records for *task_id* (``[]`` if absent)."""
+        """Return parsed records for *task_id* (``[]`` if absent).
+
+        A single malformed line is skipped rather than losing the whole
+        transcript, mirroring ``MemoryStore._read_entries``.
+        """
+        records: list[dict[str, Any]] = []
         try:
             with self.path_for(task_id).open(encoding="utf-8") as handle:
-                return [
-                    cast(dict[str, Any], json.loads(line))
-                    for line in handle
-                    if line.strip()
-                ]
-        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        logger.warning(
+                            "Skipping malformed transcript line for {}", task_id
+                        )
+                        continue
+                    if isinstance(parsed, dict):
+                        records.append(cast(dict[str, Any], parsed))
+            return records
+        except FileNotFoundError:
             return []
 
     def list(self) -> list[str]:
         """Return task ids present in the store (directory scan)."""
-        if not self._root.is_dir():
-            return []
         return sorted(path.stem for path in self._root.glob("*.jsonl"))
 
     def _serialize(self, task_id: str, records: list[dict[str, Any]]) -> list[str]:
-        """Enforce the size cap, appending a terminal marker when truncated."""
+        """Enforce the size cap (measured in UTF-8 bytes), appending a
+        terminal marker record when truncated."""
         lines: list[str] = []
         total = 0
         truncated = False
         for record in records:
             line = json.dumps(record, ensure_ascii=False)
-            if total and total + len(line) + 1 > TRANSCRIPT_MAX_BYTES:
+            line_bytes = len(line.encode("utf-8"))
+            if total and total + line_bytes + 1 > TRANSCRIPT_MAX_BYTES:
                 truncated = True
                 break
-            total += len(line) + 1
+            total += line_bytes + 1
             lines.append(line)
         if truncated:
             marker = json.dumps({"role": "system", "content": _TRUNCATION_MARKER})
@@ -126,11 +144,17 @@ class SubagentTranscriptStore:
 
     def _prune(self) -> None:
         """Keep only the newest N transcript files, sorted by mtime."""
-        if not self._root.is_dir():
-            return
-        files = sorted(self._root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+        files = list(self._root.glob("*.jsonl"))
         if len(files) <= TRANSCRIPT_RETENTION_COUNT:
             return
+
+        def _mtime(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        files.sort(key=_mtime)
         for path in files[: len(files) - TRANSCRIPT_RETENTION_COUNT]:
             try:
                 path.unlink()
@@ -139,14 +163,50 @@ class SubagentTranscriptStore:
 
     @staticmethod
     def _write_atomic(target: Path, lines: list[str]) -> None:
+        from contextlib import suppress
+
+        # Refuse to write through a symlinked transcript directory: it lives
+        # inside the agent workspace, which the agent itself can mutate, and
+        # following a planted symlink would escape the workspace boundary.
+        root = target.parent
+        if root.is_symlink() or root.parent.is_symlink():
+            raise OSError(f"Refusing to write transcripts through a symlinked path: {root}")
+
+        # Create the temp file with O_EXCL|O_NOFOLLOW so a planted symlink at
+        # the predictable name can neither be followed nor race the rename.
         tmp_path = target.with_suffix(target.suffix + ".tmp")
+        fd: int | None = None
+        for attempt in range(3):
+            try:
+                fd = os.open(
+                    tmp_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                )
+                break
+            except FileExistsError:
+                if attempt == 2:
+                    raise
+                tmp_path = target.with_suffix(f"{target.suffix}.tmp{attempt}")
+        if fd is None:  # pragma: no cover - loop above always breaks or raises
+            raise OSError(f"Could not reserve temp file for {target}")
         try:
-            with open(tmp_path, "w", encoding="utf-8") as handle:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 for line in lines:
                     handle.write(line + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_path, target)
+
+            # fsync the directory so the rename is durable (mirrors
+            # MemoryStore._write_entries). On Windows this raises
+            # PermissionError, which is expected and suppressed.
+            with suppress(PermissionError):
+                dir_fd = os.open(str(target.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise

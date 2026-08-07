@@ -205,6 +205,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
         seen["runtime"] = spec.runtime
         return SimpleNamespace(
             stop_reason="done", final_content="done", error=None, tool_events=[],
+            messages=[], usage={},
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)

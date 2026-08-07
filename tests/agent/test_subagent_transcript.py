@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.subagent_transcript import (
-    TRANSCRIPT_MAX_BYTES,
     SubagentTranscriptStore,
 )
 from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
@@ -181,6 +180,78 @@ async def test_empty_message_list_writes_valid_empty_file(
     store.write("abc12345", [])
     assert store.read("abc12345") == []
     assert store.path_for("abc12345").exists()
+
+
+async def test_size_cap_counts_utf8_bytes(store: SubagentTranscriptStore, monkeypatch) -> None:
+    """The cap is measured in UTF-8 bytes, not characters."""
+    monkeypatch.setattr("nanobot.agent.subagent_transcript.TRANSCRIPT_MAX_BYTES", 40)
+    # Each CJK char is 3 UTF-8 bytes: record 0 (8 chars) fits, record 1 (12
+    # chars) pushes the total past the cap, so truncation must fire.
+    store.write(
+        "abc12345",
+        _messages(
+            {"role": "user", "content": "你" * 8},
+            {"role": "assistant", "content": "你" * 12},
+        ),
+    )
+    lines = [
+        line
+        for line in store.path_for("abc12345").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    parsed = [json.loads(line) for line in lines]
+    assert parsed[-1]["role"] == "system"
+    assert "truncated" in parsed[-1]["content"]
+
+
+async def test_read_skips_one_malformed_line(store: SubagentTranscriptStore) -> None:
+    """A single corrupt line is skipped, not fatal to the whole transcript."""
+    store.write("abc12345", _messages({"role": "user", "content": "ok"}))
+    path = store.path_for("abc12345")
+    path.write_text(
+        json.dumps({"role": "user", "content": "ok"}) + "\n{not-json}\n" + json.dumps({"role": "assistant", "content": "later"}),
+        encoding="utf-8",
+    )
+    records = store.read("abc12345")
+    assert [r["content"] for r in records] == ["ok", "later"]
+
+
+async def test_write_refuses_symlinked_transcript_dir(
+    store: SubagentTranscriptStore, monkeypatch
+) -> None:
+    """A planted symlink at the transcript directory is refused (containment)."""
+    outside = store.root.parent.parent / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("sentinel", encoding="utf-8")
+    # Replace the real transcript dir with a symlink to the outside dir.
+    import shutil
+
+    if store.root.exists():
+        shutil.rmtree(store.root)
+    store.root.parent.mkdir(parents=True, exist_ok=True)
+    store.root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        store.write("abc12345", _messages({"role": "user", "content": "hi"}))
+    assert not (outside / "abc12345.jsonl").exists()
+
+
+async def test_write_refuses_planted_tmp_symlink(
+    store: SubagentTranscriptStore, monkeypatch
+) -> None:
+    """A planted symlink at the .tmp name cannot be followed for overwrite."""
+    # First write creates the transcript dir.
+    store.write("abc12345", _messages({"role": "user", "content": "x"}))
+    victim = store.root.parent / "victim.txt"
+    victim.write_text("original", encoding="utf-8")
+    # Plant a symlink where the temp file will be created.
+    (store.root / "abc12345.jsonl").unlink()
+    (store.root / "abc12345.jsonl.tmp").symlink_to(victim)
+
+    store.write("abc12345", _messages({"role": "user", "content": "y"}))
+    # O_EXCL refuses the planted name; the retry suffix is used and the victim
+    # is never written through the symlink.
+    assert victim.read_text(encoding="utf-8") == "original"
+    assert (store.root / "abc12345.jsonl").exists()
 
 
 async def test_list_and_missing_read(store: SubagentTranscriptStore) -> None:

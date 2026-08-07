@@ -74,7 +74,7 @@ class _SubagentHook(AgentHook):
         super().__init__()
         self._task_id = task_id
         self._status = status
-        self._last_messages: list[dict[str, Any]] = []
+        self.last_messages: list[dict[str, Any]] = []
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for tool_call in context.tool_calls:
@@ -85,7 +85,6 @@ class _SubagentHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        self._last_messages = list(context.messages)
         if self._status is None:
             return
         self._status.iteration = context.iteration
@@ -96,7 +95,7 @@ class _SubagentHook(AgentHook):
 
     async def on_finally(self, context: AgentRunHookContext) -> None:
         """Snapshot the run-level message list on every exit path."""
-        self._last_messages = list(context.messages)
+        self.last_messages = list(context.messages)
 
 
 class SubagentManager:
@@ -256,6 +255,8 @@ class SubagentManager:
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
+        while task_id in self._task_statuses:
+            task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -319,6 +320,8 @@ class SubagentManager:
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
+        while task_id in self._task_statuses:
+            task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -383,7 +386,8 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         hook = _SubagentHook(task_id, status)
-        transcript_path = f"memory/subagents/{task_id}.jsonl"
+        transcript_path: str | None = None
+        persisted = False
 
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
@@ -434,9 +438,11 @@ class SubagentManager:
                 if token is not None:
                     reset_workspace_scope(token)
                 reset_request_context(request_token)
-            self._persist_transcript(
-                task_id, hook, result.messages, result.stop_reason, usage=result.usage
-            )
+            if self._persist_transcript(
+                task_id, hook, result.stop_reason, usage=result.usage
+            ):
+                persisted = True
+                transcript_path = self.transcripts.relative_path_for(task_id)
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
@@ -466,15 +472,18 @@ class SubagentManager:
 
         except asyncio.CancelledError:
             # Persist whatever partial transcript the hook captured, then
-            # re-raise so the caller observes the cancellation.
-            self._persist_transcript(task_id, hook, None, "cancelled")
+            # re-raise so the caller observes the cancellation. A transcript
+            # already persisted on the success path is never overwritten.
+            if not persisted and self._persist_transcript(task_id, hook, "cancelled"):
+                transcript_path = self.transcripts.relative_path_for(task_id)
             raise
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            self._persist_transcript(task_id, hook, None, "error", error=str(e))
+            if not persisted and self._persist_transcript(task_id, hook, "error", error=str(e)):
+                transcript_path = self.transcripts.relative_path_for(task_id)
             final_result = f"Error: {e}"
             if announce:
                 await self._announce_result(
@@ -493,26 +502,29 @@ class SubagentManager:
         self,
         task_id: str,
         hook: _SubagentHook,
-        messages: list[dict[str, Any]] | None,
         stop_reason: str,
         error: str | None = None,
         usage: dict[str, int] | None = None,
-    ) -> None:
+    ) -> bool:
         """Persist the subagent transcript best-effort.
 
-        Storage failures are logged and swallowed so they never alter the
-        subagent's reported outcome or suppress the announce.
+        The hook's ``last_messages`` snapshot is populated by the runner's
+        ``on_finally`` on every exit path, including cancellation. Returns
+        True when the write succeeded; storage failures are logged and
+        swallowed so they never alter the subagent's reported outcome or
+        suppress the announce.
         """
         try:
-            source = messages if messages is not None else hook._last_messages
             metadata: dict[str, Any] = {"stop_reason": stop_reason}
             if error:
                 metadata["error"] = error
             if usage:
                 metadata["usage"] = dict(usage)
-            self.transcripts.write(task_id, source, metadata=metadata)
+            self.transcripts.write(task_id, hook.last_messages, metadata=metadata)
+            return True
         except Exception:
             logger.exception("Failed to persist subagent transcript for {}", task_id)
+            return False
 
     async def _announce_result(
         self,

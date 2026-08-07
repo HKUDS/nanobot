@@ -199,6 +199,22 @@ def _subagent_manager(tmp_path: Path, bus: MessageBus | None = None) -> Subagent
     )
 
 
+def _runner_completes(result: AgentRunResult):
+    """Mock ``runner.run`` the way the real runner behaves: it invokes the
+    hook's ``on_finally`` with the end-of-run messages on every exit path.
+    """
+    from nanobot.agent.hook import AgentRunHookContext
+    from nanobot.agent.runner import AgentRunSpec
+
+    async def _run(spec: AgentRunSpec) -> AgentRunResult:
+        await spec.hook.on_finally(
+            AgentRunHookContext(messages=result.messages, stop_reason=result.stop_reason)
+        )
+        return result
+
+    return _run
+
+
 def _full_messages() -> list[dict]:
     return [
         {"role": "system", "content": "sys"},
@@ -220,11 +236,13 @@ async def test_subagent_success_persists_transcript(tmp_path):
     """Success path writes a transcript with system/user/assistant+tool/tool rows."""
     sm = _subagent_manager(tmp_path)
     sm.runner.run = AsyncMock(
-        return_value=AgentRunResult(
-            final_content="done",
-            messages=_full_messages(),
-            stop_reason="completed",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
+        side_effect=_runner_completes(
+            AgentRunResult(
+                final_content="done",
+                messages=_full_messages(),
+                stop_reason="completed",
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            )
         )
     )
     sm._announce_result = AsyncMock()
@@ -250,11 +268,13 @@ async def test_subagent_tool_error_persists_transcript(tmp_path):
     """tool_error stop reason still persists the partial exchange."""
     sm = _subagent_manager(tmp_path)
     sm.runner.run = AsyncMock(
-        return_value=AgentRunResult(
-            final_content=None,
-            messages=_full_messages(),
-            stop_reason="tool_error",
-            tool_events=[{"name": "list_dir", "detail": "boom", "status": "error"}],
+        side_effect=_runner_completes(
+            AgentRunResult(
+                final_content=None,
+                messages=_full_messages(),
+                stop_reason="tool_error",
+                tool_events=[{"name": "list_dir", "detail": "boom", "status": "error"}],
+            )
         )
     )
     sm._announce_result = AsyncMock()
@@ -275,11 +295,13 @@ async def test_subagent_max_iterations_persists_transcript(tmp_path):
     """max_iterations stop reason persists with stop_reason/usage metadata."""
     sm = _subagent_manager(tmp_path)
     sm.runner.run = AsyncMock(
-        return_value=AgentRunResult(
-            final_content=None,
-            messages=_full_messages(),
-            stop_reason="max_iterations",
-            usage={"prompt_tokens": 3},
+        side_effect=_runner_completes(
+            AgentRunResult(
+                final_content=None,
+                messages=_full_messages(),
+                stop_reason="max_iterations",
+                usage={"prompt_tokens": 3},
+            )
         )
     )
     sm._announce_result = AsyncMock()
@@ -376,7 +398,34 @@ async def test_subagent_write_failure_does_not_change_outcome(tmp_path, monkeypa
 
     assert result == "ok"
     sm._announce_result.assert_awaited_once()
+    # A failed persistence never advertises a transcript path (finding #8).
+    assert sm._announce_result.call_args.kwargs.get("transcript_path") is None
     assert status.phase == "done"
+
+
+@pytest.mark.asyncio
+async def test_subagent_announce_failure_does_not_relabel_transcript(tmp_path):
+    """An announce failure after a successful run never re-persists the
+    transcript as error/cancelled (finding #9: persist-once)."""
+    sm = _subagent_manager(tmp_path)
+    sm.runner.run = AsyncMock(
+        side_effect=_runner_completes(
+            AgentRunResult(final_content="ok", messages=_full_messages(), stop_reason="completed")
+        )
+    )
+    sm._announce_result = AsyncMock(side_effect=RuntimeError("bus down"))
+    status = SubagentStatus(task_id="t9", label="label", task_description="task", started_at=0.0)
+
+    with pytest.raises(RuntimeError):
+        await sm._run_subagent(
+            "t9", "task", "label", {"channel": "cli", "chat_id": "direct"}, status, _runtime(MagicMock(spec=LLMProvider))
+        )
+
+    import json
+
+    path = tmp_path / "memory" / "subagents" / "t9.jsonl"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert records[-1]["_transcript_meta"]["stop_reason"] == "completed"
 
 
 @pytest.mark.asyncio
