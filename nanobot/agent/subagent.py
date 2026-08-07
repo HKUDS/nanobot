@@ -11,8 +11,9 @@ from typing import Any, Callable, TypedDict
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
+from nanobot.agent.subagent_transcript import SubagentTranscriptStore
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -61,12 +62,19 @@ class SubagentStatus:
 
 
 class _SubagentHook(AgentHook):
-    """Hook for subagent execution — logs tool calls and updates status."""
+    """Hook for subagent execution — logs tool calls and updates status.
+
+    The last message snapshot is refreshed on every iteration and again from
+    the run-level context in ``on_finally``, which the runner invokes on every
+    exit path (including cancellation and exceptions) with the full-or-partial
+    message list. It is the capture point for durable transcript persistence.
+    """
 
     def __init__(self, task_id: str, status: SubagentStatus | None = None) -> None:
         super().__init__()
         self._task_id = task_id
         self._status = status
+        self._last_messages: list[dict[str, Any]] = []
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for tool_call in context.tool_calls:
@@ -77,6 +85,7 @@ class _SubagentHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        self._last_messages = list(context.messages)
         if self._status is None:
             return
         self._status.iteration = context.iteration
@@ -84,6 +93,10 @@ class _SubagentHook(AgentHook):
         self._status.usage = dict(context.usage)
         if context.error:
             self._status.error = str(context.error)
+
+    async def on_finally(self, context: AgentRunHookContext) -> None:
+        """Snapshot the run-level message list on every exit path."""
+        self._last_messages = list(context.messages)
 
 
 class SubagentManager:
@@ -131,6 +144,7 @@ class SubagentManager:
             )
         self.workspace = workspace
         self.bus = bus
+        self.transcripts = SubagentTranscriptStore(workspace)
         self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
@@ -368,6 +382,9 @@ class SubagentManager:
             status.phase = payload.get("phase", status.phase)
             status.iteration = payload.get("iteration", status.iteration)
 
+        hook = _SubagentHook(task_id, status)
+        transcript_path = f"memory/subagents/{task_id}.jsonl"
+
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
             cfg = None
@@ -403,7 +420,7 @@ class SubagentManager:
                     runtime=runtime,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
-                    hook=_SubagentHook(task_id, status),
+                    hook=hook,
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
@@ -417,6 +434,9 @@ class SubagentManager:
                 if token is not None:
                     reset_workspace_scope(token)
                 reset_request_context(request_token)
+            self._persist_transcript(
+                task_id, hook, result.messages, result.stop_reason, usage=result.usage
+            )
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
@@ -440,13 +460,21 @@ class SubagentManager:
                     origin,
                     final_status,
                     origin_message_id,
+                    transcript_path=transcript_path,
                 )
             return final_result
+
+        except asyncio.CancelledError:
+            # Persist whatever partial transcript the hook captured, then
+            # re-raise so the caller observes the cancellation.
+            self._persist_transcript(task_id, hook, None, "cancelled")
+            raise
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
+            self._persist_transcript(task_id, hook, None, "error", error=str(e))
             final_result = f"Error: {e}"
             if announce:
                 await self._announce_result(
@@ -457,8 +485,34 @@ class SubagentManager:
                     origin,
                     "error",
                     origin_message_id,
+                    transcript_path=transcript_path,
                 )
             return final_result
+
+    def _persist_transcript(
+        self,
+        task_id: str,
+        hook: _SubagentHook,
+        messages: list[dict[str, Any]] | None,
+        stop_reason: str,
+        error: str | None = None,
+        usage: dict[str, int] | None = None,
+    ) -> None:
+        """Persist the subagent transcript best-effort.
+
+        Storage failures are logged and swallowed so they never alter the
+        subagent's reported outcome or suppress the announce.
+        """
+        try:
+            source = messages if messages is not None else hook._last_messages
+            metadata: dict[str, Any] = {"stop_reason": stop_reason}
+            if error:
+                metadata["error"] = error
+            if usage:
+                metadata["usage"] = dict(usage)
+            self.transcripts.write(task_id, source, metadata=metadata)
+        except Exception:
+            logger.exception("Failed to persist subagent transcript for {}", task_id)
 
     async def _announce_result(
         self,
@@ -469,6 +523,7 @@ class SubagentManager:
         origin: _SubagentOrigin,
         status: str,
         origin_message_id: str | None = None,
+        transcript_path: str | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -491,6 +546,8 @@ class SubagentManager:
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
         }
+        if transcript_path:
+            metadata["transcript_path"] = transcript_path
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
