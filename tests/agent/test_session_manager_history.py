@@ -491,8 +491,7 @@ def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
         "content": (
             "please use @drawio\n"
             "[CLI App Attachment: @drawio; tool=run_cli_app; "
-            "entry_point=cli-anything-drawio; "
-            "skill=plugins/cli-app-drawio/skills/cli-app-drawio/SKILL.md]"
+            "entry_point=cli-anything-drawio; skill=skills/cli-app-drawio/SKILL.md]"
         ),
     }]
 

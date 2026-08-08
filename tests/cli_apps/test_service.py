@@ -882,6 +882,34 @@ def test_mentioned_installed_apps_only_returns_installed_mentions(tmp_path: Path
     ]
 
 
+def test_legacy_underscored_skill_remains_visible_and_removable(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    legacy = manager.workspace / "skills" / "cli-app-unimol_tools" / "SKILL.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        "---\nname: cli-app-unimol_tools\ndescription: Legacy Uni-Mol app.\n---\n",
+        encoding="utf-8",
+    )
+    manager._save_installed(
+        {"unimol_tools": {"entry_point": "cli-anything-unimol-tools", "source": "harness"}}
+    )
+
+    app = {
+        "name": "unimol_tools",
+        "entry_point": "cli-anything-unimol-tools",
+        "install_cmd": "pip install cli-anything-unimol-tools",
+    }
+
+    assert manager._app_payload(app, manager._load_installed())["skill_installed"] is True
+    assert manager.mentioned_installed_apps("use @unimol_tools")[0]["skill"] == (
+        "skills/cli-app-unimol_tools/SKILL.md"
+    )
+
+    manager.remove_skill("unimol_tools")
+
+    assert not legacy.exists()
+
+
 def test_install_rejects_unknown_and_script_strategy(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _seed_catalog(manager)

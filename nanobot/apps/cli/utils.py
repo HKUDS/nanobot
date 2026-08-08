@@ -29,6 +29,9 @@ def runtime_lines_for_request(
     """Return CLI App annotations from an immutable request snapshot."""
     structured = metadata.get("cli_apps") if isinstance(metadata, Mapping) else None
     if isinstance(structured, list):
+        from nanobot.apps.cli import CliAppManager
+
+        manager = CliAppManager(workspace=workspace)
         structured_items = cast(list[Any], structured)
         mentions = [
             cast(Mapping[str, Any], item) for item in structured_items
@@ -41,8 +44,7 @@ def runtime_lines_for_request(
                 f"@{str(item['name']).strip().lower()} "
                 f"(installed; tool=run_cli_app; "
                 f"entry_point={str(item.get('entry_point') or 'unknown')}; "
-                f"skill=plugins/cli-app-{str(item['name']).strip().lower()}/skills/"
-                f"cli-app-{str(item['name']).strip().lower()}/SKILL.md). "
+                f"skill={manager.skill_relative_path(str(item['name']))}). "
                 "Read the skill when useful, then run this app with `run_cli_app`; do not bypass it with shell."
                 for item in mentions
                 if str(item.get("name") or "").strip()

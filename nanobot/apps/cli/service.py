@@ -219,7 +219,13 @@ def _safe_skill_name(name: str) -> str:
     return f"cli-app-{clean or 'app'}"
 
 
-def _skill_relative_path(name: str) -> str:
+def _legacy_skill_name(name: str) -> str:
+    """Return the workspace skill name emitted before Agent Plugins support."""
+    clean = _SAFE_NAME_RE.sub("-", name.lower()).strip("-")
+    return f"cli-app-{clean or 'app'}"
+
+
+def _plugin_skill_relative_path(name: str) -> str:
     skill_name = _safe_skill_name(name)
     return f"plugins/{skill_name}/skills/{skill_name}/SKILL.md"
 
@@ -622,7 +628,7 @@ class CliAppManager:
                     "name": installed_name,
                     "entry_point": entry_point,
                     "source": str(data.get("source") or ""),
-                    "skill": _skill_relative_path(installed_name),
+                    "skill": self.skill_relative_path(installed_name),
                     "tool": "run_cli_app",
                 }
             )
@@ -653,7 +659,16 @@ class CliAppManager:
         return self.workspace / "plugins" / skill_name / "skills" / skill_name / "SKILL.md"
 
     def _legacy_skill_path(self, name: str) -> Path:
-        return self.workspace / "skills" / _safe_skill_name(name) / "SKILL.md"
+        return self.workspace / "skills" / _legacy_skill_name(name) / "SKILL.md"
+
+    def _installed_skill_path(self, name: str) -> Path:
+        path = self._skill_path(name)
+        legacy_path = self._legacy_skill_path(name)
+        return legacy_path if not path.is_file() and legacy_path.is_file() else path
+
+    def skill_relative_path(self, name: str) -> str:
+        """Return the existing skill path, falling back to the canonical plugin path."""
+        return self._installed_skill_path(name).relative_to(self.workspace).as_posix()
 
     def _app_payload(
         self,
@@ -690,7 +705,7 @@ class CliAppManager:
             "status": status,
             "logo_url": logo_url,
             "brand_color": brand_color,
-            "skill_installed": self._skill_path(name).is_file(),
+            "skill_installed": self._installed_skill_path(name).is_file(),
             "manifest": self._manifest_payload(app, logo_url=logo_url, brand_color=brand_color),
         }
 
@@ -726,7 +741,7 @@ class CliAppManager:
         name = str(app["name"])
         entry_point = str(app.get("entry_point") or "")
         strategy = self._strategy(app)
-        skill_path = _skill_relative_path(name)
+        skill_path = _plugin_skill_relative_path(name)
         plugin_path = f"plugins/{_safe_skill_name(name)}"
         capabilities = [
             compact_dict({
