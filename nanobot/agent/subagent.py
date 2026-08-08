@@ -472,6 +472,16 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
+        session_key = origin.get("session_key")
+        remaining_count = self._running_sibling_count(session_key, task_id)
+        pending_notice = ""
+        if remaining_count:
+            noun = "task is" if remaining_count == 1 else "tasks are"
+            pending_notice = (
+                f"{remaining_count} other background {noun} still running for this turn. "
+                "Do not infer or summarize their results, and do not finalize the user's "
+                "overall request until their completion messages arrive."
+            )
 
         announce_content = render_template(
             "agent/subagent_announce.md",
@@ -479,6 +489,7 @@ class SubagentManager:
             status_text=status_text,
             task=task,
             result=result,
+            pending_notice=pending_notice,
         )
 
         # Inject as system message to trigger main agent.
@@ -491,6 +502,8 @@ class SubagentManager:
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
         }
+        if session_key:
+            metadata["subagent_remaining_count"] = remaining_count
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
@@ -504,6 +517,17 @@ class SubagentManager:
 
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+
+    def _running_sibling_count(self, session_key: str | None, task_id: str) -> int:
+        if not session_key:
+            return 0
+        return sum(
+            1
+            for sibling_id in self._session_tasks.get(session_key, set())
+            if sibling_id != task_id
+            and sibling_id in self._running_tasks
+            and not self._running_tasks[sibling_id].done()
+        )
 
     @staticmethod
     def _format_partial_progress(result: AgentRunResult) -> str:
