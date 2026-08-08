@@ -2129,6 +2129,34 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
         if web_config.fetch.use_jina_reader != previous_jina_reader:
             restart_required = True
 
+    # MST-specific fields: mstEngines and mstWeights
+    if provider_name == "mst":
+        raw_engines = _query_first_alias(query, "mst_engines", "mstEngines")
+        if raw_engines is not None:
+            try:
+                engines: list[str] = json.loads(raw_engines)  # pyright: ignore[reportUnknownArgumentType]
+                for item in engines:
+                    if not isinstance(item, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+                        raise WebUISettingsError("mst_engines items must be strings")
+            except (json.JSONDecodeError, TypeError) as exc:
+                if isinstance(exc, WebUISettingsError):
+                    raise
+                raise WebUISettingsError(f"Invalid mst_engines JSON: {exc}") from None
+            set_search_value("mst_engines", engines)
+
+        raw_weights = _query_first_alias(query, "mst_weights", "mstWeights")
+        if raw_weights is not None:
+            try:
+                weights: dict[str, float] = json.loads(raw_weights)  # pyright: ignore[reportUnknownArgumentType]
+                for k, v in weights.items():
+                    if not isinstance(k, str) or not isinstance(v, (int, float)):  # pyright: ignore[reportUnnecessaryIsInstance]
+                        raise WebUISettingsError("mst_weights keys must be strings and values numbers")
+            except (json.JSONDecodeError, TypeError) as exc:
+                if isinstance(exc, WebUISettingsError):
+                    raise
+                raise WebUISettingsError(f"Invalid mst_weights JSON: {exc}") from None
+            set_search_value("mst_weights", weights)
+
     if changed:
         save_config(config)
     return settings_payload(requires_restart=restart_required)

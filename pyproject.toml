@@ -85,6 +85,9 @@ pdf = [
     # Compatibility extra: PDF reading is bundled since v0.2.3.
     "pypdf>=5.0.0,<6.0.0",
 ]
+mst = [
+    "mst-python>=0.4.2",
+]
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
 ]
@@ -171,6 +174,7 @@ include = ["nanobot"]
 exclude = ["**/tests"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
+reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
