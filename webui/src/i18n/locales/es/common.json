@@ -339,6 +339,12 @@
       "estimated": "estimado",
       "includesEstimates": "incluye estimaciones",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} solicitudes",
+      "recentTitle": "Llamadas recientes",
+      "recentEmpty": "Las nuevas llamadas al modelo aparecerán aquí.",
+      "recentTokenCount": "{{tokens}} tokens",
+      "recentBreakdown": "{{input}} de entrada · {{output}} de salida · {{cached}} en caché",
+      "recentIteration": "Iteración {{count}}",
+      "recentTools": "Herramientas: {{tools}}",
       "sources": {
         "user": "Chat",
         "api": "API",

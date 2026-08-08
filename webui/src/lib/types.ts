@@ -670,6 +670,19 @@ export interface SettingsPayload {
         }
       >;
     }>;
+    recent_calls?: Array<{
+      timestamp: string;
+      source: string;
+      session_key?: string;
+      iteration?: number;
+      tools?: string[];
+      prompt_tokens: number;
+      completion_tokens: number;
+      cached_tokens: number;
+      total_tokens: number;
+      provider_tokens?: number;
+      estimated_tokens?: number;
+    }>;
     total_tokens: number;
     total_tokens_30d: number;
     total_tokens_365d: number;

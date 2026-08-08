@@ -339,6 +339,12 @@
       "estimated": "估算",
       "includesEstimates": "包含估算",
       "cellTitle": "{{date}}：{{tokens}} 個 Token，{{requests}} 次請求",
+      "recentTitle": "最近呼叫",
+      "recentEmpty": "模型產生新呼叫後，此處會顯示明細。",
+      "recentTokenCount": "{{tokens}} 個 Token",
+      "recentBreakdown": "輸入 {{input}} · 輸出 {{output}} · 快取 {{cached}}",
+      "recentIteration": "第 {{count}} 輪",
+      "recentTools": "工具：{{tools}}",
       "sources": {
         "user": "對話",
         "api": "API",

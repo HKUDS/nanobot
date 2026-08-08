@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.agent.hook import AgentHookContext
+from nanobot.providers.base import ToolCallRequest
 from nanobot.webui.token_usage import (
     TokenUsageHook,
     record_response_token_usage,
@@ -15,11 +16,11 @@ from nanobot.webui.token_usage import (
 )
 
 
-def _write_state(tmp_path, days: dict) -> None:
+def _write_state(tmp_path, days: dict, *, recent_calls: list[dict] | None = None) -> None:
     state_dir = tmp_path / "webui"
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "token-usage.json").write_text(
-        json.dumps({"days": days}), encoding="utf-8"
+        json.dumps({"days": days, "recent_calls": recent_calls or []}), encoding="utf-8"
     )
 
 
@@ -67,6 +68,24 @@ def test_record_scrubs_malformed_day_keys(tmp_path, monkeypatch) -> None:
     assert "not-a-dat3" not in raw["days"]
     assert "2026-06-02" in raw["days"]
     assert "2026-06-03" in raw["days"]
+
+
+def test_payload_canonicalizes_python_only_iso_timestamps(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    _write_state(
+        tmp_path,
+        {},
+        recent_calls=[{
+            "timestamp": "2021-W01-1",
+            "source": "user",
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+        }],
+    )
+
+    payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
+
+    assert payload["recent_calls"][0]["timestamp"] == "2021-01-04T00:00:00Z"
 
 
 def test_record_token_usage_aggregates_by_local_day(tmp_path, monkeypatch) -> None:
@@ -170,6 +189,53 @@ def test_record_token_usage_keeps_source_breakdown(tmp_path, monkeypatch) -> Non
     assert row["sources"]["dream"]["requests"] == 1
 
 
+def test_record_token_usage_keeps_recent_call_details(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    record_token_usage(
+        {"prompt_tokens": 100, "completion_tokens": 25, "cached_tokens": 40},
+        source="cron",
+        now=datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc),
+        session_key="cron:drink-water",
+        iteration=1,
+        tools=["read_file", "message"],
+    )
+
+    payload = token_usage_payload(now=datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc))
+
+    assert payload["recent_calls"] == [
+        {
+            "timestamp": "2026-06-03T12:30:00Z",
+            "source": "cron",
+            "prompt_tokens": 100,
+            "completion_tokens": 25,
+            "cached_tokens": 40,
+            "total_tokens": 125,
+            "provider_tokens": 125,
+            "estimated_tokens": 0,
+            "session_key": "cron:drink-water",
+            "iteration": 1,
+            "tools": ["read_file", "message"],
+        }
+    ]
+
+
+def test_record_token_usage_bounds_recent_calls(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("nanobot.webui.token_usage._MAX_RECENT_CALLS", 2)
+
+    for second in range(3):
+        record_token_usage(
+            {"prompt_tokens": second + 1, "completion_tokens": 1},
+            now=datetime(2026, 6, 3, 12, 0, second, tzinfo=timezone.utc),
+            session_key=f"webui:{second}",
+        )
+
+    payload = token_usage_payload(now=datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc))
+
+    assert [call["session_key"] for call in payload["recent_calls"]] == ["webui:2", "webui:1"]
+
+
 def test_record_response_token_usage_uses_response_usage(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
     monkeypatch.setattr("nanobot.webui.token_usage._local_day", lambda *_, **__: "2026-06-03")
@@ -177,10 +243,12 @@ def test_record_response_token_usage_uses_response_usage(tmp_path, monkeypatch) 
     record_response_token_usage(
         SimpleNamespace(usage={"prompt_tokens": 20, "completion_tokens": 5}),
         source="dream",
+        session_key="dream:20260603-120000",
     )
 
     payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
     assert payload["days"][0]["sources"]["dream"]["total_tokens"] == 25
+    assert payload["recent_calls"][0]["session_key"] == "dream:20260603-120000"
 
 
 @pytest.mark.asyncio
@@ -195,9 +263,13 @@ async def test_token_usage_hook_classifies_source_from_session_key(tmp_path, mon
             messages=[],
             session_key="cron:drink-water",
             usage={"prompt_tokens": 10, "completion_tokens": 5},
+            tool_calls=[ToolCallRequest(id="call-1", name="read_file", arguments={})],
         )
     )
 
     payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
 
     assert payload["days"][0]["sources"]["cron"]["total_tokens"] == 15
+    assert payload["recent_calls"][0]["session_key"] == "cron:drink-water"
+    assert payload["recent_calls"][0]["iteration"] == 0
+    assert payload["recent_calls"][0]["tools"] == ["read_file"]

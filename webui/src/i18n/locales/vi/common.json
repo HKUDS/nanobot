@@ -339,6 +339,12 @@
       "estimated": "ước tính",
       "includesEstimates": "bao gồm ước tính",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} yêu cầu",
+      "recentTitle": "Lần gọi gần đây",
+      "recentEmpty": "Các lần gọi mô hình mới sẽ xuất hiện tại đây.",
+      "recentTokenCount": "{{tokens}} token",
+      "recentBreakdown": "{{input}} đầu vào · {{output}} đầu ra · {{cached}} bộ nhớ đệm",
+      "recentIteration": "Lần lặp {{count}}",
+      "recentTools": "Công cụ: {{tools}}",
       "sources": {
         "user": "Trò chuyện",
         "api": "API",
