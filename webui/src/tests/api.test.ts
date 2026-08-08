@@ -46,6 +46,7 @@ import {
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
+  updateComputerUseSettings,
   updateSidebarState,
   updateImageGenerationSettings,
   updateModelCallOrder,
@@ -833,6 +834,20 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
+    );
+  });
+
+  it("updates computer-use capability switches", async () => {
+    await updateComputerUseSettings("tok", { browserEnabled: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/computer-use/update?browser_enabled=true",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    await updateComputerUseSettings("tok", { computerEnabled: false });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/computer-use/update?enabled=false",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
   });
 

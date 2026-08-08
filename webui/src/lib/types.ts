@@ -579,6 +579,11 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
+  computer_use?: {
+    browser_enabled: boolean;
+    enabled: boolean;
+    backend: "desktop" | "browser";
+  };
   api?: {
     host: string;
     port: number;
@@ -1100,6 +1105,11 @@ export interface WebSearchSettingsUpdate {
 export interface NetworkSafetySettingsUpdate {
   webuiAllowLocalServiceAccess: boolean;
   webuiDefaultAccessMode: WebuiDefaultAccessMode;
+}
+
+export interface ComputerUseSettingsUpdate {
+  browserEnabled?: boolean;
+  computerEnabled?: boolean;
 }
 
 export interface ImageGenerationSettingsUpdate {

@@ -138,3 +138,28 @@ async def test_model_preset_mutation_routes(
     assert response.status_code == 200
     assert json.loads(response.body)["routed"] == function_name
     assert captured["query"] == expected_query
+
+
+@pytest.mark.asyncio
+async def test_computer_use_update_route(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def update(query):
+        captured["query"] = query
+        return {"requires_restart": True}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.update_computer_use_settings", update)
+    request = SimpleNamespace(
+        path="/api/settings/computer-use/update?browser_enabled=true",
+        headers=Headers(),
+    )
+
+    response = await _router().dispatch(
+        None,
+        request,
+        "/api/settings/computer-use/update",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert captured["query"] == {"browser_enabled": ["true"]}

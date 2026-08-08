@@ -139,6 +139,7 @@ import {
   startApiService,
   stopApiService,
   updateAutomation,
+  updateComputerUseSettings,
   updateImageGenerationSettings,
   updateMcpServerTools,
   updateModelCallOrder,
@@ -179,6 +180,7 @@ import type {
   AutomationUpdatePayload,
   CliAppInfo,
   CliAppsPayload,
+  ComputerUseSettingsUpdate,
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
@@ -762,6 +764,7 @@ export function SettingsView({
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
   const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
+  const [computerUseSaving, setComputerUseSaving] = useState<"browser" | "computer" | null>(null);
   const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
   const [apiServiceLoading, setApiServiceLoading] = useState(false);
   const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
@@ -1002,7 +1005,7 @@ export function SettingsView({
   useEffect(() => {
     if (
       !pageVisible
-      || !["channels", "models", "browser", "runtime"].includes(activeSection)
+      || !["channels", "models", "browser", "runtime", "advanced"].includes(activeSection)
     ) {
       return;
     }
@@ -1556,6 +1559,34 @@ export function SettingsView({
       return false;
     } finally {
       setNanobotFeatureAction(null);
+    }
+  };
+
+  const setComputerUseEnabled = async (
+    target: "browser" | "computer",
+    enabled: boolean,
+  ) => {
+    if (!settings || computerUseSaving) return;
+    setComputerUseSaving(target);
+    try {
+      if (enabled && !(await installCapabilities(["computer-use"]))) return;
+      const update: ComputerUseSettingsUpdate = target === "browser"
+        ? { browserEnabled: enabled }
+        : { computerEnabled: enabled };
+      const payload = await updateComputerUseSettings(token, update);
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({
+          ...prev,
+          [target === "browser" ? "browser" : "runtime"]: true,
+        }));
+      }
+      await maybeRestartHostEngine(payload);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setComputerUseSaving(null);
     }
   };
 
@@ -2238,6 +2269,11 @@ export function SettingsView({
             olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
             olostepInstalling={nanobotFeatureAction === "enable:olostep"}
             capabilityError={nanobotFeaturesError}
+            browserAutomationEnabled={settings.computer_use?.browser_enabled ?? false}
+            computerUseFeature={featureCatalog.find((feature) => feature.name === "computer-use")}
+            computerUseSaving={computerUseSaving === "browser"}
+            computerUseInstalling={nanobotFeatureAction === "enable:computer-use"}
+            onToggleBrowserAutomation={(enabled) => void setComputerUseEnabled("browser", enabled)}
           />
         );
       case "channels":
@@ -2364,6 +2400,13 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.runtime}
+            computerControlEnabled={settings.computer_use?.enabled ?? false}
+            computerUseBackend={settings.computer_use?.backend ?? "desktop"}
+            computerUseFeature={featureCatalog.find((feature) => feature.name === "computer-use")}
+            computerUseSaving={computerUseSaving === "computer"}
+            computerUseInstalling={nanobotFeatureAction === "enable:computer-use"}
+            capabilityError={nanobotFeaturesError}
+            onToggleComputerControl={(enabled) => void setComputerUseEnabled("computer", enabled)}
           />
         );
       default:
@@ -5255,6 +5298,11 @@ function WebSettings({
   olostepFeature,
   olostepInstalling,
   capabilityError,
+  browserAutomationEnabled,
+  computerUseFeature,
+  computerUseSaving,
+  computerUseInstalling,
+  onToggleBrowserAutomation,
 }: {
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
@@ -5274,6 +5322,11 @@ function WebSettings({
   olostepFeature?: NanobotFeatureInfo;
   olostepInstalling: boolean;
   capabilityError: string | null;
+  browserAutomationEnabled: boolean;
+  computerUseFeature?: NanobotFeatureInfo;
+  computerUseSaving: boolean;
+  computerUseInstalling: boolean;
+  onToggleBrowserAutomation: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -5302,9 +5355,46 @@ function WebSettings({
       : selectedProvider?.credential === "base_url"
         ? !baseUrl
         : false;
+  const computerUseInstalled = computerUseFeature?.installed ?? true;
+  const browserAutomationDescription = computerUseInstalling
+    ? tx("settings.help.computerUseInstalling", "Installing computer-use support...")
+    : computerUseInstalled
+      ? tx(
+          "settings.help.browserAutomation",
+          "Let nanobot navigate and act on web pages using structured page elements. Requires Playwright Chromium.",
+        )
+      : tx(
+          "settings.help.computerUseInstall",
+          "Required Python support will be installed when you turn this on.",
+        );
 
   return (
     <div className="space-y-7">
+      <section>
+        <SettingsSectionTitle>
+          {tx("settings.sections.browserAutomation", "Browser automation")}
+        </SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.browserAutomation", "Browser automation")}
+            description={browserAutomationDescription}
+          >
+            <ToggleButton
+              checked={browserAutomationEnabled}
+              disabled={computerUseSaving || computerUseInstalling}
+              onChange={onToggleBrowserAutomation}
+              ariaLabel={tx("settings.rows.browserAutomation", "Browser automation")}
+              label={browserAutomationEnabled
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+        </SettingsGroup>
+        {capabilityError ? (
+          <p className="mt-2 px-1 text-[12px] text-destructive">{capabilityError}</p>
+        ) : null}
+      </section>
+
       <section>
         <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle>
         {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
@@ -8765,6 +8855,13 @@ function AdvancedSettings({
   onSave,
   onRestart,
   isRestarting,
+  computerControlEnabled,
+  computerUseBackend,
+  computerUseFeature,
+  computerUseSaving,
+  computerUseInstalling,
+  capabilityError,
+  onToggleComputerControl,
 }: {
   form: NetworkSafetySettingsUpdate;
   dirty: boolean;
@@ -8775,11 +8872,60 @@ function AdvancedSettings({
   onSave: () => void;
   onRestart?: () => void;
   isRestarting?: boolean;
+  computerControlEnabled: boolean;
+  computerUseBackend: "desktop" | "browser";
+  computerUseFeature?: NanobotFeatureInfo;
+  computerUseSaving: boolean;
+  computerUseInstalling: boolean;
+  capabilityError: string | null;
+  onToggleComputerControl: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const computerUseInstalled = computerUseFeature?.installed ?? true;
+  const computerControlDescription = computerUseInstalling
+    ? tx("settings.help.computerUseInstalling", "Installing computer-use support...")
+    : !computerUseInstalled
+      ? tx(
+          "settings.help.computerUseInstall",
+          "Required Python support will be installed when you turn this on.",
+        )
+      : computerUseBackend === "browser"
+        ? tx(
+            "settings.help.computerControlBrowser",
+            "Pixel-based control currently targets an isolated browser, as configured in config.json.",
+          )
+        : tx(
+            "settings.help.computerControl",
+            "Let nanobot see and control the computer running its engine. macOS requires Screen Recording and Accessibility access.",
+          );
   return (
     <div className="space-y-7">
+      <section>
+        <SettingsSectionTitle>
+          {tx("settings.sections.computerControl", "Computer control")}
+        </SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.computerControl", "Computer control")}
+            description={computerControlDescription}
+          >
+            <ToggleButton
+              checked={computerControlEnabled}
+              disabled={computerUseSaving || computerUseInstalling}
+              onChange={onToggleComputerControl}
+              ariaLabel={tx("settings.rows.computerControl", "Computer control")}
+              label={computerControlEnabled
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+        </SettingsGroup>
+        {capabilityError ? (
+          <p className="mt-2 px-1 text-[12px] text-destructive">{capabilityError}</p>
+        ) : null}
+      </section>
+
       <section>
         <SettingsSectionTitle>
           {isNativeHostSurface

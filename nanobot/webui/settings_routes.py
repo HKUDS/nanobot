@@ -64,6 +64,7 @@ from nanobot.webui.settings_api import (
     settings_usage_payload,
     update_agent_settings,
     update_api_settings,
+    update_computer_use_settings,
     update_image_generation_settings,
     update_model_call_order,
     update_model_configuration,
@@ -174,6 +175,8 @@ class WebUISettingsRouter:
             return await self._handle_settings_provider_oauth(request, "logout")
         if path == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
+        if path == "/api/settings/computer-use/update":
+            return self._handle_settings_computer_use_update(request)
         if path == "/api/settings/api-service":
             return self._handle_settings_api_service(request)
         if path == "/api/settings/api-service/start":
@@ -505,6 +508,15 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="browser"))
+
+    def _handle_settings_computer_use_update(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = update_computer_use_settings(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload, section="runtime"))
 
     def _handle_settings_api_service(self, request: WsRequest) -> Response:
         if not self._authorized(request):
