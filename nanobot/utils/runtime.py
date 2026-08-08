@@ -108,7 +108,10 @@ def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
         return None
     arguments = cast(dict[str, Any], arguments)
     if tool_name == "web_fetch":
-        url = str(arguments.get("url") or "").strip()
+        raw_url = arguments.get("url")
+        if not isinstance(raw_url, str):
+            return None
+        url = raw_url.strip()
         if url:
             return f"web_fetch:{url.lower()}"
     if tool_name == "web_search":
