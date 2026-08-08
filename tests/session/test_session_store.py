@@ -77,3 +77,57 @@ def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:
     assert len(session.messages) == FILE_MAX_MESSAGES
     archiver.assert_called_once()
     store.save.assert_called_once_with(session, fsync=False)
+
+
+def test_save_discards_stale_reference_after_invalidate(tmp_path) -> None:
+    """save() must reject a Session object that is no longer in the cache."""
+    store = MagicMock(spec=SessionStore)
+    original = Session(key="test:stale")
+    original.add_message("user", "hello")
+    replacement = Session(key="test:stale")
+    replacement.add_message("user", "new message")
+    store.load.side_effect = [original, replacement]
+    manager = SessionManager(tmp_path, store=store)
+
+    # First get_or_create loads original.
+    assert manager.get_or_create("test:stale") is original
+    # Simulate /new: invalidate then create a new session.
+    manager.invalidate("test:stale")
+    assert manager.get_or_create("test:stale") is replacement
+
+    store.save.reset_mock()
+    manager.save(original)
+
+    # The stale save must be discarded.
+    store.save.assert_not_called()
+    # The replacement must still be in cache.
+    assert manager.get_cached("test:stale") is replacement
+
+
+def test_save_accepts_current_cached_object(tmp_path) -> None:
+    """save() of the currently-cached object must proceed normally."""
+    store = MagicMock(spec=SessionStore)
+    manager = SessionManager(tmp_path, store=store)
+
+    session = manager.get_or_create("test:current")
+    session.add_message("user", "hello")
+
+    store.save.reset_mock()
+    manager.save(session)
+
+    store.save.assert_called_once_with(session, fsync=False)
+
+
+def test_save_allows_object_after_invalidate_if_no_new_session_created(tmp_path) -> None:
+    """save() after invalidate is OK if nobody created a new session yet."""
+    store = MagicMock(spec=SessionStore)
+    manager = SessionManager(tmp_path, store=store)
+
+    session = manager.get_or_create("test:orphan")
+    manager.invalidate("test:orphan")
+    # No get_or_create after invalidate — cache is empty.
+    store.save.reset_mock()
+
+    manager.save(session)
+
+    store.save.assert_called_once_with(session, fsync=False)

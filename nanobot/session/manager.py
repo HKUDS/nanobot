@@ -1092,6 +1092,14 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
+        current = self.get_cached(session.key)
+        if current is not None and current is not session:
+            logger.warning(
+                "Discarding stale save for session {} (cache has a different object)",
+                session.key,
+            )
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(
