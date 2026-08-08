@@ -1,0 +1,6 @@
+{
+  "identifier": "ai.nanobot.mac",
+  "bundle": {
+    "targets": ["app", "dmg"]
+  }
+}
