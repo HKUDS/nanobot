@@ -151,6 +151,19 @@ reference any WebUI topic. Nanobot reads a referenced topic only when its histor
 is relevant and can link it in the response. The model badge shows the current
 model or preset and links back to model settings when setup is incomplete.
 
+When two or more named model presets are configured, the badge shows a dropdown
+indicator and acts as a preset selector. Click or tap it, then choose the preset
+you want from the menu. For keyboard access, focus the badge and press
+<kbd>Enter</kbd> or <kbd>Space</kbd> to open the menu, use the arrow keys to move,
+and press <kbd>Enter</kbd> to select.
+
+The selection applies to future turns in the current session and persists with
+that session; it does not change the default for other sessions. Only named
+presets from **Settings → Models** are selectable. An inline fallback model that
+has not been saved as a named preset is not a separate manual choice. Save it as
+a named preset to make it selectable. The same switch is available in chat with
+`/model <preset>`; see [Chat Commands: Model Presets](./chat-commands.md#model-presets).
+
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
 for provider setup and output behavior.
