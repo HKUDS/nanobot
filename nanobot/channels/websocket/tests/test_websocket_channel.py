@@ -32,7 +32,6 @@ from nanobot.channels.websocket.runtime import (
     _is_valid_chat_id,
     _parse_envelope,
     _parse_inbound_payload,
-    publish_runtime_model_update,
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -1105,8 +1104,14 @@ async def test_send_broadcasts_runtime_model_updates() -> None:
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
 
-    publish_runtime_model_update(bus, "openai/gpt-4.1", "fast")
-    await channel.send(bus.outbound.get_nowait())
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="*",
+            content="",
+            event=RuntimeModelUpdatedEvent(model="openai/gpt-4.1", model_preset="fast"),
+        )
+    )
 
     payload = json.loads(mock_ws.send.call_args[0][0])
     assert payload["event"] == "runtime_model_updated"
@@ -1139,26 +1144,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "model_name": "deepseek/deepseek-chat",
     }
     chat_two.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_runtime_model_update_publisher_uses_websocket_outbound_event() -> None:
-    bus = MessageBus()
-
-    publish_runtime_model_update(
-        bus,
-        "openai/gpt-4.1",
-        "fast",
-    )
-
-    event = bus.outbound.get_nowait()
-    assert event.channel == "websocket"
-    assert event.chat_id == "*"
-    assert event.content == ""
-    assert event.metadata == {}
-    assert isinstance(event.event, RuntimeModelUpdatedEvent)
-    assert event.event.model == "openai/gpt-4.1"
-    assert event.event.model_preset == "fast"
 
 
 @pytest.mark.asyncio

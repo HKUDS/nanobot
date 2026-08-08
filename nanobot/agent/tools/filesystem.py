@@ -785,22 +785,6 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
     return best_ratio, best_start, best_window_lines, hints
 
 
-def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
-    """Locate old_text in content with a multi-level fallback chain:
-
-    1. Exact substring match
-    2. Line-trimmed sliding window (handles indentation differences)
-    3. Smart quote normalization (curly ↔ straight quotes)
-
-    Both inputs should use LF line endings (caller normalises CRLF).
-    Returns (matched_fragment, count) or (None, 0).
-    """
-    matches = _find_matches(content, old_text)
-    if not matches:
-        return None, 0
-    return matches[0].text, len(matches)
-
-
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to edit"),

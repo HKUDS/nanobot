@@ -811,11 +811,6 @@ class MSTeamsChannel(BaseChannel):
         except Exception as e:
             self.logger.warning("Failed to save conversation refs: {}", e)
 
-    def _save_refs(self, *, prune: bool = True) -> None:
-        """Persist conversation references."""
-        with self._refs_guard:
-            self._save_refs_locked(prune=prune)
-
     async def _get_access_token(self) -> str:
         """Fetch an access token for Bot Framework / Azure Bot auth."""
 

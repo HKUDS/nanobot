@@ -12,15 +12,6 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"cli_apps": cli_apps} if isinstance(cli_apps, list) and cli_apps else {}
 
 
-def runtime_lines(message: Any, workspace: Path, *, skip: bool = False) -> list[str]:
-    """Return model-visible CLI app annotations for the current turn."""
-    if skip:
-        return []
-    text = message.content if isinstance(getattr(message, "content", None), str) else ""
-    metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
-    return runtime_lines_for_request(text, metadata, workspace)
-
-
 def runtime_lines_for_request(
     text: str,
     metadata: Mapping[str, Any] | None,

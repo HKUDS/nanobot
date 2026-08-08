@@ -55,7 +55,6 @@ export type AttachmentError =
   | "io";                // file read failed at the browser layer
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
-export const MAX_IMAGES_PER_MESSAGE = MAX_ATTACHMENTS_PER_MESSAGE;
 export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 

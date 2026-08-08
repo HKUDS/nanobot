@@ -7,7 +7,6 @@ from nanobot.agent.tools.filesystem import (
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
-    _find_match,
 )
 
 # ---------------------------------------------------------------------------
@@ -114,52 +113,6 @@ class TestReadFileTool:
 
         assert "File too large to read" in result
         assert "Maximum is 100 MiB" in result
-
-
-# ---------------------------------------------------------------------------
-# _find_match  (unit tests for the helper)
-# ---------------------------------------------------------------------------
-
-class TestFindMatch:
-
-    def test_exact_match(self):
-        match, count = _find_match("hello world", "world")
-        assert match == "world"
-        assert count == 1
-
-    def test_exact_no_match(self):
-        match, count = _find_match("hello world", "xyz")
-        assert match is None
-        assert count == 0
-
-    def test_crlf_normalisation(self):
-        # Caller normalises CRLF before calling _find_match, so test with
-        # pre-normalised content to verify exact match still works.
-        content = "line1\nline2\nline3"
-        old_text = "line1\nline2\nline3"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-
-    def test_line_trim_fallback(self):
-        content = "    def foo():\n        pass\n"
-        old_text = "def foo():\n    pass"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        # The returned match should be the *original* indented text
-        assert "    def foo():" in match
-
-    def test_line_trim_multiple_candidates(self):
-        content = "  a\n  b\n  a\n  b\n"
-        old_text = "a\nb"
-        match, count = _find_match(content, old_text)
-        assert count == 2
-
-    def test_empty_old_text(self):
-        match, count = _find_match("hello", "")
-        # Empty string is always "in" any string via exact match
-        assert match == ""
 
 
 # ---------------------------------------------------------------------------

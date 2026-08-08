@@ -1313,21 +1313,6 @@ def _recover_incomplete_turns(
     return recovered
 
 
-def recover_incomplete_turns_from_session(
-    lines: list[dict[str, Any]],
-    session_messages: list[dict[str, Any]] | None,
-    *,
-    session_key: str,
-) -> list[dict[str, Any]]:
-    """Recover marked transcript answers only when one durable session turn matches."""
-    if not lines or not session_messages or not _needs_incomplete_turn_recovery(lines):
-        return lines
-    session_turns = _session_backfill_turns(session_key, session_messages)
-    if not session_turns:
-        return lines
-    return _recover_incomplete_turns(lines, session_turns)
-
-
 def _with_backfilled_user(
     records: list[dict[str, Any]],
     user_event: dict[str, Any],
@@ -1363,20 +1348,6 @@ def _inject_missing_user_events(
         out.extend(turn if has_user else _with_backfilled_user(turn, session_turns[match_index][0]))
         session_cursor = match_index + 1
     return out
-
-
-def inject_missing_user_events_from_session(
-    session_key: str,
-    lines: list[dict[str, Any]],
-    session_messages: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    """Backfill user rows for legacy WebUI transcripts that only stored assistant streams."""
-    if not lines or not session_messages or not _needs_user_event_backfill(lines):
-        return lines
-    session_turns = _session_backfill_turns(session_key, session_messages)
-    if not session_turns:
-        return lines
-    return _inject_missing_user_events(lines, session_turns)
 
 
 def _format_tool_call_trace(call: Any) -> str | None:

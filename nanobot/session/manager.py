@@ -1086,10 +1086,6 @@ class SessionManager:
         """Attempt to recover a session from a corrupt JSONL file."""
         return self._jsonl_store.repair(key, path=path)
 
-    @staticmethod
-    def _session_payload(session: Session) -> SessionPayload:
-        return JsonlSessionStore.session_payload(session)
-
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
         archiver = self._file_cap_archiver

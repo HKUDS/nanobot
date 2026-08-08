@@ -30,7 +30,6 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
     TurnModelUpdatedEvent,
     outbound_event_from_message,
-    outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -278,21 +277,6 @@ class WebSocketConfig(Base):
             "host is 0.0.0.0 (all interfaces) but neither token, token_issue_secret, "
             "nor trusted_proxy_auth is set — set one to prevent unauthenticated access"
         )
-
-
-def publish_runtime_model_update(
-    bus: MessageBus,
-    model: str,
-    model_preset: str | None,
-) -> None:
-    """Enqueue a runtime model snapshot for websocket subscribers (fan-out in-channel)."""
-    bus.outbound.put_nowait(
-        outbound_message_for_event(
-            channel="websocket",
-            chat_id="*",
-            event=RuntimeModelUpdatedEvent(model=model, model_preset=model_preset),
-        )
-    )
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
