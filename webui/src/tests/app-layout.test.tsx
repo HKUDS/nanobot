@@ -526,6 +526,9 @@ describe("App layout", () => {
     const temporaryTooltip = await screen.findByRole("tooltip");
     expect(temporaryTooltip).toHaveTextContent("Temporary chat");
     expect(temporaryTooltip).toHaveTextContent("Not saved to history or memory");
+    expect(within(temporaryTooltip).getByText(
+      "Reloading, closing, or losing the connection ends these chats.",
+    )).toHaveClass("font-medium");
     await user.unhover(heroTemporaryToggle);
 
     fireEvent.click(within(sidebar).getByText("Existing topic"));

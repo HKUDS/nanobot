@@ -112,7 +112,13 @@ export function ThreadHeader({
               >
                 <div className="font-medium">{t("temporaryChat.title")}</div>
                 <div className="mt-1 text-muted-foreground">
-                  {t("temporaryChat.description")}
+                  {t("temporaryChat.retention")}
+                </div>
+                <div className="mt-1 font-medium">
+                  {t("temporaryChat.expiration")}
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  {t("temporaryChat.externalEffects")}
                 </div>
               </TooltipContent>
             </Tooltip>

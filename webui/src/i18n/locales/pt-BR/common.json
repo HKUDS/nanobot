@@ -51,7 +51,9 @@
   },
   "temporaryChat": {
     "title": "Chat temporário",
-    "description": "Não é salvo no histórico nem na memória. Recarregar, fechar ou perder a conexão encerra estes chats. As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "retention": "Não é salvo no histórico nem na memória.",
+    "expiration": "Recarregar, fechar ou perder a conexão encerra estes chats.",
+    "externalEffects": "As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
     "clear": "Limpar chat temporário",
     "sectionTitle": "Chats temporários",
     "closeAction": "Fechar chat temporário: {{title}}"

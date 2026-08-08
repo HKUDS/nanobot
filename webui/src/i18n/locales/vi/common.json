@@ -51,7 +51,9 @@
   },
   "temporaryChat": {
     "title": "Trò chuyện tạm thời",
-    "description": "Không được lưu vào lịch sử hoặc bộ nhớ. Tải lại, đóng trang hoặc mất kết nối sẽ kết thúc các cuộc trò chuyện này. Yêu cầu vẫn được gửi đến nhà cung cấp mô hình và thao tác công cụ có thể để lại thay đổi.",
+    "retention": "Không được lưu vào lịch sử hoặc bộ nhớ.",
+    "expiration": "Tải lại, đóng trang hoặc mất kết nối sẽ kết thúc các cuộc trò chuyện này.",
+    "externalEffects": "Yêu cầu vẫn được gửi đến nhà cung cấp mô hình và thao tác công cụ có thể để lại thay đổi.",
     "clear": "Xóa trò chuyện tạm thời",
     "sectionTitle": "Trò chuyện tạm thời",
     "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
