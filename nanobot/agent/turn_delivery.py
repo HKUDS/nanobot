@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from loguru import logger
+
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
@@ -16,6 +18,7 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
     outbound_message_for_event,
 )
+
 from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
@@ -130,6 +133,7 @@ class TurnDelivery:
     _stream_base_id: str | None = field(init=False, default=None)
     _stream_segment: int = field(init=False, default=0)
     _stream_open: bool = field(init=False, default=False)
+    _stream_content: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         self.delivery_message = dataclasses.replace(
@@ -280,6 +284,7 @@ class TurnDelivery:
         return f"{self._stream_base_id}:{self._stream_segment}"
 
     async def _publish_stream(self, delta: str) -> None:
+        self._stream_content += delta
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=self.delivery_message.channel,
@@ -310,6 +315,18 @@ class TurnDelivery:
         )
         self._stream_open = merge_next
         if not merge_next:
+            # A user-visible message is finalized here. Log it so every
+            # delivered message is recorded regardless of delivery path.
+            content = self._stream_content
+            self._stream_content = ""
+            if content:
+                preview = content[:120] + "..." if len(content) > 120 else content
+                logger.info(
+                    "Delivered streamed response to {}:{}: {}",
+                    self.delivery_message.channel,
+                    self.delivery_message.chat_id,
+                    preview,
+                )
             self._stream_segment += 1
 
     async def abort_stream(self) -> None:
