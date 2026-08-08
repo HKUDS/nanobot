@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
@@ -52,7 +52,7 @@ class _FakeBlobResourceContents:
 class _FakeImageContent:
     def __init__(self, data: str, mime_type: str = "image/png") -> None:
         self.data = data
-        self.mimeType = mime_type
+        self.mime_type = mime_type
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def _fake_mcp_module(
 
     @asynccontextmanager
     async def _fake_streamable_http_client(_url: str, http_client=None):
-        yield object(), object(), object()
+        yield object(), object()
 
     mod.ClientSession = _FakeClientSession
     mod.StdioServerParameters = _FakeStdioServerParameters
@@ -133,12 +133,13 @@ def _fake_mcp_module(
     shared_mod = ModuleType("mcp.shared")
     exc_mod = ModuleType("mcp.shared.exceptions")
 
-    class _FakeMcpError(Exception):
+    class _FakeMCPError(Exception):
         def __init__(self, code: int = -1, message: str = "error"):
             self.error = SimpleNamespace(code=code, message=message)
             super().__init__(message)
 
-    exc_mod.McpError = _FakeMcpError
+    mod.MCPError = _FakeMCPError
+    exc_mod.MCPError = _FakeMCPError
     monkeypatch.setitem(sys.modules, "mcp.shared", shared_mod)
     monkeypatch.setitem(sys.modules, "mcp.shared.exceptions", exc_mod)
 
@@ -147,7 +148,7 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
 
@@ -185,7 +186,7 @@ def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "value": {
@@ -207,7 +208,7 @@ def test_wrapper_normalizes_nullable_property_type_union() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": ["string", "null"]},
@@ -224,7 +225,7 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "name": {
@@ -249,7 +250,7 @@ def test_wrapper_hoists_recursive_local_refs_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="search_dataset",
         description="search tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "filter": {
@@ -282,7 +283,7 @@ def test_wrapper_hoists_root_self_ref_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="tree",
         description="tree tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "children": {"type": "array", "items": {"$ref": "#"}},
@@ -304,7 +305,7 @@ def test_wrapper_preserves_existing_defs_refs() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "$defs": {"value": {"type": "string"}},
             "properties": {"value": {"$ref": "#/$defs/value"}},
@@ -321,7 +322,7 @@ def test_wrapper_resolves_uri_encoded_json_pointer() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "space name/value": {"type": "string"},
@@ -449,7 +450,7 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
             content=[_FakeTextContent("Error: server-side MCP failure")],
-            isError=True,
+            is_error=True,
         )
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
@@ -494,7 +495,7 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
             content=[_FakeTextContent("Error: generated report successfully")],
-            isError=False,
+            is_error=False,
         )
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
@@ -622,7 +623,7 @@ def _make_tool_def(name: str) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
         description=f"{name} tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
 
 
@@ -936,7 +937,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     @asynccontextmanager
     async def _capturing_streamable_http_client(_url: str, http_client=None):
         assert http_client is not None
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
@@ -944,11 +945,11 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
     )
     monkeypatch.setattr(
-        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        "nanobot.security.network.httpx2.AsyncHTTPTransport",
         lambda **_kwargs: httpx.MockTransport(
             lambda request: httpx.Response(200, request=request)
         ),
@@ -976,11 +977,11 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "mcp.example.com")
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
     )
     monkeypatch.setattr(
-        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        "nanobot.security.network.httpx2.AsyncHTTPTransport",
         lambda **_kwargs: httpx.MockTransport(
             lambda request: httpx.Response(200, request=request)
         ),
@@ -1050,13 +1051,15 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
         assert http_client is not None
         used_transports.append("streamableHttp")
         await http_client.get("https://example.com/start")
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    # Keep the redirect exercise isolated from host-level proxy settings.
+    monkeypatch.setattr(mcp_mod, "httpx2_env_proxy_mounts", lambda: {})
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda **_kwargs: httpx.MockTransport(_handler),
     )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
@@ -1138,13 +1141,13 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     @asynccontextmanager
     async def _capturing_streamable_http_client(_url: str, http_client=None):
         captured["timeout"] = http_client.timeout
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
+        "Httpx2PinnedDNSAsyncTransport",
         lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
     )
     monkeypatch.setattr(
@@ -1385,10 +1388,10 @@ async def test_prompt_wrapper_execute_handles_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_prompt_wrapper_execute_handles_mcp_error() -> None:
-    from mcp.shared.exceptions import McpError
+    from mcp import MCPError
 
     async def get_prompt(name: str, arguments: dict | None = None) -> object:
-        raise McpError(code=42, message="invalid argument")
+        raise MCPError(code=42, message="invalid argument")
 
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt))
     result = await wrapper.execute()
@@ -1510,7 +1513,7 @@ def test_tool_wrapper_sanitizes_name() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
     assert wrapper.name == "mcp_srv_My_Tool"
@@ -1541,7 +1544,7 @@ def test_tool_wrapper_preserves_original_name_for_mcp_call() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
     # The sanitized API-facing name differs from the original MCP name
@@ -1619,12 +1622,12 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     tool_def = SimpleNamespace(
         name="search",
         description="search tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     other_tool_def = SimpleNamespace(
         name="search",
         description="other search tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
     other_wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "other", other_tool_def)

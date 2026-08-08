@@ -12,7 +12,7 @@ from contextlib import AsyncExitStack, suppress
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, cast
 from weakref import WeakKeyDictionary
 
-import httpx
+import httpx2 as httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -25,9 +25,9 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.security.network import (
-    PinnedDNSAsyncTransport,
+    Httpx2PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
-    httpx_env_proxy_mounts,
+    httpx2_env_proxy_mounts,
     resolve_url_target,
     validate_url_target,
 )
@@ -194,7 +194,7 @@ def _is_session_terminated(exc: BaseException) -> bool:
         messages.append(str(getattr(error, "message", "")))
     return any(
         marker in message.lower()
-        for marker in ("session terminated", "connection closed")
+        for marker in ("session terminated", "session not found", "connection closed")
         for message in messages
     )
 
@@ -252,8 +252,8 @@ def _redact_url(url: str) -> str:
 
 
 def _pinned_transport_kwargs() -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"transport": PinnedDNSAsyncTransport()}
-    mounts = httpx_env_proxy_mounts()
+    kwargs: dict[str, Any] = {"transport": Httpx2PinnedDNSAsyncTransport()}
+    mounts = httpx2_env_proxy_mounts()
     if mounts:
         kwargs["mounts"] = mounts
     return kwargs
@@ -518,7 +518,7 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
     """
     image_cls = getattr(types, "ImageContent", None)
     if image_cls is not None and isinstance(block, image_cls):
-        mime = getattr(block, "mimeType", None) or "image/png"
+        mime = getattr(block, "mime_type", None) or "image/png"
         return f"data:{mime};base64,{block.data}"
 
     embedded_cls = getattr(types, "EmbeddedResource", None)
@@ -527,7 +527,7 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
         resource = getattr(block, "resource", None)
         if blob_cls is not None and isinstance(resource, blob_cls):
             blob_resource = cast(Any, resource)
-            mime = getattr(blob_resource, "mimeType", None) or ""
+            mime = getattr(blob_resource, "mime_type", None) or ""
             if isinstance(mime, str) and mime.startswith("image/"):
                 return f"data:{mime};base64,{blob_resource.blob}"
     return None
@@ -571,7 +571,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
-        raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
+        raw_schema = tool_def.input_schema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
 
@@ -650,7 +650,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
+                    if getattr(result, "is_error", False):
                         return ToolResult.error(rendered)
                     return rendered
                 except Exception as exc:
@@ -876,8 +876,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
         return True
 
     async def execute(self, **kwargs: Any) -> str:
-        from mcp import types
-        from mcp.shared.exceptions import McpError
+        from mcp import MCPError, types
 
         retried_transient = False
         refreshed_session = False
@@ -897,7 +896,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
                     raise
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
                 return "(MCP prompt call was cancelled)"
-            except McpError as exc:
+            except MCPError as exc:
                 if await self._refresh_session_after_termination(
                     exc,
                     refreshed_session,
@@ -1062,7 +1061,7 @@ async def connect_mcp_servers(
                         **_pinned_transport_kwargs(),
                     )
                 )
-                read, write, _ = await server_stack.enter_async_context(
+                read, write = await server_stack.enter_async_context(
                     streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
