@@ -159,6 +159,7 @@ async def test_exec_blocks_chained_internal_url():
         "cp /tmp/x memory/.dream_cursor",
     ],
 )
+
 def test_exec_blocks_writes_to_history_jsonl(command):
     """Direct writes to history.jsonl / .dream_cursor must be blocked (#2989)."""
     tool = ExecTool()
@@ -179,6 +180,7 @@ def test_exec_blocks_writes_to_history_jsonl(command):
         "echo history.jsonl",
     ],
 )
+
 def test_exec_allows_reads_of_history_jsonl(command):
     """Read-only access to history.jsonl must still be allowed."""
     tool = ExecTool()
@@ -274,6 +276,7 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
         "cat /dev/fd/3",
     ],
 )
+
 def test_exec_allows_benign_device_targets_inside_workspace(tmp_path, command):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -426,6 +429,7 @@ def test_exec_bwrap_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeyp
         "|format",
     ],
 )
+
 def test_exec_blocks_format_command(command):
     """The Windows ``format`` disk command must be denied."""
     tool = ExecTool()
@@ -445,6 +449,7 @@ def test_exec_blocks_format_command(command):
         "echo reformat",
     ],
 )
+
 def test_exec_allows_format_in_url_and_args(command):
     """``format`` inside URL parameters or as a non-command arg must be allowed."""
     tool = ExecTool()
@@ -496,3 +501,21 @@ def test_exec_blocks_outside_paths_from_subdirectory(tmp_path):
     )
     assert result is not None
     assert "path outside working dir" in result
+
+def test_exec_blocks_outside_paths_with_redirection_and_delimiters(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secrets"
+    outside.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    for cmd in (
+        f"cat<{outside / 'key.pem'}",
+        f"cat <{outside / 'key.pem'}",
+        f"({outside / 'key.pem'})",
+        f"cat {{{outside / 'key.pem'}}}",
+    ):
+        result = tool._guard_command(cmd, str(workspace), workspace_root=str(workspace))
+        assert result is not None, f"Expected {cmd} to be blocked"
+        assert "path outside working dir" in result
