@@ -11,7 +11,7 @@ import os
 import re
 from collections.abc import Callable
 from typing import Any, cast
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
@@ -146,6 +146,33 @@ def _unsafe_url_request_error(exc: BaseException) -> str | None:
     from nanobot.security.network import UnsafeURLRequestError
 
     return str(exc) if isinstance(exc, UnsafeURLRequestError) else None
+
+
+# Forwarding a URL to the remote Jina reader discloses it to a third party, so
+# URLs that embed credential material (userinfo, signed-URL parameters, token
+# or key query values) must never leave the machine. Matching is by parameter
+# name: over-matching only costs the local readability fallback, while
+# under-matching leaks a secret.
+_CREDENTIAL_QUERY_PARAMS = frozenset({
+    "access_token", "apikey", "api_key", "auth", "authorization",
+    "client_secret", "id_token", "key", "password", "passwd", "pwd",
+    "refresh_token", "secret", "sig", "signature", "token",
+})
+_CREDENTIAL_QUERY_PREFIXES = ("x-amz-", "x-goog-")
+
+
+def _url_carries_credentials(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return True
+    if parsed.username is not None or parsed.password is not None:
+        return True
+    for name, _value in parse_qsl(parsed.query, keep_blank_values=True):
+        lowered = name.lower()
+        if lowered in _CREDENTIAL_QUERY_PARAMS or lowered.startswith(_CREDENTIAL_QUERY_PREFIXES):
+            return True
+    return False
 
 
 async def _get_with_safe_redirects(
@@ -1082,13 +1109,26 @@ class WebFetchTool(Tool):
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""
+        if _url_carries_credentials(url):
+            redacted = urlparse(url)
+            logger.debug(
+                "Skipping Jina Reader for {}://{}{}: URL carries credential material",
+                redacted.scheme,
+                redacted.hostname or "",
+                redacted.path,
+            )
+            return None
+        # httpx already drops the fragment when building the request; strip it
+        # explicitly so client-side-only data (OAuth implicit flows put tokens
+        # there) stays out of this path even if the transport changes.
+        forwarded_url = url.split("#", 1)[0]
         try:
             headers = {"Accept": "application/json", "User-Agent": self.user_agent}
             jina_key = os.environ.get("JINA_API_KEY", "")
             if jina_key:
                 headers["Authorization"] = f"Bearer {jina_key}"
             async with httpx.AsyncClient(proxy=self.proxy, timeout=20.0) as client:
-                r = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+                r = await client.get(f"https://r.jina.ai/{forwarded_url}", headers=headers)
                 if r.status_code == 429:
                     logger.debug("Jina Reader rate limited, falling back to readability")
                     return None
