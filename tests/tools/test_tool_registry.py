@@ -28,6 +28,18 @@ class _FakeTool(Tool):
     async def execute(self, **kwargs: Any) -> Any:
         return kwargs
 
+
+class _ClosableTool(_FakeTool):
+    def __init__(self, name: str, *, error: BaseException | None = None):
+        super().__init__(name)
+        self.closed = False
+        self.error = error
+
+    async def close(self) -> None:
+        self.closed = True
+        if self.error is not None:
+            raise self.error
+
 def _tool_names(definitions: list[dict[str, Any]]) -> list[str]:
     names: list[str] = []
     for definition in definitions:
@@ -56,6 +68,24 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
+
+
+async def test_close_attempts_every_registered_tool() -> None:
+    registry = ToolRegistry()
+    broken = _ClosableTool("broken", error=RuntimeError("close failed"))
+    healthy = _ClosableTool("healthy")
+    registry.register(broken)
+    registry.register(healthy)
+
+    try:
+        await registry.close()
+    except RuntimeError as exc:
+        assert str(exc) == "close failed"
+    else:
+        raise AssertionError("expected close failure")
+
+    assert broken.closed is True
+    assert healthy.closed is True
 
 
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:

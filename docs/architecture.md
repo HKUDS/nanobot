@@ -125,6 +125,7 @@ Important files:
 | Shell execution | `nanobot/agent/tools/shell.py` |
 | Filesystem tools | `nanobot/agent/tools/filesystem.py` |
 | Web search/fetch | `nanobot/agent/tools/web.py` |
+| Browser and computer use | `nanobot/agent/tools/browser_tool.py`, `nanobot/agent/tools/computer_use.py` |
 | MCP tools | `nanobot/agent/tools/mcp.py` |
 | Cron | `nanobot/agent/tools/cron.py`, `nanobot/cron/` |
 | Image generation | `nanobot/agent/tools/image_generation.py` |
@@ -188,7 +189,7 @@ Security-sensitive code paths include:
 |---|---|
 | Workspace scope | `nanobot/security/workspace_access.py`, `nanobot/security/workspace_policy.py` |
 | Shell sandboxing | `nanobot/agent/tools/shell.py` |
-| SSRF/network checks | `nanobot/security/network.py`, `nanobot/agent/tools/web.py` |
+| SSRF/network checks | `nanobot/security/network.py`, `nanobot/agent/tools/web.py`, `nanobot/agent/tools/computer_use_backends/browser_playwright.py` |
 | PTH guard and CLI startup security | `nanobot/security/` and CLI entrypoints |
 | Channel access control | channel config in `nanobot/channels/*.py` |
 

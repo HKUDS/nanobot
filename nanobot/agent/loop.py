@@ -1397,6 +1397,7 @@ class AgentLoop:
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,
+            *(() if not hasattr(self, "tools") else (self.tools.close,)),
             lambda: agent_context.close_mcp(self),
         )
         for cleanup in cleanup_steps:
