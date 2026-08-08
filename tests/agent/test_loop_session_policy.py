@@ -119,12 +119,18 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
     loop = _loop(tmp_path, [])
 
     async def wait_for_discard(key: str) -> None:
-        while loop.sessions.get_cached(key) is not None:
+        while loop.sessions.get_cached(key) is not None or key in loop._discarding_sessions:
             await asyncio.sleep(0)
 
     loop.provider.chat_with_retry = AsyncMock(side_effect=block_provider)
     monkeypatch.setattr(loop, "_connect_mcp", AsyncMock())
     monkeypatch.setattr(loop, "close_mcp", AsyncMock())
+    terminate_exec_sessions = AsyncMock(return_value=1)
+    monkeypatch.setattr(
+        loop._exec_session_manager,
+        "terminate_by_owner",
+        terminate_exec_sessions,
+    )
     key = "websocket:transient-cancelled"
     loop.sessions.get_or_create_transient(
         key,
@@ -152,6 +158,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
         await asyncio.wait_for(active_task, timeout=2)
     await asyncio.wait_for(wait_for_discard(key), timeout=2)
     assert loop.sessions.get_cached(key) is None
+    terminate_exec_sessions.assert_awaited_once_with(key)
 
     loop.stop()
     await loop.bus.publish_inbound(_message(key, "wake"))
