@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from nanobot.agent.hook import AgentHookContext
 from nanobot.webui.token_usage import (
@@ -201,3 +202,137 @@ async def test_token_usage_hook_classifies_source_from_session_key(tmp_path, mon
     payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
 
     assert payload["days"][0]["sources"]["cron"]["total_tokens"] == 15
+
+
+@pytest.mark.asyncio
+async def test_token_usage_hook_logs_diagnostic(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("nanobot.webui.token_usage._local_day", lambda *_, **__: "2026-06-03")
+
+    logs = []
+    handler_id = logger.add(
+        lambda msg: logs.append(msg.record["message"]),
+        filter=lambda record: record["message"].startswith("Token usage:"),
+    )
+
+    try:
+        hook = TokenUsageHook()
+        await hook.after_iteration(
+            AgentHookContext(
+                iteration=2,
+                messages=[],
+                session_key="cron:drink-water",
+                usage={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "cached_tokens": 10,
+                },
+            )
+        )
+
+        assert len(logs) == 1
+        log_msg = logs[0]
+        assert "source=cron" in log_msg
+        assert "session=cron:drink-water" in log_msg
+        assert "iteration=2" in log_msg
+        assert "prompt=100" in log_msg
+        assert "completion=20" in log_msg
+        assert "total=120" in log_msg
+
+        # Verify aggregate is still working
+        payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
+        assert payload["days"][0]["sources"]["cron"]["total_tokens"] == 120
+    finally:
+        logger.remove(handler_id)
+
+
+@pytest.mark.asyncio
+async def test_token_usage_hook_logs_heartbeat(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    logs = []
+    handler_id = logger.add(
+        lambda msg: logs.append(msg.record["message"]),
+        filter=lambda record: record["message"].startswith("Token usage:"),
+    )
+
+    try:
+        hook = TokenUsageHook()
+        await hook.after_iteration(
+            AgentHookContext(
+                iteration=0,
+                messages=[],
+                session_key="heartbeat",
+                usage={"prompt_tokens": 5, "completion_tokens": 1},
+            )
+        )
+
+        assert len(logs) == 1
+        log_msg = logs[0]
+        assert "source=cron" in log_msg
+        assert "session=heartbeat" in log_msg
+    finally:
+        logger.remove(handler_id)
+
+
+@pytest.mark.asyncio
+async def test_token_usage_hook_ignores_empty_usage(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    logs = []
+    handler_id = logger.add(
+        lambda msg: logs.append(msg.record["message"]),
+        filter=lambda record: record["message"].startswith("Token usage:"),
+    )
+
+    try:
+        hook = TokenUsageHook()
+        await hook.after_iteration(
+            AgentHookContext(
+                iteration=1,
+                messages=[],
+                session_key="user",
+                usage={"prompt_tokens": 0, "completion_tokens": 0},
+            )
+        )
+
+        assert len(logs) == 0
+
+        payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
+        assert payload["days"] == []
+    finally:
+        logger.remove(handler_id)
+
+
+@pytest.mark.asyncio
+async def test_token_usage_hook_logs_estimated_usage(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    logs = []
+    handler_id = logger.add(
+        lambda msg: logs.append(msg.record["message"]),
+        filter=lambda record: record["message"].startswith("Token usage:"),
+    )
+
+    try:
+        hook = TokenUsageHook()
+        await hook.after_iteration(
+            AgentHookContext(
+                iteration=3,
+                messages=[],
+                session_key="user:123",
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "provider_tokens": 0,
+                    "estimated_tokens": 15,
+                },
+            )
+        )
+
+        assert len(logs) == 1
+        log_msg = logs[0]
+        assert "provider=0" in log_msg
+        assert "estimated=15" in log_msg
+    finally:
+        logger.remove(handler_id)

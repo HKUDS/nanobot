@@ -361,9 +361,30 @@ class TokenUsageHook(AgentHook):
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         try:
+            normalized = _normalize_usage(context.usage)
+            if not normalized:
+                return
+
+            source = _source_from_session_key(context.session_key)
+            session = context.session_key if context.session_key is not None else "default"
+
+            logger.info(
+                "Token usage: source={} session={} iteration={} prompt={} "
+                "completion={} cached={} total={} provider={} estimated={}",
+                source,
+                session,
+                context.iteration,
+                normalized.get("prompt_tokens", 0),
+                normalized.get("completion_tokens", 0),
+                normalized.get("cached_tokens", 0),
+                normalized.get("total_tokens", 0),
+                normalized.get("provider_tokens", 0),
+                normalized.get("estimated_tokens", 0),
+            )
+
             record_token_usage(
-                context.usage,
-                source=_source_from_session_key(context.session_key),
+                normalized,
+                source=source,
                 timezone_name=self._timezone_name,
             )
         except Exception:
