@@ -36,6 +36,8 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
         final_content="review result",
         error=None,
         tool_events=[],
+        messages=[],
+        usage={},
     ))
     manager._announce_result = AsyncMock()
 
@@ -69,6 +71,8 @@ async def test_run_inline_returns_structured_error(tmp_path):
         final_content=None,
         error="subagent failed",
         tool_events=[],
+        messages=[],
+        usage={},
     ))
 
     result = await manager.run_inline(
@@ -111,6 +115,8 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
             final_content="done",
             error=None,
             tool_events=[],
+            messages=[],
+            usage={},
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
@@ -154,6 +160,8 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
             final_content="done",
             error=None,
             tool_events=[],
+            messages=[],
+            usage={},
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
@@ -197,6 +205,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
         seen["runtime"] = spec.runtime
         return SimpleNamespace(
             stop_reason="done", final_content="done", error=None, tool_events=[],
+            messages=[], usage={},
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
@@ -236,6 +245,8 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
             final_content="done",
             error=None,
             tool_events=[],
+            messages=[],
+            usage={},
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
@@ -322,6 +333,8 @@ async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
             final_content="done",
             error=None,
             tool_events=[],
+            messages=[],
+            usage={},
         )
 
     manager.runner.run = AsyncMock(side_effect=fake_run)
