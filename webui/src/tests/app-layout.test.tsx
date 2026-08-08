@@ -521,6 +521,13 @@ describe("App layout", () => {
     expect(heroTemporaryToggle.compareDocumentPosition(themeToggle)
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
+    const user = userEvent.setup();
+    await user.hover(heroTemporaryToggle);
+    const temporaryTooltip = await screen.findByRole("tooltip");
+    expect(temporaryTooltip).toHaveTextContent("Temporary chat");
+    expect(temporaryTooltip).toHaveTextContent("Not saved to history or memory");
+    await user.unhover(heroTemporaryToggle);
+
     fireEvent.click(within(sidebar).getByText("Existing topic"));
     expect(window.location.hash).toBe("#/chat/websocket%3Aexisting-chat");
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();

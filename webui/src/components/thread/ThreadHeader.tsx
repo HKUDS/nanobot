@@ -110,7 +110,10 @@ export function ThreadHeader({
                 align="end"
                 className="max-w-72 rounded-xl border border-border/70 bg-popover px-3 py-2 text-[12px]/[1.4] text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10"
               >
-                {t("temporaryChat.description")}
+                <div className="font-medium">{t("temporaryChat.title")}</div>
+                <div className="mt-1 text-muted-foreground">
+                  {t("temporaryChat.description")}
+                </div>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
