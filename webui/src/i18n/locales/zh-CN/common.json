@@ -488,6 +488,12 @@
       "estimated": "估算",
       "includesEstimates": "包含估算",
       "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次请求",
+      "recentTitle": "最近调用",
+      "recentEmpty": "模型产生新调用后，这里会显示明细。",
+      "recentTokenCount": "{{tokens}} 个 Token",
+      "recentBreakdown": "输入 {{input}} · 输出 {{output}} · 缓存 {{cached}}",
+      "recentIteration": "第 {{count}} 轮",
+      "recentTools": "工具：{{tools}}",
       "sources": {
         "user": "对话",
         "api": "API",

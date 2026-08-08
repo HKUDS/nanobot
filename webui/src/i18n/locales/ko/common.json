@@ -339,6 +339,12 @@
       "estimated": "추정",
       "includesEstimates": "추정 포함",
       "cellTitle": "{{date}}: {{tokens}} 토큰, 요청 {{requests}}회",
+      "recentTitle": "최근 호출",
+      "recentEmpty": "새 모델 호출이 여기에 표시됩니다.",
+      "recentTokenCount": "{{tokens}} 토큰",
+      "recentBreakdown": "입력 {{input}} · 출력 {{output}} · 캐시 {{cached}}",
+      "recentIteration": "반복 {{count}}",
+      "recentTools": "도구: {{tools}}",
       "sources": {
         "user": "채팅",
         "api": "API",

@@ -339,6 +339,12 @@
       "estimated": "推定",
       "includesEstimates": "推定を含む",
       "cellTitle": "{{date}}: {{tokens}} トークン、{{requests}} 件のリクエスト",
+      "recentTitle": "最近の呼び出し",
+      "recentEmpty": "新しいモデル呼び出しがここに表示されます。",
+      "recentTokenCount": "{{tokens}} トークン",
+      "recentBreakdown": "入力 {{input}} · 出力 {{output}} · キャッシュ {{cached}}",
+      "recentIteration": "反復 {{count}}",
+      "recentTools": "ツール: {{tools}}",
       "sources": {
         "user": "チャット",
         "api": "API",

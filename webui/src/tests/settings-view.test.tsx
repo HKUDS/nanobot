@@ -1976,6 +1976,19 @@ describe("SettingsView Apps catalog", () => {
             requests: 2,
           },
         ],
+        recent_calls: [
+          {
+            timestamp: "2026-06-03T09:15:30Z",
+            source: "cron",
+            session_key: "cron:drink-water",
+            iteration: 0,
+            tools: ["read_file"],
+            prompt_tokens: 1200,
+            completion_tokens: 300,
+            cached_tokens: 500,
+            total_tokens: 1500,
+          },
+        ],
         total_tokens: 1500,
         total_tokens_30d: 1500,
         total_tokens_365d: 1500,
@@ -2006,6 +2019,12 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByLabelText("Token activity")).toBeInTheDocument();
     expect(screen.getByText("Token Usage")).toBeInTheDocument();
+    expect(screen.getByText("Recent calls")).toBeInTheDocument();
+    expect(screen.getByText("cron:drink-water")).toBeInTheDocument();
+    expect(screen.getByText("Iteration 1")).toBeInTheDocument();
+    expect(screen.getByText("Tools: read_file")).toBeInTheDocument();
+    expect(screen.getByText("1.5K tokens")).toBeInTheDocument();
+    expect(screen.getByText("1.2K in · 300 out · 500 cached")).toBeInTheDocument();
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();

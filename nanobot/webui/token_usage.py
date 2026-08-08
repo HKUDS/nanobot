@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, cast
@@ -16,9 +15,10 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.paths import get_webui_dir
 
-TOKEN_USAGE_SCHEMA_VERSION = 1
+TOKEN_USAGE_SCHEMA_VERSION = 2
 _MAX_STATE_FILE_BYTES = 512 * 1024
 _MAX_DAYS_RETAINED = 400
+_MAX_RECENT_CALLS = 50
 _USAGE_KEYS = (
     "prompt_tokens",
     "completion_tokens",
@@ -40,12 +40,16 @@ def default_token_usage_state() -> dict[str, Any]:
     return {
         "schema_version": TOKEN_USAGE_SCHEMA_VERSION,
         "days": {},
+        "recent_calls": [],
         "updated_at": None,
     }
 
 
-def _utc_now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+def _utc_iso(value: datetime | None = None) -> str:
+    dt = value or datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _zone(timezone_name: str | None) -> timezone | ZoneInfo:
@@ -145,6 +149,50 @@ def _normalize_sources(raw: Any, fallback: dict[str, int]) -> dict[str, dict[str
     return sources
 
 
+def _normalize_recent_calls(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+
+    calls: list[dict[str, Any]] = []
+    for value in cast(list[Any], raw)[-_MAX_RECENT_CALLS:]:
+        if not isinstance(value, dict):
+            continue
+        call = cast(dict[str, Any], value)
+        timestamp = call.get("timestamp")
+        if not isinstance(timestamp, str):
+            continue
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        usage = _normalize_usage(call)
+        if not usage:
+            continue
+
+        normalized: dict[str, Any] = {
+            "timestamp": _utc_iso(parsed_timestamp),
+            "source": _clean_source(call.get("source")),
+            **usage,
+        }
+        session_key = call.get("session_key")
+        if isinstance(session_key, str) and session_key.strip():
+            normalized["session_key"] = session_key.strip()[:160]
+        iteration = call.get("iteration")
+        if isinstance(iteration, int) and not isinstance(iteration, bool) and iteration >= 0:
+            normalized["iteration"] = iteration
+        tools = call.get("tools")
+        if isinstance(tools, list):
+            normalized_tools = [
+                tool.strip()[:80]
+                for tool in cast(list[Any], tools)
+                if isinstance(tool, str) and tool.strip()
+            ][:12]
+            if normalized_tools:
+                normalized["tools"] = normalized_tools
+        calls.append(normalized)
+    return calls
+
+
 def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
     state = default_token_usage_state()
     if not isinstance(raw, dict):
@@ -176,6 +224,7 @@ def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
         }
 
     state["days"] = days
+    state["recent_calls"] = _normalize_recent_calls(raw.get("recent_calls"))
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None
     return state
@@ -199,7 +248,7 @@ def read_token_usage_state() -> dict[str, Any]:
 
 def write_token_usage_state(raw: dict[str, Any]) -> dict[str, Any]:
     state = normalize_token_usage_state(raw)
-    state["updated_at"] = _utc_now_iso()
+    state["updated_at"] = _utc_iso()
     encoded = json.dumps(
         state,
         ensure_ascii=False,
@@ -235,6 +284,9 @@ def record_token_usage(
     source: str = "user",
     timezone_name: str | None = None,
     now: datetime | None = None,
+    session_key: str | None = None,
+    iteration: int | None = None,
+    tools: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized = _normalize_usage(usage)
     if not normalized:
@@ -268,6 +320,21 @@ def record_token_usage(
         sources[source_key] = source_row
         row["sources"] = sources
 
+        recent_calls = cast(list[dict[str, Any]], state["recent_calls"])
+        call: dict[str, Any] = {
+            "timestamp": _utc_iso(now),
+            "source": source_key,
+            **normalized,
+        }
+        if session_key:
+            call["session_key"] = session_key
+        if iteration is not None:
+            call["iteration"] = iteration
+        if tools:
+            call["tools"] = tools
+        recent_calls.append(call)
+        state["recent_calls"] = recent_calls[-_MAX_RECENT_CALLS:]
+
         days_by_date[day] = row
         if len(days_by_date) > _MAX_DAYS_RETAINED:
             state["days"] = dict(sorted(days_by_date.items())[-_MAX_DAYS_RETAINED:])
@@ -279,12 +346,14 @@ def record_response_token_usage(
     *,
     source: str,
     timezone_name: str | None = None,
+    session_key: str | None = None,
 ) -> None:
     try:
         record_token_usage(
             getattr(response, "usage", None),
             source=source,
             timezone_name=timezone_name,
+            session_key=session_key,
         )
     except Exception:
         logger.exception("failed to record {} token usage", source)
@@ -348,6 +417,7 @@ def token_usage_payload(
         "longest_streak_days": longest_streak,
         "active_days_30d": sum(1 for row in last_30 if _clean_int(row.get("total_tokens")) > 0),
         "requests_30d": sum(_clean_int(row.get("requests")) for row in last_30),
+        "recent_calls": list(reversed(cast(list[dict[str, Any]], state["recent_calls"]))),
         "updated_at": state.get("updated_at"),
     }
 
@@ -365,6 +435,9 @@ class TokenUsageHook(AgentHook):
                 context.usage,
                 source=_source_from_session_key(context.session_key),
                 timezone_name=self._timezone_name,
+                session_key=context.session_key,
+                iteration=context.iteration,
+                tools=[call.name for call in context.tool_calls if call.has_valid_name()],
             )
         except Exception:
             logger.exception("failed to record token usage")

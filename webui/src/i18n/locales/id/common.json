@@ -339,6 +339,12 @@
       "estimated": "perkiraan",
       "includesEstimates": "termasuk perkiraan",
       "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
+      "recentTitle": "Panggilan terbaru",
+      "recentEmpty": "Panggilan model baru akan muncul di sini.",
+      "recentTokenCount": "{{tokens}} token",
+      "recentBreakdown": "{{input}} masuk · {{output}} keluar · {{cached}} cache",
+      "recentIteration": "Iterasi {{count}}",
+      "recentTools": "Alat: {{tools}}",
       "sources": {
         "user": "Chat",
         "api": "API",

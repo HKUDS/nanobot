@@ -488,6 +488,12 @@
       "estimated": "estimated",
       "includesEstimates": "includes estimates",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
+      "recentTitle": "Recent calls",
+      "recentEmpty": "New model calls will appear here.",
+      "recentTokenCount": "{{tokens}} tokens",
+      "recentBreakdown": "{{input}} in · {{output}} out · {{cached}} cached",
+      "recentIteration": "Iteration {{count}}",
+      "recentTools": "Tools: {{tools}}",
       "sources": {
         "user": "Chat",
         "api": "API",

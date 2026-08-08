@@ -137,6 +137,122 @@ function formatCompactTokens(tokens: number): string {
   return String(tokens);
 }
 
+function recentCallTimeFormatter(language: string, timeZone: string | undefined) {
+  const options: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  };
+  try {
+    return new Intl.DateTimeFormat(language, { ...options, timeZone });
+  } catch {
+    return new Intl.DateTimeFormat(language, options);
+  }
+}
+
+export function RecentTokenUsage({
+  usage,
+  timeZone,
+}: {
+  usage?: TokenUsagePayload;
+  timeZone?: string;
+}) {
+  const { t, i18n } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const timeFormatter = useMemo(
+    () => recentCallTimeFormatter(i18n.language, timeZone),
+    [i18n.language, timeZone],
+  );
+  const calls = usage?.recent_calls?.slice(0, 8) ?? [];
+
+  return (
+    <div className="mt-4 border-t border-border/35 pt-4">
+      <h3 className="text-[12px] font-medium text-foreground/78">
+        {tx("settings.usage.recentTitle", "Recent calls")}
+      </h3>
+      {calls.length === 0 ? (
+        <p className="mt-2 text-[12px] leading-5 text-muted-foreground/70">
+          {tx("settings.usage.recentEmpty", "New model calls will appear here.")}
+        </p>
+      ) : (
+        <ol className="mt-2 divide-y divide-border/30">
+          {calls.map((call, index) => {
+            const estimated = (call.estimated_tokens ?? 0) > 0;
+            return (
+              <li
+                key={`${call.timestamp}-${call.session_key ?? call.source}-${call.iteration ?? "run"}-${index}`}
+                className="grid min-w-0 gap-1.5 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-[12px] font-medium text-foreground/78">
+                      {tokenUsageSourceLabel(call.source, tx)}
+                    </span>
+                    {call.session_key ? (
+                      <code
+                        translate="no"
+                        className="break-all font-mono text-[11px] text-muted-foreground/72"
+                      >
+                        {call.session_key}
+                      </code>
+                    ) : null}
+                    {call.iteration !== undefined ? (
+                      <span className="text-[11px] text-muted-foreground/62">
+                        {tx("settings.usage.recentIteration", "Iteration {{count}}", {
+                          count: call.iteration + 1,
+                        })}
+                      </span>
+                    ) : null}
+                  </div>
+                  {call.tools?.length ? (
+                    <p className="break-words text-[11px] leading-4 text-muted-foreground/62">
+                      {tx("settings.usage.recentTools", "Tools: {{tools}}", {
+                        tools: call.tools.join(", "),
+                      })}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="min-w-0 sm:text-end">
+                  <p className="text-[12px] font-medium tabular-nums text-foreground/78">
+                    {tx("settings.usage.recentTokenCount", "{{tokens}} tokens", {
+                      tokens: formatCompactTokens(call.total_tokens),
+                    })}
+                    {estimated ? (
+                      <span className="font-normal text-muted-foreground/62">
+                        {` · ${tx("settings.usage.estimated", "estimated")}`}
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground/62">
+                    {tx(
+                      "settings.usage.recentBreakdown",
+                      "{{input}} in · {{output}} out · {{cached}} cached",
+                      {
+                        input: formatCompactTokens(call.prompt_tokens),
+                        output: formatCompactTokens(call.completion_tokens),
+                        cached: formatCompactTokens(call.cached_tokens),
+                      },
+                    )}
+                  </p>
+                  <time
+                    dateTime={call.timestamp}
+                    className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/52"
+                  >
+                    {timeFormatter.format(new Date(call.timestamp))}
+                  </time>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function tokenUsageLevel(tokens: number, max: number): number {
   if (tokens <= 0 || max <= 0) return 0;
   const ratio = tokens / max;
