@@ -356,6 +356,7 @@ _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
+_IMAGE_TOKEN_ESTIMATE = 2048
 _TRUNCATED_SUFFIX = "\n... (truncated)"
 
 
@@ -676,6 +677,7 @@ def _estimate_prompt_tokens_with_source(
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     parts: list[str] = []
+    image_tokens = 0
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, str):
@@ -687,6 +689,8 @@ def _estimate_prompt_tokens_with_source(
                     text = part.get("text", "")
                     if isinstance(text, str) and text:
                         parts.append(text)
+                elif part is not None and part.get("type") in {"image_url", "input_image"}:
+                    image_tokens += _IMAGE_TOKEN_ESTIMATE
 
         tc = msg.get("tool_calls")
         if tc:
@@ -709,7 +713,7 @@ def _estimate_prompt_tokens_with_source(
             _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
         )
         message_tokens = len(enc.encode(message_payload)) if message_payload else 0
-        return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
+        return message_tokens + image_tokens + tool_tokens + per_message_overhead, "tiktoken"
     except Exception:
         tool_payload = (
             ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
@@ -718,7 +722,7 @@ def _estimate_prompt_tokens_with_source(
         )
         payload = message_payload + tool_payload
         estimated = len(payload.encode("utf-8"))
-        return estimated + per_message_overhead, "heuristic"
+        return estimated + image_tokens + per_message_overhead, "heuristic"
 
 
 def estimate_prompt_tokens(
@@ -734,6 +738,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     """Estimate prompt tokens contributed by one persisted message."""
     content = message.get("content")
     parts: list[str] = []
+    image_tokens = 0
     if isinstance(content, str):
         parts.append(content)
     elif isinstance(content, list):
@@ -743,6 +748,8 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
                 text = part.get("text", "")
                 if isinstance(text, str) and text:
                     parts.append(text)
+            elif part is not None and part.get("type") in {"image_url", "input_image"}:
+                image_tokens += _IMAGE_TOKEN_ESTIMATE
             else:
                 parts.append(json.dumps(raw_part, ensure_ascii=False))
     elif content is not None:
@@ -760,13 +767,13 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         parts.append(rc)
 
     payload = "\n".join(parts)
-    if not payload:
+    if not payload and not image_tokens:
         return 4
     try:
         enc = _get_token_encoding()
-        return max(4, len(enc.encode(payload)) + 4)
+        return max(4, len(enc.encode(payload)) + image_tokens + 4)
     except Exception:
-        return max(4, len(payload.encode("utf-8")) + 4)
+        return max(4, len(payload.encode("utf-8")) + image_tokens + 4)
 
 
 def estimate_prompt_tokens_chain(

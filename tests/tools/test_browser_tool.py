@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -11,6 +12,7 @@ import pytest
 from nanobot.agent.tools.browser_tool import BrowserTool, BrowserToolConfig
 from nanobot.agent.tools.computer_use_backends import browser_playwright
 from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserBackend
+from nanobot.agent.tools.context import RequestContext, request_context
 
 
 class _FakeDomBackend:
@@ -86,6 +88,7 @@ class TestConfigAndMetadata:
         assert cfg.headless is True
         assert cfg.include_screenshot is False
         assert cfg.max_elements == 200
+        assert cfg.max_sessions == 8
 
     def test_enabled_reads_config(self):
         ctx = MagicMock()
@@ -170,6 +173,32 @@ class TestDispatch:
         texts = [b for b in result if b.get("type") == "text"]
         assert imgs and texts
         assert "Clicked element [1]" in texts[-1]["text"]
+
+    @pytest.mark.asyncio
+    async def test_calls_are_serialized_across_sessions(self):
+        class SlowBackend(_FakeDomBackend):
+            active = 0
+            max_active = 0
+
+            async def dom_snapshot(self, max_elements=200):
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                await asyncio.sleep(0.01)
+                self.active -= 1
+                return await super().dom_snapshot(max_elements)
+
+        backend = SlowBackend()
+        tool = BrowserTool(backend_impl=backend)
+
+        async def snapshot(session: str):
+            with request_context(
+                RequestContext(channel="test", chat_id=session, session_key=session)
+            ):
+                return await tool.execute(action="snapshot")
+
+        await asyncio.gather(snapshot("a"), snapshot("b"))
+
+        assert backend.max_active == 1
 
 
 class TestErrorsAndPolicy:

@@ -1705,14 +1705,17 @@ controls an isolated Playwright page.
 | `tools.browser.enable` | `false` | Register the DOM-based `browser` tool |
 | `tools.browser.allowedDomains` | `[]` | Optional top-level navigation allowlist; entries include subdomains |
 | `tools.browser.includeScreenshot` | `false` | Attach a screenshot after browser actions |
+| `tools.browser.maxSessions` | `8` | Maximum retained browser sessions; least-recently-used state is closed first |
 | `tools.computerUse.enable` | `false` | Register pixel-based `computer_use` |
 | `tools.computerUse.backend` | `"desktop"` | `"desktop"` or `"browser"` |
 | `tools.computerUse.allowedDomains` | `[]` | Navigation allowlist for the browser backend |
 | `tools.computerUse.targetWidth` / `targetHeight` | `1280` / `800` | Maximum screenshot dimensions exposed to the model |
+| `tools.computerUse.maxSessions` | `8` | Maximum retained sessions for the browser backend |
 
 Each nanobot session gets separate browser state. Browser HTTP and WebSocket traffic passes
 through the shared SSRF policy; local, private, link-local, and metadata targets are blocked
-unless explicitly permitted with `tools.ssrfWhitelist`. `file:` URLs are not accepted.
+unless explicitly permitted with `tools.ssrfWhitelist`. When `maxSessions` is reached, the
+least-recently-used browser state is closed. `file:` URLs are not accepted.
 
 > [!IMPORTANT]
 > Browser URL checks are defense in depth, not an egress sandbox: Chromium performs its own DNS
@@ -1721,7 +1724,8 @@ unless explicitly permitted with `tools.ssrfWhitelist`. `file:` URLs are not acc
 > [!WARNING]
 > The desktop backend can click, type, and change state outside the workspace. Enabling it is an
 > explicit trust decision: use a trusted model and input source, and run nanobot in a disposable
-> OS account or VM when unattended. The workspace restriction is not an OS sandbox.
+> OS account or VM when unattended. The workspace restriction is not an OS sandbox. Desktop text
+> input supports ASCII key events; use the browser backend when Unicode text input is required.
 
 ## Web Tools
 

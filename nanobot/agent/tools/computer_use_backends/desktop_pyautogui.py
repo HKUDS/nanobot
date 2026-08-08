@@ -111,6 +111,11 @@ class DesktopBackend(ComputerBackend):
             await asyncio.to_thread(pg.hscroll, clicks if direction == "right" else -clicks)
 
     async def type_text(self, text: str) -> None:
+        if not text.isascii():
+            raise ValueError(
+                "desktop text input supports ASCII key events only; "
+                "use the browser backend for Unicode text"
+            )
         pg = self._ensure()
         await asyncio.to_thread(pg.typewrite, text, 0.01)
 

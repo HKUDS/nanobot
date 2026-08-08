@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import sys
 from types import SimpleNamespace
@@ -81,19 +82,23 @@ class TestConfigAndMetadata:
         assert cfg.enable is False
         assert cfg.backend == "desktop"
         assert (cfg.target_width, cfg.target_height) == (1280, 800)
+        assert cfg.max_sessions == 8
         assert "require_approval" not in type(cfg).model_fields
 
     def test_tools_config_accepts_camel_case(self):
         cfg = ToolsConfig.model_validate({
-            "browser": {"enable": True},
-            "computerUse": {"enable": True, "backend": "browser"},
+            "browser": {"enable": True, "maxSessions": 4},
+            "computerUse": {"enable": True, "backend": "browser", "maxSessions": 6},
         })
 
         assert cfg.browser.enable is True
+        assert cfg.browser.max_sessions == 4
         assert cfg.computer_use.enable is True
         assert cfg.computer_use.backend == "browser"
+        assert cfg.computer_use.max_sessions == 6
         dumped = cfg.model_dump(by_alias=True)
         assert "computerUse" in dumped
+        assert dumped["computerUse"]["maxSessions"] == 6
 
     def test_enabled_reads_config(self):
         ctx = MagicMock()
@@ -218,10 +223,10 @@ async def test_backend_pool_isolates_sessions_and_closes_all():
 
     pool = SessionBackendPool(factory, finalizer=finalize)
     with request_context(RequestContext(channel="test", chat_id="a", session_key="test:a")):
-        first = pool.get()
-        assert pool.get() is first
+        first = await pool.get()
+        assert await pool.get() is first
     with request_context(RequestContext(channel="test", chat_id="b", session_key="test:b")):
-        second = pool.get()
+        second = await pool.get()
 
     assert first is not second
     await pool.close()
@@ -231,6 +236,59 @@ async def test_backend_pool_isolates_sessions_and_closes_all():
 
     await pool.close()
     assert finalized == [True]
+
+
+@pytest.mark.asyncio
+async def test_backend_pool_evicts_least_recently_used_session():
+    created: list[_FakeBackend] = []
+
+    def factory():
+        backend = _FakeBackend()
+        created.append(backend)
+        return backend
+
+    pool = SessionBackendPool(factory, max_backends=2)
+    contexts = [
+        RequestContext(channel="test", chat_id=key, session_key=f"test:{key}")
+        for key in ("a", "b", "c")
+    ]
+    with request_context(contexts[0]):
+        first = await pool.get()
+    with request_context(contexts[1]):
+        second = await pool.get()
+    with request_context(contexts[0]):
+        assert await pool.get() is first
+    with request_context(contexts[2]):
+        await pool.get()
+
+    assert first.closed is False
+    assert second.closed is True
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_tool_serializes_calls_across_sessions():
+    class SlowBackend(_FakeBackend):
+        active = 0
+        max_active = 0
+
+        async def dimensions(self):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return await super().dimensions()
+
+    backend = SlowBackend(width=1280, height=800)
+    tool = ComputerUseTool(backend_impl=backend)
+
+    async def screenshot(session: str):
+        with request_context(RequestContext(channel="test", chat_id=session, session_key=session)):
+            return await tool.execute(action="screenshot")
+
+    await asyncio.gather(screenshot("a"), screenshot("b"))
+
+    assert backend.max_active == 1
 
 
 @pytest.mark.asyncio
@@ -249,6 +307,18 @@ async def test_desktop_backend_uses_safe_pyautogui_calls():
         "button": "left",
     }
     pg.scroll.assert_called_once_with(-3)
+
+
+@pytest.mark.asyncio
+async def test_desktop_backend_rejects_unicode_instead_of_typing_incorrect_keys():
+    pg = MagicMock()
+    backend = DesktopBackend()
+    backend._pg = pg
+
+    with pytest.raises(ValueError, match="ASCII"):
+        await backend.type_text("你好")
+
+    pg.typewrite.assert_not_called()
 
 
 def test_desktop_backend_preserves_pyautogui_failsafe(monkeypatch):

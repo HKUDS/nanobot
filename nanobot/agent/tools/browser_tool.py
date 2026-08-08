@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from pydantic import Field
@@ -44,6 +45,7 @@ class BrowserToolConfig(Base):
     allowed_domains: list[str] = Field(default_factory=list)
     include_screenshot: bool = False
     max_elements: int = Field(default=200, ge=1, le=1000)
+    max_sessions: int = Field(default=8, ge=1, le=64)
 
 
 def _format_elements(elements: list[dict[str, Any]]) -> str:
@@ -134,9 +136,11 @@ class BrowserTool(Tool):
             from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserRuntime
             runtime = BrowserRuntime(headless=self.config.headless)
         self._runtime = runtime
+        self._execution_lock = asyncio.Lock()
         self._backends = SessionBackendPool(
             self._make_backend,
             backend_impl,
+            max_backends=self.config.max_sessions,
             finalizer=runtime.close if runtime is not None else None,
         )
 
@@ -225,12 +229,16 @@ class BrowserTool(Tool):
         raise ValueError(f"unknown action '{action}'")
 
     async def execute(self, action: str | None = None, **kwargs: Any) -> Any:
+        async with self._execution_lock:
+            return await self._execute(action, **kwargs)
+
+    async def _execute(self, action: str | None = None, **kwargs: Any) -> Any:
         action = (action or "").strip()
         if action not in _ACTIONS:
             return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
 
         try:
-            backend = self._backends.get()
+            backend = await self._backends.get()
         except ImportError as exc:
             return f"Error: {exc}"
         except Exception as exc:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -78,37 +79,60 @@ class SessionBackendPool:
         factory: Callable[[], Any],
         injected: Any = None,
         *,
+        max_backends: int = 8,
         finalizer: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        if max_backends < 1:
+            raise ValueError("max_backends must be at least 1")
         self._factory = factory
         self._injected = injected
+        self._max_backends = max_backends
         self._finalizer = finalizer
-        self._backends: dict[str, Any] = {}
+        self._backends: OrderedDict[str, Any] = OrderedDict()
+        self._lock = asyncio.Lock()
+        self._closed = False
 
-    def get(self) -> Any:
-        if self._injected is not None:
-            return self._injected
-        key = current_request_session_key() or "default"
-        backend = self._backends.get(key)
-        if backend is None:
-            backend = self._backends[key] = self._factory()
-        return backend
+    async def get(self) -> Any:
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("computer-use backend pool is closed")
+            if self._injected is not None:
+                return self._injected
+            key = current_request_session_key() or "default"
+            backend = self._backends.get(key)
+            if backend is not None:
+                self._backends.move_to_end(key)
+                return backend
+            if len(self._backends) >= self._max_backends:
+                _, stale = self._backends.popitem(last=False)
+                await stale.close()
+            backend = self._factory()
+            self._backends[key] = backend
+            return backend
 
     async def close(self) -> None:
-        backends = [self._injected] if self._injected is not None else list(self._backends.values())
-        self._injected = None
-        self._backends.clear()
+        async with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            backends = (
+                [self._injected]
+                if self._injected is not None
+                else list(self._backends.values())
+            )
+            self._injected = None
+            self._backends.clear()
+            finalizer, self._finalizer = self._finalizer, None
         results = await asyncio.gather(
             *(backend.close() for backend in backends if backend is not None),
             return_exceptions=True,
         )
         errors = [result for result in results if isinstance(result, BaseException)]
-        if self._finalizer is not None:
+        if finalizer is not None:
             try:
-                await self._finalizer()
+                await finalizer()
             except BaseException as exc:
                 errors.append(exc)
-            self._finalizer = None
         if len(errors) == 1:
             raise errors[0]
         if errors:

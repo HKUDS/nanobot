@@ -60,6 +60,7 @@ class ComputerUseToolConfig(Base):
     allowed_domains: list[str] = Field(default_factory=list)
     start_url: str = "about:blank"
     headless: bool = True
+    max_sessions: int = Field(default=8, ge=1, le=64)
 
 
 def _fit_size(width: int, height: int, max_width: int, max_height: int) -> tuple[int, int]:
@@ -97,7 +98,8 @@ def _scale_point(
             nullable=True,
         ),
         text=StringSchema(
-            "Text to type (action=type), or a key/combo like 'ctrl+s' or 'Enter' (action=key).",
+            "Text to type (action=type; desktop supports ASCII), or a key/combo like "
+            "'ctrl+s' or 'Enter' (action=key).",
             nullable=True,
         ),
         scroll_direction=StringSchema(
@@ -160,9 +162,11 @@ class ComputerUseTool(Tool):
             from nanobot.agent.tools.computer_use_backends.browser_playwright import BrowserRuntime
             runtime = BrowserRuntime(headless=self.config.headless)
         self._runtime = runtime
+        self._execution_lock = asyncio.Lock()
         self._backends = SessionBackendPool(
             self._make_backend,
             backend_impl,
+            max_backends=1 if self.config.backend == "desktop" else self.config.max_sessions,
             finalizer=runtime.close if runtime is not None else None,
         )
 
@@ -277,12 +281,16 @@ class ComputerUseTool(Tool):
         raise ValueError(f"unknown action '{action}'")
 
     async def execute(self, action: str | None = None, **kwargs: Any) -> Any:
+        async with self._execution_lock:
+            return await self._execute(action, **kwargs)
+
+    async def _execute(self, action: str | None = None, **kwargs: Any) -> Any:
         action = (action or "").strip()
         if action not in _ACTIONS:
             return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
 
         try:
-            backend = self._backends.get()
+            backend = await self._backends.get()
             real_w, real_h = await backend.dimensions()
         except ImportError as exc:
             return f"Error: {exc}"
