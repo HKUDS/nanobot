@@ -9,9 +9,12 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.security.network import (
+    Httpx2PinnedDNSAsyncTransport,
+    PinnedDNSAsyncTransport,
     configure_ssrf_whitelist,
     contains_internal_url,
     env_proxy_applies_to_url,
+    httpx2_env_proxy_mounts,
     httpx_env_proxy_mounts,
     is_loopback_host,
     pin_resolved_url_dns,
@@ -263,6 +266,17 @@ def test_env_proxy_helpers_respect_no_proxy(monkeypatch):
     mounts = httpx_env_proxy_mounts()
     assert any(transport is None for transport in mounts.values())
     assert any(transport is not None for transport in mounts.values())
+
+    httpx2_mounts = httpx2_env_proxy_mounts()
+    assert any(transport is None for transport in httpx2_mounts.values())
+    assert any(transport is not None for transport in httpx2_mounts.values())
+
+
+def test_httpx_transports_share_global_dns_pin_lock():
+    assert (
+        Httpx2PinnedDNSAsyncTransport._resolver_lock
+        is PinnedDNSAsyncTransport._resolver_lock
+    )
 
 
 # ---------------------------------------------------------------------------
