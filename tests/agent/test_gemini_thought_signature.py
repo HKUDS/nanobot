@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from nanobot.providers.base import ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.registry import ProviderSpec
 
 GEMINI_EXTRA = {"google": {"thought_signature": "sig-abc-123"}}
 
@@ -243,3 +244,124 @@ def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     sanitized = provider._sanitize_messages(messages)
 
     assert sanitized[1]["tool_calls"][0]["extra_content"] == GEMINI_EXTRA
+
+
+# ── Replay to Gemini: drop tool calls without a thought signature ─────
+
+def _gemini_provider() -> OpenAICompatProvider:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        return OpenAICompatProvider(
+            spec=ProviderSpec(
+                name="gemini", keywords=("gemini",), env_key="GEMINI_API_KEY"
+            )
+        )
+
+
+def _tool_call(tc_id: str, name: str, *, signed: bool = False) -> dict:
+    tc: dict = {
+        "id": tc_id,
+        "type": "function",
+        "function": {"name": name, "arguments": "{}"},
+    }
+    if signed:
+        tc["extra_content"] = GEMINI_EXTRA
+    return tc
+
+
+def test_gemini_drops_unsigned_tool_calls_keeping_assistant_text() -> None:
+    """Switching to Gemini mid-conversation: tool calls produced by another
+    provider (no thought signature) are dropped together with their results;
+    the assistant's own text content is preserved."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "check the sensor"},
+        {
+            "role": "assistant",
+            "content": "On it.",
+            "tool_calls": [_tool_call("default_api:exec", "exec")],
+        },
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == ["user", "assistant", "user"]
+    assert sanitized[1]["content"] == "On it."
+    assert "tool_calls" not in sanitized[1]
+    assert not any(m.get("role") == "tool" for m in sanitized)
+
+
+def test_gemini_keeps_signed_calls_and_drops_unsigned_results() -> None:
+    """Mixed history: signed (Gemini-origin) calls survive, unsigned calls and
+    their results are removed, and the replayed ids stay consistent."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "do both"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                _tool_call("call_signed", "read_file", signed=True),
+                _tool_call("default_api:exec", "exec"),
+            ],
+        },
+        {"role": "tool", "content": "file contents", "tool_call_id": "call_signed"},
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == ["user", "assistant", "tool", "user"]
+    calls = sanitized[1]["tool_calls"]
+    assert len(calls) == 1
+    assert calls[0]["extra_content"] == GEMINI_EXTRA
+    assert sanitized[2]["tool_call_id"] == calls[0]["id"]
+    assert sanitized[2]["content"] == "file contents"
+
+
+def test_gemini_replay_preserves_signed_tool_calls() -> None:
+    """A pure Gemini-origin history replays unchanged (signature intact)."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("call_1", "get_weather", signed=True)],
+        },
+        {"role": "tool", "content": "sunny", "tool_call_id": "call_1"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == ["user", "assistant", "tool", "user"]
+    calls = sanitized[1]["tool_calls"]
+    assert len(calls) == 1
+    assert calls[0]["extra_content"] == GEMINI_EXTRA
+    assert sanitized[2]["tool_call_id"] == calls[0]["id"]
+
+
+def test_non_gemini_provider_keeps_unsigned_tool_calls() -> None:
+    """The filter is Gemini-scoped: other providers still replay unsigned calls."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("default_api:exec", "exec")],
+        },
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert len(sanitized[1]["tool_calls"]) == 1
+    assert sanitized[2]["role"] == "tool"
+    assert sanitized[2]["tool_call_id"] == sanitized[1]["tool_calls"][0]["id"]
