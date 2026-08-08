@@ -724,8 +724,7 @@ function UserImageCell({
         aria-label={image.name ? `${openLabel}: ${image.name}` : openLabel}
         className={cn(
           tileClasses,
-          "block cursor-zoom-in p-0 transition-transform duration-150 motion-reduce:transition-none",
-          "hover:scale-[1.01]",
+          "block cursor-zoom-in p-0",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
         )}
       >

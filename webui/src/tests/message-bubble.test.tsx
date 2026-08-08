@@ -919,9 +919,9 @@ describe("MessageBubble", () => {
     expect(imageButton).toHaveClass(
       "border",
       "border-border/60",
-      "hover:scale-[1.01]",
       "focus-visible:ring-2",
     );
+    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
     expect(imageButton).not.toHaveClass("hover:ring-2");
     expect(imageButton).not.toHaveClass("hover:ring-primary/25");
     expect(imageButton).not.toHaveAttribute("title");
