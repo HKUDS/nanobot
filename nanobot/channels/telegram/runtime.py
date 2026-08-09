@@ -38,6 +38,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
@@ -52,6 +53,29 @@ TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for repl
 # explicit rather than allowing unspecialized generics to spread Unknown.
 TelegramApplication: TypeAlias = Application[Any, Any, Any, Any, Any, Any]
 _T = TypeVar("_T")
+
+# A healthy long poll completes a round trip roughly every ~10s even with zero
+# traffic, so an idle gap this long is a reliable stall signal (see #5156).
+POLLING_STALL_THRESHOLD_SECONDS = 120.0
+POLLING_STALL_CHECK_INTERVAL_SECONDS = 30.0
+
+
+class _LivenessTrackedRequest(HTTPXRequest):
+    """HTTPXRequest that timestamps each completed HTTP round trip.
+
+    Used only for the getUpdates pool so a watchdog can detect a wedged
+    long-poll loop that PTB's own retry logic treats as a normal timeout
+    and only logs at DEBUG (never surfaced via ``error_callback``).
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.last_success_monotonic: float = time.monotonic()
+
+    async def do_request(self, *args: Any, **kwargs: Any) -> tuple[int, bytes]:
+        result = await super().do_request(*args, **kwargs)
+        self.last_success_monotonic = time.monotonic()
+        return result
 
 
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
@@ -477,6 +501,8 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task[None]] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
+        self._poll_request: _LivenessTrackedRequest | None = None
+        self._liveness_task: asyncio.Task[None] | None = None
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -521,6 +547,9 @@ class TelegramChannel(BaseChannel):
             self.logger.error("bot token not configured")
             return
 
+        redirect_lib_logging("telegram")
+        redirect_lib_logging("httpx", level="WARNING")
+
         self._running = True
 
         proxy = self.config.proxy or None
@@ -533,13 +562,14 @@ class TelegramChannel(BaseChannel):
             read_timeout=30.0,
             proxy=proxy,
         )
-        poll_request = HTTPXRequest(
+        poll_request = _LivenessTrackedRequest(
             connection_pool_size=4,
             pool_timeout=self.config.pool_timeout,
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
         )
+        self._poll_request = poll_request
         builder = (
             Application.builder()
             .token(self.config.token)
@@ -627,14 +657,45 @@ class TelegramChannel(BaseChannel):
                 drop_pending_updates=False,  # Process pending messages on startup
                 error_callback=self._on_polling_error,
             )
+            self._liveness_task = asyncio.create_task(self._watch_polling_liveness())
 
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
 
+    async def _watch_polling_liveness(self) -> None:
+        """Detect a wedged getUpdates pool that PTB's own retry loop stays silent about.
+
+        PTB treats a stuck long-poll (PoolTimeout -> TimedOut, infinite retries)
+        as a normal timeout: it never calls ``error_callback`` and only logs at
+        DEBUG (see #5156), so this is the only reliable signal that polling has
+        stalled.
+        """
+        stalled = False
+        while self._running:
+            await asyncio.sleep(POLLING_STALL_CHECK_INTERVAL_SECONDS)
+            poll_request = self._poll_request
+            if poll_request is None:
+                continue
+            idle = time.monotonic() - poll_request.last_success_monotonic
+            if idle > POLLING_STALL_THRESHOLD_SECONDS:
+                if not stalled:
+                    stalled = True
+                    self.logger.error(
+                        "polling appears stalled: no successful getUpdates round-trip in {:.0f}s",
+                        idle,
+                    )
+            elif stalled:
+                stalled = False
+                self.logger.info("polling recovered after {:.0f}s stall", idle)
+
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
+
+        if self._liveness_task:
+            self._liveness_task.cancel()
+            self._liveness_task = None
 
         # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):

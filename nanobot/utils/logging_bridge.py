@@ -39,9 +39,11 @@ def redirect_lib_logging(name: str, level: str | None = None) -> None:
     handler does not filter — loguru's own level controls visibility.
     """
     lib_logger = logging.getLogger(name)
+    resolved = getattr(logging, level.upper(), logging.WARNING) if level else logging.DEBUG
+    lib_logger.setLevel(resolved)
     if not any(isinstance(h, _LoguruBridge) for h in lib_logger.handlers):
         handler = _LoguruBridge(name)
         if level is not None:
-            handler.setLevel(getattr(logging, level.upper(), logging.WARNING))
+            handler.setLevel(resolved)
         lib_logger.handlers = [handler]
         lib_logger.propagate = False

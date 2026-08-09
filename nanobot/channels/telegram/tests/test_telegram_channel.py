@@ -1,4 +1,6 @@
 import asyncio
+import time
+from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -323,6 +325,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     builder = _FakeBuilder(app)
 
     monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime._LivenessTrackedRequest", _FakeHTTPXRequest)
     monkeypatch.setattr(
         "nanobot.channels.telegram.runtime.Application",
         SimpleNamespace(builder=lambda: builder),
@@ -349,6 +352,35 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_bridges_stdlib_logging(monkeypatch) -> None:
+    """python-telegram-bot and httpx logs must be bridged into loguru so
+    polling failures are no longer silent (see PR #5156)."""
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime._LivenessTrackedRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.redirect_lib_logging",
+        lambda name, level=None: calls.append((name, level)),
+    )
+
+    await channel.start()
+
+    assert ("telegram", None) in calls
+    assert ("httpx", "WARNING") in calls
+
+
+@pytest.mark.asyncio
 async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     _FakeHTTPXRequest.clear()
     config = TelegramConfig(
@@ -364,6 +396,7 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     builder = _FakeBuilder(app)
 
     monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime._LivenessTrackedRequest", _FakeHTTPXRequest)
     monkeypatch.setattr(
         "nanobot.channels.telegram.runtime.Application",
         SimpleNamespace(builder=lambda: builder),
@@ -376,6 +409,45 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     assert api_req.kwargs["connection_pool_size"] == 32
     assert api_req.kwargs["pool_timeout"] == 10.0
     assert poll_req.kwargs["pool_timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_watch_polling_liveness_logs_stall_and_recovery(monkeypatch) -> None:
+    """PTB's own retry loop stays silent on a wedged getUpdates pool (#5156),
+    so nanobot's watchdog must be the one to surface it."""
+    import nanobot.channels.telegram.runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "POLLING_STALL_CHECK_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(runtime_module, "POLLING_STALL_THRESHOLD_SECONDS", 0.15)
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        channel.logger, "error", lambda message, idle: recorded.append(("error", message))
+    )
+    monkeypatch.setattr(
+        channel.logger, "info", lambda message, idle: recorded.append(("info", message))
+    )
+
+    channel._running = True
+    channel._poll_request = SimpleNamespace(last_success_monotonic=time.monotonic() - 1.0)
+    task = asyncio.create_task(channel._watch_polling_liveness())
+
+    await asyncio.sleep(0.3)
+    assert recorded == [("error", "polling appears stalled: no successful getUpdates round-trip in {:.0f}s")]
+
+    channel._poll_request.last_success_monotonic = time.monotonic()
+    await asyncio.sleep(0.08)  # < threshold, so it must not have re-stalled yet
+
+    channel._running = False
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+    assert recorded[-1] == ("info", "polling recovered after {:.0f}s stall")
 
 
 def test_webhook_config_requires_https_url_and_secret() -> None:
@@ -421,6 +493,7 @@ async def test_start_webhook_mode(monkeypatch) -> None:
     builder = _FakeBuilder(app)
 
     monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime._LivenessTrackedRequest", _FakeHTTPXRequest)
     monkeypatch.setattr(
         "nanobot.channels.telegram.runtime.Application",
         SimpleNamespace(builder=lambda: builder),
