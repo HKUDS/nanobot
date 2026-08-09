@@ -1147,6 +1147,7 @@
         "recordingStatus": "Recording {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Open this WebUI over HTTPS to use voice input.",
         "unsupported": "Voice input is not supported in this browser.",
         "permission": "Allow microphone access in the address bar, then retry.",
         "notConfigured": "Configure a transcription provider first.",

@@ -1146,6 +1146,7 @@
         "recordingStatus": "正在录音 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "请通过 HTTPS 打开此 WebUI 以使用语音输入。",
         "unsupported": "当前浏览器不支持语音输入。",
         "permission": "请在地址栏允许麦克风后重试。",
         "notConfigured": "请先配置转写提供商。",

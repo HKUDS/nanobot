@@ -651,6 +651,45 @@ describe("ThreadComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("explains the HTTPS requirement for voice input on an insecure origin", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", false);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText("Open this WebUI over HTTPS to use voice input."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("keeps the unsupported-browser error for secure origins without recording support", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("MediaRecorder", undefined);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText("Voice input is not supported in this browser."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
   it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
     mockVoiceRecorder(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/webm" }));
     const { decodeAudioData } = mockVoiceAudioInput(

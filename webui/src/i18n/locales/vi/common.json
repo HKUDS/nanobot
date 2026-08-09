@@ -1133,6 +1133,7 @@
         "recordingStatus": "Đang ghi {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Mở WebUI này qua HTTPS để dùng tính năng nhập bằng giọng nói.",
         "unsupported": "Trình duyệt này không hỗ trợ nhập bằng giọng nói.",
         "permission": "Cho phép micrô trong thanh địa chỉ rồi thử lại.",
         "notConfigured": "Hãy cấu hình nhà cung cấp chép lời trước.",

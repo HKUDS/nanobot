@@ -1133,6 +1133,7 @@
         "recordingStatus": "録音中 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "音声入力を使用するには、この WebUI を HTTPS で開いてください。",
         "unsupported": "このブラウザーは音声入力に対応していません。",
         "permission": "アドレスバーでマイクを許可してから再試行してください。",
         "notConfigured": "先に文字起こしプロバイダーを設定してください。",

@@ -1133,6 +1133,7 @@
         "recordingStatus": "Merekam {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Buka WebUI ini melalui HTTPS untuk menggunakan input suara.",
         "unsupported": "Input suara tidak didukung di browser ini.",
         "permission": "Izinkan mikrofon di bilah alamat, lalu coba lagi.",
         "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",

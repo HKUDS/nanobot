@@ -1133,6 +1133,7 @@
         "recordingStatus": "正在錄音 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "請透過 HTTPS 開啟此 WebUI 以使用語音輸入。",
         "unsupported": "目前瀏覽器不支援語音輸入。",
         "permission": "請在網址列允許麥克風後重試。",
         "notConfigured": "請先設定轉寫供應商。",
