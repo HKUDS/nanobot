@@ -1134,7 +1134,7 @@
         "recordingStatus": "Grabando {{time}}"
       },
       "voiceErrors": {
-        "insecureContext": "Abre esta WebUI mediante HTTPS para usar la entrada de voz.",
+        "insecureContext": "Por seguridad, Chrome y otros navegadores bloquean el acceso al micrófono en páginas HTTP remotas. Abre esta WebUI mediante HTTPS para usar la entrada de voz.",
         "unsupported": "Este navegador no admite entrada de voz.",
         "permission": "Permite el micrófono en la barra de direcciones y vuelve a intentarlo.",
         "notConfigured": "Configura primero un proveedor de transcripción.",

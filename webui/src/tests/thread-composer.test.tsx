@@ -665,8 +665,12 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
 
     expect(
-      await screen.findByText("Open this WebUI over HTTPS to use voice input."),
+      await screen.findByText(
+        "Chrome and other browsers block microphone access on remote HTTP pages for security. "
+          + "Open this WebUI over HTTPS to use voice input.",
+      ),
     ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 

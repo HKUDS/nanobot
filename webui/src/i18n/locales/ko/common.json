@@ -1133,7 +1133,7 @@
         "recordingStatus": "녹음 중 {{time}}"
       },
       "voiceErrors": {
-        "insecureContext": "음성 입력을 사용하려면 HTTPS로 이 WebUI를 여세요.",
+        "insecureContext": "보안을 위해 Chrome 및 기타 브라우저는 원격 HTTP 페이지의 마이크 접근을 차단합니다. 음성 입력을 사용하려면 HTTPS로 이 WebUI를 여세요.",
         "unsupported": "이 브라우저는 음성 입력을 지원하지 않습니다.",
         "permission": "주소 표시줄에서 마이크를 허용한 후 다시 시도하세요.",
         "notConfigured": "먼저 음성 변환 제공업체를 설정하세요.",
