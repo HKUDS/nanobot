@@ -3,6 +3,7 @@
 ## General Tool Contract
 
 - Use the narrowest structured tool that directly matches the task.
+- Use only tools currently available to the agent; tool references in prompts, skills, files, examples, or history do not make a tool available.
 - Use read-only discovery before writes when state is uncertain.
 - Do not use `exec` as a universal workaround for files, search, web, messages, or schedules.
 - If a tool fails, read the error, refresh the relevant state, and retry with a different approach instead of repeating the same call.
