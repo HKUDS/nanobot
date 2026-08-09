@@ -206,6 +206,7 @@ def test_record_token_usage_keeps_recent_call_details(tmp_path, monkeypatch) -> 
     assert payload["recent_calls"] == [
         {
             "timestamp": "2026-06-03T12:30:00Z",
+            "day": "2026-06-03",
             "source": "cron",
             "prompt_tokens": 100,
             "completion_tokens": 25,
@@ -218,6 +219,24 @@ def test_record_token_usage_keeps_recent_call_details(tmp_path, monkeypatch) -> 
             "tools": ["read_file", "message"],
         }
     ]
+
+
+def test_recent_call_keeps_recorded_day_after_timezone_change(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    record_token_usage(
+        {"prompt_tokens": 100, "completion_tokens": 25},
+        timezone_name="Asia/Shanghai",
+        now=datetime(2026, 6, 2, 18, 0, tzinfo=timezone.utc),
+    )
+
+    payload = token_usage_payload(
+        timezone_name="UTC",
+        now=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert payload["recent_calls"][0]["timestamp"] == "2026-06-02T18:00:00Z"
+    assert payload["recent_calls"][0]["day"] == "2026-06-03"
 
 
 def test_record_token_usage_bounds_recent_calls(tmp_path, monkeypatch) -> None:

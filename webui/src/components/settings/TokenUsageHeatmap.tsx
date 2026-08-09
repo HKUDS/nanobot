@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -152,12 +153,16 @@ function recentCallTimeFormatter(language: string, timeZone: string | undefined)
   }
 }
 
-export function RecentTokenUsage({
+function TokenUsageDetails({
   usage,
   timeZone,
+  selectedCell,
+  onShowRecent,
 }: {
   usage?: TokenUsagePayload;
   timeZone?: string;
+  selectedCell?: TokenUsageCell;
+  onShowRecent: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
@@ -166,88 +171,173 @@ export function RecentTokenUsage({
     () => recentCallTimeFormatter(i18n.language, timeZone),
     [i18n.language, timeZone],
   );
-  const calls = usage?.recent_calls?.slice(0, 8) ?? [];
+  const dayFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(i18n.language, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        timeZone: "UTC",
+      }),
+    [i18n.language],
+  );
+  const recentCalls = usage?.recent_calls ?? [];
+  const calls = selectedCell
+    ? recentCalls.filter(
+        (call) =>
+          (call.day ?? isoDayInTimeZone(new Date(call.timestamp), timeZone)) === selectedCell.date,
+      )
+    : recentCalls.slice(0, 5);
+  const hasPartialDetails = Boolean(
+    selectedCell && calls.length > 0 && calls.length < selectedCell.requests,
+  );
+  const sourceBreakdown = selectedCell ? tokenUsageSourceBreakdown(selectedCell, tx) : "";
 
   return (
-    <div className="mt-4 border-t border-border/35 pt-4">
-      <h3 className="text-[12px] font-medium text-foreground/78">
-        {tx("settings.usage.recentTitle", "Recent calls")}
-      </h3>
+    <div id="token-usage-details" className="mt-7 border-t border-border/35 pt-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3
+            aria-atomic="true"
+            aria-live="polite"
+            className="text-[14px] font-medium text-foreground/88"
+          >
+            {selectedCell
+              ? dayFormatter.format(utcDateFromIsoDay(selectedCell.date))
+              : tx("settings.usage.recentTitle", "Recent calls")}
+          </h3>
+          {selectedCell ? (
+            <>
+              <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-3">
+                <div>
+                  <dt className="text-[10px] leading-4 text-muted-foreground/65">
+                    {tx("settings.usage.totalTokens", "Total tokens")}
+                  </dt>
+                  <dd className="mt-0.5 text-[18px] font-medium tabular-nums tracking-[-0.02em] text-foreground/88">
+                    {formatCompactTokens(selectedCell.total)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] leading-4 text-muted-foreground/65">
+                    {tx("settings.usage.requests", "Requests")}
+                  </dt>
+                  <dd className="mt-0.5 text-[18px] font-medium tabular-nums tracking-[-0.02em] text-foreground/88">
+                    {selectedCell.requests}
+                  </dd>
+                </div>
+              </dl>
+              {sourceBreakdown ? (
+                <p className="mt-3 text-[11px] leading-4 text-muted-foreground/72">
+                  {sourceBreakdown}
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+        {selectedCell ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onShowRecent}
+            className="self-start rounded-full px-3 text-[11px] text-muted-foreground"
+          >
+            {tx("settings.usage.viewRecent", "View recent calls")}
+          </Button>
+        ) : null}
+      </div>
       {calls.length === 0 ? (
-        <p className="mt-2 text-[12px] leading-5 text-muted-foreground/70">
-          {tx("settings.usage.recentEmpty", "New model calls will appear here.")}
+        <p className="mt-4 max-w-xl text-[12px] leading-5 text-muted-foreground/70">
+          {selectedCell
+            ? tx(
+                "settings.usage.dayDetailsUnavailable",
+                "Per-call details are kept only for the 50 most recent calls. This day's total is still available above.",
+              )
+            : tx("settings.usage.recentEmpty", "New model calls will appear here.")}
         </p>
       ) : (
-        <ol className="mt-2 divide-y divide-border/30">
-          {calls.map((call, index) => {
-            const estimated = (call.estimated_tokens ?? 0) > 0;
-            return (
-              <li
-                key={`${call.timestamp}-${call.session_key ?? call.source}-${call.iteration ?? "run"}-${index}`}
-                className="grid min-w-0 gap-1.5 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-[12px] font-medium text-foreground/78">
-                      {tokenUsageSourceLabel(call.source, tx)}
-                    </span>
-                    {call.session_key ? (
-                      <code
-                        translate="no"
-                        className="break-all font-mono text-[11px] text-muted-foreground/72"
-                      >
-                        {call.session_key}
-                      </code>
-                    ) : null}
-                    {call.iteration !== undefined ? (
-                      <span className="text-[11px] text-muted-foreground/62">
-                        {tx("settings.usage.recentIteration", "Iteration {{count}}", {
-                          count: call.iteration + 1,
-                        })}
+        <>
+          {hasPartialDetails && selectedCell ? (
+            <p className="mt-4 max-w-xl text-[12px] leading-5 text-muted-foreground/70">
+              {tx(
+                "settings.usage.dayDetailsPartial",
+                "Showing {{shown}} of {{total}} calls. Per-call details are kept only for the 50 most recent calls.",
+                { shown: calls.length, total: selectedCell.requests },
+              )}
+            </p>
+          ) : null}
+          <ol className="mt-4 divide-y divide-border/30">
+            {calls.map((call, index) => {
+              const estimated = (call.estimated_tokens ?? 0) > 0;
+              return (
+                <li
+                  key={`${call.timestamp}-${call.session_key ?? call.source}-${call.iteration ?? "run"}-${index}`}
+                  className="grid min-w-0 gap-1.5 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4"
+                >
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="text-[12px] font-medium text-foreground/78">
+                        {tokenUsageSourceLabel(call.source, tx)}
                       </span>
+                      {call.session_key ? (
+                        <code
+                          translate="no"
+                          title={call.session_key}
+                          className="min-w-0 max-w-full truncate font-mono text-[11px] text-muted-foreground/72"
+                        >
+                          {call.session_key}
+                        </code>
+                      ) : null}
+                      {call.iteration !== undefined ? (
+                        <span className="text-[11px] text-muted-foreground/62">
+                          {tx("settings.usage.recentIteration", "Iteration {{count}}", {
+                            count: call.iteration + 1,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    {call.tools?.length ? (
+                      <p className="break-words text-[11px] leading-4 text-muted-foreground/62">
+                        {tx("settings.usage.recentTools", "Tools: {{tools}}", {
+                          tools: call.tools.join(", "),
+                        })}
+                      </p>
                     ) : null}
                   </div>
-                  {call.tools?.length ? (
-                    <p className="break-words text-[11px] leading-4 text-muted-foreground/62">
-                      {tx("settings.usage.recentTools", "Tools: {{tools}}", {
-                        tools: call.tools.join(", "),
+                  <div className="min-w-0 sm:text-end">
+                    <p className="text-[12px] font-medium tabular-nums text-foreground/78">
+                      {tx("settings.usage.recentTokenCount", "{{tokens}} tokens", {
+                        tokens: formatCompactTokens(call.total_tokens),
                       })}
+                      {estimated ? (
+                        <span className="font-normal text-muted-foreground/62">
+                          {` · ${tx("settings.usage.estimated", "estimated")}`}
+                        </span>
+                      ) : null}
                     </p>
-                  ) : null}
-                </div>
-                <div className="min-w-0 sm:text-end">
-                  <p className="text-[12px] font-medium tabular-nums text-foreground/78">
-                    {tx("settings.usage.recentTokenCount", "{{tokens}} tokens", {
-                      tokens: formatCompactTokens(call.total_tokens),
-                    })}
-                    {estimated ? (
-                      <span className="font-normal text-muted-foreground/62">
-                        {` · ${tx("settings.usage.estimated", "estimated")}`}
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground/62">
-                    {tx(
-                      "settings.usage.recentBreakdown",
-                      "{{input}} in · {{output}} out · {{cached}} cached",
-                      {
-                        input: formatCompactTokens(call.prompt_tokens),
-                        output: formatCompactTokens(call.completion_tokens),
-                        cached: formatCompactTokens(call.cached_tokens),
-                      },
-                    )}
-                  </p>
-                  <time
-                    dateTime={call.timestamp}
-                    className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/52"
-                  >
-                    {timeFormatter.format(new Date(call.timestamp))}
-                  </time>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+                    <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground/62">
+                      {tx(
+                        "settings.usage.recentBreakdown",
+                        "{{input}} in · {{output}} out · {{cached}} cached",
+                        {
+                          input: formatCompactTokens(call.prompt_tokens),
+                          output: formatCompactTokens(call.completion_tokens),
+                          cached: formatCompactTokens(call.cached_tokens),
+                        },
+                      )}
+                    </p>
+                    <time
+                      dateTime={call.timestamp}
+                      className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/52"
+                    >
+                      {timeFormatter.format(new Date(call.timestamp))}
+                    </time>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </>
       )}
     </div>
   );
@@ -271,12 +361,16 @@ function tokenUsageCellClass(level: number, future: boolean): string {
   return "bg-neutral-200/70 ring-1 ring-black/[0.025] dark:bg-white/[0.08] dark:ring-white/[0.035]";
 }
 
-export function TokenUsageHeatmap({
+function TokenUsageCalendar({
   usage,
   timeZone,
+  selectedDate,
+  onSelectDate,
 }: {
   usage?: TokenUsagePayload;
   timeZone?: string;
+  selectedDate: string | null;
+  onSelectDate: (date: string) => void;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
@@ -290,15 +384,16 @@ export function TokenUsageHeatmap({
     [monthFormatter, timeZone, usage?.days],
   );
   const maxTokens = Math.max(0, ...cells.map((cell) => cell.total));
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth;
+  }, [timeZone]);
 
   return (
-    <div className="overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="mx-auto w-full min-w-0 max-w-[1054px] px-0.5 sm:min-w-[760px]">
-        <div className="mb-2 flex justify-end">
-          <span className="text-[11px] font-normal leading-none text-muted-foreground/64">
-            {tx("settings.usage.shortTitle", "Token Usage")}
-          </span>
-        </div>
+    <div ref={scrollRef} className="mt-5 overflow-x-auto pb-2">
+      <div className="w-full min-w-[1480px] px-0.5 lg:min-w-[760px]">
         <div className="relative mb-2 h-4 text-[10px] font-normal leading-4 text-muted-foreground/62" aria-hidden>
           {monthLabels.map((month) => (
             <span
@@ -311,7 +406,8 @@ export function TokenUsageHeatmap({
           ))}
         </div>
         <div
-          className="grid grid-flow-col grid-rows-7 gap-[3px] sm:gap-1.5"
+          role="group"
+          className="grid grid-flow-col grid-rows-7 gap-1"
           style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
           aria-label={tx("settings.usage.title", "Token activity")}
         >
@@ -334,14 +430,34 @@ export function TokenUsageHeatmap({
                   }`;
               const breakdown = cell.future ? "" : tokenUsageSourceBreakdown(cell, tx);
               const ariaLabel = breakdown ? `${label} · ${breakdown}` : label;
+              const interactive = !cell.future && (cell.total > 0 || cell.requests > 0);
+              if (!interactive) {
+                return (
+                  <span
+                    key={cell.date}
+                    aria-hidden
+                    className={cn(
+                      "aspect-square w-full rounded-[3px]",
+                      tokenUsageCellClass(level, cell.future),
+                    )}
+                  />
+                );
+              }
               return (
                 <Tooltip key={cell.date}>
                   <TooltipTrigger asChild>
-                    <span
+                    <button
+                      id={`token-usage-day-${cell.date}`}
+                      type="button"
                       aria-label={ariaLabel}
+                      aria-controls="token-usage-details"
+                      aria-pressed={selectedDate === cell.date}
+                      onClick={() => onSelectDate(cell.date)}
                       className={cn(
-                        "aspect-square w-full rounded-[2px] transition-transform hover:scale-110 sm:rounded-[4px]",
+                        "aspect-square w-full cursor-pointer rounded-[3px] transition-[box-shadow,filter,transform] duration-150 hover:brightness-95 focus-visible:outline-offset-2 active:scale-[0.96] motion-reduce:transition-none",
                         tokenUsageCellClass(level, cell.future),
+                        selectedDate === cell.date &&
+                          "ring-2 ring-sky-700 ring-offset-2 ring-offset-settings-surface dark:ring-sky-200",
                       )}
                     />
                   </TooltipTrigger>
@@ -361,6 +477,85 @@ export function TokenUsageHeatmap({
           </TooltipProvider>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function TokenUsageOverview({
+  usage,
+  timeZone,
+}: {
+  usage?: TokenUsagePayload;
+  timeZone?: string;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const selectedDay = selectedDate
+    ? usage?.days.find((day) => day.date === selectedDate)
+    : undefined;
+  const selectedCell = selectedDay
+    ? {
+        date: selectedDay.date,
+        total: selectedDay.total_tokens,
+        estimated: selectedDay.estimated_tokens ?? 0,
+        requests: selectedDay.requests,
+        sources: selectedDay.sources ?? {},
+        future: false,
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (selectedDate && !selectedDay) setSelectedDate(null);
+  }, [selectedDate, selectedDay]);
+
+  const showRecentCalls = () => {
+    if (selectedDate) document.getElementById(`token-usage-day-${selectedDate}`)?.focus();
+    setSelectedDate(null);
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-[920px]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground/90">
+            {tx("settings.usage.shortTitle", "Token usage")}
+          </h2>
+          <p className="mt-1 text-[12px] leading-5 text-muted-foreground/72">
+            {tx(
+              "settings.usage.subtitle",
+              "Provider-reported usage over the last 12 months. Select a day with activity to inspect its calls.",
+            )}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground/62">
+          <span>{tx("settings.usage.less", "Less")}</span>
+          <span className="flex items-center gap-1" aria-hidden>
+            {[0, 1, 2, 3, 4].map((level) => (
+              <span
+                key={level}
+                className={cn(
+                  "h-2.5 w-2.5 rounded-[3px]",
+                  tokenUsageCellClass(level, false),
+                )}
+              />
+            ))}
+          </span>
+          <span>{tx("settings.usage.more", "More")}</span>
+        </div>
+      </div>
+      <TokenUsageCalendar
+        usage={usage}
+        timeZone={timeZone}
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+      />
+      <TokenUsageDetails
+        usage={usage}
+        timeZone={timeZone}
+        selectedCell={selectedCell}
+        onShowRecent={showRecentCalls}
+      />
     </div>
   );
 }

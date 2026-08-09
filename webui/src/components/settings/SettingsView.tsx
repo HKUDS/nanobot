@@ -70,10 +70,7 @@ import {
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
-import {
-  RecentTokenUsage,
-  TokenUsageHeatmap,
-} from "@/components/settings/TokenUsageHeatmap";
+import { TokenUsageOverview } from "@/components/settings/TokenUsageHeatmap";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   channelIsRunning,
@@ -2768,8 +2765,7 @@ function OverviewSettings({
   return (
     <div className="space-y-7">
       <section className="rounded-[22px] bg-settings-surface px-4 py-4 sm:px-5">
-        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
-        <RecentTokenUsage usage={settings.usage} timeZone={settings.agent.timezone} />
+        <TokenUsageOverview usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>

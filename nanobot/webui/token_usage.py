@@ -174,6 +174,15 @@ def _normalize_recent_calls(raw: Any) -> list[dict[str, Any]]:
             "source": _clean_source(call.get("source")),
             **usage,
         }
+        recorded_day = call.get("day")
+        if isinstance(recorded_day, str):
+            try:
+                parsed_day = datetime.fromisoformat(recorded_day).date().isoformat()
+            except ValueError:
+                pass
+            else:
+                if parsed_day == recorded_day:
+                    normalized["day"] = recorded_day
         session_key = call.get("session_key")
         if isinstance(session_key, str) and session_key.strip():
             normalized["session_key"] = session_key.strip()[:160]
@@ -323,6 +332,7 @@ def record_token_usage(
         recent_calls = cast(list[dict[str, Any]], state["recent_calls"])
         call: dict[str, Any] = {
             "timestamp": _utc_iso(now),
+            "day": day,
             "source": source_key,
             **normalized,
         }

@@ -672,6 +672,7 @@ export interface SettingsPayload {
     }>;
     recent_calls?: Array<{
       timestamp: string;
+      day?: string;
       source: string;
       session_key?: string;
       iteration?: number;
