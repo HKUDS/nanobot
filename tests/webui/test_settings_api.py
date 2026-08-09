@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -27,6 +28,7 @@ from nanobot.webui.settings_api import (
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
+    settings_usage_records_payload,
     update_agent_settings,
     update_api_settings,
     update_model_call_order,
@@ -1346,6 +1348,31 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     assert payload["total_tokens"] == 22
     assert payload["requests_30d"] == 1
     assert "agent" not in payload
+    assert "records" not in payload
+
+
+def test_settings_usage_records_payload_filters_and_validates_day(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    from nanobot.webui.token_usage import record_token_usage
+
+    record_token_usage(
+        {"prompt_tokens": 20, "completion_tokens": 2},
+        now=datetime(2026, 6, 3, tzinfo=timezone.utc),
+    )
+
+    payload = settings_usage_records_payload({"day": ["2026-06-03"]})
+
+    assert payload["day"] == "2026-06-03"
+    assert len(payload["records"]) == 1
+    with pytest.raises(WebUISettingsError, match="YYYY-MM-DD"):
+        settings_usage_records_payload({"day": ["June 3"]})
 
 
 def test_update_network_safety_settings_writes_local_service_flag(

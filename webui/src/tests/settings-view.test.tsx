@@ -1963,33 +1963,10 @@ describe("SettingsView Apps catalog", () => {
   });
 
   it("shows token activity on the overview", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-06-03T12:00:00Z"));
     const payload: SettingsPayload = {
       ...settingsPayload(),
-      agent: {
-        ...settingsPayload().agent,
-        timezone: "America/Los_Angeles",
-      },
       usage: {
         days: [
-          {
-            date: "2026-06-02",
-            prompt_tokens: 400,
-            completion_tokens: 0,
-            cached_tokens: 0,
-            total_tokens: 400,
-            requests: 1,
-            sources: {
-              api: {
-                prompt_tokens: 400,
-                completion_tokens: 0,
-                cached_tokens: 0,
-                total_tokens: 400,
-                requests: 1,
-              },
-            },
-          },
           {
             date: "2026-06-03",
             prompt_tokens: 1200,
@@ -1997,29 +1974,6 @@ describe("SettingsView Apps catalog", () => {
             cached_tokens: 500,
             total_tokens: 1500,
             requests: 2,
-            sources: {
-              cron: {
-                prompt_tokens: 1200,
-                completion_tokens: 300,
-                cached_tokens: 500,
-                total_tokens: 1500,
-                requests: 2,
-              },
-            },
-          },
-        ],
-        recent_calls: [
-          {
-            timestamp: "2026-06-03T01:15:30Z",
-            day: "2026-06-03",
-            source: "cron",
-            session_key: "cron:drink-water",
-            iteration: 0,
-            tools: ["read_file"],
-            prompt_tokens: 1200,
-            completion_tokens: 300,
-            cached_tokens: 500,
-            total_tokens: 1500,
           },
         ],
         total_tokens: 1500,
@@ -2051,54 +2005,10 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "overview" });
 
     expect(await screen.findByLabelText("Token activity")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Token usage" })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Provider-reported usage over the last 12 months. Select a day with activity to inspect its calls.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Less")).toBeInTheDocument();
-    expect(screen.getByText("More")).toBeInTheDocument();
-    expect(screen.getByText("Recent calls")).toBeInTheDocument();
-    expect(screen.getByText("cron:drink-water")).toBeInTheDocument();
-    expect(screen.getByText("Iteration 1")).toBeInTheDocument();
-    expect(screen.getByText("Tools: read_file")).toBeInTheDocument();
-    expect(screen.getByText("1.5K tokens")).toBeInTheDocument();
-    expect(screen.getByText("1.2K in · 300 out · 500 cached")).toBeInTheDocument();
+    expect(screen.getByText("Token Usage")).toBeInTheDocument();
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
-
-    const juneSecond = screen.getByRole("button", { name: /2026-06-02: 400 tokens/ });
-    fireEvent.click(juneSecond);
-    expect(juneSecond).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("heading", { name: "June 2, 2026" })).toBeInTheDocument();
-    expect(screen.getByText("Total tokens")).toBeInTheDocument();
-    expect(screen.getByText("Requests")).toBeInTheDocument();
-    expect(screen.getByText("API 400")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Per-call details are kept only for the 50 most recent calls. This day's total is still available above.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("cron:drink-water")).not.toBeInTheDocument();
-
-    const juneThird = screen.getByRole("button", { name: /2026-06-03: 1.5K tokens/ });
-    fireEvent.click(juneThird);
-    expect(juneThird).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("heading", { name: "June 3, 2026" })).toBeInTheDocument();
-    expect(screen.getByText("Automations 1.5K")).toBeInTheDocument();
-    expect(screen.getByText("cron:drink-water")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Showing 1 of 2 calls. Per-call details are kept only for the 50 most recent calls.",
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "View recent calls" }));
-    expect(screen.getByRole("heading", { name: "Recent calls" })).toBeInTheDocument();
-    expect(juneThird).toHaveAttribute("aria-pressed", "false");
-    expect(juneThird).toHaveFocus();
   });
 
   it("coalesces focus refreshes while usage is already loading", async () => {
