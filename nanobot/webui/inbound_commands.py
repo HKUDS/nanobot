@@ -666,6 +666,17 @@ class WebUICommandRouter:
                     context_blocks.append(session_context)
                 if context_blocks:
                     metadata[RUNTIME_CONTEXT_INPUT_META] = context_blocks
+            if temporary_policy is not None:
+                try:
+                    self._temporary_chats.validate_active(connection, chat_id)
+                except TemporaryChatError as exc:
+                    await self._transport.webui_send_event(
+                        connection,
+                        "error",
+                        detail=exc.detail,
+                        **rejection_fields,
+                    )
+                    return
             await self._transport.webui_dispatch_message(
                 sender_id=client_id,
                 chat_id=chat_id,
