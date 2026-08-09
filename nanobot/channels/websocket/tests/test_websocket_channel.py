@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -338,6 +339,75 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
     assert chat_id not in channel._conn_chats.get(connection, set())
     assert not upload.exists()
     assert read_transcript_lines(inbound.session_key) == []
+
+
+@pytest.mark.asyncio
+async def test_discarded_temporary_chat_in_flight_message_is_not_resurrected(
+    bus,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 5000)
+    chat_id = await _new_temporary_chat(channel, connection)
+
+    policy_captured = threading.Event()
+    release = threading.Event()
+    original = channel._session_access.normalize_mentions
+
+    def blocked_normalize_mentions(raw: object, *, exclude_session_key: str | None = None):
+        policy_captured.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("test release was never signalled")
+        return original(raw, exclude_session_key=exclude_session_key)
+
+    monkeypatch.setattr(
+        channel._session_access,
+        "normalize_mentions",
+        blocked_normalize_mentions,
+    )
+
+    message_task = asyncio.create_task(
+        channel._dispatch_envelope(
+            connection,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "hello",
+                "webui": True,
+                "turn_id": "turn-race",
+            },
+        )
+    )
+    assert await asyncio.to_thread(policy_captured.wait, 10)
+
+    await channel._dispatch_envelope(
+        connection,
+        "webui-client",
+        {"type": "discard_temporary_chat", "chat_id": chat_id},
+    )
+    release.set()
+    await message_task
+
+    session_key = f"websocket:{chat_id}"
+    assert sessions.get_cached(session_key) is None
+    assert sessions.list_sessions() == []
+    assert bus.publish_inbound.await_count == 1
+    control = bus.publish_inbound.await_args.args[0]
+    assert control.metadata[INBOUND_META_RUNTIME_CONTROL] == RUNTIME_CONTROL_SESSION_DISCARD
+    sent = _sent_ws_payloads(connection)
+    assert [payload["event"] for payload in sent] == ["error"]
+    payload = sent[0]
+    assert payload["detail"] == "temporary_chat_unavailable"
+    assert payload["chat_id"] == chat_id
+    assert payload["turn_id"] == "turn-race"
 
 
 @pytest.mark.asyncio

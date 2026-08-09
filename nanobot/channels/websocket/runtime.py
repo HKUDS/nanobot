@@ -1045,6 +1045,17 @@ class WebSocketChannel(BaseChannel):
                 )
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions
+            if temporary_policy is not None:
+                try:
+                    self._temporary_chats.validate_active(connection, cid)
+                except TemporaryChatError as exc:
+                    await self._send_event(
+                        connection,
+                        "error",
+                        detail=exc.detail,
+                        **rejection_fields,
+                    )
+                    return
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._workspaces.persist_scope(cid, scope)
             is_webui = metadata.get("webui") is True

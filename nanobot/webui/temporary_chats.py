@@ -156,6 +156,14 @@ class WebUITemporaryChats:
     def owns(self, owner: object, chat_id: str) -> bool:
         return self._owners.get(chat_id) is owner
 
+    def validate_active(self, owner: object, chat_id: str) -> None:
+        """Reject in-flight work for a Temporary Chat that was discarded."""
+        if (
+            self._owners.get(chat_id) is not owner
+            or not self._cached_session_is_transient(chat_id)
+        ):
+            raise TemporaryChatError("temporary_chat_unavailable")
+
     def should_persist_transcript(self, chat_id: str) -> bool:
         """Apply the session policy and retain it for late events after disposal."""
         return (
