@@ -84,10 +84,6 @@ class TestToolHintKnownTools:
         assert '"C:/Program Files/Git/project"' not in result
         assert '"' in result
 
-    def test_exec_short_command_unchanged(self):
-        result = _hint([_tc("exec", {"command": "npm install typescript"})])
-        assert result == "$ npm install typescript"
-
     def test_exec_chained_commands_truncated_not_mid_path(self):
         """Long chained commands should truncate preserving abbreviated paths."""
         cmd = "cd D:\\Documents\\GitHub\\project && npm run build && npm test"

@@ -49,6 +49,15 @@
       "noMatch": "Aucune demande en attente ne correspond à ce code."
     }
   },
+  "temporaryChat": {
+    "title": "Discussion temporaire",
+    "retention": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire.",
+    "expiration": "Recharger, fermer ou perdre la connexion met fin à ces discussions.",
+    "externalEffects": "Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
+    "clear": "Effacer la discussion temporaire",
+    "sectionTitle": "Discussions temporaires",
+    "closeAction": "Fermer la discussion temporaire : {{title}}"
+  },
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
@@ -1124,6 +1133,7 @@
         "recordingStatus": "Enregistrement {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Pour des raisons de sécurité, Chrome et d’autres navigateurs bloquent l’accès au microphone sur les pages HTTP distantes. Ouvrez cette WebUI en HTTPS pour utiliser la saisie vocale.",
         "unsupported": "La saisie vocale n'est pas prise en charge par ce navigateur.",
         "permission": "Autorisez le microphone dans la barre d'adresse, puis réessayez.",
         "notConfigured": "Configurez d'abord un fournisseur de transcription.",

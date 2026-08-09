@@ -49,6 +49,15 @@
       "noMatch": "Nenhuma solicitação pendente corresponde a este código."
     }
   },
+  "temporaryChat": {
+    "title": "Chat temporário",
+    "retention": "Não é salvo no histórico nem na memória.",
+    "expiration": "Recarregar, fechar ou perder a conexão encerra estes chats.",
+    "externalEffects": "As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "clear": "Limpar chat temporário",
+    "sectionTitle": "Chats temporários",
+    "closeAction": "Fechar chat temporário: {{title}}"
+  },
   "sidebar": {
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",
@@ -1138,6 +1147,7 @@
         "recordingStatus": "Gravando {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Por segurança, o Chrome e outros navegadores bloqueiam o acesso ao microfone em páginas HTTP remotas. Abra esta WebUI por HTTPS para usar a entrada de voz.",
         "unsupported": "A entrada de voz não é compatível com este navegador.",
         "permission": "Permita o microfone na barra de endereço e tente novamente.",
         "notConfigured": "Configure primeiro um provedor de transcrição.",

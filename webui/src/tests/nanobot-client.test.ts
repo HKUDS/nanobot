@@ -71,6 +71,116 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("keeps temporary chats out of attachment and reconnect state", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const chatId = "temp-server-id";
+    client.connect();
+    lastSocket().fakeOpen();
+    const creation = client.newTemporaryChat();
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "new_temporary_chat",
+    });
+    lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true });
+    await expect(creation).resolves.toBe(chatId);
+    lastSocket().sent = [];
+    client.onChat(chatId, vi.fn());
+    client.sendMessage(chatId, "hello", undefined, { turnId: "turn-1" });
+
+    expect(lastSocket().sent.map((raw) => JSON.parse(raw))).toEqual([
+      {
+        type: "message",
+        chat_id: chatId,
+        content: "hello",
+        turn_id: "turn-1",
+        webui: true,
+      },
+    ]);
+
+    client.discardTemporaryChat(chatId);
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "discard_temporary_chat",
+      chat_id: chatId,
+    });
+  });
+
+  it("waits for the temporary attachment when creating a temporary chat", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const creation = client.newTemporaryChat();
+    let resolved = false;
+    void creation.then(() => { resolved = true; });
+    lastSocket().fakeMessage({ event: "attached", chat_id: "ordinary-chat" });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    lastSocket().fakeMessage({
+      event: "attached",
+      chat_id: "server-temporary-chat",
+      temporary: true,
+    });
+    await expect(creation).resolves.toBe("server-temporary-chat");
+  });
+
+  it("forgets every temporary chat when the socket drops", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: true,
+      maxBackoffMs: 1,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    client.connect();
+    lastSocket().fakeOpen();
+    const firstCreation = client.newTemporaryChat();
+    lastSocket().fakeMessage({
+      event: "attached",
+      chat_id: "temp-drop-a",
+      temporary: true,
+    });
+    await firstCreation;
+    const secondCreation = client.newTemporaryChat();
+    lastSocket().fakeMessage({
+      event: "attached",
+      chat_id: "temp-drop-b",
+      temporary: true,
+    });
+    await secondCreation;
+    lastSocket().sent = [];
+    client.onChat("temp-drop-a", firstHandler);
+    client.onChat("temp-drop-b", secondHandler);
+    firstHandler.mockClear();
+    secondHandler.mockClear();
+    lastSocket().close();
+
+    await vi.advanceTimersByTimeAsync(1);
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temp-drop-a",
+      text: "stale first chat",
+    });
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "temp-drop-b",
+      text: "stale second chat",
+    });
+
+    expect(lastSocket().sent).toEqual([]);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).not.toHaveBeenCalled();
+  });
+
   it("routes events to the matching chat handler", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -212,6 +322,31 @@ describe("NanobotClient", () => {
       status: "idle",
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
+  });
+
+  it("clears the local run strip immediately when a stop is requested", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-stop",
+      status: "running",
+      started_at: 12_345,
+      turn_id: "turn-stop",
+    });
+
+    client.finishRunLocally("chat-stop");
+
+    expect(client.getRunStartedAt("chat-stop")).toBeNull();
+    expect(client.hasUnsettledRun("chat-stop")).toBe(false);
+    expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
   });
 
   it("clears stale run strip when reconnecting after a dropped socket", async () => {

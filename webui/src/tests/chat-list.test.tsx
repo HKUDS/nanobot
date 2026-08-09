@@ -152,6 +152,39 @@ describe("ChatList", () => {
     expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
   });
 
+  it("shows temporary chats separately and lets the user reopen or close them", async () => {
+    const temporarySession = session({
+      key: "temporary:temporary-one",
+      chatId: "temporary-one",
+      preview: "hi",
+    });
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[]}
+        temporarySessions={[temporarySession]}
+        activeKey={null}
+        onSelect={onSelect}
+        onCloseTemporaryChat={onClose}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const section = screen.getByRole("region", { name: "Temporary chats" });
+    fireEvent.click(within(section).getByRole("button", { name: "hi" }));
+    expect(onSelect).toHaveBeenCalledWith("temporary:temporary-one");
+
+    fireEvent.click(within(section).getByRole("button", {
+      name: "Close temporary chat: hi",
+    }));
+    expect(onClose).toHaveBeenCalledWith("temporary:temporary-one");
+  });
+
   it("orders chats by latest session activity by default", () => {
     const sessions = [
       session({

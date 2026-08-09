@@ -108,6 +108,10 @@ interface PendingRequest<T> {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingChatRequest extends PendingRequest<string> {
+  temporary: boolean;
+}
+
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 const TURN_REJECTION_DETAILS = new Set([
   "access_denied",
@@ -173,6 +177,8 @@ export class NanobotClient {
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
+  /** Temporary chats are connection-owned and intentionally not reattached. */
+  private temporaryChatIds = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
@@ -194,7 +200,7 @@ export class NanobotClient {
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingRequest<string> | null = null;
+  private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   // Frames queued while the socket is not yet OPEN
@@ -280,6 +286,16 @@ export class NanobotClient {
   getRunStartedAt(chatId: string): number | null {
     const v = this.runStartedAtByChatId.get(chatId);
     return v === undefined ? null : v;
+  }
+
+  /** Clear the optimistic run state immediately after the user stops a turn. */
+  finishRunLocally(chatId: string): void {
+    const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
+    for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    if (this.runStartedAtByChatId.delete(chatId)) {
+      this.emitRunStatus(chatId, null);
+    }
   }
 
   /** Refresh transport policy after bootstrap token renewal. */
@@ -725,7 +741,16 @@ export class NanobotClient {
     } catch {
       // ignore
     }
+    this.clearTemporaryChats();
     this.setStatus("closed");
+  }
+
+  discardTemporaryChat(chatId: string): void {
+    if (!this.temporaryChatIds.has(chatId)) return;
+    if (this.socket?.readyState === WS_OPEN) {
+      this.rawSend({ type: "discard_temporary_chat", chat_id: chatId });
+    }
+    this.forgetTemporaryChat(chatId);
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
@@ -738,11 +763,26 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("newChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
       });
+    });
+  }
+
+  /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
+  newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
+    if (this.pendingNewChat) {
+      return Promise.reject(new Error("newChat already in flight"));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNewChat = null;
+        reject(new Error("newTemporaryChat timed out"));
+      }, timeoutMs);
+      this.pendingNewChat = { resolve, reject, timer, temporary: true };
+      this.queueSend({ type: "new_temporary_chat" });
     });
   }
 
@@ -782,7 +822,7 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("forkChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "fork_chat",
         source_chat_id: sourceChatId,
@@ -793,6 +833,7 @@ export class NanobotClient {
   }
 
   attach(chatId: string): void {
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
@@ -814,7 +855,8 @@ export class NanobotClient {
       startsNewRun?: boolean;
     },
   ): void {
-    this.knownChats.add(chatId);
+    const temporary = this.temporaryChatIds.has(chatId);
+    if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
       chat_id: chatId,
@@ -863,6 +905,7 @@ export class NanobotClient {
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     this.queueSend({
       type: "set_workspace_scope",
@@ -987,8 +1030,15 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
-      this.knownChats.add(parsed.chat_id);
-      if (this.pendingNewChat) {
+      if (parsed.temporary === true) {
+        this.temporaryChatIds.add(parsed.chat_id);
+      } else {
+        this.knownChats.add(parsed.chat_id);
+      }
+      if (
+        this.pendingNewChat
+        && this.pendingNewChat.temporary === (parsed.temporary === true)
+      ) {
         clearTimeout(this.pendingNewChat.timer);
         this.pendingNewChat.resolve(parsed.chat_id);
         this.pendingNewChat = null;
@@ -1094,6 +1144,7 @@ export class NanobotClient {
 
   private handleClose(event?: { code?: number }): void {
     this.socket = null;
+    this.clearTemporaryChats();
     if (this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
@@ -1238,6 +1289,40 @@ export class NanobotClient {
     } else {
       this.sendQueue.push(frame);
     }
+  }
+
+  private clearTemporaryChats(): void {
+    for (const chatId of [...this.temporaryChatIds]) {
+      this.forgetTemporaryChat(chatId);
+    }
+  }
+
+  private forgetTemporaryChat(chatId: string): void {
+    this.temporaryChatIds.delete(chatId);
+    this.knownChats.delete(chatId);
+    this.chatHandlers.delete(chatId);
+    this.pendingInboundByChat.delete(chatId);
+    const wasRunning = this.runStartedAtByChatId.delete(chatId);
+    this.runGenerationByChatId.delete(chatId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    this.unsettledRunTurnIdsByChatId.delete(chatId);
+    this.canonicalCompletedTurnIdsByChatId.delete(chatId);
+    this.goalStateByChatId.delete(chatId);
+    for (const key of [...this.runStartedAtByTurnKey.keys()]) {
+      if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);
+    }
+    for (const [key, pending] of [...this.pendingMessageSends]) {
+      if (pending.chatId !== chatId) continue;
+      this.pendingMessageSends.delete(key);
+      this.socketPendingMessageSendKeys.delete(key);
+    }
+    this.sendQueue = this.sendQueue.filter((frame) => (
+      !("chat_id" in frame) || frame.chat_id !== chatId
+    ));
+    if (this.lastSocketMessageSendKey?.startsWith(`${chatId}\u0000`)) {
+      this.lastSocketMessageSendKey = null;
+    }
+    if (wasRunning) this.emitRunStatus(chatId, null);
   }
 
   private frameFitsTransport(frame: Outbound): boolean {

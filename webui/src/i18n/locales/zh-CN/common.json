@@ -49,6 +49,15 @@
       "noMatch": "没有待处理请求与此配对码匹配。"
     }
   },
+  "temporaryChat": {
+    "title": "临时聊天",
+    "retention": "不会保存到历史记录或记忆。",
+    "expiration": "刷新、关闭页面或连接中断后，临时聊天会结束。",
+    "externalEffects": "请求仍会发送给模型提供商，工具操作也可能留下更改。",
+    "clear": "清空临时聊天",
+    "sectionTitle": "临时聊天",
+    "closeAction": "关闭临时聊天：{{title}}"
+  },
   "sidebar": {
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",
@@ -1137,6 +1146,7 @@
         "recordingStatus": "正在录音 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "出于安全考虑，Chrome 等浏览器会阻止远程 HTTP 页面访问麦克风。请通过 HTTPS 打开此 WebUI 以使用语音输入。",
         "unsupported": "当前浏览器不支持语音输入。",
         "permission": "请在地址栏允许麦克风后重试。",
         "notConfigured": "请先配置转写提供商。",

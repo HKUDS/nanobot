@@ -288,6 +288,13 @@ The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
 `http://<your-ip>:8765` from the other device and enter the secret in the login
 form.
 
+Plain HTTP is enough for basic WebUI access, but browsers expose microphone
+capture only in secure contexts. Voice input works on same-machine localhost;
+from another device, serve the WebUI over HTTPS with a certificate that device
+trusts. Configure [`sslCertfile` and `sslKeyfile`](./websocket.md#tlsssl) on the
+WebSocket channel and open `https://<your-host>:8765`, or terminate HTTPS at a
+reverse proxy and use that proxy's HTTPS URL.
+
 Remote WebUI clients with a valid token can view and use Apps. Actions that
 install missing nanobot support packages, such as adding a channel dependency,
 are blocked by default. To let trusted remote administrators change the Python
@@ -321,6 +328,10 @@ If the page does not open, check these in order:
 3. `nanobot gateway` is still running.
 4. You are opening port `8765`, not the gateway health port.
 5. LAN access uses `host: "0.0.0.0"` and a token or token issue secret.
+
+If voice input asks for a secure connection, use HTTPS with a certificate the
+device trusts. Browsers do not expose microphone capture to
+`http://<your-ip>` origins.
 
 For detailed diagnostics, see
 [`troubleshooting.md#webui-problems`](./troubleshooting.md#webui-problems).

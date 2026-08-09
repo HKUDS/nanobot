@@ -49,6 +49,15 @@
       "noMatch": "沒有待處理請求符合此配對碼。"
     }
   },
+  "temporaryChat": {
+    "title": "臨時聊天",
+    "retention": "不會儲存至歷史記錄或記憶。",
+    "expiration": "重新載入、關閉頁面或連線中斷後，臨時聊天會結束。",
+    "externalEffects": "請求仍會傳送給模型供應商，工具操作也可能留下變更。",
+    "clear": "清空臨時聊天",
+    "sectionTitle": "臨時聊天",
+    "closeAction": "關閉臨時聊天：{{title}}"
+  },
   "sidebar": {
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",
@@ -1124,6 +1133,7 @@
         "recordingStatus": "正在錄音 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "基於安全考量，Chrome 等瀏覽器會阻止遠端 HTTP 頁面存取麥克風。請透過 HTTPS 開啟此 WebUI 以使用語音輸入。",
         "unsupported": "目前瀏覽器不支援語音輸入。",
         "permission": "請在網址列允許麥克風後重試。",
         "notConfigured": "請先設定轉寫供應商。",

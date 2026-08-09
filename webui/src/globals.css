@@ -33,6 +33,10 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 17 88% 32%;
+    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -67,6 +71,10 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 32 98% 73%;
+    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-accent: var(--background);
@@ -429,6 +437,41 @@
   .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
     opacity: 1;
     transform: translateY(0);
+  }
+  .composer-workspace-drawer {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .composer-workspace-drawer[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .composer-workspace-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .composer-workspace-drawer {
+      transition:
+        grid-template-rows var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-6px);
+      transition: transform var(--composer-workspace-drawer-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+      transform: translateY(0);
+    }
   }
   @keyframes run-pulse-dot {
     0%,

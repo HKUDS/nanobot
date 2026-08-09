@@ -49,6 +49,15 @@
       "noMatch": "このコードに一致する保留中のリクエストはありません。"
     }
   },
+  "temporaryChat": {
+    "title": "一時チャット",
+    "retention": "履歴やメモリには保存されません。",
+    "expiration": "再読み込み、ページを閉じる操作、接続切断で一時チャットは終了します。",
+    "externalEffects": "リクエストは引き続きモデルプロバイダーに送信され、ツール操作による変更は残る場合があります。",
+    "clear": "一時チャットを消去",
+    "sectionTitle": "一時チャット",
+    "closeAction": "一時チャット「{{title}}」を閉じる"
+  },
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
@@ -1124,6 +1133,7 @@
         "recordingStatus": "録音中 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "セキュリティ上、Chrome などのブラウザーはリモートの HTTP ページからのマイクアクセスをブロックします。音声入力を使用するには、この WebUI を HTTPS で開いてください。",
         "unsupported": "このブラウザーは音声入力に対応していません。",
         "permission": "アドレスバーでマイクを許可してから再試行してください。",
         "notConfigured": "先に文字起こしプロバイダーを設定してください。",

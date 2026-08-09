@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from loguru import logger
@@ -147,6 +147,15 @@ class RetentionResult:
     already_consolidated_count: int
 
 
+@dataclass(frozen=True)
+class SessionPolicy:
+    """Runtime rules that do not belong in durable session data."""
+
+    persist: bool = True
+    log_content: bool = True
+    disabled_tools: frozenset[str] = frozenset()
+
+
 @dataclass
 class Session:
     """A conversation session."""
@@ -158,6 +167,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -1079,6 +1089,24 @@ class SessionManager:
         self._remember(session)
         return session
 
+    def get_or_create_transient(
+        self,
+        key: str,
+        *,
+        disabled_tools: Collection[str] = (),
+    ) -> Session:
+        """Return a fresh, non-persistent session without loading history."""
+        policy = SessionPolicy(
+            persist=False,
+            log_content=False,
+            disabled_tools=frozenset(disabled_tools),
+        )
+        session = self.get_cached(key)
+        if session is None or session.policy != policy:
+            session = Session(key=key, policy=policy)
+            self._remember(session)
+        return session
+
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
 
@@ -1088,6 +1116,9 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
+        if not session.policy.persist:
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(

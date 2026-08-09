@@ -49,6 +49,15 @@
       "noMatch": "Tidak ada permintaan tertunda yang cocok dengan kode ini."
     }
   },
+  "temporaryChat": {
+    "title": "Obrolan sementara",
+    "retention": "Tidak disimpan ke riwayat atau memori.",
+    "expiration": "Memuat ulang, menutup, atau kehilangan koneksi akan mengakhiri obrolan ini.",
+    "externalEffects": "Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
+    "clear": "Hapus obrolan sementara",
+    "sectionTitle": "Obrolan sementara",
+    "closeAction": "Tutup obrolan sementara: {{title}}"
+  },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
@@ -1124,6 +1133,7 @@
         "recordingStatus": "Merekam {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Demi keamanan, Chrome dan browser lain memblokir akses mikrofon pada halaman HTTP jarak jauh. Buka WebUI ini melalui HTTPS untuk menggunakan input suara.",
         "unsupported": "Input suara tidak didukung di browser ini.",
         "permission": "Izinkan mikrofon di bilah alamat, lalu coba lagi.",
         "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",

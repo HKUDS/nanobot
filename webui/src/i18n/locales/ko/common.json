@@ -49,6 +49,15 @@
       "noMatch": "이 코드와 일치하는 대기 중인 요청이 없습니다."
     }
   },
+  "temporaryChat": {
+    "title": "임시 채팅",
+    "retention": "기록이나 메모리에 저장되지 않습니다.",
+    "expiration": "새로고침, 페이지 닫기 또는 연결 끊김 시 임시 채팅이 종료됩니다.",
+    "externalEffects": "요청은 계속 모델 제공업체로 전송되며 도구 작업의 변경 사항은 남을 수 있습니다.",
+    "clear": "임시 채팅 지우기",
+    "sectionTitle": "임시 채팅",
+    "closeAction": "임시 채팅 닫기: {{title}}"
+  },
   "sidebar": {
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
@@ -1124,6 +1133,7 @@
         "recordingStatus": "녹음 중 {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "보안을 위해 Chrome 및 기타 브라우저는 원격 HTTP 페이지의 마이크 접근을 차단합니다. 음성 입력을 사용하려면 HTTPS로 이 WebUI를 여세요.",
         "unsupported": "이 브라우저는 음성 입력을 지원하지 않습니다.",
         "permission": "주소 표시줄에서 마이크를 허용한 후 다시 시도하세요.",
         "notConfigured": "먼저 음성 변환 제공업체를 설정하세요.",

@@ -295,10 +295,17 @@ interface ThreadShellProps {
   session: ChatSummary | null;
   sessions?: ChatSummary[];
   title: string;
+  temporary?: boolean;
+  temporaryChatIds?: readonly string[];
+  temporaryChatEnabled?: boolean;
+  onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
   onGoHome?: () => void;
   onNewChat?: () => void;
-  onCreateChat?: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string | null>;
+  onCreateChat?: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    initialMessage?: string,
+  ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
@@ -477,7 +484,7 @@ function HeroGreeting({ text }: { text: string }) {
       <h1
         ref={headingRef}
         data-testid="hero-greeting"
-        className="whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
+        className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
       >
         {text}
       </h1>
@@ -580,6 +587,10 @@ export function ThreadShell({
   session,
   sessions = [],
   title,
+  temporary = false,
+  temporaryChatIds = [],
+  temporaryChatEnabled = false,
+  onTemporaryChatEnabledChange,
   onToggleSidebar,
   onCreateChat,
   onForkChat,
@@ -602,7 +613,7 @@ export function ThreadShell({
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
-  const historyKey = session?.key ?? null;
+  const historyKey = temporary ? null : session?.key ?? null;
   const mentionSessions = useMemo(
     () => sessions.filter((candidate) => (
       candidate.key !== historyKey
@@ -657,6 +668,7 @@ export function ThreadShell({
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -664,6 +676,7 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
+  const knownTemporaryChatIdsRef = useRef(new Set<string>());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -678,6 +691,8 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
+  const showTemporaryChatControl =
+    !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -735,6 +750,18 @@ export function ThreadShell({
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
   }, [historyKey]);
+
+  useEffect(() => {
+    const retained = new Set(temporaryChatIds);
+    for (const chatId of retained) knownTemporaryChatIdsRef.current.add(chatId);
+    for (const cachedChatId of knownTemporaryChatIdsRef.current) {
+      if (!retained.has(cachedChatId)) {
+        messageCacheRef.current.delete(cachedChatId);
+        activeViewportTurnByChatIdRef.current.delete(cachedChatId);
+        knownTemporaryChatIdsRef.current.delete(cachedChatId);
+      }
+    }
+  }, [temporaryChatIds]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
@@ -838,6 +865,12 @@ export function ThreadShell({
     () => modelPresetOptionsFromSettings(settings),
     [settings],
   );
+  const availableSlashCommands = useMemo(
+    () => temporary
+      ? slashCommands.filter(({ command }) => command === "/model" || command === "/stop")
+      : slashCommands,
+    [slashCommands, temporary],
+  );
   const modelBadge = useMemo(
     () => toModelBadgeInfo(modelName, settings, activeModelPreset),
     [activeModelPreset, modelName, settings],
@@ -898,7 +931,7 @@ export function ThreadShell({
   }, [chatId, client]);
 
   useEffect(() => {
-    if (!chatId || loading) return;
+    if (!historyKey || !chatId || loading) return;
     const cached = messageCacheRef.current.get(chatId);
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
     const hasNewCanonicalHistory = (
@@ -1028,10 +1061,11 @@ export function ThreadShell({
     historyLineage,
     historyActiveTurnId,
     hasPendingToolCalls,
+    historyKey,
   ]);
 
   useLayoutEffect(() => {
-    if (!chatId) return;
+    if (!historyKey || !chatId) return;
     const commit = pendingCanonicalCommitRef.current.get(chatId);
     if (!commit) return;
     if (
@@ -1069,17 +1103,17 @@ export function ThreadShell({
     pendingCanonicalCommitRef.current.delete(chatId);
     committedHistoryLineageRef.current.set(chatId, historyLineage);
     completedCanonicalHydrateVersionRef.current.set(chatId, historyVersion);
-  }, [chatId, client, historyLineage, historyVersion, messages, setMessages]);
+  }, [chatId, client, historyKey, historyLineage, historyVersion, messages, setMessages]);
 
   useEffect(() => {
-    if (!chatId || hasPendingToolCalls) return;
+    if (!historyKey || !chatId || hasPendingToolCalls) return;
     if (completedCanonicalHydrateVersionRef.current.get(chatId) !== historyVersion) return;
     completedCanonicalHydrateVersionRef.current.delete(chatId);
     reconcileTurnComplete();
-  }, [chatId, hasPendingToolCalls, historyVersion, messages, reconcileTurnComplete]);
+  }, [chatId, hasPendingToolCalls, historyKey, historyVersion, messages, reconcileTurnComplete]);
 
   const refreshCanonicalHistory = useCallback(() => {
-    if (!chatId) return;
+    if (!historyKey || !chatId) return;
     pendingCanonicalHydrateRef.current.set(chatId, {
       historyLineage,
       historyVersion,
@@ -1089,10 +1123,10 @@ export function ThreadShell({
       uiRevision: uiRevisionRef.current,
     });
     refreshHistory();
-  }, [chatId, client, historyLineage, historyVersion, refreshHistory]);
+  }, [chatId, client, historyKey, historyLineage, historyVersion, refreshHistory]);
 
   useEffect(() => {
-    if (!chatId) return;
+    if (!historyKey || !chatId) return;
     return client.onSessionUpdate((updatedChatId, scope) => {
       if (updatedChatId !== chatId) return;
       if (scope === "metadata") return;
@@ -1101,7 +1135,7 @@ export function ThreadShell({
       // so keep an active programmatic follow alive across canonical hydration.
       refreshCanonicalHistory();
     });
-  }, [chatId, client, refreshCanonicalHistory]);
+  }, [chatId, client, historyKey, refreshCanonicalHistory]);
 
   const wasPageHiddenRef = useRef(document.visibilityState === "hidden");
   useEffect(() => {
@@ -1112,7 +1146,7 @@ export function ThreadShell({
       }
       if (!wasPageHiddenRef.current) return;
       wasPageHiddenRef.current = false;
-      if (!chatId || client.status !== "open" || loading) return;
+      if (!historyKey || !chatId || client.status !== "open" || loading) return;
       if (
         !turnActive
         && !hasPendingToolCalls
@@ -1129,6 +1163,7 @@ export function ThreadShell({
     chatId,
     client,
     hasPendingToolCalls,
+    historyKey,
     historyError,
     loading,
     refreshCanonicalHistory,
@@ -1230,7 +1265,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope);
+      const newId = await onCreateChat?.(workspaceScope, content);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
@@ -1386,7 +1421,7 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
-          slashCommands={slashCommands}
+          slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
@@ -1396,12 +1431,13 @@ export function ThreadShell({
           runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
-          pendingQueueKey={chatId}
+          pendingQueueKey={temporary ? null : chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
@@ -1429,15 +1465,17 @@ export function ThreadShell({
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
-          slashCommands={slashCommands}
+          slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
+          surfaceRef={composerSurfaceRef}
           runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
+          workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
@@ -1484,6 +1522,11 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            temporaryChatEnabled={temporaryChatEnabled}
+            temporaryChatDisabled={booting || turnActive}
+            onTemporaryChatEnabledChange={
+              showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+            }
           />
         ) : null}
         <FilePreviewAvailabilityProvider
@@ -1492,6 +1535,7 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
+            temporary={temporary}
             isStreaming={turnActive}
             emptyState={emptyState}
             composer={composer}
@@ -1502,7 +1546,7 @@ export function ThreadShell({
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
-            slashCommands={slashCommands}
+            slashCommands={availableSlashCommands}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}
             loadingOlder={loadingOlder}
