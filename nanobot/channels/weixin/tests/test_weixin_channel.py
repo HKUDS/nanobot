@@ -197,6 +197,66 @@ def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_login_force_does_not_short_circuit_on_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(
+            {
+                "token": "persisted-token",
+                "get_updates_buf": "persisted-cursor",
+                "context_tokens": {"wx-user": "ctx-persisted"},
+                "typing_tickets": {"wx-user": {"ticket": "ticket-persisted"}},
+                "base_url": "https://persisted.example",
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel._qr_login = AsyncMock(return_value=False)
+
+    ok = await channel.login(force=True)
+
+    assert ok is False
+    channel._qr_login.assert_awaited_once()
+    assert channel._token == ""
+    assert channel._get_updates_buf == ""
+    assert channel._context_tokens == {}
+    assert channel._typing_tickets == {}
+    assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+
+
+@pytest.mark.asyncio
+async def test_login_without_force_reuses_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(
+            {
+                "token": "persisted-token",
+                "get_updates_buf": "persisted-cursor",
+                "context_tokens": {"wx-user": "ctx-persisted"},
+                "base_url": "https://persisted.example",
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel._qr_login = AsyncMock(return_value=False)
+
+    ok = await channel.login(force=False)
+
+    assert ok is True
+    channel._qr_login.assert_not_awaited()
+    assert channel._token == "persisted-token"
+    assert channel._get_updates_buf == "persisted-cursor"
+    assert channel._context_tokens == {"wx-user": "ctx-persisted"}
+    assert channel.config.base_url == "https://persisted.example"
+
+
+@pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()
     msg = {

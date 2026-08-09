@@ -947,7 +947,7 @@ class WeixinChannel(BaseChannel):
         if force:
             self._token = ""
             self._get_updates_buf = ""
-        if self._token or self._load_state():
+        if self._token or (not force and self._load_state()):
             return True
 
         # Initialize HTTP client for the login flow
