@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -304,6 +304,7 @@ describe("App layout", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -2252,7 +2253,7 @@ describe("App layout", () => {
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
     expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+    await user.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),

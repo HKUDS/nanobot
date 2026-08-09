@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -138,3 +139,62 @@ async def test_model_preset_mutation_routes(
     assert response.status_code == 200
     assert json.loads(response.body)["routed"] == function_name
     assert captured["query"] == expected_query
+
+
+@pytest.mark.parametrize(
+    ("update_info", "expected"),
+    [
+        (None, {"updateAvailable": None}),
+        (
+            {
+                "currentVersion": "1.2.0",
+                "latestVersion": "1.3.0",
+                "pypiUrl": "https://pypi.org/project/nanobot-ai/",
+            },
+            {
+                "updateAvailable": {
+                    "currentVersion": "1.2.0",
+                    "latestVersion": "1.3.0",
+                    "pypiUrl": "https://pypi.org/project/nanobot-ai/",
+                }
+            },
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_version_check_route_returns_stable_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    update_info: dict[str, str] | None,
+    expected: dict[str, object],
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.check_for_update",
+        lambda: update_info,
+    )
+    request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
+
+    response = await _router().dispatch(None, request, request.path)
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body) == expected
+
+
+@pytest.mark.asyncio
+async def test_version_check_route_enforces_auth_and_bounds_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    check = MagicMock(side_effect=RuntimeError("upstream secret body"))
+    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", check)
+    request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
+
+    unauthorized = await _router(authorized=False).dispatch(None, request, request.path)
+    assert unauthorized is not None
+    assert unauthorized.status_code == 401
+    check.assert_not_called()
+
+    failed = await _router().dispatch(None, request, request.path)
+    assert failed is not None
+    assert failed.status_code == 500
+    assert json.loads(failed.body) == {"error": "version check failed"}
+    assert "upstream secret body" not in failed.body.decode()
