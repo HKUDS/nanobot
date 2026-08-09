@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.computer_use_backends.base import SessionBackendPool
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.schema import (
@@ -235,23 +235,29 @@ class BrowserTool(Tool):
     async def _execute(self, action: str | None = None, **kwargs: Any) -> Any:
         action = (action or "").strip()
         if action not in _ACTIONS:
-            return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
+            return ToolResult.error(
+                f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
+            )
 
         try:
             backend = await self._backends.get()
         except ImportError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except Exception as exc:
-            return f"Error: could not initialize browser backend: {type(exc).__name__}: {exc}"
+            return ToolResult.error(
+                f"Error: could not initialize browser backend: {type(exc).__name__}: {exc}"
+            )
 
         try:
             status, direct = await self._dispatch(backend, action, kwargs)
             if blocked := getattr(backend, "pop_blocked_navigation", lambda: None)():
                 raise ValueError(f"navigation was blocked: {blocked}")
         except ValueError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except Exception as exc:
-            return f"Error executing browser '{action}': {type(exc).__name__}: {exc}"
+            return ToolResult.error(
+                f"Error executing browser '{action}': {type(exc).__name__}: {exc}"
+            )
 
         if direct is not None:
             return direct

@@ -161,7 +161,6 @@ class TestExecute:
         await tool.execute(action="left_click", x=5000, y=-10)
         assert fb.calls == [("click", 2559, 0, "left", 1)]
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("action", "kwargs", "expected"),
         [
@@ -206,6 +205,7 @@ class TestExecute:
         tool, _ = _tool()
         result = await tool.execute(**kwargs)
         assert isinstance(result, str) and error in result
+        assert result.is_error is True
 
 
 @pytest.mark.asyncio

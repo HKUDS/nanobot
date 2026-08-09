@@ -512,11 +512,17 @@ class WebUISettingsRouter:
     def _handle_settings_computer_use_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
+        query = self._query(request)
         try:
-            payload = update_computer_use_settings(self._query(request))
+            payload = update_computer_use_settings(query)
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
-        return self._json_response(self._with_restart_state(payload, section="runtime"))
+        if payload.get("requires_restart"):
+            if "browser_enabled" in query or "browserEnabled" in query:
+                self._restart_sections.add("browser")
+            if "enabled" in query or "computerEnabled" in query:
+                self._restart_sections.add("runtime")
+        return self._json_response(self._with_restart_state(payload))
 
     def _handle_settings_api_service(self, request: WsRequest) -> Response:
         if not self._authorized(request):

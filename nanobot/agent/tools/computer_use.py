@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.computer_use_backends.base import SessionBackendPool
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.schema import (
@@ -287,15 +287,19 @@ class ComputerUseTool(Tool):
     async def _execute(self, action: str | None = None, **kwargs: Any) -> Any:
         action = (action or "").strip()
         if action not in _ACTIONS:
-            return f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
+            return ToolResult.error(
+                f"Error: unknown action '{action}'. Valid actions: {', '.join(_ACTIONS)}"
+            )
 
         try:
             backend = await self._backends.get()
             real_w, real_h = await backend.dimensions()
         except ImportError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except Exception as exc:
-            return f"Error: could not initialize computer_use backend: {type(exc).__name__}: {exc}"
+            return ToolResult.error(
+                f"Error: could not initialize computer_use backend: {type(exc).__name__}: {exc}"
+            )
 
         source = (real_w, real_h)
         target = _fit_size(real_w, real_h, self.config.target_width, self.config.target_height)
@@ -305,18 +309,20 @@ class ComputerUseTool(Tool):
             if blocked := getattr(backend, "pop_blocked_navigation", lambda: None)():
                 raise ValueError(f"navigation was blocked: {blocked}")
         except ValueError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except NotImplementedError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except Exception as exc:
-            return f"Error executing computer_use '{action}': {type(exc).__name__}: {exc}"
+            return ToolResult.error(
+                f"Error executing computer_use '{action}': {type(exc).__name__}: {exc}"
+            )
 
         # Return a fresh screenshot so the model sees the result of its action.
         try:
             png = await backend.screenshot()
             png = self._downscale_png(png, target)
         except ImportError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except Exception as exc:
             return f"{status}\n(Could not capture screenshot: {type(exc).__name__}: {exc})"
 

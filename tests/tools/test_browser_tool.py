@@ -130,7 +130,6 @@ class TestDispatch:
         assert '[1] button "Submit"' in result
         assert '[2] input[text] "your name"' in result
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("action", "kwargs", "expected"),
         [
@@ -214,6 +213,7 @@ class TestErrorsAndPolicy:
         tool, _ = _tool()
         result = await tool.execute(**kwargs)
         assert isinstance(result, str) and error in result
+        assert result.is_error is True
 
     @pytest.mark.asyncio
     async def test_backend_blocks_disallowed_navigation(self):
