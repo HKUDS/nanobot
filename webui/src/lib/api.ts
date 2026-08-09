@@ -7,6 +7,7 @@ import type {
   ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
+  ComputerUseSettingsUpdate,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -1073,6 +1074,24 @@ export async function updateNetworkSafetySettings(
   query.set("webui_default_access_mode", update.webuiDefaultAccessMode);
   return request<SettingsPayload>(
     `${base}/api/settings/network-safety/update?${query}`,
+    token,
+  );
+}
+
+export async function updateComputerUseSettings(
+  token: string,
+  update: ComputerUseSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  if (update.browserEnabled !== undefined) {
+    query.set("browser_enabled", String(update.browserEnabled));
+  }
+  if (update.computerEnabled !== undefined) {
+    query.set("enabled", String(update.computerEnabled));
+  }
+  return request<SettingsPayload>(
+    `${base}/api/settings/computer-use/update?${query}`,
     token,
   );
 }

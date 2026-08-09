@@ -29,6 +29,36 @@ def test_estimate_prompt_tokens_chain_falls_back_without_provider_counter() -> N
     assert source == "tiktoken"
 
 
+def test_image_blocks_have_bounded_token_cost() -> None:
+    text = [{"role": "tool", "content": [{"type": "text", "text": "screen"}]}]
+    small_image = [{
+        "role": "tool",
+        "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,A"}},
+            {"type": "text", "text": "screen"},
+        ],
+    }]
+    large_image = [{
+        "role": "tool",
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64," + "A" * 100_000},
+            },
+            {"type": "text", "text": "screen"},
+        ],
+    }]
+
+    text_tokens = estimate_prompt_tokens(text)
+    small_tokens = estimate_prompt_tokens(small_image)
+    large_tokens = estimate_prompt_tokens(large_image)
+
+    assert small_tokens >= text_tokens + 2_000
+    assert large_tokens == small_tokens
+    assert estimate_message_tokens(large_image[0]) >= text_tokens + 2_000
+    assert estimate_message_tokens({"role": "user", "content": small_image[0]["content"][:1]}) > 2_000
+
+
 def test_estimate_prompt_tokens_chain_falls_back_when_provider_counter_fails() -> None:
     tokens, source = estimate_prompt_tokens_chain(
         _BrokenCounterProvider(),

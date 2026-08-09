@@ -200,6 +200,19 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
 
+    async def close(self) -> None:
+        """Close every registered tool, attempting all cleanups."""
+        errors: list[BaseException] = []
+        for tool in self._tools.values():
+            try:
+                await tool.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("failed to close tools", errors)
+
     @property
     def tool_names(self) -> list[str]:
         """Get list of registered tool names."""

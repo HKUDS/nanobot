@@ -76,11 +76,13 @@ class TestHandleStop:
 
         loop.subagents.close = close_subagents
         loop._exec_session_manager.close_all = AsyncMock()
+        loop.tools.close = AsyncMock()
         with patch("nanobot.agent.loop.agent_context.close_mcp", AsyncMock()):
             await loop.close_mcp()
 
         assert events == ["turn_cancelled", "resources_closed"]
         assert task.cancelled()
+        loop.tools.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_close_mcp_serializes_duplicate_cleanup(self):

@@ -220,6 +220,10 @@ class Tool(ABC):
         """Return optional per-turn prompt context owned by this tool."""
         return None
 
+    async def close(self) -> None:
+        """Release resources owned by the tool. Safe to call repeatedly."""
+        return None
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:
         """Run the tool; return content, or ``ToolResult.error(...)`` for failures."""

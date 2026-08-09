@@ -33,12 +33,23 @@ COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "find_files",
     "web_search", "web_fetch", "list_dir", "list_exec_sessions",
 })
+VISUAL_TOOLS = frozenset({"browser", "computer_use"})
+STALE_SCREENSHOT_PLACEHOLDER = {
+    "type": "text",
+    "text": "[Earlier screenshot omitted; use the latest screenshot from this tool.]",
+}
 # read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
+
+
+def _is_image_block(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return cast(dict[str, Any], value).get("type") in {"image_url", "input_image"}
 
 
 def _tool_call_name_is_valid(tool_call: Any) -> bool:
@@ -84,6 +95,10 @@ class ContextGovernor:
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
         updated = self.apply_tool_result_budget(config, updated)
+        updated = self.drop_stale_visual_tool_images(
+            updated,
+            start_index=config.inflight_start_index,
+        )
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
         updated = self.snip_history(config, updated)
         updated = self.drop_orphan_tool_results(updated)
@@ -324,6 +339,35 @@ class ContextGovernor:
                 if updated is messages:
                     updated = [dict(m) for m in messages]
                 updated[idx]["content"] = normalized
+        return updated
+
+    @staticmethod
+    def drop_stale_visual_tool_images(
+        messages: list[dict[str, Any]],
+        *,
+        start_index: int,
+    ) -> list[dict[str, Any]]:
+        """Keep only the latest in-flight screenshot from each visual tool."""
+        seen: set[str] = set()
+        updated = messages
+        for idx in range(len(messages) - 1, start_index - 1, -1):
+            message = messages[idx]
+            name = str(message.get("name") or "")
+            content = message.get("content")
+            if message.get("role") != "tool" or name not in VISUAL_TOOLS:
+                continue
+            if not isinstance(content, list):
+                continue
+            content_blocks = cast(list[object], content)
+            blocks = [block for block in content_blocks if not _is_image_block(block)]
+            if len(blocks) == len(content_blocks):
+                continue
+            if name not in seen:
+                seen.add(name)
+                continue
+            if updated is messages:
+                updated = [dict(item) for item in messages]
+            updated[idx]["content"] = [dict(STALE_SCREENSHOT_PLACEHOLDER), *blocks]
         return updated
 
     def compact_inflight_overflow(

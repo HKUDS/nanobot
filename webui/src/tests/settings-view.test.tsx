@@ -64,6 +64,11 @@ function settingsPayload(): SettingsPayload {
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
     },
+    computer_use: {
+      browser_enabled: false,
+      enabled: false,
+      backend: "desktop",
+    },
     api: {
       host: "127.0.0.1",
       port: 8900,
@@ -4200,6 +4205,98 @@ describe("SettingsView Apps catalog", () => {
         }),
       );
     });
+  });
+
+  it("enables browser automation from Web settings", async () => {
+    const payload = settingsPayload();
+    const updatedPayload: SettingsPayload = {
+      ...payload,
+      computer_use: { ...payload.computer_use!, browser_enabled: true },
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "computer-use",
+            display_name: "Computer Use",
+            type: "feature",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+        });
+      }
+      if (url === "/api/settings/computer-use/update?browser_enabled=true") {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "browser" });
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Browser automation" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/computer-use/update?browser_enabled=true",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+  });
+
+  it("enables computer control from Security settings", async () => {
+    const payload = settingsPayload();
+    const updatedPayload: SettingsPayload = {
+      ...payload,
+      computer_use: { ...payload.computer_use!, enabled: true },
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "computer-use",
+            display_name: "Computer Use",
+            type: "feature",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+        });
+      }
+      if (url === "/api/settings/computer-use/update?enabled=true") {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "advanced" });
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Computer control" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/computer-use/update?enabled=true",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {

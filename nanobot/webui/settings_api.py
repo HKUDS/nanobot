@@ -1261,6 +1261,11 @@ def settings_payload(
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
+        "computer_use": {
+            "browser_enabled": config.tools.browser.enable,
+            "enabled": config.tools.computer_use.enable,
+            "backend": config.tools.computer_use.backend,
+        },
         "api": {
             "host": config.api.host,
             "port": config.api.port,
@@ -2042,6 +2047,30 @@ def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
             write_webui_default_access_mode(default_access_mode)
         except ValueError as exc:
             raise WebUISettingsError(str(exc)) from exc
+    return settings_payload(requires_restart=changed)
+
+
+def update_computer_use_settings(query: QueryParams) -> dict[str, Any]:
+    raw_browser = _query_first_alias(query, "browser_enabled", "browserEnabled")
+    raw_computer = _query_first_alias(query, "enabled", "computerEnabled")
+    if raw_browser is None and raw_computer is None:
+        raise WebUISettingsError("browser_enabled or enabled is required")
+
+    config = load_config()
+    changed = False
+    if raw_browser is not None:
+        browser_enabled = _parse_bool(raw_browser, "browser_enabled")
+        if config.tools.browser.enable != browser_enabled:
+            config.tools.browser.enable = browser_enabled
+            changed = True
+    if raw_computer is not None:
+        computer_enabled = _parse_bool(raw_computer, "enabled")
+        if config.tools.computer_use.enable != computer_enabled:
+            config.tools.computer_use.enable = computer_enabled
+            changed = True
+
+    if changed:
+        save_config(config)
     return settings_payload(requires_restart=changed)
 
 

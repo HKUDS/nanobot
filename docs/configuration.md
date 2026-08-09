@@ -42,6 +42,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Add fallback chains | [Model Fallbacks](#model-fallbacks) |
 | Configure voice transcription | [Transcription Settings](#transcription-settings) |
 | Tune channel defaults | [Channel Settings](#channel-settings) |
+| Enable browser or desktop control | [Browser and Computer Use](#browser-and-computer-use) |
 | Configure web search and fetch | [Web Tools](#web-tools) |
 | Enable image generation | [Image Generation](#image-generation) |
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
@@ -1669,6 +1670,62 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 > Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
+
+## Browser and Computer Use
+
+Browser and desktop control are optional and disabled by default. Install their runtime first:
+
+```bash
+pip install 'nanobot-ai[computer-use]'
+playwright install chromium
+```
+
+For normal web interaction, prefer the DOM-based `browser` tool. It gives the model numbered
+element references and works without vision. Use `computer_use` when the model must see and act
+on pixels; its `desktop` backend controls the real local machine, while its `browser` backend
+controls an isolated Playwright page.
+
+```json
+{
+  "tools": {
+    "browser": {
+      "enable": true,
+      "allowedDomains": ["example.com"]
+    },
+    "computerUse": {
+      "enable": false,
+      "backend": "desktop"
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `tools.browser.enable` | `false` | Register the DOM-based `browser` tool |
+| `tools.browser.allowedDomains` | `[]` | Optional top-level navigation allowlist; entries include subdomains |
+| `tools.browser.includeScreenshot` | `false` | Attach a screenshot after browser actions |
+| `tools.browser.maxSessions` | `8` | Maximum retained browser sessions; least-recently-used state is closed first |
+| `tools.computerUse.enable` | `false` | Register pixel-based `computer_use` |
+| `tools.computerUse.backend` | `"desktop"` | `"desktop"` or `"browser"` |
+| `tools.computerUse.allowedDomains` | `[]` | Navigation allowlist for the browser backend |
+| `tools.computerUse.targetWidth` / `targetHeight` | `1280` / `800` | Maximum screenshot dimensions exposed to the model |
+| `tools.computerUse.maxSessions` | `8` | Maximum retained sessions for the browser backend |
+
+Each nanobot session gets separate browser state. Browser HTTP and WebSocket traffic passes
+through the shared SSRF policy; local, private, link-local, and metadata targets are blocked
+unless explicitly permitted with `tools.ssrfWhitelist`. When `maxSessions` is reached, the
+least-recently-used browser state is closed. `file:` URLs are not accepted.
+
+> [!IMPORTANT]
+> Browser URL checks are defense in depth, not an egress sandbox: Chromium performs its own DNS
+> resolution after validation. Use OS/container network isolation when browsing hostile pages.
+
+> [!WARNING]
+> The desktop backend can click, type, and change state outside the workspace. Enabling it is an
+> explicit trust decision: use a trusted model and input source, and run nanobot in a disposable
+> OS account or VM when unattended. The workspace restriction is not an OS sandbox. Desktop text
+> input supports ASCII key events; use the browser backend when Unicode text input is required.
 
 ## Web Tools
 

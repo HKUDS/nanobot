@@ -29,6 +29,7 @@ from nanobot.webui.settings_api import (
     settings_usage_payload,
     update_agent_settings,
     update_api_settings,
+    update_computer_use_settings,
     update_model_call_order,
     update_model_configuration,
     update_network_safety_settings,
@@ -1007,6 +1008,27 @@ def test_settings_payload_includes_network_safety_fields(
     assert payload["advanced"]["ssrf_whitelist_count"] == 1
 
 
+def test_settings_payload_includes_computer_use_tools(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.browser.enable = True
+    config.tools.computer_use.enable = True
+    config.tools.computer_use.backend = "browser"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    assert payload["computer_use"] == {
+        "browser_enabled": True,
+        "enabled": True,
+        "backend": "browser",
+    }
+
+
 def test_settings_payload_includes_exec_path_flags(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1372,6 +1394,32 @@ def test_update_network_safety_settings_writes_local_service_flag(
     assert payload["advanced"]["webui_allow_local_service_access"] is False
     assert payload["advanced"]["webui_default_access_mode"] == "full"
     assert payload["requires_restart"] is True
+
+
+def test_update_computer_use_settings_writes_only_requested_switches(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    browser_payload = update_computer_use_settings({"browser_enabled": ["true"]})
+    saved = load_config(config_path)
+    assert saved.tools.browser.enable is True
+    assert saved.tools.computer_use.enable is False
+    assert browser_payload["requires_restart"] is True
+
+    computer_payload = update_computer_use_settings({"computerEnabled": ["true"]})
+    saved = load_config(config_path)
+    assert saved.tools.browser.enable is True
+    assert saved.tools.computer_use.enable is True
+    assert computer_payload["computer_use"]["enabled"] is True
+
+
+def test_update_computer_use_settings_requires_a_switch() -> None:
+    with pytest.raises(WebUISettingsError, match="browser_enabled or enabled"):
+        update_computer_use_settings({})
 
 
 def test_update_network_safety_settings_accepts_legacy_restricted_default_access(
