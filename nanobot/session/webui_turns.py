@@ -216,12 +216,30 @@ async def maybe_generate_webui_title(
         )
         return False
 
-    # Re-fetch the cached session after the LLM await: the session may have
-    # been replaced by /new or a concurrent reset while we were waiting.
+    # Re-fetch after the LLM await: the session may have been replaced by /new
+    # or reset while we were waiting.
     current = sessions.get_cached(session_key)
     if current is not session:
         logger.debug(
             "Skipping title update for {} (session was replaced while title was generating)",
+            session_key,
+        )
+        return False
+
+    # Re-check title ownership: the user may have edited the title via WebUI
+    # while we were waiting for the LLM.  The session object is the same, but
+    # its metadata was mutated in-place.
+    if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
+        logger.debug(
+            "Skipping title update for {} (user edited title while generation was in flight)",
+            session_key,
+        )
+        return False
+    if isinstance(session.metadata.get(WEBUI_TITLE_METADATA_KEY), str) and session.metadata[
+        WEBUI_TITLE_METADATA_KEY
+    ].strip():
+        logger.debug(
+            "Skipping title update for {} (title already set while generation was in flight)",
             session_key,
         )
         return False
