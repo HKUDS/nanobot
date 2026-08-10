@@ -7739,7 +7739,7 @@ function AppsCatalogSettings({
             {tx("settings.apps.loading", "Loading Apps...")}
           </div>
         ) : items.length ? (
-          <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-10 gap-y-1 py-3 xl:grid-cols-2">
             {items.map((item) =>
               item.kind === "cli" ? (
                 <CliAppsCatalogRow
@@ -7990,8 +7990,15 @@ function McpAppsCatalogRow({
   };
 
   return (
-    <article className="rounded-[14px] transition-colors hover:bg-muted/45">
-      <div className="group flex min-w-0 items-center gap-3 px-3 py-3">
+    <article className="min-w-0 rounded-[14px] transition-colors hover:bg-muted/45">
+      <div
+        className={cn(
+          "group min-w-0 px-3 py-3",
+          oauthFlow
+            ? "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+            : "flex items-center gap-3",
+        )}
+      >
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
@@ -8000,7 +8007,12 @@ function McpAppsCatalogRow({
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-1",
+            oauthFlow && "col-span-2 justify-self-end sm:col-span-1",
+          )}
+        >
           {readyInstalled ? (
             <>
               <DropdownMenu>
@@ -8050,14 +8062,22 @@ function McpAppsCatalogRow({
               </AppsActionButton>
             </>
           ) : oauthFlow ? (
-            <AppsActionButton
-              ariaLabel={t("settings.mcp.connectingAccount", {
-                name: preset.display_name,
-                defaultValue: "Connecting {{name}}",
-              })}
-              visibleLabel={tx("settings.mcp.connectingLabel", "Connecting…")}
-              busy
-            />
+            <>
+              <AppsActionButton
+                ariaLabel={t("settings.mcp.connectingAccount", {
+                  name: preset.display_name,
+                  defaultValue: "Connecting {{name}}",
+                })}
+                visibleLabel={tx("settings.mcp.connectingLabel", "Connecting…")}
+                busy
+              />
+              <AppsActionButton
+                ariaLabel={tx("settings.actions.cancel", "Cancel")}
+                visibleLabel={tx("settings.actions.cancel", "Cancel")}
+                tone="danger"
+                onClick={onOAuthCancel}
+              />
+            </>
           ) : isOAuth && preset.install_supported ? (
             <AppsActionButton
               ariaLabel={t("settings.mcp.connectTitle", {
@@ -8114,15 +8134,6 @@ function McpAppsCatalogRow({
             >
               {tx("settings.mcp.continueSignIn", "Continue sign-in")}
               <ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden />
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={onOAuthCancel}
-              className="h-8 rounded-full px-3 text-[12px] font-semibold text-muted-foreground"
-            >
-              {tx("settings.actions.cancel", "Cancel")}
             </Button>
           </div>
         </div>
@@ -8423,7 +8434,7 @@ function McpCustomServerPanel({
 
       {activeMode === "custom" ? (
         <div className="border-t border-border/35 bg-muted/18 px-3 py-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
             <label className="min-w-0 flex-1">
               <span className="mb-1.5 block text-[11.5px] font-medium text-muted-foreground">
                 {tx("settings.mcp.serverName", "Server name")}
@@ -8499,7 +8510,7 @@ function McpCustomServerPanel({
           </Button>
 
           {advancedOpen ? (
-            <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_180px]">
+            <div className="mt-2 grid gap-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_180px]">
               {!remote ? (
                 <label className="min-w-0">
                   <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
@@ -8554,7 +8565,7 @@ function McpCustomServerPanel({
 
       {activeMode === "import" ? (
         <div className="border-t border-border/35 bg-muted/18 px-3 py-3">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-end">
             <label className="min-w-0 flex-1">
               <span className="mb-1.5 block text-[11.5px] font-medium text-muted-foreground">
                 {tx("settings.mcp.configImport", "Import mcp.json")}

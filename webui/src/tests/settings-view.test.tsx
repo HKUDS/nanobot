@@ -756,10 +756,11 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "Connecting Xmind" })).toHaveTextContent(
       "Connecting…",
     );
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
     expect(await screen.findByRole("button", { name: "Xmind connected." }, { timeout: 2500 }))
       .toHaveTextContent("Connected");
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledTimes(1);
@@ -767,6 +768,66 @@ describe("SettingsView Apps catalog", () => {
       "/api/settings/mcp-oauth/status?flow_id=flow-123",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
+  });
+
+  it("lets the user cancel an active OAuth connection after closing the popup", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
+        return jsonResponse({
+          flow_id: "flow-cancel",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=cancel",
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/cancel?flow_id=flow-cancel") {
+        return jsonResponse({
+          flow_id: "flow-cancel",
+          name: "xmind",
+          status: "cancelled",
+          expires_in: 299,
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/status?flow_id=flow-cancel") {
+        return new Promise<Response>(() => {});
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      closed: false,
+      location: { replace: vi.fn() },
+      document: { title: "", body: { textContent: "" } },
+      focus: vi.fn(),
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+
+    const cancelButton = await screen.findByRole("button", { name: "Cancel" });
+    expect(screen.getByRole("button", { name: "Connecting Xmind" })).toBeInTheDocument();
+    popup.closed = true;
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/mcp-oauth/cancel?flow_id=flow-cancel",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    ));
+    expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connecting Xmind" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(popup.close).not.toHaveBeenCalled();
   });
 
   it("silently removes an MCP when the card already shows the result", async () => {
@@ -866,7 +927,7 @@ describe("SettingsView Apps catalog", () => {
       "nanobot-mcp-oauth",
       "popup,width=560,height=720,resizable=yes,scrollbars=yes",
     );
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
   it("does not mistake a COOP-isolated OAuth tab for a blocked popup", async () => {
@@ -929,7 +990,7 @@ describe("SettingsView Apps catalog", () => {
       "Finish signing in in the browser window.",
     );
     expect(screen.queryByRole("button", { name: "Continue sign-in" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
   it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {

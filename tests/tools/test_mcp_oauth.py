@@ -134,6 +134,11 @@ async def test_create_mcp_oauth_auth_uses_browser_handlers_and_persists_redirect
     assert str(auth.context.client_metadata.redirect_uris[0]) == (
         "https://agent.example/auth/mcp/callback"
     )
+    assert str(auth.context.client_metadata.client_uri) == "https://github.com/HKUDS/nanobot"
+    assert str(auth.context.client_metadata.logo_uri) == (
+        "https://raw.githubusercontent.com/HKUDS/nanobot/main/"
+        "webui/public/brand/nanobot_apple_touch.png"
+    )
     assert auth.context.redirect_handler is redirect
     assert auth.context.callback_handler is callback
     storage = MCPOAuthStorage("xmind", "https://app.xmind.example/api/mcp")
@@ -235,6 +240,11 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
                 "code_challenge_methods_supported": ["S256"],
             })
         if request.url.path == "/register":
+            registration = json.loads(request.content)
+            assert registration["client_uri"] == "https://github.com/HKUDS/nanobot"
+            assert registration["logo_uri"].endswith(
+                "/webui/public/brand/nanobot_apple_touch.png"
+            )
             return httpx.Response(201, json={
                 "client_id": "nanobot-client",
                 "redirect_uris": ["https://agent.example/auth/mcp/callback"],
