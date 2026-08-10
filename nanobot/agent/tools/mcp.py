@@ -185,6 +185,25 @@ def _is_transient(exc: BaseException) -> bool:
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
 
 
+def _is_transient_connection_failure(exc: BaseException) -> bool:
+    if isinstance(exc, BaseExceptionGroup):
+        group = cast(BaseExceptionGroup[BaseException], exc)
+        return bool(group.exceptions) and all(
+            _is_transient_connection_failure(nested) for nested in group.exceptions
+        )
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)) or _is_transient(exc)
+
+
+def _log_mcp_connection_failure(name: str, exc: BaseException, hint: str = "") -> None:
+    if _is_transient_connection_failure(exc):
+        logger.warning("MCP server '{}': transient connection failure", name)
+        logger.opt(exception=exc).debug(
+            "MCP server '{}' transient connection failure details", name
+        )
+        return
+    logger.opt(exception=exc).error("MCP server '{}': failed to connect: {}", name, hint)
+
+
 def _is_session_terminated(exc: BaseException) -> bool:
     """Return True when the MCP SDK reports a dead client session."""
     if _is_transient(exc):
@@ -1217,7 +1236,7 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            logger.exception("MCP server '{}': failed to connect: {}", name, hint)
+            _log_mcp_connection_failure(name, e, hint)
             return False
 
     async def connect_single_server(
@@ -1264,7 +1283,7 @@ async def connect_mcp_servers(
         try:
             result = await connect_single_server(name, cfg)
         except Exception as e:
-            logger.exception("MCP server '{}' connection failed: {}", name, e)
+            _log_mcp_connection_failure(name, e)
             continue
         if result[1] is not None:
             server_stacks[result[0]] = result[1]

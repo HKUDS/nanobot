@@ -826,25 +826,59 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
 ) -> None:
     messages: list[str] = []
 
-    def _error(message: str, *args: object) -> None:
-        messages.append(message.format(*args))
-
     @asynccontextmanager
     async def _broken_stdio_client(_params: object):
         raise RuntimeError("Parse error: Unexpected token 'INFO' before JSON-RPC headers")
         yield  # pragma: no cover
 
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _broken_stdio_client)
-    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.exception", _error)
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(message.record["message"]), level="ERROR"
+    )
 
     registry = ToolRegistry()
-    stacks = await connect_mcp_servers({"gh": MCPServerConfig(command="github-mcp")}, registry)
+    try:
+        stacks = await connect_mcp_servers(
+            {"gh": MCPServerConfig(command="github-mcp")}, registry
+        )
+    finally:
+        mcp_mod.logger.remove(sink)
 
     assert stacks == {}
     assert messages
     assert "stdio protocol pollution" in messages[-1]
     assert "stdout" in messages[-1]
     assert "stderr" in messages[-1]
+
+
+def test_transient_connection_group_logs_brief_warning_and_debug_trace() -> None:
+    records: list[dict] = []
+    sink = mcp_mod.logger.add(lambda message: records.append(message.record), level="DEBUG")
+    error = ExceptionGroup("transport failed", [httpx.ConnectError("")])
+    try:
+        mcp_mod._log_mcp_connection_failure("notion", error)
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    warning = next(record for record in records if record["level"].name == "WARNING")
+    debug = next(record for record in records if record["level"].name == "DEBUG")
+    assert warning["exception"] is None
+    assert "transient connection failure" in warning["message"]
+    assert debug["exception"] is not None
+    assert not any(record["level"].name == "ERROR" for record in records)
+
+
+def test_unexpected_connection_failure_keeps_error_trace() -> None:
+    records: list[dict] = []
+    sink = mcp_mod.logger.add(lambda message: records.append(message.record), level="DEBUG")
+    try:
+        mcp_mod._log_mcp_connection_failure("notion", RuntimeError("boom"))
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    error = next(record for record in records if record["level"].name == "ERROR")
+    assert error["exception"] is not None
+    assert not any(record["level"].name == "WARNING" for record in records)
 
 
 @pytest.mark.asyncio
