@@ -350,6 +350,30 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("locks an async send and keeps the draft when it is rejected", async () => {
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this pending draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => resolveSend(false));
+
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("keep this pending draft");
+  });
+
   it("dismisses the touch keyboard after a successful send", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query === "(hover: none) and (pointer: coarse)",

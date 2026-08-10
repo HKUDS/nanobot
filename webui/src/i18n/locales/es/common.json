@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "Autenticación requerida",
-      "hint": "Introduce el secreto configurado como tokenIssueSecret en la configuración del gateway.",
-      "placeholder": "Contraseña",
+      "hint": "Introduce la contraseña de acceso a la WebUI de este gateway de nanobot.",
+      "label": "Contraseña de acceso a la WebUI",
+      "placeholder": "Introduce la contraseña",
       "submit": "Conectar",
-      "invalid": "Contraseña no válida. Inténtalo de nuevo."
+      "required": "Introduce la contraseña de acceso a la WebUI.",
+      "invalid": "La contraseña no es correcta. Compruébala e inténtalo de nuevo."
     },
     "account": {
       "section": "Cuenta",
@@ -582,7 +584,14 @@
       "searchPlaceholder": "Buscar aplicaciones",
       "featured": "Herramientas",
       "loading": "Cargando aplicaciones...",
-      "empty": "Ninguna herramienta coincide con esta vista.",
+      "empty": "Ninguna herramienta coincide con tu búsqueda.",
+      "emptyApps": "No hay aplicaciones disponibles.",
+      "emptyIntegrations": "No hay integraciones disponibles.",
+      "emptyReady": "Todavía no hay herramientas listas.",
+      "clearSearch": "Borrar búsqueda",
+      "browseApps": "Explorar aplicaciones",
+      "browseIntegrations": "Explorar integraciones",
+      "emptyIntegrationsHint": "Añade una integración personalizada abajo.",
       "restartRequired": "Reinicia nanobot para aplicar las aplicaciones y funciones actualizadas."
     },
     "channels": {
@@ -685,7 +694,9 @@
       "loading": "Cargando automatizaciones...",
       "noMatches": "No hay automatizaciones que coincidan con esta vista.",
       "empty": "Aún no hay automatizaciones.",
-      "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
+      "emptyHint": "Crea automatizaciones en un chat para que conserven el contexto correcto.",
+      "emptyAction": "Abrir un chat",
+      "clearFilters": "Borrar filtros",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
       "localTrigger": "Activador local",
@@ -1368,7 +1379,7 @@
     },
     "workspaceScopeRejected": {
       "title": "El espacio de trabajo no cambió",
-      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
+      "body": "El gateway rechazó este proyecto o modo de acceso. Elige un proyecto existente u otro modo de acceso e inténtalo de nuevo."
     },
     "turnRejected": {
       "title": "El mensaje no se envió",

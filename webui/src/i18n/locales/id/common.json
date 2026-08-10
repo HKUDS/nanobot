@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "Autentikasi diperlukan",
-      "hint": "Masukkan secret yang dikonfigurasi sebagai tokenIssueSecret di konfigurasi gateway.",
-      "placeholder": "Kata sandi",
+      "hint": "Masukkan kata sandi akses WebUI untuk gateway nanobot ini.",
+      "label": "Kata sandi akses WebUI",
+      "placeholder": "Masukkan kata sandi",
       "submit": "Hubungkan",
-      "invalid": "Kata sandi tidak valid. Coba lagi."
+      "required": "Masukkan kata sandi akses WebUI.",
+      "invalid": "Kata sandi tersebut tidak cocok. Periksa lalu coba lagi."
     },
     "account": {
       "section": "Akun",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "Cari aplikasi",
       "featured": "Alat",
       "loading": "Memuat aplikasi...",
-      "empty": "Tidak ada alat yang cocok dengan tampilan ini.",
+      "empty": "Tidak ada alat yang cocok dengan pencarian Anda.",
+      "emptyApps": "Tidak ada aplikasi yang tersedia.",
+      "emptyIntegrations": "Tidak ada integrasi yang tersedia.",
+      "emptyReady": "Belum ada alat yang siap.",
+      "clearSearch": "Hapus pencarian",
+      "browseApps": "Jelajahi aplikasi",
+      "browseIntegrations": "Jelajahi integrasi",
+      "emptyIntegrationsHint": "Tambahkan integrasi khusus di bawah.",
       "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
       "empty": "Belum ada otomasi.",
-      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
+      "emptyHint": "Buat otomatisasi di chat agar konteks yang tepat tetap tersimpan.",
+      "emptyAction": "Buka chat",
+      "clearFilters": "Hapus filter",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
       "localTrigger": "Pemicu lokal",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Ruang kerja tidak berubah",
-      "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai ruang kerja sebelumnya."
+      "body": "Gateway menolak proyek atau mode akses ini. Pilih proyek yang sudah ada atau mode akses lain, lalu coba lagi."
     },
     "turnRejected": {
       "title": "Pesan tidak terkirim",

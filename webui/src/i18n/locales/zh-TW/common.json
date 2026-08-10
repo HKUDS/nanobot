@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "需要驗證",
-      "hint": "請輸入閘道設定中 tokenIssueSecret 所設定的金鑰。",
-      "placeholder": "密碼",
+      "hint": "請輸入此 nanobot 閘道的 WebUI 存取密碼。",
+      "label": "WebUI 存取密碼",
+      "placeholder": "輸入密碼",
       "submit": "連線",
-      "invalid": "密碼無效，請再試一次。"
+      "required": "請輸入 WebUI 存取密碼。",
+      "invalid": "密碼不正確，請檢查後再試一次。"
     },
     "account": {
       "section": "帳戶",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "搜尋工具",
       "featured": "工具",
       "loading": "正在載入應用程式…",
-      "empty": "沒有符合條件的工具。",
+      "empty": "沒有符合搜尋條件的工具。",
+      "emptyApps": "沒有可用的應用程式。",
+      "emptyIntegrations": "沒有可用的整合服務。",
+      "emptyReady": "尚無就緒的工具。",
+      "clearSearch": "清除搜尋",
+      "browseApps": "瀏覽應用程式",
+      "browseIntegrations": "瀏覽整合服務",
+      "emptyIntegrationsHint": "可在下方新增自訂整合服務。",
       "restartRequired": "重新啟動 nanobot 以套用更新後的應用程式與整合服務。"
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "正在載入自動任務…",
       "noMatches": "目前沒有符合條件的自動任務。",
       "empty": "尚無自動任務。",
-      "emptyHint": "請從自動任務預定執行的對話中建立，讓 nanobot 保留正確的對話脈絡。",
+      "emptyHint": "請在聊天中建立自動任務，以保留正確的對話脈絡。",
+      "emptyAction": "開啟聊天",
+      "clearFilters": "清除篩選",
       "oneShot": "單次",
       "systemTask": "系統管理的自動任務",
       "localTrigger": "本機觸發器",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "工作區未變更",
-      "body": "閘道拒絕要求的專案或存取模式，因此 Nanobot 繼續使用先前的工作區。"
+      "body": "閘道拒絕了此專案或存取模式。請選擇現有專案或其他存取模式，然後再試一次。"
     },
     "turnRejected": {
       "title": "訊息未傳送",

@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "需要验证",
-      "hint": "请输入网关配置中的 tokenIssueSecret。",
-      "placeholder": "密码",
+      "hint": "请输入此 nanobot 网关的 WebUI 访问密码。",
+      "label": "WebUI 访问密码",
+      "placeholder": "输入密码",
       "submit": "连接",
-      "invalid": "密码无效，请重试。"
+      "required": "请输入 WebUI 访问密码。",
+      "invalid": "密码不正确，请检查后重试。"
     },
     "account": {
       "section": "账户",
@@ -595,7 +597,14 @@
       "searchPlaceholder": "搜索工具",
       "featured": "工具",
       "loading": "正在加载应用...",
-      "empty": "当前视图没有匹配的工具。",
+      "empty": "没有与搜索条件匹配的工具。",
+      "emptyApps": "暂无可用应用。",
+      "emptyIntegrations": "暂无可用集成。",
+      "emptyReady": "还没有就绪的工具。",
+      "clearSearch": "清除搜索",
+      "browseApps": "浏览应用",
+      "browseIntegrations": "浏览集成",
+      "emptyIntegrationsHint": "可在下方添加自定义集成。",
       "restartRequired": "重启 nanobot 以应用更新后的应用和集成。"
     },
     "channels": {
@@ -698,7 +707,9 @@
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",
       "empty": "暂无自动任务。",
-      "emptyHint": "请从它应该运行的来源处创建，这样 nanobot 才能保留正确上下文。",
+      "emptyHint": "请在对话中创建自动任务，以便保留正确的上下文。",
+      "emptyAction": "打开对话",
+      "clearFilters": "清除筛选",
       "oneShot": "一次性",
       "systemTask": "系统管理的自动任务",
       "localTrigger": "本地触发器",
@@ -1381,7 +1392,7 @@
     },
     "workspaceScopeRejected": {
       "title": "工作区未更改",
-      "body": "网关拒绝了请求的项目或访问权限，Nanobot 已继续使用之前的工作区。"
+      "body": "网关拒绝了此项目或访问权限。请选择已存在的项目或其他访问权限，然后重试。"
     },
     "turnRejected": {
       "title": "消息未发送",

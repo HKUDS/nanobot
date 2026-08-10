@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "Authentification requise",
-      "hint": "Saisissez le secret configuré comme tokenIssueSecret dans la configuration de votre gateway.",
-      "placeholder": "Mot de passe",
+      "hint": "Saisissez le mot de passe d’accès à la WebUI de cette passerelle nanobot.",
+      "label": "Mot de passe d’accès à la WebUI",
+      "placeholder": "Saisissez le mot de passe",
       "submit": "Se connecter",
-      "invalid": "Mot de passe invalide. Réessayez."
+      "required": "Saisissez le mot de passe d’accès à la WebUI.",
+      "invalid": "Ce mot de passe ne fonctionne pas. Vérifiez-le et réessayez."
     },
     "account": {
       "section": "Compte",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "Rechercher des applications",
       "featured": "Outils",
       "loading": "Chargement des applications...",
-      "empty": "Aucun outil ne correspond à cette vue.",
+      "empty": "Aucun outil ne correspond à votre recherche.",
+      "emptyApps": "Aucune application disponible.",
+      "emptyIntegrations": "Aucune intégration disponible.",
+      "emptyReady": "Aucun outil n’est encore prêt.",
+      "clearSearch": "Effacer la recherche",
+      "browseApps": "Parcourir les applications",
+      "browseIntegrations": "Parcourir les intégrations",
+      "emptyIntegrationsHint": "Ajoutez une intégration personnalisée ci-dessous.",
       "restartRequired": "Redémarrez nanobot pour appliquer les applications et fonctions mises à jour."
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",
       "empty": "Aucune automatisation pour le moment.",
-      "emptyHint": "Créez-la depuis son point d'exécution pour que nanobot conserve le bon contexte.",
+      "emptyHint": "Créez les automatisations dans un chat afin de conserver le bon contexte.",
+      "emptyAction": "Ouvrir un chat",
+      "clearFilters": "Effacer les filtres",
       "oneShot": "Ponctuelle",
       "systemTask": "Automatisation gérée par le système",
       "localTrigger": "Déclencheur local",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "L’espace de travail n’a pas changé",
-      "body": "La passerelle a refusé le projet ou le mode d’accès demandé ; Nanobot a conservé l’espace de travail précédent."
+      "body": "La passerelle a refusé ce projet ou ce mode d’accès. Choisissez un projet existant ou un autre mode d’accès, puis réessayez."
     },
     "turnRejected": {
       "title": "Le message n’a pas été envoyé",

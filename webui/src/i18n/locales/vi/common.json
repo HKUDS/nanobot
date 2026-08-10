@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "Cần xác thực",
-      "hint": "Nhập secret được cấu hình là tokenIssueSecret trong cấu hình gateway.",
-      "placeholder": "Mật khẩu",
+      "hint": "Nhập mật khẩu truy cập WebUI cho gateway nanobot này.",
+      "label": "Mật khẩu truy cập WebUI",
+      "placeholder": "Nhập mật khẩu",
       "submit": "Kết nối",
-      "invalid": "Mật khẩu không hợp lệ. Hãy thử lại."
+      "required": "Nhập mật khẩu truy cập WebUI.",
+      "invalid": "Mật khẩu không đúng. Hãy kiểm tra và thử lại."
     },
     "account": {
       "section": "Tài khoản",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "Tìm ứng dụng",
       "featured": "Công cụ",
       "loading": "Đang tải ứng dụng...",
-      "empty": "Không có công cụ phù hợp với chế độ xem này.",
+      "empty": "Không có công cụ phù hợp với tìm kiếm của bạn.",
+      "emptyApps": "Không có ứng dụng nào.",
+      "emptyIntegrations": "Không có tích hợp nào.",
+      "emptyReady": "Chưa có công cụ nào sẵn sàng.",
+      "clearSearch": "Xóa tìm kiếm",
+      "browseApps": "Xem ứng dụng",
+      "browseIntegrations": "Xem tích hợp",
+      "emptyIntegrationsHint": "Thêm tích hợp tùy chỉnh ở bên dưới.",
       "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật."
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
       "empty": "Chưa có tự động hóa.",
-      "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
+      "emptyHint": "Tạo tác vụ tự động trong cuộc trò chuyện để giữ đúng ngữ cảnh.",
+      "emptyAction": "Mở cuộc trò chuyện",
+      "clearFilters": "Xóa bộ lọc",
       "oneShot": "Một lần",
       "systemTask": "Tự động hóa do hệ thống quản lý",
       "localTrigger": "Trình kích hoạt cục bộ",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Không gian làm việc không thay đổi",
-      "body": "Gateway đã từ chối dự án hoặc chế độ truy cập được yêu cầu, nên Nanobot giữ không gian làm việc trước đó."
+      "body": "Gateway đã từ chối dự án hoặc chế độ truy cập này. Chọn dự án hiện có hoặc chế độ truy cập khác rồi thử lại."
     },
     "turnRejected": {
       "title": "Tin nhắn chưa được gửi",

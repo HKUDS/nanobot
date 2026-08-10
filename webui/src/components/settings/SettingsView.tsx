@@ -2328,6 +2328,7 @@ export function SettingsView({
             onAction={handleAutomationAction}
             onRequestEdit={setAutomationPendingEdit}
             onRequestDelete={setAutomationPendingDelete}
+            onBackToChat={onBackToChat}
           />
         );
       case "skills":
@@ -2448,7 +2449,7 @@ export function SettingsView({
         onSave={handleAutomationEdit}
       />
 
-      <main
+      <div
         className={cn(
           "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
           activeSection === "channels" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
@@ -2512,7 +2513,7 @@ export function SettingsView({
             </div>
           ) : null}
         </div>
-      </main>
+      </div>
     </div>
   );
 }
@@ -2578,9 +2579,9 @@ function SettingsSidebar({
         {t("settings.backToChat")}
       </button>
       <div className="mb-3 px-1 lg:mb-4 lg:px-2">
-        <h2 className="text-[18px] font-normal tracking-normal text-foreground">
+        <h1 className="text-[18px] font-normal tracking-normal text-foreground">
           {t("settings.sidebar.title")}
-        </h2>
+        </h1>
       </div>
 
       <nav
@@ -5488,6 +5489,7 @@ function AutomationsSettings({
   onAction,
   onRequestEdit,
   onRequestDelete,
+  onBackToChat,
 }: {
   payload: AutomationsPayload | null;
   loading: boolean;
@@ -5502,6 +5504,7 @@ function AutomationsSettings({
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
   onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
+  onBackToChat: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
@@ -5549,74 +5552,76 @@ function AutomationsSettings({
 
   return (
     <div className="space-y-5">
-      <section className="shrink-0">
-        <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
-          <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted p-1">
-              {summaryOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => onFilterChange(option.value)}
-                  className={cn(
-                    "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
-                    filter === option.value && "bg-background text-foreground",
-                    automationFilterToneClass(option.value, option.count, filter === option.value),
-                  )}
-                >
-                  <span>{option.label}</span>
-                  <span
+      {jobs.length ? (
+        <section className="shrink-0">
+          <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
+            <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
+              <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted p-1">
+                {summaryOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onFilterChange(option.value)}
                     className={cn(
-                      "min-w-5 shrink-0 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground",
-                      automationFilterCountClass(option.value, option.count),
+                      "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+                      filter === option.value && "bg-background text-foreground",
+                      automationFilterToneClass(option.value, option.count, filter === option.value),
                     )}
                   >
-                    {option.count}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-            <div className="relative min-w-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
-              <Input
-                value={query}
-                onChange={(event) => onQueryChange(event.target.value)}
-                placeholder={tx(
-                  "settings.automations.search",
-                  "Search task, message, linked chat, or schedule",
-                )}
-                className={cn(
-                  "h-9 w-full rounded-[13px] pl-9 text-[13px]",
-                  SETTINGS_SEARCH_INPUT_CLASS,
-                )}
-              />
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
-                >
-                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                  <span>{sortLabel[sort]}</span>
-                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-40">
-                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
-                    <span>{sortLabel[value]}</span>
-                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
-                  </DropdownMenuItem>
+                    <span>{option.label}</span>
+                    <span
+                      className={cn(
+                        "min-w-5 shrink-0 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground",
+                        automationFilterCountClass(option.value, option.count),
+                      )}
+                    >
+                      {option.count}
+                    </span>
+                  </button>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="relative min-w-0">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                <Input
+                  value={query}
+                  onChange={(event) => onQueryChange(event.target.value)}
+                  placeholder={tx(
+                    "settings.automations.search",
+                    "Search task, message, linked chat, or schedule",
+                  )}
+                  className={cn(
+                    "h-9 w-full rounded-[13px] pl-9 text-[13px]",
+                    SETTINGS_SEARCH_INPUT_CLASS,
+                  )}
+                />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                  >
+                    <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                    <span>{sortLabel[sort]}</span>
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-40">
+                  {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                    <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                      <span>{sortLabel[value]}</span>
+                      {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       {error ? (
         <div className="flex items-center gap-2 rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
@@ -5674,13 +5679,35 @@ function AutomationsSettings({
               : tx("settings.automations.empty", "No automations yet.")}
           </div>
           {!jobs.length ? (
-            <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
-              {tx(
-                "settings.automations.emptyHint",
-                "Create one from where it should run so nanobot keeps the right context.",
-              )}
-            </div>
-          ) : null}
+            <>
+              <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
+                {tx(
+                  "settings.automations.emptyHint",
+                  "Create automations in a chat so they keep the right context.",
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-full"
+                onClick={onBackToChat}
+              >
+                {tx("settings.automations.emptyAction", "Open a chat")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4 rounded-full"
+              onClick={() => {
+                onQueryChange("");
+                onFilterChange("all");
+              }}
+            >
+              {tx("settings.automations.clearFilters", "Clear filters")}
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -7396,6 +7423,23 @@ function AppsCatalogSettings({
     (cliAppsLoading || mcpPresetsLoading) &&
     !cliApps &&
     !mcpPresets;
+  const cliAppCount = cliApps?.apps.length ?? 0;
+  const emptyTitle = normalizedQuery
+    ? tx("settings.apps.empty", "No tools match your search.")
+    : filter === "cli"
+      ? tx("settings.apps.emptyApps", "No apps available.")
+      : filter === "mcp"
+        ? tx("settings.apps.emptyIntegrations", "No integrations available.")
+        : tx("settings.apps.emptyReady", "No tools are ready yet.");
+  const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery
+    ? null
+    : filter === "cli"
+      ? "mcp"
+      : filter === "mcp"
+        ? (cliAppCount ? "cli" : null)
+        : cliAppCount
+          ? "cli"
+          : "mcp";
   const statusMessage =
     cliError ||
     mcpError ||
@@ -7484,7 +7528,35 @@ function AppsCatalogSettings({
           </div>
         ) : (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            {tx("settings.apps.empty", "No tools match this view.")}
+            <p>{emptyTitle}</p>
+            {normalizedQuery ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-full"
+                onClick={() => onQueryChange("")}
+              >
+                {tx("settings.apps.clearSearch", "Clear search")}
+              </Button>
+            ) : emptyBrowseTarget ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-full"
+                onClick={() => onFilterChange(emptyBrowseTarget)}
+              >
+                {emptyBrowseTarget === "cli"
+                  ? tx("settings.apps.browseApps", "Browse apps")
+                  : tx("settings.apps.browseIntegrations", "Browse integrations")}
+              </Button>
+            ) : (
+              <p className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
+                {tx(
+                  "settings.apps.emptyIntegrationsHint",
+                  "Add a custom integration below.",
+                )}
+              </p>
+            )}
           </div>
         )}
       </section>

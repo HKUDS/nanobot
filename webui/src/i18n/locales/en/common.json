@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "Authentication required",
-      "hint": "Enter the secret configured as tokenIssueSecret in your gateway config.",
-      "placeholder": "Password",
+      "hint": "Enter the WebUI access password for this nanobot gateway.",
+      "label": "WebUI access password",
+      "placeholder": "Enter password",
       "submit": "Connect",
-      "invalid": "Invalid password. Try again."
+      "required": "Enter the WebUI access password.",
+      "invalid": "That password did not work. Check it and try again."
     },
     "account": {
       "section": "Account",
@@ -595,7 +597,14 @@
       "searchPlaceholder": "Search tools",
       "featured": "Tools",
       "loading": "Loading Apps...",
-      "empty": "No tools match this view.",
+      "empty": "No tools match your search.",
+      "emptyApps": "No apps available.",
+      "emptyIntegrations": "No integrations available.",
+      "emptyReady": "No tools are ready yet.",
+      "clearSearch": "Clear search",
+      "browseApps": "Browse apps",
+      "browseIntegrations": "Browse integrations",
+      "emptyIntegrationsHint": "Add a custom integration below.",
       "restartRequired": "Restart nanobot to apply updated apps and integrations."
     },
     "channels": {
@@ -698,7 +707,9 @@
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
       "empty": "No automations yet.",
-      "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
+      "emptyHint": "Create automations in a chat so they keep the right context.",
+      "emptyAction": "Open a chat",
+      "clearFilters": "Clear filters",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
       "localTrigger": "Local trigger",
@@ -1381,7 +1392,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again."
     },
     "turnRejected": {
       "title": "Message was not sent",

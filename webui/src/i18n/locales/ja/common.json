@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "認証が必要です",
-      "hint": "gateway 設定の tokenIssueSecret に指定されたシークレットを入力してください。",
-      "placeholder": "パスワード",
+      "hint": "この nanobot ゲートウェイの WebUI アクセスパスワードを入力してください。",
+      "label": "WebUI アクセスパスワード",
+      "placeholder": "パスワードを入力",
       "submit": "接続",
-      "invalid": "パスワードが無効です。もう一度お試しください。"
+      "required": "WebUI アクセスパスワードを入力してください。",
+      "invalid": "パスワードが正しくありません。確認してもう一度お試しください。"
     },
     "account": {
       "section": "アカウント",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "アプリを検索",
       "featured": "ツール",
       "loading": "アプリを読み込み中...",
-      "empty": "この表示に一致するツールはありません。",
+      "empty": "検索条件に一致するツールはありません。",
+      "emptyApps": "利用できるアプリはありません。",
+      "emptyIntegrations": "利用できる連携はありません。",
+      "emptyReady": "使用可能なツールはまだありません。",
+      "clearSearch": "検索をクリア",
+      "browseApps": "アプリを見る",
+      "browseIntegrations": "連携を見る",
+      "emptyIntegrationsHint": "下からカスタム連携を追加できます。",
       "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "自動タスクを読み込み中...",
       "noMatches": "この表示に一致する自動タスクはありません。",
       "empty": "自動タスクはまだありません。",
-      "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
+      "emptyHint": "正しいコンテキストを保持するには、チャットで自動化を作成してください。",
+      "emptyAction": "チャットを開く",
+      "clearFilters": "フィルターをクリア",
       "oneShot": "一回限り",
       "systemTask": "システム管理の自動タスク",
       "localTrigger": "ローカルトリガー",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "ワークスペースは変更されませんでした",
-      "body": "要求されたプロジェクトまたはアクセスモードがゲートウェイで拒否されたため、Nanobot は以前のワークスペースをそのまま使用しています。"
+      "body": "このプロジェクトまたはアクセスモードはゲートウェイに拒否されました。既存のプロジェクトまたは別のアクセスモードを選択して、もう一度お試しください。"
     },
     "turnRejected": {
       "title": "メッセージは送信されませんでした",

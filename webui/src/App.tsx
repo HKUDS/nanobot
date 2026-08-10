@@ -316,13 +316,22 @@ function AuthForm({
   onSecret: (secret: string) => void;
 }) {
   const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(
+    failed ? "invalid" : null,
+  );
+  const errorMessage = validationError ? t(`app.auth.${validationError}`) : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const secret = value.trim();
-    if (!secret) return;
+    if (!secret) {
+      setValidationError("required");
+      inputRef.current?.focus();
+      return;
+    }
     setSubmitting(true);
     onSecret(secret);
   };
@@ -334,26 +343,44 @@ function AuthForm({
         className="flex w-full max-w-sm flex-col gap-4"
       >
         <div className="flex flex-col items-center gap-1 text-center">
-          <p className="text-lg font-semibold">{t("app.auth.title")}</p>
-          <p className="text-sm text-muted-foreground">{t("app.auth.hint")}</p>
-        </div>
-        {failed && (
-          <p className="text-center text-sm text-destructive">
-            {t("app.auth.invalid")}
+          <h1 className="text-lg font-semibold">{t("app.auth.title")}</h1>
+          <p id="webui-auth-hint" className="text-sm text-muted-foreground">
+            {t("app.auth.hint")}
           </p>
-        )}
-        <Input
-          type="password"
-          placeholder={t("app.auth.placeholder")}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={submitting}
-          autoFocus
-        />
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="webui-access-password" className="text-sm font-medium text-foreground">
+            {t("app.auth.label")}
+          </label>
+          <Input
+            ref={inputRef}
+            id="webui-access-password"
+            name="webui-access-password"
+            type="password"
+            autoComplete="current-password"
+            placeholder={t("app.auth.placeholder")}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setValidationError(null);
+            }}
+            disabled={submitting}
+            aria-invalid={validationError ? true : undefined}
+            aria-describedby={
+              validationError ? "webui-auth-hint webui-auth-error" : "webui-auth-hint"
+            }
+            autoFocus
+          />
+          {errorMessage ? (
+            <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
+        </div>
         <Button
           type="submit"
           className="w-full"
-          disabled={!value.trim() || submitting}
+          disabled={submitting}
         >
           {t("app.auth.submit")}
         </Button>

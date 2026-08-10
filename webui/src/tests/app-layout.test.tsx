@@ -315,9 +315,38 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
-    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Authentication required" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("WebUI access password")).toHaveAttribute(
+      "autocomplete",
+      "current-password",
+    );
+    expect(
+      screen.queryByText("That password did not work. Check it and try again."),
+    ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("explains and focuses an empty auth password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI access password");
+    const connect = screen.getByRole("button", { name: "Connect" });
+    expect(connect).toBeEnabled();
+    fireEvent.click(connect);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter the WebUI access password.",
+    );
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAttribute("aria-describedby", "webui-auth-hint webui-auth-error");
+    expect(password).toHaveFocus();
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
   it("shows the auth form when bootstrap does not issue an API token", async () => {
@@ -329,8 +358,12 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
-    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Authentication required" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("That password did not work. Check it and try again."),
+    ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -341,11 +374,16 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByPlaceholderText("Password");
+    const password = await screen.findByLabelText("WebUI access password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    expect(await screen.findByText("Invalid password. Try again.")).toBeInTheDocument();
+    const retryPassword = await screen.findByLabelText("WebUI access password");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That password did not work. Check it and try again.",
+    );
+    expect(retryPassword).toHaveAttribute("aria-invalid", "true");
+    expect(retryPassword).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -363,6 +401,21 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it("uses one main landmark and a page heading in desktop settings", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll("main")).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
   });
 
   it("places Automations after Skills in the main sidebar", async () => {
@@ -650,6 +703,57 @@ describe("App layout", () => {
       access_mode: "restricted",
       restrict_to_workspace: true,
     });
+  });
+
+  it("preserves the first message when the gateway rejects a project", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    createChatSpy.mockRejectedValueOnce(
+      new Error("workspace_scope_rejected:project_path must be an existing directory"),
+    );
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "restricted",
+        default_scope: {
+          project_path: "C:\\workspace",
+          project_name: "workspace",
+          access_mode: "restricted",
+          restrict_to_workspace: true,
+        },
+        controls: { can_change_project: true, can_use_full_access: true },
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "Choose project" }));
+    fireEvent.change(await screen.findByLabelText("Paste path"), {
+      target: { value: "C:\\missing-project" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    const message = screen.getByLabelText("Message input");
+    fireEvent.change(message, { target: { value: "keep this first message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    expect(message).toHaveValue("keep this first message");
+    const projectButton = screen.getByRole("button", { name: "Choose project" });
+    await waitFor(() => expect(projectButton).toHaveFocus());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    fireEvent.click(projectButton);
+    const projectPath = await screen.findByLabelText("Paste path");
+    expect(projectPath).toHaveValue("C:\\missing-project");
+    expect(projectPath).toHaveAttribute("aria-invalid", "true");
+    expect(projectPath).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    expect(window.location.hash).toBe("");
+    consoleError.mockRestore();
   });
 
   it("restores the Settings route after a restart fallback hash", async () => {

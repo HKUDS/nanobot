@@ -11,10 +11,12 @@
     },
     "auth": {
       "title": "인증이 필요합니다",
-      "hint": "gateway 설정의 tokenIssueSecret에 구성된 비밀 값을 입력하세요.",
-      "placeholder": "비밀번호",
+      "hint": "이 nanobot 게이트웨이의 WebUI 액세스 비밀번호를 입력하세요.",
+      "label": "WebUI 액세스 비밀번호",
+      "placeholder": "비밀번호 입력",
       "submit": "연결",
-      "invalid": "비밀번호가 올바르지 않습니다. 다시 시도하세요."
+      "required": "WebUI 액세스 비밀번호를 입력하세요.",
+      "invalid": "비밀번호가 올바르지 않습니다. 확인한 후 다시 시도하세요."
     },
     "account": {
       "section": "계정",
@@ -581,7 +583,14 @@
       "searchPlaceholder": "앱 검색",
       "featured": "도구",
       "loading": "앱을 불러오는 중...",
-      "empty": "이 보기에 일치하는 도구가 없습니다.",
+      "empty": "검색과 일치하는 도구가 없습니다.",
+      "emptyApps": "사용 가능한 앱이 없습니다.",
+      "emptyIntegrations": "사용 가능한 연동이 없습니다.",
+      "emptyReady": "아직 준비된 도구가 없습니다.",
+      "clearSearch": "검색 지우기",
+      "browseApps": "앱 둘러보기",
+      "browseIntegrations": "연동 둘러보기",
+      "emptyIntegrationsHint": "아래에서 사용자 지정 연동을 추가하세요.",
       "restartRequired": "업데이트된 앱과 기능을 적용하려면 nanobot을 다시 시작하세요."
     },
     "channels": {
@@ -684,7 +693,9 @@
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
       "empty": "아직 자동화가 없습니다.",
-      "emptyHint": "실행될 위치에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
+      "emptyHint": "올바른 컨텍스트를 유지하려면 채팅에서 자동화를 만드세요.",
+      "emptyAction": "채팅 열기",
+      "clearFilters": "필터 지우기",
       "oneShot": "일회성",
       "systemTask": "시스템 관리 자동화",
       "localTrigger": "로컬 트리거",
@@ -1367,7 +1378,7 @@
     },
     "workspaceScopeRejected": {
       "title": "작업공간이 변경되지 않았습니다",
-      "body": "요청한 프로젝트 또는 접근 모드가 게이트웨이에서 거부되어 Nanobot이 이전 작업공간을 계속 사용합니다."
+      "body": "게이트웨이가 이 프로젝트 또는 접근 모드를 거부했습니다. 기존 프로젝트나 다른 접근 모드를 선택한 후 다시 시도하세요."
     },
     "turnRejected": {
       "title": "메시지가 전송되지 않았습니다",
