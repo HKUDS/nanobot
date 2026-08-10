@@ -14,6 +14,7 @@ import type {
   ChannelConnectPayload,
   NanobotFeaturesPayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelQrConnectLabels = {
   qrAlt: string;
@@ -43,7 +44,6 @@ export type ChannelQrConnectPendingContext = {
 };
 
 export function ChannelQrConnectFlow({
-  token,
   channelName,
   startOptions = {},
   idleLabel,
@@ -69,6 +69,7 @@ export function ChannelQrConnectFlow({
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
 }) {
+  const { client } = useClient();
   const pageVisible = usePageVisibility();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -78,8 +79,6 @@ export function ChannelQrConnectFlow({
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
   const startDomain = startOptions.domain;
   const startInstanceId = startOptions.instanceId;
   const startMode = startOptions.mode;
@@ -129,7 +128,7 @@ export function ChannelQrConnectFlow({
       pollInFlight.current = true;
       try {
         const payload = await pollChannelConnect(
-          tokenRef.current,
+          client,
           channelName,
           sessionId,
         );
@@ -163,6 +162,7 @@ export function ChannelQrConnectFlow({
     };
   }, [
     channelName,
+    client,
     connect?.interval_ms,
     connect?.session_id,
     connect?.status,
@@ -175,7 +175,7 @@ export function ChannelQrConnectFlow({
     setBusy(true);
     setError(null);
     try {
-      const payload = await startChannelConnect(tokenRef.current, channelName, {
+      const payload = await startChannelConnect(client, channelName, {
         domain: startDomain,
         instanceId: startInstanceId,
         mode: startMode,
@@ -187,7 +187,7 @@ export function ChannelQrConnectFlow({
     } finally {
       setBusy(false);
     }
-  }, [channelName, startDomain, startForce, startInstanceId, startMode]);
+  }, [channelName, client, startDomain, startForce, startInstanceId, startMode]);
 
   useEffect(() => {
     if (!connectRequestId || connectRequestId === handledRequestId) return;
@@ -203,7 +203,7 @@ export function ChannelQrConnectFlow({
     setBusy(true);
     try {
       const payload = await cancelChannelConnect(
-        tokenRef.current,
+        client,
         channelName,
         connect.session_id,
       );
@@ -223,10 +223,9 @@ export function ChannelQrConnectFlow({
     setError(null);
     try {
       const payload = await pollChannelConnect(
-        tokenRef.current,
+        client,
         channelName,
         connect.session_id,
-        "",
         params,
       );
       setConnect((current) => ({

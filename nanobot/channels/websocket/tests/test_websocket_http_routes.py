@@ -9,8 +9,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import quote, urlencode
 
+import httpx
 import pytest
 
 from nanobot.bus.events import OutboundMessage
@@ -614,9 +614,10 @@ async def test_webui_skill_management_routes(
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         headers = {"Authorization": f"Bearer {token}"}
-        update_response = await _http_get(
-            f"http://127.0.0.1:{port}/api/webui/skills/update"
-            "?name=custom-skill&enabled=false",
+        update_response = await _webui_mutate(
+            channel,
+            "skill.update",
+            {"name": "custom-skill", "enabled": False},
             headers=headers,
         )
         assert update_response.status_code == 200
@@ -628,9 +629,10 @@ async def test_webui_skill_management_routes(
         )
         assert custom["enabled"] is False
 
-        delete_response = await _http_get(
-            f"http://127.0.0.1:{port}/api/webui/skills/delete"
-            "?name=custom-skill",
+        delete_response = await _webui_mutate(
+            channel,
+            "skill.delete",
+            {"name": "custom-skill"},
             headers=headers,
         )
         assert delete_response.status_code == 200
@@ -751,12 +753,10 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         }
         trends.assert_awaited_once_with(["acme/agent-skills/react-testing"])
 
-        params = urlencode({
-            "source": "acme/agent-skills",
-            "skill": "react-testing",
-        })
-        install_response = await _http_get(
-            f"http://127.0.0.1:{port}/api/webui/skills/install?{params}",
+        install_response = await _webui_mutate(
+            channel,
+            "skill.install",
+            {"source": "acme/agent-skills", "skill": "react-testing"},
             headers=headers,
         )
         assert install_response.status_code == 200
@@ -810,25 +810,22 @@ async def test_webui_skill_install_rejects_overlapping_requests(
         workspace_path=tmp_path,
         port=_free_port(),
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    path = (
-        "/api/webui/skills/install"
-        "?source=acme%2Fagent-skills&skill=react-testing"
+    first = asyncio.create_task(
+        _webui_mutate(
+            channel,
+            "skill.install",
+            {"source": "acme/agent-skills", "skill": "react-testing"},
+        )
     )
-    request = _FakeReq(
-        {
-            "Authorization": f"Bearer {token}",
-            "Host": "127.0.0.1:8765",
-        },
-        path=path,
-    )
-
-    first = asyncio.create_task(channel.gateway.http.dispatch(_LOCAL, request))
     await started.wait()
-    overlapping = await channel.gateway.http.dispatch(_LOCAL, request)
+    overlapping = await _webui_mutate(
+        channel,
+        "skill.install",
+        {"source": "acme/agent-skills", "skill": "react-testing"},
+    )
 
     assert overlapping.status_code == 409
-    assert "already in progress" in overlapping.body.decode()
+    assert "already in progress" in overlapping.text
     assert install_mock.await_count == 1
 
     finish.set()
@@ -854,17 +851,15 @@ async def test_webui_skill_delete_remains_local_only(
         workspace_path=tmp_path,
         port=_free_port(),
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.dispatch(
-        _REMOTE,
-        _FakeReq(
-            {"Authorization": f"Bearer {token}"},
-            path="/api/webui/skills/delete?name=custom-skill",
-        ),
+    response = await _webui_mutate(
+        channel,
+        "skill.delete",
+        {"name": "custom-skill"},
+        connection=_REMOTE,
     )
 
     assert response.status_code == 403
-    assert "remote skill deletion is disabled" in response.body.decode()
+    assert "remote skill deletion is disabled" in response.text
     delete.assert_not_called()
 
 
@@ -904,20 +899,15 @@ async def test_webui_skill_install_honors_remote_install_opt_in(
         workspace_path=tmp_path,
         port=_free_port(),
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.dispatch(
-        _REMOTE,
-        _FakeReq(
-            {"Authorization": f"Bearer {token}"},
-            path=(
-                "/api/webui/skills/install"
-                "?source=acme%2Fagent-skills&skill=react-testing"
-            ),
-        ),
+    response = await _webui_mutate(
+        channel,
+        "skill.install",
+        {"source": "acme/agent-skills", "skill": "react-testing"},
+        connection=_REMOTE,
     )
 
     assert response.status_code == 200
-    assert json.loads(response.body.decode())["last_action"]["name"] == "react-testing"
+    assert response.json()["last_action"]["name"] == "react-testing"
 
 
 @pytest.mark.asyncio
@@ -979,9 +969,10 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         assert catalog.status_code == 200
         assert catalog.json()["apps"][0]["name"] == "gimp"
 
-        installed = await _http_get(
-            "http://127.0.0.1:29912/api/settings/cli-apps/install?name=gimp",
-            headers=auth,
+        installed = await _webui_mutate(
+            channel,
+            "settings.cli_app.install",
+            {"name": "gimp"},
         )
         assert installed.status_code == 200
         assert installed.json()["last_action"]["message"] == "install:gimp"
@@ -1017,26 +1008,29 @@ async def test_nanobot_feature_routes_require_token_and_enable(
         assert features["websocket"]["enabled"] is True
         assert features["websocket"]["ready"] is True
 
-        enabled = await _http_get(
-            "http://127.0.0.1:29916/api/settings/nanobot-features/enable?name=matrix",
-            headers=auth,
+        enabled = await _webui_mutate(
+            channel,
+            "settings.feature.enable",
+            {"name": "matrix"},
         )
         assert enabled.status_code == 200
         body = enabled.json()
         assert body["last_action"]["message"] == "Enabled channel 'matrix'"
         assert body["restart_required_sections"] == ["runtime"]
 
-        disabled_websocket = await _http_get(
-            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=websocket",
-            headers=auth,
+        disabled_websocket = await _webui_mutate(
+            channel,
+            "settings.feature.disable",
+            {"name": "websocket"},
         )
         assert disabled_websocket.status_code == 400
         assert "cannot be disabled from WebUI" in disabled_websocket.text
         assert "websocket" not in json.loads(config_path.read_text(encoding="utf-8"))["channels"]
 
-        disabled = await _http_get(
-            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=matrix",
-            headers=auth,
+        disabled = await _webui_mutate(
+            channel,
+            "settings.feature.disable",
+            {"name": "matrix"},
         )
         assert disabled.status_code == 200
         body = disabled.json()
@@ -1158,43 +1152,41 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     assert body["requests"][0]["created_at_ms"] == 1_000_000
     assert body["requests"][0]["expires_at_ms"] == 1_600_000
 
-    approved_response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(auth, path="/api/settings/pairing/approve?code=ABCD-EFGH"),
-        "/api/settings/pairing/approve",
+    approved_response = await _webui_mutate(
+        channel,
+        "settings.pairing.approve",
+        {"code": "ABCD-EFGH"},
     )
-    assert approved_response is not None
     assert approved_response.status_code == 200
-    body = json.loads(approved_response.body.decode())
+    body = approved_response.json()
     assert body["last_action"]["action"] == "approve"
     assert body["last_action"]["sender_id"] == "ou_123"
     assert approved == ["ABCD-EFGH"]
 
-    denied_action = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(auth, path="/api/settings/pairing/deny?code=ABCD-EFGH"),
-        "/api/settings/pairing/deny",
+    denied_action = await _webui_mutate(
+        channel,
+        "settings.pairing.deny",
+        {"code": "ABCD-EFGH"},
     )
-    assert denied_action is not None
     assert denied_action.status_code == 200
-    assert json.loads(denied_action.body.decode())["last_action"]["action"] == "deny"
+    assert denied_action.json()["last_action"]["action"] == "deny"
     assert denied == ["ABCD-EFGH"]
 
-    missing_code = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(auth, path="/api/settings/pairing/approve"),
-        "/api/settings/pairing/approve",
+    missing_code = await _webui_mutate(
+        channel,
+        "settings.pairing.approve",
     )
-    assert missing_code is not None
     assert missing_code.status_code == 400
-    assert "Missing pairing code" in missing_code.body.decode()
+    assert "Missing pairing code" in missing_code.text
 
 
-def test_api_service_settings_read_api_key_from_private_header(bus: MagicMock) -> None:
+def test_api_service_settings_read_api_key_from_webui_payload(bus: MagicMock) -> None:
     channel = _ch(bus)
-    request = _FakeReq(
-        {"X-Nanobot-API-Service-Values": json.dumps({"api_key": "secret-token"})},
-        path="/api/settings/api-service/start?host=0.0.0.0&port=8900&timeout=120",
+    request = _FakeReq(path="/api/settings/api-service/start")
+    setattr(
+        request,
+        "_nanobot_webui_mutation_payload",
+        {"host": "0.0.0.0", "port": 8900, "timeout": 120, "api_key": "secret-token"},
     )
 
     query = channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
@@ -1207,24 +1199,19 @@ def test_api_service_settings_read_api_key_from_private_header(bus: MagicMock) -
     }
 
 
-def test_api_service_settings_reject_invalid_private_header(bus: MagicMock) -> None:
+def test_api_service_settings_reject_non_string_api_key(bus: MagicMock) -> None:
     from nanobot.webui.settings_api import WebUISettingsError
 
     channel = _ch(bus)
-    request = _FakeReq(
-        {"X-Nanobot-API-Service-Values": json.dumps({"api_key": 123})},
-        path="/api/settings/api-service/start?host=127.0.0.1",
+    request = _FakeReq(path="/api/settings/api-service/start")
+    setattr(
+        request,
+        "_nanobot_webui_mutation_payload",
+        {"host": "127.0.0.1", "api_key": 123},
     )
 
     with pytest.raises(WebUISettingsError, match="API key must be a string"):
         channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
-
-    query_secret = _FakeReq(
-        path="/api/settings/api-service/start?host=127.0.0.1&api_key=secret-token",
-    )
-    with pytest.raises(WebUISettingsError, match="private header"):
-        channel.gateway.http.settings_routes._parse_api_service_settings_query(query_secret)
-
 
 @pytest.mark.asyncio
 async def test_nanobot_feature_remote_install_requires_opt_in(
@@ -1242,19 +1229,15 @@ async def test_nanobot_feature_remote_install_requires_opt_in(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    path = "/api/settings/nanobot-features/enable?name=matrix"
-    request = _FakeReq({"Authorization": f"Bearer {token}"}, path=path)
-
-    blocked = await channel.gateway.http.settings_routes.dispatch(
-        _REMOTE,
-        request,
-        "/api/settings/nanobot-features/enable",
+    blocked = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
+        connection=_REMOTE,
     )
 
-    assert blocked is not None
     assert blocked.status_code == 403
-    assert "remote WebUI is disabled" in blocked.body.decode()
+    assert "remote WebUI is disabled" in blocked.text
     assert install_calls == []
 
     config_path.write_text(
@@ -1262,13 +1245,13 @@ async def test_nanobot_feature_remote_install_requires_opt_in(
         encoding="utf-8",
     )
 
-    allowed = await channel.gateway.http.settings_routes.dispatch(
-        _REMOTE,
-        request,
-        "/api/settings/nanobot-features/enable",
+    allowed = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
+        connection=_REMOTE,
     )
 
-    assert allowed is not None
     assert allowed.status_code == 200
     assert install_calls == ["matrix"]
 
@@ -1289,19 +1272,12 @@ async def test_nanobot_feature_local_install_allowed_by_default(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    request = _FakeReq(
-        {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
-        path="/api/settings/nanobot-features/enable?name=matrix",
+    response = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
     )
 
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        request,
-        "/api/settings/nanobot-features/enable",
-    )
-
-    assert response is not None
     assert response.status_code == 200
     assert install_calls == ["matrix"]
     assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
@@ -1338,21 +1314,14 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
         port=_free_port(),
         channel_feature_action=channel_feature_action,
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    request = _FakeReq(
-        {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
-        path="/api/settings/nanobot-features/enable?name=matrix",
+    response = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
     )
 
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        request,
-        "/api/settings/nanobot-features/enable",
-    )
-
-    assert response is not None
     assert response.status_code == 200
-    body = json.loads(response.body.decode())
+    body = response.json()
     assert calls == [("enable", "matrix", None)]
     assert body["requires_restart"] is False
     assert body["restart_required_sections"] == []
@@ -1380,19 +1349,14 @@ async def test_channel_connect_runtime_import_error_is_not_reported_as_unsupport
         lambda _name: FakePlugin(),
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
-            path="/api/settings/channels/fake/connect/start",
-        ),
-        "/api/settings/channels/fake/connect/start",
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.connect.start",
+        {"channel": "fake"},
     )
 
-    assert response is not None
     assert response.status_code == 500
-    assert "failed to start fake connection" in response.body.decode()
+    assert "failed to start fake connection" in response.text
 
 
 @pytest.mark.asyncio
@@ -1474,37 +1438,26 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
         port=_free_port(),
         channel_feature_action=channel_feature_action,
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    auth = {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"}
-
-    started = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            auth,
-            path="/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default",
-        ),
-        "/api/settings/channels/feishu/connect/start",
+    started = await _webui_mutate(
+        channel,
+        "settings.channel.connect.start",
+        {"channel": "feishu", "domain": "feishu", "instance_id": "default"},
     )
 
-    assert started is not None
     assert started.status_code == 200
-    start_body = json.loads(started.body.decode())
+    start_body = started.json()
     assert start_body["status"] == "pending"
     assert start_body["instance_id"] == "default"
     assert start_body["qr_url"].startswith("https://accounts.feishu.cn/")
 
-    polled = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            auth,
-            path=f"/api/settings/channels/feishu/connect/poll?session_id={start_body['session_id']}",
-        ),
-        "/api/settings/channels/feishu/connect/poll",
+    polled = await _webui_mutate(
+        channel,
+        "settings.channel.connect.poll",
+        {"channel": "feishu", "session_id": start_body["session_id"]},
     )
 
-    assert polled is not None
     assert polled.status_code == 200
-    body = json.loads(polled.body.decode())
+    body = polled.json()
     assert body["status"] == "succeeded"
     assert body["instance_id"] == "default"
     assert "app_secret" not in body
@@ -1664,32 +1617,25 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
         port=_free_port(),
         channel_feature_action=channel_feature_action,
     )
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {
-                "Authorization": f"Bearer {token}",
-                "Host": "127.0.0.1:8765",
-                "X-Nanobot-Channel-Values": json.dumps(
-                    {
-                        "channels.discord.token": "discord-token",
-                        "channels.discord.allowChannels": "123, 456",
-                        "channels.discord.groupPolicy": "open",
-                    }
-                ),
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.configure",
+        {
+            "name": "discord",
+            "enable": True,
+            "values": {
+                "channels.discord.token": "discord-token",
+                "channels.discord.allowChannels": "123, 456",
+                "channels.discord.groupPolicy": "open",
             },
-            path="/api/settings/channels/configure?name=discord&enable=true",
-        ),
-        "/api/settings/channels/configure",
+        },
     )
 
-    assert response is not None
     assert response.status_code == 200
-    body = json.loads(response.body.decode())
+    body = response.json()
     assert body["saved"] is True
     assert body["name"] == "discord"
-    assert "discord-token" not in response.body.decode()
+    assert "discord-token" not in response.text
     assert calls == [("enable", "discord", "default")]
     assert body["nanobot_features"]["requires_restart"] is False
     data = json.loads(config_path.read_text(encoding="utf-8"))
@@ -1728,28 +1674,20 @@ async def test_channel_configure_route_preserves_existing_channel_values(
     monkeypatch.setattr(loader, "_current_config_path", config_path)
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {
-                "Authorization": f"Bearer {token}",
-                "Host": "127.0.0.1:8765",
-                "X-Nanobot-Channel-Values": json.dumps(
-                    {
-                        "channels.discord.token": "",
-                        "channels.discord.allowChannels": "new-channel",
-                    }
-                ),
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.configure",
+        {
+            "name": "discord",
+            "values": {
+                "channels.discord.token": "",
+                "channels.discord.allowChannels": "new-channel",
             },
-            path="/api/settings/channels/configure?name=discord",
-        ),
-        "/api/settings/channels/configure",
+        },
     )
 
-    assert response is not None
     assert response.status_code == 200
-    body = json.loads(response.body.decode())
+    body = response.json()
     assert body["saved_keys"] == ["channels.discord.allowChannels"]
     discord = next(
         feature
@@ -1794,26 +1732,18 @@ async def test_channel_configure_route_saves_matrix_device_id_without_replacing_
     monkeypatch.setattr(loader, "_current_config_path", config_path)
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {
-                "Authorization": f"Bearer {token}",
-                "Host": "127.0.0.1:8765",
-                "X-Nanobot-Channel-Values": json.dumps(
-                    {
-                        "channels.matrix.accessToken": "",
-                        "channels.matrix.deviceId": "DEVICE-ID",
-                    }
-                ),
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.configure",
+        {
+            "name": "matrix",
+            "values": {
+                "channels.matrix.accessToken": "",
+                "channels.matrix.deviceId": "DEVICE-ID",
             },
-            path="/api/settings/channels/configure?name=matrix",
-        ),
-        "/api/settings/channels/configure",
+        },
     )
 
-    assert response is not None
     assert response.status_code == 200
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["matrix"]["accessToken"] == "saved-token"
@@ -1834,27 +1764,19 @@ async def test_channel_configure_route_saves_mattermost_setup(
     monkeypatch.setattr(loader, "_current_config_path", config_path)
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {
-                "Authorization": f"Bearer {token}",
-                "Host": "127.0.0.1:8765",
-                "X-Nanobot-Channel-Values": json.dumps(
-                    {
-                        "channels.mattermost.serverUrl": "https://chat.example.com",
-                        "channels.mattermost.token": "mattermost-token",
-                        "channels.mattermost.teamId": "platform",
-                    }
-                ),
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.configure",
+        {
+            "name": "mattermost",
+            "values": {
+                "channels.mattermost.serverUrl": "https://chat.example.com",
+                "channels.mattermost.token": "mattermost-token",
+                "channels.mattermost.teamId": "platform",
             },
-            path="/api/settings/channels/configure?name=mattermost",
-        ),
-        "/api/settings/channels/configure",
+        },
     )
 
-    assert response is not None
     assert response.status_code == 200
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["mattermost"] == {
@@ -1880,23 +1802,17 @@ async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    request = _FakeReq(
-        {
-            "Authorization": f"Bearer {token}",
-            "Host": "nanobot.example",
-            "X-Forwarded-For": "203.0.113.42",
-        },
-        path="/api/settings/nanobot-features/enable?name=matrix",
+    forwarded_headers = {
+        "Host": "nanobot.example",
+        "X-Forwarded-For": "203.0.113.42",
+    }
+    blocked = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
+        headers=forwarded_headers,
     )
 
-    blocked = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        request,
-        "/api/settings/nanobot-features/enable",
-    )
-
-    assert blocked is not None
     assert blocked.status_code == 403
     assert install_calls == []
 
@@ -1905,13 +1821,13 @@ async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
         encoding="utf-8",
     )
 
-    allowed = await channel.gateway.http.settings_routes.dispatch(
-        _LOCAL,
-        request,
-        "/api/settings/nanobot-features/enable",
+    allowed = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
+        headers=forwarded_headers,
     )
 
-    assert allowed is not None
     assert allowed.status_code == 200
     assert install_calls == ["matrix"]
 
@@ -1932,19 +1848,13 @@ async def test_nanobot_feature_remote_enable_without_install_is_allowed(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    request = _FakeReq(
-        {"Authorization": f"Bearer {token}"},
-        path="/api/settings/nanobot-features/enable?name=matrix",
+    response = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "matrix"},
+        connection=_REMOTE,
     )
 
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _REMOTE,
-        request,
-        "/api/settings/nanobot-features/enable",
-    )
-
-    assert response is not None
     assert response.status_code == 200
     assert install_calls == []
     assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
@@ -1966,19 +1876,13 @@ async def test_nanobot_feature_remote_disable_does_not_need_install_policy(
     _stub_matrix_feature(monkeypatch, config_path, deps=["matrix-nio>=0.25.2"], installed=False)
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_api_token(300)
-    request = _FakeReq(
-        {"Authorization": f"Bearer {token}"},
-        path="/api/settings/nanobot-features/disable?name=matrix",
+    response = await _webui_mutate(
+        channel,
+        "settings.feature.disable",
+        {"name": "matrix"},
+        connection=_REMOTE,
     )
 
-    response = await channel.gateway.http.settings_routes.dispatch(
-        _REMOTE,
-        request,
-        "/api/settings/nanobot-features/disable",
-    )
-
-    assert response is not None
     assert response.status_code == 200
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["matrix"]["enabled"] is False
@@ -2150,14 +2054,10 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         assert catalog.status_code == 200
         assert catalog.json()["presets"][0]["name"] == "browserbase"
 
-        enabled = await _http_get(
-            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
-            headers={
-                **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
-                    {"browserbase_api_key": "bb_live_secret"}
-                ),
-            },
+        enabled = await _webui_mutate(
+            channel,
+            "settings.mcp.enable",
+            {"name": "browserbase", "browserbase_api_key": "bb_live_secret"},
         )
         assert enabled.status_code == 200
         assert preset_queries[-1][1]["browserbase_api_key"] == ["bb_live_secret"]
@@ -2167,40 +2067,27 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         assert body["hot_reload"]["ok"] is True
         assert body["restart_required_sections"] == []
 
-        bad_header = await _http_get(
-            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
-            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
-        )
-        assert bad_header.status_code == 400
-
-        custom = await _http_get(
-            "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
-            headers={
-                **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
-                    {"name": "docs", "command": "npx"}
-                ),
-            },
+        custom = await _webui_mutate(
+            channel,
+            "settings.mcp.custom",
+            {"name": "docs", "command": "npx"},
         )
         assert custom.status_code == 200
         assert custom_queries[-1][1]["command"] == ["npx"]
         assert custom.json()["last_action"]["message"] == "custom:docs MCP config reloaded."
 
-        imported = await _http_get(
-            "http://127.0.0.1:29913/api/settings/mcp-presets/import",
-            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
+        imported = await _webui_mutate(
+            channel,
+            "settings.mcp.import",
+            {"config": "{}"},
         )
         assert imported.status_code == 200
         assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
 
-        tools = await _http_get(
-            "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
-            headers={
-                **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
-                    {"name": "docs", "enabled_tools": []}
-                ),
-            },
+        tools = await _webui_mutate(
+            channel,
+            "settings.mcp.tools",
+            {"name": "docs", "enabled_tools": []},
         )
         assert tools.status_code == 200
         assert tools.json()["last_action"]["message"] == "tools:docs MCP config reloaded."
@@ -2291,10 +2178,10 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
         }
-        query = urlencode({"state": json.dumps(payload)})
-        updated = await _http_get(
-            f"http://127.0.0.1:29911/api/webui/sidebar-state/update?{query}",
-            headers=auth,
+        updated = await _webui_mutate(
+            channel,
+            "sidebar.update",
+            {"state": payload},
         )
         assert updated.status_code == 200
         body = updated.json()
@@ -2325,16 +2212,14 @@ async def test_session_delete_removes_file(
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
         webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
-        resp = await _http_get(
-            "http://127.0.0.1:29903/api/sessions/websocket:doomed/delete",
-            headers=auth,
+        resp = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed"},
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
@@ -2436,21 +2321,20 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[external_job.id]["origin"]["preview"] == ""
         assert by_id["heartbeat"]["protected"] is True
 
-        updated = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={user_job.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
-                    {
-                        "name": "Daily quiz",
-                        "message": "Ask the daily quiz",
-                        "schedule": {
-                            "kind": "cron",
-                            "expr": "0 9 * * *",
-                            "tz": "UTC",
-                        },
-                    }
-                ),
+        updated = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {
+                    "name": "Daily quiz",
+                    "message": "Ask the daily quiz",
+                    "schedule": {
+                        "kind": "cron",
+                        "expr": "0 9 * * *",
+                        "tz": "UTC",
+                    },
+                },
             },
         )
         assert updated.status_code == 200
@@ -2461,128 +2345,125 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
         assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
 
-        unicode_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={user_job.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": quote(
-                    json.dumps(
-                        {
-                            "name": "每日测验",
-                            "message": "问今日测验",
-                        },
-                        ensure_ascii=False,
-                    ),
-                    safe="",
-                ),
+        unicode_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {"name": "每日测验", "message": "问今日测验"},
             },
         )
         assert unicode_update.status_code == 200
         assert cron.get_job(user_job.id).name == "每日测验"
         assert cron.get_job(user_job.id).payload.message == "问今日测验"
 
-        malformed_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={user_job.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"message": ["bad"]}),
-            },
+        malformed_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {"id": user_job.id, "values": {"message": ["bad"]}},
         )
         assert malformed_update.status_code == 400
         assert cron.get_job(user_job.id).payload.message == "问今日测验"
 
-        invalid_cron_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={user_job.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
-                    {"schedule": {"kind": "cron", "expr": "not a cron", "tz": "UTC"}}
-                ),
+        invalid_cron_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {
+                    "schedule": {"kind": "cron", "expr": "not a cron", "tz": "UTC"}
+                },
             },
         )
         assert invalid_cron_update.status_code == 400
         assert cron.get_job(user_job.id).schedule.expr == "0 9 * * *"
 
-        past_one_shot_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={past_one_shot_job.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
-                    {
-                        "message": "Updated one-shot message",
-                        "schedule": {"kind": "at", "at_ms": 1},
-                    }
-                ),
+        past_one_shot_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": past_one_shot_job.id,
+                "values": {
+                    "message": "Updated one-shot message",
+                    "schedule": {"kind": "at", "at_ms": 1},
+                },
             },
         )
         assert past_one_shot_update.status_code == 200
         assert cron.get_job(past_one_shot_job.id).payload.message == "Updated one-shot message"
         assert cron.get_job(past_one_shot_job.id).schedule.at_ms == 1
 
-        protected_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id=heartbeat",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"name": "bad"}),
-            },
+        protected_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {"id": "heartbeat", "values": {"name": "bad"}},
         )
         assert protected_update.status_code == 403
 
-        disabled = await _http_get(
-            f"{base_url}/api/webui/automations/disable?id={user_job.id}",
-            headers=auth,
+        disabled = await _webui_mutate(
+            channel,
+            "automation.disable",
+            {"id": user_job.id},
         )
         assert disabled.status_code == 200
         by_id = {job["id"]: job for job in disabled.json()["jobs"]}
         assert by_id[user_job.id]["enabled"] is False
 
-        disabled_run = await _http_get(
-            f"{base_url}/api/webui/automations/run?id={user_job.id}",
-            headers=auth,
+        disabled_run = await _webui_mutate(
+            channel,
+            "automation.run",
+            {"id": user_job.id},
         )
         assert disabled_run.status_code == 409
 
-        unbound_run = await _http_get(
-            f"{base_url}/api/webui/automations/run?id={incomplete_job.id}",
-            headers=auth,
+        unbound_run = await _webui_mutate(
+            channel,
+            "automation.run",
+            {"id": incomplete_job.id},
         )
         assert unbound_run.status_code == 409
         assert "no linked chat" in unbound_run.text
 
-        unbound_enable = await _http_get(
-            f"{base_url}/api/webui/automations/enable?id={incomplete_job.id}",
-            headers=auth,
+        unbound_enable = await _webui_mutate(
+            channel,
+            "automation.enable",
+            {"id": incomplete_job.id},
         )
         assert unbound_enable.status_code == 409
         assert "no linked chat" in unbound_enable.text
 
-        protected_delete = await _http_get(
-            f"{base_url}/api/webui/automations/delete?id=heartbeat",
-            headers=auth,
+        protected_delete = await _webui_mutate(
+            channel,
+            "automation.delete",
+            {"id": "heartbeat"},
         )
         assert protected_delete.status_code == 403
-        protected_disable = await _http_get(
-            f"{base_url}/api/webui/automations/disable?id=heartbeat",
-            headers=auth,
+        protected_disable = await _webui_mutate(
+            channel,
+            "automation.disable",
+            {"id": "heartbeat"},
         )
         assert protected_disable.status_code == 403
-        protected_run = await _http_get(
-            f"{base_url}/api/webui/automations/run?id=heartbeat",
-            headers=auth,
+        protected_run = await _webui_mutate(
+            channel,
+            "automation.run",
+            {"id": "heartbeat"},
         )
         assert protected_run.status_code == 403
 
-        enabled = await _http_get(
-            f"{base_url}/api/webui/automations/enable?id={user_job.id}",
-            headers=auth,
+        enabled = await _webui_mutate(
+            channel,
+            "automation.enable",
+            {"id": user_job.id},
         )
         assert enabled.status_code == 200
         by_id = {job["id"]: job for job in enabled.json()["jobs"]}
         assert by_id[user_job.id]["enabled"] is True
 
-        deleted = await _http_get(
-            f"{base_url}/api/webui/automations/delete?id={user_job.id}",
-            headers=auth,
+        deleted = await _webui_mutate(
+            channel,
+            "automation.delete",
+            {"id": user_job.id},
         )
         assert deleted.status_code == 200
         assert user_job.id not in {job["id"] for job in deleted.json()["jobs"]}
@@ -2629,46 +2510,45 @@ async def test_webui_automations_route_manages_local_triggers(
         assert by_id[trigger.id]["payload"]["message"] == "Review queued PR"
         assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
 
-        disabled = await _http_get(
-            f"{base_url}/api/webui/automations/disable?id={trigger.id}",
-            headers=auth,
+        disabled = await _webui_mutate(
+            channel,
+            "automation.disable",
+            {"id": trigger.id},
         )
         assert disabled.status_code == 200
         stored = trigger_store.get(trigger.id)
         assert stored is not None
         assert stored.enabled is False
 
-        run = await _http_get(
-            f"{base_url}/api/webui/automations/run?id={trigger.id}",
-            headers=auth,
+        run = await _webui_mutate(
+            channel,
+            "automation.run",
+            {"id": trigger.id},
         )
         assert run.status_code == 409
         assert "CLI message" in run.text
 
-        renamed = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={trigger.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"name": "Release review"}),
-            },
+        renamed = await _webui_mutate(
+            channel,
+            "automation.update",
+            {"id": trigger.id, "values": {"name": "Release review"}},
         )
         assert renamed.status_code == 200
         stored = trigger_store.get(trigger.id)
         assert stored is not None
         assert stored.name == "Release review"
 
-        bad_update = await _http_get(
-            f"{base_url}/api/webui/automations/update?id={trigger.id}",
-            headers={
-                **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"message": "coupled"}),
-            },
+        bad_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {"id": trigger.id, "values": {"message": "coupled"}},
         )
         assert bad_update.status_code == 400
 
-        deleted = await _http_get(
-            f"{base_url}/api/webui/automations/delete?id={trigger.id}",
-            headers=auth,
+        deleted = await _webui_mutate(
+            channel,
+            "automation.delete",
+            {"id": trigger.id},
         )
         assert deleted.status_code == 200
         assert trigger_store.get(trigger.id) is None
@@ -2696,13 +2576,11 @@ async def test_session_delete_blocks_when_bound_automation_exists(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29915)
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         path = sm._get_session_path("websocket:doomed")
-        resp = await _http_get(
-            "http://127.0.0.1:29915/api/sessions/websocket:doomed/delete",
-            headers=auth,
+        resp = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed"},
         )
 
         assert resp.status_code == 200
@@ -2723,7 +2601,6 @@ async def test_session_delete_blocks_and_cascades_local_triggers(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
     sm = _seed_session(tmp_path, key="websocket:doomed")
     trigger_store = LocalTriggerStore(tmp_path)
     trigger = trigger_store.create(
@@ -2740,20 +2617,19 @@ async def test_session_delete_blocks_and_cascades_local_triggers(
     )
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
-        blocked = await _http_get(
-            f"{base_url}/api/sessions/websocket:doomed/delete",
-            headers=auth,
+        blocked = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed"},
         )
         assert blocked.status_code == 200
         assert blocked.json()["blocked_by_automations"] is True
         assert trigger_store.get(trigger.id) is not None
 
-        deleted = await _http_get(
-            f"{base_url}/api/sessions/websocket:doomed/delete?delete_automations=true",
-            headers=auth,
+        deleted = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed", "delete_automations": True},
         )
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
@@ -2788,13 +2664,11 @@ async def test_session_delete_can_cascade_bound_automations(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         path = sm._get_session_path("websocket:doomed")
-        resp = await _http_get(
-            "http://127.0.0.1:29916/api/sessions/websocket:doomed/delete?delete_automations=true",
-            headers=auth,
+        resp = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed", "delete_automations": True},
         )
 
         assert resp.status_code == 200
@@ -2830,13 +2704,11 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
     )
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         path = sm._get_session_path("websocket:doomed")
-        resp = await _http_get(
-            "http://127.0.0.1:29918/api/sessions/websocket:doomed/delete",
-            headers=auth,
+        resp = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed"},
         )
 
         assert resp.status_code == 200
@@ -2854,21 +2726,19 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_accepts_percent_encoded_websocket_keys(
+async def test_session_delete_action_accepts_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path, key="websocket:encoded-key")
     channel = _ch(bus, session_manager=sm, port=29910)
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         path = sm._get_session_path("websocket:encoded-key")
         assert path.exists()
-        deleted = await _http_get(
-            "http://127.0.0.1:29910/api/sessions/websocket%3Aencoded-key/delete",
-            headers=auth,
+        deleted = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:encoded-key"},
         )
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
@@ -3100,9 +2970,16 @@ async def test_session_delete_rejects_non_websocket_keys(
 
         doomed = sm._get_session_path("slack:C123")
         assert doomed.exists()
-        deny_delete = await _http_get(
+        get_delete = await _http_get(
             "http://127.0.0.1:29909/api/sessions/slack:C123/delete",
             headers=auth,
+        )
+        assert get_delete.status_code == 405
+
+        deny_delete = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "slack:C123"},
         )
         assert deny_delete.status_code == 404
         assert doomed.exists()
@@ -3119,14 +2996,12 @@ async def test_session_delete_rejects_invalid_key(
     channel = _ch(bus, session_manager=sm, port=29904)
     server_task = asyncio.create_task(channel.start())
     try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
         # Invalid characters in the key -> regex match fails -> 404
         # (route doesn't match, falls through to channel 404).
-        resp = await _http_get(
-            "http://127.0.0.1:29904/api/sessions/bad%20key/delete",
-            headers=auth,
+        resp = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "bad key"},
         )
         assert resp.status_code in {400, 404}
     finally:
@@ -3241,6 +3116,31 @@ _REMOTE = _FakeConn(("192.168.1.5", 12345))
 _LOCAL = _FakeConn(("127.0.0.1", 12345))
 _NO_HEADERS = _FakeReq()
 _LOCAL_BROWSER_REQ = _FakeReq({"Host": "127.0.0.1:8765"})
+
+
+async def _webui_mutate(
+    channel: WebSocketChannel,
+    action: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    headers: dict[str, str] | None = None,
+    connection: _FakeConn = _LOCAL,
+) -> httpx.Response:
+    request_headers = {"Host": "127.0.0.1:8765", **(headers or {})}
+    mutation_connection = _FakeConn(connection.remote_address)
+    mutation_connection.request = _FakeReq(request_headers)
+    response = await channel.gateway.http.dispatch_webui_mutation(
+        mutation_connection,
+        action,
+        payload or {},
+    )
+    request = httpx.Request("GET", "http://127.0.0.1/webui-mutation")
+    return httpx.Response(
+        response.status_code,
+        headers=list(response.headers.raw_items()),
+        content=response.body,
+        request=request,
+    )
 
 
 def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:

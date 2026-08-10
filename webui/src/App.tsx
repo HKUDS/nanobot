@@ -2081,7 +2081,7 @@ function Shell({
       setPairingBusyCode(code);
       setPairingError(null);
       try {
-        const payload = await runPairingAction(getToken(), action, code);
+        const payload = await runPairingAction(client, action, code);
         setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
         setSnoozedPairingCodes((current) => {
           if (!current.has(code)) return current;
@@ -2096,7 +2096,7 @@ function Shell({
         setPairingBusyCode(null);
       }
     },
-    [getToken, refreshPairingRequests],
+    [client, refreshPairingRequests],
   );
 
   const onDismissPairingRequest = useCallback((code: string) => {

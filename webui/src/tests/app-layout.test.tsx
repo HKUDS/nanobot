@@ -19,6 +19,7 @@ const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
+const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
@@ -242,6 +243,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
+    requestMutation = requestMutationSpy;
     discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
@@ -270,7 +272,8 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
-    setSidebarStateSpy.mockReset();
+    setSidebarStateSpy.mockReset().mockResolvedValue({});
+    requestMutationSpy.mockReset();
     discardTemporaryChatSpy.mockReset();
     let temporaryChatCounter = 0;
     newTemporaryChatSpy.mockImplementation(async () => (
@@ -877,40 +880,36 @@ describe("App layout", () => {
         }],
         raw_markdown: "---\nname: github\n---\nUse GitHub CLI.",
       },
-      "/api/webui/skills/update?name=github&enabled=false": {
-        skills: [
-          {
-            name: "cron",
-            description: "Schedule reminders.",
-            source: "builtin",
-            enabled: true,
-            deletable: false,
-            available: true,
-          },
-          {
-            name: "github",
-            description: "Work with GitHub.",
-            source: "builtin",
-            enabled: false,
-            deletable: false,
-            available: false,
-            unavailable_reason: "CLI: gh",
-          },
-          {
-            name: "custom-skill",
-            description: "A workspace skill.",
-            source: "workspace",
-            enabled: true,
-            deletable: true,
-            available: true,
-          },
-        ],
-        last_action: {
-          name: "github",
-          enabled: false,
-          deleted: false,
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "cron",
+          description: "Schedule reminders.",
+          source: "builtin",
+          enabled: true,
+          deletable: false,
+          available: true,
         },
-      },
+        {
+          name: "github",
+          description: "Work with GitHub.",
+          source: "builtin",
+          enabled: false,
+          deletable: false,
+          available: false,
+          unavailable_reason: "CLI: gh",
+        },
+        {
+          name: "custom-skill",
+          description: "A workspace skill.",
+          source: "workspace",
+          enabled: true,
+          deletable: true,
+          available: true,
+        },
+      ],
+      last_action: { name: "github", enabled: false, deleted: false },
     });
 
     render(<App />);
@@ -1010,14 +1009,10 @@ describe("App layout", () => {
         },
         raw_markdown: "---\nname: custom-skill\n---\nWorkspace instructions.",
       },
-      "/api/webui/skills/delete?name=custom-skill": {
-        skills: [],
-        last_action: {
-          name: "custom-skill",
-          enabled: false,
-          deleted: true,
-        },
-      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [],
+      last_action: { name: "custom-skill", enabled: false, deleted: true },
     });
 
     render(<App />);
@@ -1149,9 +1144,8 @@ describe("App layout", () => {
       "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
         trends: { "acme/agent-skills/react-testing": [] },
       },
-      "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing":
-        () => pendingInstall,
     });
+    requestMutationSpy.mockImplementationOnce(() => pendingInstall);
 
     render(<App />);
 
@@ -1199,11 +1193,14 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing",
-        expect.objectContaining({
-          headers: { Authorization: expect.any(String) },
-        }),
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "skill.install",
+        {
+          provider: "skills_sh",
+          source: "acme/agent-skills",
+          skill: "react-testing",
+        },
+        150_000,
       );
     });
     fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
@@ -1361,14 +1358,12 @@ describe("App layout", () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/webui/automations": { jobs: [pastOneShot] },
-      "/api/webui/automations/update?id=past-one-shot": {
-        jobs: [
-          {
-            ...pastOneShot,
-            payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
-          },
-        ],
-      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      jobs: [{
+        ...pastOneShot,
+        payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
+      }],
     });
 
     render(<App />);
@@ -1394,19 +1389,17 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/automations/update?id=past-one-shot",
-        expect.any(Object),
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "automation.update",
+        {
+          id: "past-one-shot",
+          values: {
+            name: "Past one-shot",
+            message: "Updated one-shot message",
+          },
+        },
+        20_000,
       );
-    });
-    const updateCall = vi.mocked(fetch).mock.calls.find(
-      ([url]) => String(url) === "/api/webui/automations/update?id=past-one-shot",
-    );
-    expect(updateCall).toBeTruthy();
-    const headers = updateCall?.[1]?.headers as Record<string, string>;
-    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
-      name: "Past one-shot",
-      message: "Updated one-shot message",
     });
   });
 
@@ -1829,6 +1822,9 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
       expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
@@ -2581,17 +2577,14 @@ describe("App layout", () => {
     mockFetchRoutes({
       "/api/settings": initialSettings,
     });
-    const fetchMock = vi.mocked(fetch);
     window.history.replaceState(null, "", "/#/settings?section=runtime");
 
     render(<App />);
 
     expect(await screen.findByText("UTC")).toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).startsWith("/api/settings/update?timezone="),
-      ),
-    ).toHaveLength(0);
+      requestMutationSpy.mock.calls.some(([action]) => action === "settings.agent.update"),
+    ).toBe(false);
     expect(screen.queryByRole("heading", { name: "Regional" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("Used for schedules and time-aware replies."),

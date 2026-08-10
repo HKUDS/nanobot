@@ -54,6 +54,7 @@ import type {
   NanobotFeaturesPayload,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 export function ChannelCatalogRow({
   feature,
@@ -148,7 +149,6 @@ export function ChannelSetupPanel({
   if (feature.instances !== undefined) {
     return (
       <ChannelInstancesPanel
-        token={token}
         feature={feature}
         showBrandLogos={showBrandLogos}
         chatAppsDocsUrl={chatAppsDocsUrl}
@@ -269,6 +269,7 @@ function ChannelSetupSurface({
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const { client } = useClient();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [notice, setNotice] = useState<string | null>(null);
@@ -345,7 +346,7 @@ function ChannelSetupSurface({
     setNotice(null);
     const values = channelValuesForSubmit(fields, fieldValues, touchedFields);
     try {
-      const validationPayload = await validateChannel(token, feature.name, values);
+      const validationPayload = await validateChannel(client, feature.name, values);
       setValidation(validationPayload);
       if (!validationPayload.can_enable) {
         setNotice(
@@ -355,7 +356,7 @@ function ChannelSetupSurface({
         return;
       }
       const payload = await configureChannel(
-        token,
+        client,
         feature.name,
         values,
         { enable: true },
@@ -377,7 +378,7 @@ function ChannelSetupSurface({
     setNotice(null);
     try {
       const payload = await validateChannel(
-        token,
+        client,
         feature.name,
         channelValuesForSubmit(fields, fieldValues, touchedFields),
       );

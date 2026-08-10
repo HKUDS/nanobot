@@ -28,22 +28,28 @@ def _router(*, authorized: bool = True) -> WebUISettingsRouter:
     )
 
 
+def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
+    request = SimpleNamespace(path=path, headers=Headers())
+    request._nanobot_webui_mutation_request = True
+    request._nanobot_webui_mutation_payload = payload
+    request._nanobot_trusted_proxy_authenticated = True
+    return request
+
+
 @pytest.mark.parametrize(
-    ("provider", "header_name", "authorization_response"),
+    ("provider", "authorization_response"),
     [
-        ("xai_grok", "X-Nanobot-OAuth-Code", "secret"),
+        ("xai_grok", "secret"),
         (
             "openai_codex",
-            "X-Nanobot-OAuth-Callback",
             "http://localhost:1455/auth/callback?code=secret&state=test",
         ),
     ],
 )
 @pytest.mark.asyncio
-async def test_oauth_completion_reads_private_response_header(
+async def test_oauth_completion_reads_websocket_payload(
     monkeypatch,
     provider: str,
-    header_name: str,
     authorization_response: str,
 ) -> None:
     captured: dict[str, object] = {}
@@ -58,19 +64,13 @@ async def test_oauth_completion_reads_private_response_header(
 
     monkeypatch.setattr("nanobot.webui.settings_routes.complete_oauth_provider", complete)
     router = _router()
-    request = SimpleNamespace(
-        path=(
-            "/api/settings/provider/oauth-login/complete"
-            f"?provider={provider}&flow_id=flow-123"
-        ),
-        headers=Headers(
-            [
-                (
-                    header_name,
-                    authorization_response,
-                )
-            ]
-        ),
+    request = _mutation_request(
+        "/api/settings/provider/oauth-login/complete",
+        {
+            "provider": provider,
+            "flow_id": "flow-123",
+            "authorization_response": authorization_response,
+        },
     )
 
     response = await router.dispatch(
@@ -90,28 +90,29 @@ async def test_oauth_completion_reads_private_response_header(
         "query": {"provider": [provider], "flow_id": ["flow-123"]},
         "authorization_response": authorization_response,
     }
-    assert authorization_response not in request.path
+    assert request.path == "/api/settings/provider/oauth-login/complete"
+    assert not request.headers
 
 
 @pytest.mark.parametrize(
-    ("request_path", "route_path", "function_name", "expected_query"),
+    ("route_path", "function_name", "payload", "expected_query"),
     [
         (
-            "/api/settings/model-configurations/delete?name=spare",
             "/api/settings/model-configurations/delete",
             "delete_model_configuration",
+            {"name": "spare"},
             {"name": ["spare"]},
         ),
         (
             "/api/settings/model-configurations/migrate",
-            "/api/settings/model-configurations/migrate",
             "migrate_model_configurations",
+            {},
             {},
         ),
         (
-            "/api/settings/model-call-order/update?order=%5B%22backup%22%5D",
             "/api/settings/model-call-order/update",
             "update_model_call_order",
+            {"order": ["backup"]},
             {"order": ['["backup"]']},
         ),
     ],
@@ -119,9 +120,9 @@ async def test_oauth_completion_reads_private_response_header(
 @pytest.mark.asyncio
 async def test_model_preset_mutation_routes(
     monkeypatch,
-    request_path: str,
     route_path: str,
     function_name: str,
+    payload: dict[str, object],
     expected_query: dict[str, list[str]],
 ) -> None:
     captured: dict[str, object] = {}
@@ -131,7 +132,7 @@ async def test_model_preset_mutation_routes(
         return {"routed": function_name}
 
     monkeypatch.setattr(f"nanobot.webui.settings_routes.{function_name}", mutate)
-    request = SimpleNamespace(path=request_path, headers=Headers())
+    request = _mutation_request(route_path, payload)
 
     response = await _router().dispatch(None, request, route_path)
 
@@ -139,6 +140,23 @@ async def test_model_preset_mutation_routes(
     assert response.status_code == 200
     assert json.loads(response.body)["routed"] == function_name
     assert captured["query"] == expected_query
+
+
+@pytest.mark.asyncio
+async def test_settings_get_mutation_route_is_method_not_allowed() -> None:
+    path = "/api/settings/provider/update"
+    request = SimpleNamespace(
+        path=f"{path}?provider=openrouter&api_key=must-not-run",
+        headers=Headers(),
+    )
+
+    response = await _router().dispatch(None, request, path)
+
+    assert response is not None
+    assert response.status_code == 405
+    assert json.loads(response.body) == {
+        "error": "WebUI mutations require an authenticated WebSocket"
+    }
 
 
 @pytest.mark.parametrize(

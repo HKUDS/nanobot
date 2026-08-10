@@ -46,7 +46,7 @@ export function SkillsMarketplace({
   installing: string;
   onInstallingChange: (skillId: string) => void;
 }) {
-  const { getToken } = useClient();
+  const { client, getToken } = useClient();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MarketplaceSkillSummary[]>([]);
@@ -161,7 +161,7 @@ export function SkillsMarketplace({
     setError("");
     try {
       const payload = await installMarketplaceSkill(
-        getToken(),
+        client,
         skill.provider,
         skill.source,
         skill.skill_id,

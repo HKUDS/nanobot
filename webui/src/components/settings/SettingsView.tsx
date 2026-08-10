@@ -724,7 +724,7 @@ export function SettingsView({
   hostChromeInset = false,
 }: SettingsViewProps) {
   const { t } = useTranslation();
-  const { getToken, token } = useClient();
+  const { client, getToken, token } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -872,7 +872,7 @@ export function SettingsView({
     const poll = async () => {
       try {
         const payload = await completeProviderOAuth(
-          getToken(),
+          client,
           providerOAuthFlow.provider,
           providerOAuthFlow.flow_id,
         );
@@ -902,7 +902,7 @@ export function SettingsView({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [applyPayload, closeProviderOAuthFlow, getToken, providerOAuthFlow]);
+  }, [applyPayload, client, closeProviderOAuthFlow, providerOAuthFlow]);
 
   useEffect(() => {
     if (!initialSettings || settings !== null) return;
@@ -1301,7 +1301,7 @@ export function SettingsView({
       }
       setModelConfigurationSaving(true);
       try {
-        const payload = await createModelConfiguration(token, {
+        const payload = await createModelConfiguration(client, {
           label,
           provider,
           model,
@@ -1319,7 +1319,7 @@ export function SettingsView({
 
         let finalPayload = payload;
         if (nextOrder) {
-          const orderedPayload = await updateModelCallOrder(token, nextOrder);
+          const orderedPayload = await updateModelCallOrder(client, nextOrder);
           applyPayload(orderedPayload);
           finalPayload = orderedPayload;
         }
@@ -1345,7 +1345,7 @@ export function SettingsView({
     const reasoningEffort = form.reasoningEffort || null;
     setSaving(true);
     try {
-      const payload = await updateModelConfiguration(token, {
+      const payload = await updateModelConfiguration(client, {
         name: selectedPreset.name,
         label:
           form.presetLabel.trim() !== selectedPreset.label
@@ -1431,7 +1431,7 @@ export function SettingsView({
     setModelCallOrder(nextOrder);
     setModelCallOrderSaving(true);
     try {
-      const payload = await updateModelCallOrder(token, nextOrder);
+      const payload = await updateModelCallOrder(client, nextOrder);
       applyPayload(payload, { preserveAgentForm: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
@@ -1447,7 +1447,7 @@ export function SettingsView({
     if (modelMigrationSaving) return;
     setModelMigrationSaving(true);
     try {
-      const payload = await migrateModelConfigurations(token);
+      const payload = await migrateModelConfigurations(client);
       applyPayload(payload);
       onModelNameChange(payload.agent.model || null);
       setError(null);
@@ -1469,7 +1469,7 @@ export function SettingsView({
     }
     setSaving(true);
     try {
-      const payload = await deleteModelConfiguration(token, modelPresetPendingDelete.name);
+      const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
       applyPayload(payload);
       setModelPresetPendingDelete(null);
       setError(null);
@@ -1484,7 +1484,7 @@ export function SettingsView({
     if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
     setImageGenerationSaving(true);
     try {
-      const payload = await updateImageGenerationSettings(token, imageGenerationForm);
+      const payload = await updateImageGenerationSettings(client, imageGenerationForm);
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
@@ -1502,7 +1502,7 @@ export function SettingsView({
     if (!settings || !transcriptionDirty || transcriptionSaving) return;
     setTranscriptionSaving(true);
     try {
-      const payload = await updateTranscriptionSettings(token, transcriptionForm);
+      const payload = await updateTranscriptionSettings(client, transcriptionForm);
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
@@ -1520,7 +1520,7 @@ export function SettingsView({
     if (!settings || !networkSafetyDirty || networkSafetySaving) return;
     setNetworkSafetySaving(true);
     try {
-      const payload = await updateNetworkSafetySettings(token, networkSafetyForm);
+      const payload = await updateNetworkSafetySettings(client, networkSafetyForm);
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -1544,7 +1544,7 @@ export function SettingsView({
     try {
       let latest = nanobotFeatures;
       for (const name of missing) {
-        latest = await enableNanobotFeature(token, name);
+        latest = await enableNanobotFeature(client, name);
         if (latest.requires_restart) {
           setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
         }
@@ -1568,8 +1568,8 @@ export function SettingsView({
     setApiServiceError(null);
     try {
       const payload = action === "start"
-        ? await startApiService(token, values!)
-        : await stopApiService(token);
+        ? await startApiService(client, values!)
+        : await stopApiService(client);
       setApiService(payload);
       const refreshed = await fetchNanobotFeatures(token);
       setNanobotFeatures(refreshed);
@@ -1622,7 +1622,7 @@ export function SettingsView({
         if (field === "region") update.region = providerForm.region.trim();
         if (field === "profile") update.profile = providerForm.profile.trim();
       }
-      const payload = await updateProviderSettings(token, update);
+      const payload = await updateProviderSettings(client, update);
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
@@ -1656,7 +1656,7 @@ export function SettingsView({
     if (providerSaving) return false;
     setProviderSaving(CUSTOM_PROVIDER_CREATION_KEY);
     try {
-      const payload = await createProviderSettings(token, {
+      const payload = await createProviderSettings(client, {
         name: draft.name.trim(),
         apiKey: draft.apiKey.trim() || undefined,
         apiBase: draft.apiBase.trim(),
@@ -1698,12 +1698,11 @@ export function SettingsView({
       const payload =
         action === "login"
           ? await loginProviderOAuth(
-              token,
+              client,
               providerName,
-              "",
               providerName === "openai_codex" && remoteBrowserAccess,
             )
-          : await logoutProviderOAuth(token, providerName);
+          : await logoutProviderOAuth(client, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
         try {
           if (popup && !popup.closed) popup.location.href = payload.authorization_url;
@@ -1739,7 +1738,7 @@ export function SettingsView({
     setProviderOAuthDialogError(null);
     try {
       const payload = await completeProviderOAuth(
-        token,
+        client,
         flow.provider,
         flow.flow_id,
         authorizationResponse,
@@ -1798,7 +1797,7 @@ export function SettingsView({
         update.apiKey = apiKey;
       }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
-      const payload = await updateWebSearchSettings(token, update);
+      const payload = await updateWebSearchSettings(client, update);
       applyPayload(payload);
       if (payload.requires_restart || webFetchRestartRequired) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
@@ -1903,7 +1902,7 @@ export function SettingsView({
     setCliAppsMessage(null);
     setCliAppsError(null);
     try {
-      const payload = await runCliAppAction(token, action, name);
+      const payload = await runCliAppAction(client, action, name);
       setCliApps(payload);
       if (action !== "test") {
         notifyCliAppsChanged(payload);
@@ -1934,8 +1933,8 @@ export function SettingsView({
     setNanobotFeaturesError(null);
     try {
       const payload = action === "enable"
-        ? await enableNanobotFeature(token, name)
-        : await disableNanobotFeature(token, name);
+        ? await enableNanobotFeature(client, name)
+        : await disableNanobotFeature(client, name);
       setNanobotFeatures(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -1955,7 +1954,7 @@ export function SettingsView({
     setAutomationAction(key);
     setAutomationsError(null);
     try {
-      const payload = await runAutomationAction(token, action, job.id);
+      const payload = await runAutomationAction(client, action, job.id);
       setAutomations(payload);
       if (action === "delete") setAutomationPendingDelete(null);
       if (action === "run") {
@@ -1977,7 +1976,7 @@ export function SettingsView({
     setAutomationAction(key);
     setAutomationsError(null);
     try {
-      const payload = await updateAutomation(token, job.id, values);
+      const payload = await updateAutomation(client, job.id, values);
       setAutomations(payload);
       setAutomationPendingEdit(null);
     } catch (err) {
@@ -1997,7 +1996,7 @@ export function SettingsView({
     setMcpMessage(null);
     setMcpError(null);
     try {
-      const payload = await runMcpPresetAction(token, action, name, values);
+      const payload = await runMcpPresetAction(client, action, name, values);
       setMcpPresets(payload);
       setMcpMessage(payload.last_action?.message ?? null);
       if (action !== "test") {
@@ -2024,7 +2023,7 @@ export function SettingsView({
     setMcpMessage(null);
     setMcpError(null);
     try {
-      const payload = await saveCustomMcpServer(token, {
+      const payload = await saveCustomMcpServer(client, {
         name,
         transport: customMcpForm.transport,
         command: customMcpForm.command,
@@ -2054,7 +2053,7 @@ export function SettingsView({
     setMcpMessage(null);
     setMcpError(null);
     try {
-      const payload = await importMcpConfig(token, mcpConfigImport);
+      const payload = await importMcpConfig(client, mcpConfigImport);
       setMcpPresets(payload);
       setMcpMessage(payload.last_action?.message ?? null);
       notifyMcpPresetsChanged(payload);
@@ -2075,7 +2074,7 @@ export function SettingsView({
     setMcpMessage(null);
     setMcpError(null);
     try {
-      const payload = await updateMcpServerTools(token, name, enabledTools);
+      const payload = await updateMcpServerTools(client, name, enabledTools);
       setMcpPresets(payload);
       setMcpMessage(payload.last_action?.message ?? null);
       notifyMcpPresetsChanged(payload);

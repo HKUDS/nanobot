@@ -144,6 +144,8 @@ export function useSidebarState(
   const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
+  const connectionOpenRef = useRef(client.status === "open");
+  const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -171,14 +173,32 @@ export function useSidebarState(
     };
   }, []);
 
+  const persist = useCallback((next: SidebarStatePayload) => {
+    if (!connectionOpenRef.current) {
+      pendingPersistenceRef.current = next;
+      return;
+    }
+    void client.setSidebarState(next).catch(() => {
+      // Sidebar persistence is best-effort; the optimistic local state remains usable.
+    });
+  }, [client]);
+
+  useEffect(() => client.onStatus((status) => {
+    connectionOpenRef.current = status === "open";
+    if (status !== "open" || pendingPersistenceRef.current === null) return;
+    const pending = pendingPersistenceRef.current;
+    pendingPersistenceRef.current = null;
+    persist(pending);
+  }), [client, persist]);
+
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
       stateRef.current = next;
       setState(next);
-      client.setSidebarState(next);
+      persist(next);
     },
-    [client],
+    [persist],
   );
 
   const pruned = useMemo(() => {

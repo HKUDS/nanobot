@@ -10,6 +10,8 @@ import type {
   SettingsPayload,
 } from "@/lib/types";
 
+const requestMutationMock = vi.fn();
+
 function jsonResponse(body: unknown): Response {
   return {
     ok: true,
@@ -353,7 +355,7 @@ function renderSettingsView(
   } = {},
 ) {
   render(
-    <ClientProvider client={{} as never} token="tok">
+    <ClientProvider client={{ requestMutation: requestMutationMock } as never} token="tok">
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}
@@ -390,6 +392,7 @@ describe("SettingsView Apps catalog", () => {
     "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.";
 
   beforeEach(() => {
+    requestMutationMock.mockReset().mockResolvedValue(settingsPayload());
     vi.stubGlobal(
       "matchMedia",
       vi.fn((query: string) => ({
@@ -572,12 +575,15 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/nanobot-features") {
         return jsonResponse({ features: [], enabled_count: 0 });
       }
-      if (url === "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120") {
-        return jsonResponse({ ...stopped, installed: true, running: true, managed: true });
-      }
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      ...stopped,
+      installed: true,
+      running: true,
+      managed: true,
+    });
 
     renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
 
@@ -586,9 +592,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(startButton);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120",
-        expect.any(Object),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.api_service.start",
+        { host: "127.0.0.1", port: 8900, timeout: 120 },
+        150_000,
       );
     });
   });
@@ -609,21 +616,19 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url === "/api/settings/cli-apps/uninstall?name=anygen") {
-        return jsonResponse({
-          apps: [{ ...installedAnyGen, installed: false, status: "available" }],
-          installed_count: 0,
-          catalog_updated_at: "2026-04-18",
-          last_action: {
-            ok: true,
-            message: "Uninstalled CLI for AnyGen.",
-            still_available: false,
-          },
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      apps: [{ ...installedAnyGen, installed: false, status: "available" }],
+      installed_count: 0,
+      catalog_updated_at: "2026-04-18",
+      last_action: {
+        ok: true,
+        message: "Uninstalled CLI for AnyGen.",
+        still_available: false,
+      },
+    });
 
     renderSettingsView();
 
@@ -634,11 +639,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(uninstall);
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/cli-apps/uninstall?name=anygen",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.cli_app.uninstall",
+        { name: "anygen" },
+        20_000,
       ),
     );
     expect(await screen.findByText("Uninstalled CLI for AnyGen.")).toBeInTheDocument();
@@ -719,8 +723,12 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/nanobot-features/enable?name=matrix") {
-        return jsonResponse({
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.feature.enable") {
+        return {
           features: [{
             name: "matrix",
             display_name: "Matrix",
@@ -737,10 +745,10 @@ describe("SettingsView Apps catalog", () => {
           }],
           enabled_count: 1,
           last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
-        });
+        };
       }
-      if (url === "/api/settings/nanobot-features/disable?name=matrix") {
-        return jsonResponse({
+      if (action === "settings.feature.disable") {
+        return {
           features: [{
             name: "matrix",
             display_name: "Matrix",
@@ -756,11 +764,10 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
           requires_restart: true,
           last_action: { ok: true, message: "Disabled channel 'matrix'", enabled: false },
-        });
+        };
       }
-      return { ok: false, status: 404, json: async () => ({}) } as Response;
+      return settingsPayload();
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -772,18 +779,14 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
     expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
     expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/settings/nanobot-features/enable?name=matrix",
-      expect.anything(),
-    );
+    expect(requestMutationMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=matrix",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "matrix" },
+        150_000,
       ),
     );
     await waitFor(() =>
@@ -801,11 +804,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/disable?name=matrix",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.disable",
+        { name: "matrix" },
+        20_000,
       ),
     );
     await waitFor(() =>
@@ -839,26 +841,24 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 1,
         });
       }
-      if (url === "/api/settings/nanobot-features/enable?name=matrix") {
-        return jsonResponse({
-          features: [{
-            name: "matrix",
-            display_name: "Matrix",
-            type: "channel",
-            enabled: true,
-            installed: true,
-            ready: true,
-            status: "enabled",
-            install_supported: true,
-            requires_restart: true,
-          }],
-          enabled_count: 1,
-          last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      features: [{
+        name: "matrix",
+        display_name: "Matrix",
+        type: "channel",
+        enabled: true,
+        installed: true,
+        ready: true,
+        status: "enabled",
+        install_supported: true,
+        requires_restart: true,
+      }],
+      enabled_count: 1,
+      last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
+    });
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -872,11 +872,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=matrix",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "matrix" },
+        150_000,
       ),
     );
   });
@@ -950,20 +949,18 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
-        return jsonResponse({
-          session_id: "feishu-session",
-          status: "pending",
-          qr_url: "https://accounts.feishu.cn/login?device_code=device",
-          domain: "feishu",
-          interval_ms: 5000,
-          expires_at_ms: Date.now() + 600_000,
-          message: "Scan with Feishu or Lark to connect.",
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      session_id: "feishu-session",
+      status: "pending",
+      qr_url: "https://accounts.feishu.cn/login?device_code=device",
+      domain: "feishu",
+      interval_ms: 5000,
+      expires_at_ms: Date.now() + 600_000,
+      message: "Scan with Feishu or Lark to connect.",
+    });
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -973,11 +970,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.connect.start",
+        { channel: "feishu", domain: "feishu", instance_id: "default", mode: "replace" },
+        150_000,
       ),
     );
     expect(await screen.findByText("Scan with Feishu")).toBeInTheDocument();
@@ -1008,20 +1004,18 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
-        return jsonResponse({
-          session_id: "feishu-switch-session",
-          status: "pending",
-          qr_url: "https://accounts.feishu.cn/login?device_code=switch-device",
-          domain: "feishu",
-          interval_ms: 5000,
-          expires_at_ms: Date.now() + 600_000,
-          message: "Scan with Feishu or Lark to connect.",
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      session_id: "feishu-switch-session",
+      status: "pending",
+      qr_url: "https://accounts.feishu.cn/login?device_code=switch-device",
+      domain: "feishu",
+      interval_ms: 5000,
+      expires_at_ms: Date.now() + 600_000,
+      message: "Scan with Feishu or Lark to connect.",
+    });
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -1030,11 +1024,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.connect.start",
+        { channel: "feishu", domain: "feishu", instance_id: "default", mode: "replace" },
+        150_000,
       ),
     );
     expect(await screen.findByText("Scan with Feishu")).toBeInTheDocument();
@@ -1064,8 +1057,12 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/nanobot-features/enable?name=feishu&instance_id=default") {
-        return jsonResponse({
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.feature.enable") {
+        return {
           features: [{
             name: "feishu",
             display_name: "Feishu",
@@ -1097,14 +1094,13 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 1,
           requires_restart: false,
           last_action: { ok: true, message: "Enabled channel 'feishu'", enabled: true },
-        });
+        };
       }
-      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
+      if (action === "settings.channel.connect.start") {
         throw new Error("Feishu connect should not start when credentials are already configured");
       }
-      return { ok: false, status: 404, json: async () => ({}) } as Response;
+      return settingsPayload();
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -1112,16 +1108,15 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("switch", { name: "nanobot assistant" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=feishu&instance_id=default",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "feishu", instance_id: "default" },
+        150_000,
       ),
     );
-    expect(fetchMock.mock.calls.some(([input]) =>
-      String(input) === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
-    )).toBe(false);
+    expect(requestMutationMock.mock.calls.some(([action]) => (
+      action === "settings.channel.connect.start"
+    ))).toBe(false);
     expect(screen.getByRole("switch", { name: "nanobot assistant" })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -1310,7 +1305,6 @@ describe("SettingsView Apps catalog", () => {
   });
 
   it("shows a single Feishu assistant without a duplicate assistant list", async () => {
-    const reconnectUrls: string[] = [];
     const feishuPayload = {
       features: [{
         name: "feishu",
@@ -1352,13 +1346,10 @@ describe("SettingsView Apps catalog", () => {
         if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
         if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
         if (url === "/api/settings/nanobot-features") return jsonResponse(feishuPayload);
-        if (url === "/api/settings/nanobot-features/enable?name=feishu&instance_id=default") {
-          reconnectUrls.push(url);
-          return jsonResponse(feishuPayload);
-        }
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }),
     );
+    requestMutationMock.mockResolvedValueOnce(feishuPayload);
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -1374,7 +1365,11 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByText("cli_sup...port")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Replace assistant" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-    await waitFor(() => expect(reconnectUrls).toHaveLength(1));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.feature.enable",
+      { name: "feishu", instance_id: "default" },
+      150_000,
+    ));
     expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
   });
 
@@ -1577,8 +1572,19 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/channels/configure?name=discord&enable=true") {
-        return jsonResponse({
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce({
+        name: "discord",
+        status: "ready",
+        checks: [],
+        missing_fields: [],
+        can_enable: true,
+        requires_restart: false,
+      })
+      .mockResolvedValueOnce({
           name: "discord",
           saved: true,
           saved_keys: [
@@ -1606,23 +1612,7 @@ describe("SettingsView Apps catalog", () => {
             enabled_count: 1,
             requires_restart: false,
           },
-        });
-      }
-      if (url === "/api/settings/channels/validate?name=discord") {
-        return jsonResponse({
-          name: "discord",
-          status: "configured",
-          checks: [{ id: "bot_token", label: "Bot token", status: "pass" }],
-          identity: { name: "nanobot-test", account: "123" },
-          missing_fields: [],
-          can_enable: true,
-          requires_restart: false,
-          message: "Configuration is present.",
-        });
-      }
-      return { ok: false, status: 404, json: async () => ({}) } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
+      });
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -1647,21 +1637,24 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some(
-          ([input]) => String(input) === "/api/settings/channels/configure?name=discord&enable=true",
-        ),
+        requestMutationMock.mock.calls.some(([action]) => (
+          action === "settings.channel.configure"
+        )),
       ).toBe(true),
     );
-    const configureCall = fetchMock.mock.calls.find(
-      ([input]) => String(input) === "/api/settings/channels/configure?name=discord&enable=true",
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      {
+        name: "discord",
+        enable: true,
+        values: {
+          "channels.discord.token": "discord-token",
+          "channels.discord.allowChannels": "123, 456",
+          "channels.discord.groupPolicy": "open",
+        },
+      },
+      150_000,
     );
-    expect((configureCall?.[1] as RequestInit | undefined)?.method).toBeUndefined();
-    const headers = (configureCall?.[1] as RequestInit | undefined)?.headers as Record<string, string>;
-    expect(JSON.parse(headers["X-Nanobot-Channel-Values"])).toEqual({
-      "channels.discord.token": "discord-token",
-      "channels.discord.allowChannels": "123, 456",
-      "channels.discord.groupPolicy": "open",
-    });
     expect(await screen.findByText("Checked and enabled.")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
       "aria-checked",
@@ -1703,29 +1696,27 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
-      if (url === "/api/settings/nanobot-features/enable?name=discord") {
-        return jsonResponse({
-          features: [{
-            name: "discord",
-            display_name: "Discord",
-            webui: "webui/index.ts",
-            type: "channel",
-            enabled: true,
-            configured: true,
-            installed: true,
-            ready: true,
-            status: "enabled",
-            install_supported: true,
-            requires_restart: true,
-            setup: channelSetupContract("discord"),
-          }],
-          enabled_count: 1,
-          requires_restart: false,
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      features: [{
+        name: "discord",
+        display_name: "Discord",
+        webui: "webui/index.ts",
+        type: "channel",
+        enabled: true,
+        configured: true,
+        installed: true,
+        ready: true,
+        status: "enabled",
+        install_supported: true,
+        requires_restart: true,
+        setup: channelSetupContract("discord"),
+      }],
+      enabled_count: 1,
+      requires_restart: false,
+    });
 
     renderSettingsView({ initialSection: "channels" });
 
@@ -1752,9 +1743,10 @@ describe("SettingsView Apps catalog", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "Discord channel" }));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=discord",
-        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "discord" },
+        150_000,
       ),
     );
   });
@@ -1980,10 +1972,7 @@ describe("SettingsView Apps catalog", () => {
     const websocketSwitch = screen.getByRole("switch", { name: "WebSocket channel" });
     expect(websocketSwitch).toBeDisabled();
     expect(websocketSwitch).toHaveAttribute("aria-checked", "true");
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/settings/nanobot-features/disable?name=websocket",
-      expect.anything(),
-    );
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("publishes the latest settings payload to the shell", async () => {
@@ -2290,12 +2279,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return jsonResponse(updatedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(updatedPayload);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -2326,19 +2313,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.drop(primaryRow, { dataTransfer });
 
     await waitFor(() => {
-      const saveCall = fetchMock.mock.calls.find(([input]) =>
-        String(input).startsWith("/api/settings/model-call-order/update?"),
-      );
-      expect(saveCall).toBeDefined();
-      const url = new URL(String(saveCall?.[0]), "http://nanobot.test");
-      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
-        "backup",
-        "primary",
-      ]);
-      expect(saveCall?.[1]).toEqual(
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_call_order.update",
+        { order: ["backup", "primary"] },
+        20_000,
       );
     });
 
@@ -2385,12 +2363,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return jsonResponse(updatedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(updatedPayload);
 
     renderSettingsView({ initialSection: "models", initialSettings: initialPayload });
 
@@ -2439,16 +2415,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return {
-          ok: false,
-          status: 500,
-          text: async () => "Order update failed",
-        } as Response;
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockRejectedValueOnce(new Error("Order update failed"));
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -2503,12 +2473,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return jsonResponse(orderedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(orderedPayload);
 
     renderSettingsView({ initialSection: "models", initialSettings: payloadWithCodex });
 
@@ -2524,16 +2492,11 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(enableSwitch);
 
     await waitFor(() => {
-      const orderCall = fetchMock.mock.calls.find(([input]) =>
-        String(input).startsWith("/api/settings/model-call-order/update?"),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_call_order.update",
+        { order: ["primary", "backup", "codex"] },
+        20_000,
       );
-      expect(orderCall).toBeDefined();
-      const url = new URL(String(orderCall?.[0]), "http://nanobot.test");
-      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
-        "primary",
-        "backup",
-        "codex",
-      ]);
     });
     const enabledCodexRow = await screen.findByTestId("model-call-order-row-codex");
     expect(enabledCodexRow).not.toHaveTextContent("Disabled");
@@ -2575,15 +2538,12 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url.startsWith("/api/settings/model-configurations/create?")) {
-        return jsonResponse(createdPayload);
-      }
-      if (url.startsWith("/api/settings/model-call-order/update?")) {
-        return jsonResponse(orderedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce(createdPayload)
+      .mockResolvedValueOnce(orderedPayload);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -2617,16 +2577,11 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(saveButton);
 
     await waitFor(() => {
-      const orderCall = fetchMock.mock.calls.find(([input]) =>
-        String(input).startsWith("/api/settings/model-call-order/update?"),
+      expect(requestMutationMock).toHaveBeenLastCalledWith(
+        "settings.model_call_order.update",
+        { order: ["primary", "backup", "writer"] },
+        20_000,
       );
-      expect(orderCall).toBeDefined();
-      const url = new URL(String(orderCall?.[0]), "http://nanobot.test");
-      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
-        "primary",
-        "backup",
-        "writer",
-      ]);
     });
     const writerRow = await screen.findByTestId("model-call-order-row-writer");
     expect(writerRow).not.toHaveTextContent("Disabled");
@@ -2663,12 +2618,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url === "/api/settings/model-configurations/migrate") {
-        return jsonResponse(migratedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(migratedPayload);
 
     renderSettingsView({ initialSection: "models", initialSettings: legacyPayload });
 
@@ -2677,11 +2630,10 @@ describe("SettingsView Apps catalog", () => {
     );
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/model-configurations/migrate",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.migrate",
+        {},
+        20_000,
       ),
     );
     expect(
@@ -2719,21 +2671,9 @@ describe("SettingsView Apps catalog", () => {
       authorization_url: "https://auth.x.ai/oauth2/authorize?state=test",
       expires_in: 600,
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
-        return jsonResponse(authorization);
-      }
-      if (
-        url ===
-        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123"
-      ) {
-        expect(init?.headers).toMatchObject({
-          "X-Nanobot-OAuth-Code": "secret",
-        });
-        return jsonResponse(signedIn);
-      }
       if (url === "/api/settings/cli-apps") {
         return jsonResponse({ apps: [], installed_count: 0 });
       }
@@ -2743,6 +2683,9 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce(authorization)
+      .mockResolvedValueOnce(signedIn);
     const popup = {
       opener: window,
       location: { href: "about:blank" },
@@ -2757,9 +2700,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/oauth-login?provider=xai_grok",
-        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.oauth_login",
+        { provider: "xai_grok" },
+        20_000,
       ),
     );
     expect(popup.opener).toBeNull();
@@ -2779,13 +2723,14 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            "X-Nanobot-OAuth-Code": "secret",
-          }),
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.oauth_complete",
+        {
+          provider: "xai_grok",
+          flow_id: "flow-123",
+          authorization_response: "secret",
+        },
+        20_000,
       ),
     );
     expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();
@@ -2825,19 +2770,6 @@ describe("SettingsView Apps catalog", () => {
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/settings") return jsonResponse(payload);
-        if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
-          return jsonResponse(authorization);
-        }
-        if (
-          url ===
-          "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-remote"
-        ) {
-          return jsonResponse({
-            status: "pending",
-            provider: "xai_grok",
-            flow_id: "flow-remote",
-          });
-        }
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -2847,6 +2779,7 @@ describe("SettingsView Apps catalog", () => {
         return jsonResponse({});
       });
       vi.stubGlobal("fetch", fetchMock);
+      requestMutationMock.mockResolvedValueOnce(authorization);
       const popup = {
         opener: window,
         location: { href: "about:blank" },
@@ -2924,19 +2857,9 @@ describe("SettingsView Apps catalog", () => {
       expires_in: 600,
       completion_input: "callback_url",
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url === "/api/settings/provider/oauth-login?provider=openai_codex") {
-        return jsonResponse(authorization);
-      }
-      if (
-        url ===
-        "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex-local"
-      ) {
-        expect(init?.headers).not.toHaveProperty("X-Nanobot-OAuth-Callback");
-        return jsonResponse(signedIn);
-      }
       if (url === "/api/settings/cli-apps") {
         return jsonResponse({ apps: [], installed_count: 0 });
       }
@@ -2946,6 +2869,9 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce(authorization)
+      .mockResolvedValueOnce(signedIn);
     const openMock = vi.fn();
     vi.stubGlobal("open", openMock);
 
@@ -2955,9 +2881,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     const dialog = await screen.findByRole("dialog");
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login?provider=openai_codex",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex" },
+      20_000,
     );
     expect(openMock).not.toHaveBeenCalled();
     expect(
@@ -3013,30 +2940,9 @@ describe("SettingsView Apps catalog", () => {
       };
       const callbackUrl =
         "http://localhost:1455/auth/callback?code=secret&state=test";
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/settings") return jsonResponse(payload);
-        if (
-          url ===
-          "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true"
-        ) {
-          return jsonResponse(authorization);
-        }
-        if (
-          url ===
-          "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex"
-        ) {
-          const headers = init?.headers as Record<string, string>;
-          if (headers?.["X-Nanobot-OAuth-Callback"]) {
-            expect(headers["X-Nanobot-OAuth-Callback"]).toBe(callbackUrl);
-            return jsonResponse(signedIn);
-          }
-          return jsonResponse({
-            status: "pending",
-            provider: "openai_codex",
-            flow_id: "flow-codex",
-          });
-        }
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -3046,6 +2952,18 @@ describe("SettingsView Apps catalog", () => {
         return jsonResponse({});
       });
       vi.stubGlobal("fetch", fetchMock);
+      requestMutationMock.mockImplementation(async (
+        action: string,
+        mutationPayload: Record<string, unknown>,
+      ) => {
+        if (action === "settings.provider.oauth_login") return authorization;
+        if (mutationPayload.authorization_response === callbackUrl) return signedIn;
+        return {
+          status: "pending",
+          provider: "openai_codex",
+          flow_id: "flow-codex",
+        };
+      });
       const popup = {
         opener: window,
         location: { href: "about:blank" },
@@ -3093,13 +3011,14 @@ describe("SettingsView Apps catalog", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
 
       await waitFor(() =>
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
-          expect.objectContaining({
-            headers: expect.objectContaining({
-              "X-Nanobot-OAuth-Callback": callbackUrl,
-            }),
-          }),
+        expect(requestMutationMock).toHaveBeenCalledWith(
+          "settings.provider.oauth_complete",
+          {
+            provider: "openai_codex",
+            flow_id: "flow-codex",
+            authorization_response: callbackUrl,
+          },
+          20_000,
         ),
       );
       expect(await screen.findByText("Signed in as acct-codex")).toBeInTheDocument();
@@ -3147,33 +3066,9 @@ describe("SettingsView Apps catalog", () => {
       },
     ];
     let payload: SettingsPayload = { ...base, providers };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url.startsWith("/api/settings/provider/update?")) {
-        const query = new URLSearchParams(url.split("?")[1]);
-        const providerName = query.get("provider");
-        const headers = init?.headers as Record<string, string>;
-        const values = JSON.parse(decodeURIComponent(
-          headers["X-Nanobot-Provider-Values"],
-        )) as {
-          proxy?: string;
-          extraBody?: string;
-        };
-        payload = {
-          ...payload,
-          providers: payload.providers.map((provider) =>
-            provider.name === providerName
-              ? {
-                  ...provider,
-                  proxy: values.proxy || null,
-                  extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
-                }
-              : provider,
-          ),
-        };
-        return jsonResponse(payload);
-      }
       if (url === "/api/settings/cli-apps") {
         return jsonResponse({ apps: [], installed_count: 0 });
       }
@@ -3183,6 +3078,24 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (
+      _action: string,
+      values: { provider?: string; proxy?: string; extraBody?: string },
+    ) => {
+      payload = {
+        ...payload,
+        providers: payload.providers.map((provider) =>
+          provider.name === values.provider
+            ? {
+                ...provider,
+                proxy: values.proxy || null,
+                extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
+              }
+            : provider,
+        ),
+      };
+      return payload;
+    });
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -3199,17 +3112,14 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/update?provider=xai_grok",
-        expect.objectContaining({
-          headers: {
-            Authorization: "Bearer tok",
-            "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
-              extraBody: "",
-              proxy: "http://127.0.0.1:7890",
-            })),
-          },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.update",
+        {
+          provider: "xai_grok",
+          extraBody: "",
+          proxy: "http://127.0.0.1:7890",
+        },
+        20_000,
       ),
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
@@ -3223,17 +3133,14 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/update?provider=openai_codex",
-        expect.objectContaining({
-          headers: {
-            Authorization: "Bearer tok",
-            "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
-              extraBody: "",
-              proxy: "http://proxy.example:8080",
-            })),
-          },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.update",
+        {
+          provider: "openai_codex",
+          extraBody: "",
+          proxy: "http://proxy.example:8080",
+        },
+        20_000,
       ),
     );
   });
@@ -3286,11 +3193,9 @@ describe("SettingsView Apps catalog", () => {
       },
     ];
     const payload: SettingsPayload = { ...base, providers };
-    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
-      const [input] = args;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
       if (url === "/api/settings/cli-apps") {
         return jsonResponse({ apps: [], installed_count: 0 });
       }
@@ -3300,6 +3205,7 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValue(payload);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -3308,9 +3214,10 @@ describe("SettingsView Apps catalog", () => {
     expect(xSearch).toHaveAttribute("aria-checked", "true");
     fireEvent.click(xSearch);
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=xai_grok",
-      expect.anything(),
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      expect.objectContaining({ provider: "xai_grok" }),
+      20_000,
     ));
     await waitFor(() => expect(
       screen.getByRole("button", { name: "Save provider" }),
@@ -3320,9 +3227,10 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
     fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openai_codex",
-      expect.anything(),
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      expect.objectContaining({ provider: "openai_codex" }),
+      20_000,
     ));
     await waitFor(() => expect(
       screen.getByRole("button", { name: "Save provider" }),
@@ -3347,17 +3255,17 @@ describe("SettingsView Apps catalog", () => {
     ).not.toBeInTheDocument());
 
     await waitFor(() => {
-      const requestUpdates = fetchMock.mock.calls
-        .filter(([input]) => String(input).startsWith("/api/settings/provider/update?"))
-        .map(([input, init]) => {
-          const provider = new URLSearchParams(String(input).split("?")[1]).get("provider");
-          const headers = init?.headers as Record<string, string>;
-          const values = JSON.parse(decodeURIComponent(
-            headers["X-Nanobot-Provider-Values"],
-          )) as { apiType?: string; extraBody?: string };
-          return [provider, {
-            ...(values.apiType ? { apiType: values.apiType } : {}),
-            extraBody: JSON.parse(values.extraBody ?? "{}"),
+      const requestUpdates = requestMutationMock.mock.calls
+        .filter(([action]) => action === "settings.provider.update")
+        .map(([, values]) => {
+          const update = values as {
+            provider: string;
+            apiType?: string;
+            extraBody?: string;
+          };
+          return [update.provider, {
+            ...(update.apiType ? { apiType: update.apiType } : {}),
+            extraBody: JSON.parse(update.extraBody ?? "{}"),
           }] as const;
         });
       expect(requestUpdates).toEqual([
@@ -3397,7 +3305,6 @@ describe("SettingsView Apps catalog", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url.startsWith("/api/settings/provider/update?")) return jsonResponse(payload);
       if (url === "/api/settings/cli-apps") {
         return jsonResponse({ apps: [], installed_count: 0 });
       }
@@ -3407,6 +3314,7 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(payload);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -3417,14 +3325,11 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() => {
-      const updateCall = fetchMock.mock.calls.find(
-        ([input]) => String(input).startsWith("/api/settings/provider/update?"),
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
       );
       expect(updateCall).toBeTruthy();
-      const headers = updateCall?.[1]?.headers as Record<string, string>;
-      const values = JSON.parse(decodeURIComponent(
-        headers["X-Nanobot-Provider-Values"],
-      )) as { extraBody: string };
+      const values = updateCall?.[1] as { extraBody: string };
       expect(JSON.parse(values.extraBody)).toEqual({
         metadata: { owner: "legacy-config" },
         tools: [{ type: "file_search", vector_store_ids: ["vs_legacy"] }],
@@ -3456,14 +3361,22 @@ describe("SettingsView Apps catalog", () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url === "/api/settings/provider/create") {
-        const headers = init?.headers as Record<string, string>;
-        const values = JSON.parse(decodeURIComponent(
-          headers["X-Nanobot-Provider-Values"],
-        )) as Record<string, string>;
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementationOnce(async (
+      _action: string,
+      values: Record<string, string>,
+    ) => {
         payload = {
           ...payload,
           created_provider: "custom-company-gateway",
@@ -3493,17 +3406,8 @@ describe("SettingsView Apps catalog", () => {
             },
           ],
         };
-        return jsonResponse(payload);
-      }
-      if (url === "/api/settings/cli-apps") {
-        return jsonResponse({ apps: [], installed_count: 0 });
-      }
-      if (url === "/api/settings/mcp-presets") {
-        return jsonResponse({ presets: [], installed_count: 0 });
-      }
-      return jsonResponse({});
+        return payload;
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -3548,14 +3452,11 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() => {
-      const createCall = fetchMock.mock.calls.find(
-        ([input]) => String(input) === "/api/settings/provider/create",
+      const createCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.create",
       );
       expect(createCall).toBeTruthy();
-      const headers = createCall?.[1]?.headers as Record<string, string>;
-      expect(JSON.parse(decodeURIComponent(
-        headers["X-Nanobot-Provider-Values"],
-      ))).toEqual({
+      expect(createCall?.[1]).toEqual({
         name: "Company Gateway",
         apiKey: "sk-company",
         apiBase: "https://gateway.example/v1",
@@ -4227,12 +4128,10 @@ describe("SettingsView Apps catalog", () => {
           fetched_at: 1,
         });
       }
-      if (url.startsWith("/api/settings/model-configurations/update?")) {
-        return jsonResponse(updatedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(updatedPayload);
 
     renderSettingsView({ initialSection: "models" });
 
@@ -4259,22 +4158,16 @@ describe("SettingsView Apps catalog", () => {
       ),
     );
     await waitFor(() => {
-      const saveCall = fetchMock.mock.calls.find(([input]) =>
-        String(input).startsWith("/api/settings/model-configurations/update?"),
+      const saveCall = requestMutationMock.mock.calls.find(([action]) =>
+        action === "settings.model_configuration.update",
       );
       expect(saveCall).toBeDefined();
-      const url = new URL(String(saveCall?.[0]), "http://nanobot.test");
-      expect(Object.fromEntries(url.searchParams)).toEqual({
+      expect(saveCall?.[1]).toEqual({
         name: "primary",
         model: "deepseek-reasoner",
         reasoning_effort: "provider-native-mode",
-        temperature: "0.4",
+        temperature: 0.4,
       });
-      expect(saveCall?.[1]).toEqual(
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
-      );
     });
   });
 
@@ -4289,17 +4182,15 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url === "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default") {
-        return jsonResponse({
-          ...payload,
-          advanced: { ...payload.advanced, webui_allow_local_service_access: false },
-          requires_restart: true,
-          restart_required_sections: ["runtime"],
-        });
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload,
+      advanced: { ...payload.advanced, webui_allow_local_service_access: false },
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    });
 
     renderSettingsView({ initialSection: "advanced" });
 
@@ -4315,11 +4206,13 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.network_safety.update",
+        {
+          webui_allow_local_service_access: false,
+          webui_default_access_mode: "default",
+        },
+        20_000,
       ),
     );
   });
@@ -4348,15 +4241,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings") return jsonResponse(payload);
       if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
       if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
-      if (
-        url ===
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true"
-      ) {
-        return jsonResponse(updatedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(updatedPayload);
 
     renderSettingsView({ initialSection: "browser" });
 
@@ -4369,11 +4257,15 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(saveButton);
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer tok" },
-        }),
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.web_search.update",
+        {
+          provider: "keenable",
+          max_results: 5,
+          timeout: 30,
+          use_jina_reader: true,
+        },
+        20_000,
       ),
     );
   });
@@ -4435,12 +4327,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings") return jsonResponse(payload);
       if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
       if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
-      if (url === "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default") {
-        return jsonResponse(restartedPayload);
-      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(restartedPayload);
 
     renderSettingsView({
       initialSection: "advanced",
