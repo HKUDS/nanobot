@@ -134,6 +134,16 @@ class TestEditFileTool:
         assert f.read_text() == "hello earth"
 
     @pytest.mark.asyncio
+    async def test_identical_replacement_returns_clear_error(self, tool, tmp_path):
+        f = tmp_path / "a.py"
+        f.write_text("hello world", encoding="utf-8")
+
+        result = await tool.execute(path=str(f), old_text="world", new_text="world")
+
+        assert result == "Error: new_text must be different from old_text."
+        assert f.read_text(encoding="utf-8") == "hello world"
+
+    @pytest.mark.asyncio
     async def test_crlf_normalisation(self, tool, tmp_path):
         f = tmp_path / "crlf.py"
         f.write_bytes(b"line1\r\nline2\r\nline3")
