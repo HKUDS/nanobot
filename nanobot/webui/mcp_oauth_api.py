@@ -345,6 +345,7 @@ class McpOAuthManager:
 
     def _payload(self, flow: _McpOAuthFlow) -> dict[str, Any]:
         task = flow.task
+        connected = flow.reload_result.get("connected") if flow.reload_result is not None else None
         if task is not None and task.cancelled():
             status = "cancelled"
         elif task is not None and task.done():
@@ -356,7 +357,9 @@ class McpOAuthManager:
                 status = "failed"
             elif flow.reload_result is None:
                 status = "authorized"
-            elif flow.reload_result.get("ok"):
+            elif flow.reload_result.get("ok") or (
+                isinstance(connected, list) and flow.name in connected
+            ):
                 status = "connected"
             else:
                 status = "authorized"

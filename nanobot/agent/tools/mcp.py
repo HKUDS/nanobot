@@ -1337,6 +1337,13 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         current_servers = dict(state._mcp_servers)
         current_names = set(current_servers)
         next_names = set(next_servers)
+        from nanobot.agent.tools.mcp_oauth import mcp_oauth_has_credentials
+
+        authorization_pending = {
+            name
+            for name, cfg in next_servers.items()
+            if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url)
+        }
         removed = sorted(current_names - next_names)
         added = sorted(next_names - current_names)
         changed = sorted(
@@ -1354,9 +1361,13 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         retry_missing = sorted(
             name
             for name in next_names
-            if name not in state._mcp_stacks and name not in set(added) | set(changed)
+            if name not in state._mcp_stacks
+            and name not in set(added) | set(changed)
+            and name not in authorization_pending
         )
-        to_connect_names = sorted(set(added) | set(changed) | set(retry_missing))
+        to_connect_names = sorted(
+            (set(added) | set(changed) | set(retry_missing)) - authorization_pending
+        )
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, MCPConnection] = {}
         if to_connect:

@@ -705,7 +705,13 @@ describe("SettingsView Apps catalog", () => {
           name: "xmind",
           status: "connected",
           expires_in: 295,
-          hot_reload: { ok: true, requires_restart: false },
+          hot_reload: {
+            ok: false,
+            requires_restart: false,
+            connected: ["xmind"],
+            failed: ["notion"],
+            message: "MCP config reloaded, but some servers did not connect: notion",
+          },
         });
       }
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
@@ -765,6 +771,7 @@ describe("SettingsView Apps catalog", () => {
       .toHaveTextContent("Configured");
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/some servers did not connect: notion/i)).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(

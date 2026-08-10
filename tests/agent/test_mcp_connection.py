@@ -407,6 +407,52 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
 
 
 @pytest.mark.asyncio
+async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config = load_config()
+    notion = MCPServerConfig(
+        type="streamableHttp",
+        auth="oauth",
+        url="https://mcp.notion.test/mcp",
+    )
+    linear = MCPServerConfig(
+        type="streamableHttp",
+        auth="oauth",
+        url="https://mcp.linear.test/mcp",
+    )
+    config.tools.mcp_servers.update({"notion": notion, "linear": linear})
+    save_config(config)
+
+    attempted: list[str] = []
+
+    async def _fake_connect(servers, _registry):
+        attempted.extend(servers)
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        return {"linear": stack}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
+        lambda name, _url: name == "linear",
+    )
+    loop = _make_loop(tmp_path, mcp_servers={"notion": notion})
+
+    result = await mcp_runtime.reload_servers(loop, loop.tools)
+
+    assert attempted == ["linear"]
+    assert result["ok"] is True
+    assert result["failed"] == []
+    assert result["retried"] == []
+    assert result["connected"] == ["linear"]
+    await loop.close_mcp()
+
+
+@pytest.mark.asyncio
 async def test_mcp_tool_reconnects_after_session_terminated(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
