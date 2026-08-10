@@ -19,7 +19,6 @@ import { cn } from "@/lib/utils";
 export const SETTINGS_SEARCH_INPUT_CLASS = cn(
   "border-border/45 bg-settings-surface transition-colors hover:border-border/70",
   "focus-visible:border-border/70 focus-visible:bg-background",
-  "focus-visible:ring-0 focus-visible:ring-offset-0",
 );
 
 export function CapabilityInstallNotice({

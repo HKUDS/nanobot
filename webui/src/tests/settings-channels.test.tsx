@@ -834,8 +834,9 @@ describe("Settings channels", () => {
 
     const emailRow = await screen.findByRole("button", { name: "View Email settings" });
     expect(screen.getByPlaceholderText("Search channels")).toHaveClass(
-      "focus-visible:ring-0",
-      "focus-visible:ring-offset-0",
+      "focus-visible:ring-2",
+      "focus-visible:ring-inset",
+      "focus-visible:ring-ring/50",
     );
     expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
 

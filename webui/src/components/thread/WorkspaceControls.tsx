@@ -256,10 +256,7 @@ export function WorkspaceProjectPicker({
                 aria-label={t("workspace.dialog.manual")}
                 aria-invalid={pathError || error ? true : undefined}
                 aria-describedby={pathError || error ? pathErrorId : undefined}
-                className={cn(
-                  "h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]",
-                  "focus-visible:ring-1 focus-visible:ring-foreground/10 focus-visible:ring-offset-0",
-                )}
+                className="h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]"
               />
               <Button
                 type="submit"

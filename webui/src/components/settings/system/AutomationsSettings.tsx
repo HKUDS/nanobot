@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
@@ -835,7 +836,10 @@ export function AutomationEditDialog({
                           everyUnit: event.target.value as AutomationEveryUnit,
                         }))
                       }
-                      className="h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                      className={cn(
+                        "h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground transition-colors",
+                        formControlFocusClassName,
+                      )}
                     >
                       {AUTOMATION_EVERY_UNITS.map((unit) => (
                         <option key={unit.value} value={unit.value}>
