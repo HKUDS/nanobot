@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import traceback
 import unicodedata
 from contextlib import suppress
 from dataclasses import dataclass
@@ -61,21 +62,77 @@ POLLING_STALL_CHECK_INTERVAL_SECONDS = 30.0
 
 
 class _LivenessTrackedRequest(HTTPXRequest):
-    """HTTPXRequest that timestamps each completed HTTP round trip.
+    """HTTPXRequest that timestamps each completed HTTP round trip and tracks
+    per-request lifecycle state for the getUpdates pool.
 
-    Used only for the getUpdates pool so a watchdog can detect a wedged
-    long-poll loop that PTB's own retry logic treats as a normal timeout
-    and only logs at DEBUG (never surfaced via ``error_callback``).
+    Temporary diagnostic instrumentation for #5156: used only for the
+    getUpdates pool so a watchdog can detect a wedged long-poll loop that
+    PTB's own retry logic treats as a normal timeout and only logs at DEBUG
+    (never surfaced via ``error_callback``), and so a stall report can carry
+    enough state (in-flight count, cancellations vs. errors, raw httpcore
+    connection state) to tell a PTB lifecycle bug apart from a proxy-layer
+    connection leak. Not meant to survive once the root cause is found.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.last_success_monotonic: float = time.monotonic()
+        self.active_requests: int = 0
+        self.total_started: int = 0
+        self.total_completed: int = 0
+        self.total_cancelled: int = 0
+        self.total_errors: int = 0
 
     async def do_request(self, *args: Any, **kwargs: Any) -> tuple[int, bytes]:
-        result = await super().do_request(*args, **kwargs)
-        self.last_success_monotonic = time.monotonic()
-        return result
+        self.active_requests += 1
+        self.total_started += 1
+        try:
+            result = await super().do_request(*args, **kwargs)
+        except asyncio.CancelledError:
+            self.total_cancelled += 1
+            raise
+        except Exception:
+            self.total_errors += 1
+            raise
+        else:
+            self.last_success_monotonic = time.monotonic()
+            self.total_completed += 1
+            return result
+        finally:
+            self.active_requests -= 1
+
+    def pool_snapshot(self) -> list[str]:
+        """Best-effort dump of the underlying httpcore connections' raw state.
+
+        Reaches through private httpx/httpcore attributes (``_transport``,
+        ``_pool``) that aren't part of any public API; acceptable only
+        because this is diagnostic-only instrumentation, never merged as-is.
+        """
+        try:
+            pool: Any = self._client._transport._pool  # type: ignore[attr-defined]
+            return _describe_pool_connections(pool)
+        except Exception as exc:  # pragma: no cover - best-effort introspection
+            return [f"<pool introspection failed: {exc!r}>"]
+
+
+def _describe_pool_connections(pool: Any) -> list[str]:
+    """``pool.connections`` returns httpcore's untyped connection objects; funnel
+    the ``Any`` here so callers stay fully typed."""
+    return [str(conn.info()) for conn in pool.connections]
+
+
+def _dump_task_stacks(limit: int = 20) -> list[str]:
+    """Format the stack of every live asyncio task, for stall diagnostics."""
+    dumps: list[str] = []
+    for task in asyncio.all_tasks():
+        stack = task.get_stack(limit=limit)
+        if not stack:
+            continue
+        # ``stack[-1]`` is the innermost frame; format_stack walks its
+        # f_back chain, so this yields the full call chain in order.
+        formatted = "".join(traceback.format_stack(stack[-1], limit=limit))
+        dumps.append(f"{task.get_name()}:\n{formatted}")
+    return dumps
 
 
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
@@ -547,7 +604,10 @@ class TelegramChannel(BaseChannel):
             self.logger.error("bot token not configured")
             return
 
-        redirect_lib_logging("telegram")
+        # WARNING, not DEBUG: PTB logs the full Bot API base URL (which embeds the
+        # bot token), request parameters, and update contents at DEBUG. The liveness
+        # watchdog below already covers the PoolTimeout path PTB only logs at DEBUG.
+        redirect_lib_logging("telegram", level="WARNING")
         redirect_lib_logging("httpx", level="WARNING")
 
         self._running = True
@@ -672,6 +732,7 @@ class TelegramChannel(BaseChannel):
         stalled.
         """
         stalled = False
+        stall_started: float = 0.0
         while self._running:
             await asyncio.sleep(POLLING_STALL_CHECK_INTERVAL_SECONDS)
             poll_request = self._poll_request
@@ -681,12 +742,24 @@ class TelegramChannel(BaseChannel):
             if idle > POLLING_STALL_THRESHOLD_SECONDS:
                 if not stalled:
                     stalled = True
+                    stall_started = poll_request.last_success_monotonic
                     self.logger.error(
-                        "polling appears stalled: no successful getUpdates round-trip in {:.0f}s",
+                        "polling appears stalled: no successful getUpdates round-trip in {:.0f}s "
+                        "(active={} started={} completed={} cancelled={} errors={})",
                         idle,
+                        poll_request.active_requests,
+                        poll_request.total_started,
+                        poll_request.total_completed,
+                        poll_request.total_cancelled,
+                        poll_request.total_errors,
                     )
+                    for line in poll_request.pool_snapshot():
+                        self.logger.error("polling stall: pool connection {}", line)
+                    for stack in _dump_task_stacks():
+                        self.logger.error("polling stall: task stack {}", stack)
             elif stalled:
                 stalled = False
+                idle = time.monotonic() - stall_started
                 self.logger.info("polling recovered after {:.0f}s stall", idle)
 
     async def stop(self) -> None:

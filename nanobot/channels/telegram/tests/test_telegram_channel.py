@@ -376,7 +376,7 @@ async def test_start_bridges_stdlib_logging(monkeypatch) -> None:
 
     await channel.start()
 
-    assert ("telegram", None) in calls
+    assert ("telegram", "WARNING") in calls
     assert ("httpx", "WARNING") in calls
 
 
@@ -426,18 +426,32 @@ async def test_watch_polling_liveness_logs_stall_and_recovery(monkeypatch) -> No
     )
     recorded: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        channel.logger, "error", lambda message, idle: recorded.append(("error", message))
+        channel.logger,
+        "error",
+        lambda message, *args: recorded.append(("error", message)),
     )
     monkeypatch.setattr(
-        channel.logger, "info", lambda message, idle: recorded.append(("info", message))
+        channel.logger, "info", lambda message, *args: recorded.append(("info", message))
     )
 
     channel._running = True
-    channel._poll_request = SimpleNamespace(last_success_monotonic=time.monotonic() - 1.0)
+    channel._poll_request = SimpleNamespace(
+        last_success_monotonic=time.monotonic() - 1.0,
+        active_requests=1,
+        total_started=1,
+        total_completed=0,
+        total_cancelled=0,
+        total_errors=0,
+        pool_snapshot=lambda: [],
+    )
     task = asyncio.create_task(channel._watch_polling_liveness())
 
     await asyncio.sleep(0.3)
-    assert recorded == [("error", "polling appears stalled: no successful getUpdates round-trip in {:.0f}s")]
+    assert (
+        "error",
+        "polling appears stalled: no successful getUpdates round-trip in {:.0f}s "
+        "(active={} started={} completed={} cancelled={} errors={})",
+    ) in recorded
 
     channel._poll_request.last_success_monotonic = time.monotonic()
     await asyncio.sleep(0.08)  # < threshold, so it must not have re-stalled yet
