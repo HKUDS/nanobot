@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, cast
@@ -16,9 +15,10 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.paths import get_webui_dir
 
-TOKEN_USAGE_SCHEMA_VERSION = 1
+TOKEN_USAGE_SCHEMA_VERSION = 2
 _MAX_STATE_FILE_BYTES = 512 * 1024
 _MAX_DAYS_RETAINED = 400
+_MAX_USAGE_RECORDS = 50
 _USAGE_KEYS = (
     "prompt_tokens",
     "completion_tokens",
@@ -40,12 +40,16 @@ def default_token_usage_state() -> dict[str, Any]:
     return {
         "schema_version": TOKEN_USAGE_SCHEMA_VERSION,
         "days": {},
+        "records": [],
         "updated_at": None,
     }
 
 
-def _utc_now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+def _utc_iso(value: datetime | None = None) -> str:
+    dt = value or datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _zone(timezone_name: str | None) -> timezone | ZoneInfo:
@@ -145,6 +149,63 @@ def _normalize_sources(raw: Any, fallback: dict[str, int]) -> dict[str, dict[str
     return sources
 
 
+def _normalize_usage_records(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for value in cast(list[Any], raw)[-_MAX_USAGE_RECORDS:]:
+        if not isinstance(value, dict):
+            continue
+        record = cast(dict[str, Any], value)
+        timestamp = record.get("timestamp")
+        if not isinstance(timestamp, str):
+            continue
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        usage_value = record.get("usage")
+        if not isinstance(usage_value, dict):
+            continue
+        usage = _normalize_usage(cast(dict[str, Any], usage_value))
+        if not usage:
+            continue
+        recorded_day = record.get("day")
+        if not isinstance(recorded_day, str):
+            continue
+        try:
+            parsed_day = datetime.fromisoformat(recorded_day).date().isoformat()
+        except ValueError:
+            continue
+        if parsed_day != recorded_day:
+            continue
+
+        normalized: dict[str, Any] = {
+            "timestamp": _utc_iso(parsed_timestamp),
+            "day": recorded_day,
+            "source": _clean_source(record.get("source")),
+            "usage": usage,
+        }
+        session_key = record.get("session_key")
+        if isinstance(session_key, str) and session_key.strip():
+            normalized["session_key"] = session_key.strip()[:160]
+        iteration = record.get("iteration")
+        if isinstance(iteration, int) and not isinstance(iteration, bool) and iteration >= 0:
+            normalized["iteration"] = iteration
+        requested_tools = record.get("requested_tools")
+        if isinstance(requested_tools, list):
+            normalized_tools = [
+                tool.strip()[:80]
+                for tool in cast(list[Any], requested_tools)
+                if isinstance(tool, str) and tool.strip()
+            ][:12]
+            if normalized_tools:
+                normalized["requested_tools"] = normalized_tools
+        records.append(normalized)
+    return records
+
+
 def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
     state = default_token_usage_state()
     if not isinstance(raw, dict):
@@ -176,6 +237,7 @@ def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
         }
 
     state["days"] = days
+    state["records"] = _normalize_usage_records(raw.get("records"))
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None
     return state
@@ -199,7 +261,7 @@ def read_token_usage_state() -> dict[str, Any]:
 
 def write_token_usage_state(raw: dict[str, Any]) -> dict[str, Any]:
     state = normalize_token_usage_state(raw)
-    state["updated_at"] = _utc_now_iso()
+    state["updated_at"] = _utc_iso()
     encoded = json.dumps(
         state,
         ensure_ascii=False,
@@ -235,6 +297,9 @@ def record_token_usage(
     source: str = "user",
     timezone_name: str | None = None,
     now: datetime | None = None,
+    session_key: str | None = None,
+    iteration: int | None = None,
+    requested_tools: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized = _normalize_usage(usage)
     if not normalized:
@@ -268,6 +333,22 @@ def record_token_usage(
         sources[source_key] = source_row
         row["sources"] = sources
 
+        records = cast(list[dict[str, Any]], state["records"])
+        record: dict[str, Any] = {
+            "timestamp": _utc_iso(now),
+            "day": day,
+            "source": source_key,
+            "usage": normalized,
+        }
+        if session_key:
+            record["session_key"] = session_key
+        if iteration is not None:
+            record["iteration"] = iteration
+        if requested_tools:
+            record["requested_tools"] = requested_tools
+        records.append(record)
+        state["records"] = records[-_MAX_USAGE_RECORDS:]
+
         days_by_date[day] = row
         if len(days_by_date) > _MAX_DAYS_RETAINED:
             state["days"] = dict(sorted(days_by_date.items())[-_MAX_DAYS_RETAINED:])
@@ -279,12 +360,14 @@ def record_response_token_usage(
     *,
     source: str,
     timezone_name: str | None = None,
+    session_key: str | None = None,
 ) -> None:
     try:
         record_token_usage(
             getattr(response, "usage", None),
             source=source,
             timezone_name=timezone_name,
+            session_key=session_key,
         )
     except Exception:
         logger.exception("failed to record {} token usage", source)
@@ -352,6 +435,35 @@ def token_usage_payload(
     }
 
 
+def token_usage_records_payload(*, day: str | None = None) -> dict[str, Any]:
+    """Return retained usage records separately from the lightweight summary."""
+    if day is not None:
+        try:
+            parsed_day = datetime.fromisoformat(day).date().isoformat()
+        except ValueError as exc:
+            raise ValueError("day must use YYYY-MM-DD") from exc
+        if parsed_day != day:
+            raise ValueError("day must use YYYY-MM-DD")
+
+    state = read_token_usage_state()
+    records = cast(list[dict[str, Any]], state["records"])
+    matching_records = [record for record in records if day is None or record.get("day") == day]
+    days_by_date = cast(dict[str, dict[str, Any]], state["days"])
+    if day is None:
+        recorded_requests = sum(_clean_int(row.get("requests")) for row in days_by_date.values())
+    else:
+        recorded_requests = _clean_int((days_by_date.get(day) or {}).get("requests"))
+
+    return {
+        "records": list(reversed(matching_records)),
+        "day": day,
+        "recorded_requests": recorded_requests,
+        "retention_limit": _MAX_USAGE_RECORDS,
+        "truncated": recorded_requests > len(matching_records),
+        "updated_at": state.get("updated_at"),
+    }
+
+
 class TokenUsageHook(AgentHook):
     """Persist provider-reported token usage without coupling it to chat messages."""
 
@@ -365,6 +477,11 @@ class TokenUsageHook(AgentHook):
                 context.usage,
                 source=_source_from_session_key(context.session_key),
                 timezone_name=self._timezone_name,
+                session_key=context.session_key,
+                iteration=context.iteration,
+                requested_tools=[
+                    call.name for call in context.tool_calls if call.has_valid_name()
+                ],
             )
         except Exception:
             logger.exception("failed to record token usage")

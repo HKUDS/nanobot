@@ -40,7 +40,7 @@ from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.security.network import is_loopback_host
 from nanobot.security.workspace_access import workspace_sandbox_status
-from nanobot.webui.token_usage import token_usage_payload
+from nanobot.webui.token_usage import token_usage_payload, token_usage_records_payload
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
@@ -1345,6 +1345,15 @@ def settings_usage_payload() -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
     config = load_config()
     return token_usage_payload(timezone_name=config.agents.defaults.timezone)
+
+
+def settings_usage_records_payload(query: QueryParams) -> dict[str, Any]:
+    """Return retained usage records, optionally scoped to one recorded day."""
+    day = (_query_first(query, "day") or "").strip() or None
+    try:
+        return token_usage_records_payload(day=day)
+    except ValueError as exc:
+        raise WebUISettingsError(str(exc)) from exc
 
 
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:

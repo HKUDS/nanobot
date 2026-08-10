@@ -141,6 +141,42 @@ async def test_model_preset_mutation_routes(
     assert captured["query"] == expected_query
 
 
+@pytest.mark.asyncio
+async def test_usage_records_route_forwards_day_filter(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def payload(query):
+        captured["query"] = query
+        return {"records": [], "day": "2026-06-03"}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_records_payload", payload)
+    request = SimpleNamespace(
+        path="/api/settings/usage/records?day=2026-06-03",
+        headers=Headers(),
+    )
+
+    response = await _router().dispatch(None, request, "/api/settings/usage/records")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body)["day"] == "2026-06-03"
+    assert captured["query"] == {"day": ["2026-06-03"]}
+
+
+@pytest.mark.asyncio
+async def test_usage_records_route_requires_authentication() -> None:
+    request = SimpleNamespace(path="/api/settings/usage/records", headers=Headers())
+
+    response = await _router(authorized=False).dispatch(
+        None,
+        request,
+        "/api/settings/usage/records",
+    )
+
+    assert response is not None
+    assert response.status_code == 401
+
+
 @pytest.mark.parametrize(
     ("update_info", "expected"),
     [

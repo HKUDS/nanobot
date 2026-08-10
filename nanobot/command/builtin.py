@@ -432,6 +432,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         progress = DreamRunProgress()
         content = ""
         resp = None
+        key = None
         diff_body = ""
         t0 = time.monotonic()
         try:
@@ -483,6 +484,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 resp,
                 source="dream",
                 timezone_name=getattr(loop.context, "timezone", None),
+                session_key=key,
             )
             if store.git.is_initialized():
                 commit_msg = build_dream_commit_message("dream: manual run", diff_body)

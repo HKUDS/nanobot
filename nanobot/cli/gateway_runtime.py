@@ -503,6 +503,7 @@ def _run_gateway(
             store = agent.context.memory
             progress = DreamRunProgress()
             resp = None
+            key = None
             diff_body = ""
             try:
                 result = store.build_dream_prompt()
@@ -554,6 +555,7 @@ def _run_gateway(
                     resp,
                     source="dream",
                     timezone_name=config.agents.defaults.timezone,
+                    session_key=key,
                 )
                 sha = _commit_dream_changes(store)
                 if sha:
