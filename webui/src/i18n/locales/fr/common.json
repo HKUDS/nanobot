@@ -972,6 +972,10 @@
     "unarchive": "Désarchiver",
     "showArchived": "Afficher les archives",
     "hideArchived": "Masquer les archives",
+    "select": "Sélectionner",
+    "cancelSelection": "Annuler la sélection",
+    "selectedCount": "{{count}} sélectionnés",
+    "deleteSelected": "Supprimer",
     "delete": "Supprimer",
     "newChat": "Nouveau sujet",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "Supprimer cette discussion ?",
+    "titleMany": "Supprimer {{count}} discussions et volets ?",
     "description": "Cette action est irréversible.",
+    "descriptionMany": "Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer",
     "automationsDescription": "Cette discussion contient des automatisations planifiées. La supprimer les supprimera aussi.",
+    "automationsDescriptionMany": "Les automatisations liées seront également supprimées.",
     "moreAutomations": "+ {{count}} autres",
     "confirmWithAutomations": "Supprimer",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "Copier le code",
     "copy": "Copier",
     "copied": "Copié"
+  },
+  "workbench": {
+    "aria": "Espace de conversations",
+    "panes": "Volets",
+    "panesInTab": "Volets dans {{title}}",
+    "dropPane": "Déplacer {{pane}} dans {{tab}}",
+    "moveToTab": "Déplacer vers un onglet",
+    "layout": "Disposition des volets",
+    "addPane": "Ajouter un volet",
+    "promotePane": "Définir {{title}} comme volet principal",
+    "paneActions": "Actions du volet {{title}}",
+    "detachPane": "Déplacer {{title}} vers son propre sujet",
+    "composerAria": "Message à {{title}}",
+    "layouts": {
+      "columns": "Colonnes",
+      "rows": "Lignes",
+      "grid": "Grille",
+      "main-stack": "Principal et pile",
+      "monocle": "Monocle"
+    }
   },
   "common": {
     "dismiss": "Fermer",

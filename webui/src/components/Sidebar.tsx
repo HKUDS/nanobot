@@ -16,7 +16,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { ChatList } from "@/components/ChatList";
+import {
+  ChatList,
+  type SidebarDeleteItem,
+  type SidebarPaneGroup,
+} from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
@@ -39,9 +43,17 @@ interface SidebarProps {
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  paneGroups?: Record<string, SidebarPaneGroup>;
+  onSelectPane?: (tabKey: string, paneKey: string) => void;
+  onDetachPane?: (tabKey: string, paneKey: string) => void;
+  onPromotePane?: (tabKey: string, paneKey: string) => void;
+  attachableTabKeys?: string[];
+  paneAcceptingTabKeys?: string[];
+  onAttachPane?: (paneKey: string, tabKey: string) => void;
   onReorderSessions: (keys: string[]) => void;
   onToggleGroup: (groupId: string) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;
@@ -230,9 +242,17 @@ export function Sidebar(props: SidebarProps) {
             onSelect={props.onSelect}
             onCloseTemporaryChat={props.onCloseTemporaryChat}
             onRequestDelete={props.onRequestDelete}
+            onRequestDeleteMany={props.onRequestDeleteMany}
             onTogglePin={props.onTogglePin}
             onRequestRename={props.onRequestRename}
             onToggleArchive={props.onToggleArchive}
+            paneGroups={props.paneGroups}
+            onSelectPane={props.onSelectPane}
+            onDetachPane={props.onDetachPane}
+            onPromotePane={props.onPromotePane}
+            attachableTabKeys={props.attachableTabKeys}
+            paneAcceptingTabKeys={props.paneAcceptingTabKeys}
+            onAttachPane={props.onAttachPane}
             onReorderSessions={props.onReorderSessions}
             onToggleGroup={props.onToggleGroup}
             onRequestRenameProject={props.onRequestRenameProject}

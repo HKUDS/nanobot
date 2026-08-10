@@ -972,6 +972,10 @@
     "unarchive": "보관 해제",
     "showArchived": "보관된 항목 표시",
     "hideArchived": "보관된 항목 숨기기",
+    "select": "선택",
+    "cancelSelection": "선택 취소",
+    "selectedCount": "{{count}}개 선택됨",
+    "deleteSelected": "삭제",
     "delete": "삭제",
     "newChat": "새 주제",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",
+    "titleMany": "채팅과 창 {{count}}개를 삭제할까요?",
     "description": "이 작업은 되돌릴 수 없습니다.",
+    "descriptionMany": "이 작업은 되돌릴 수 없습니다.",
     "cancel": "취소",
     "confirm": "삭제",
     "automationsDescription": "이 채팅에는 예약된 자동화가 있습니다. 채팅을 삭제하면 자동화도 함께 삭제됩니다.",
+    "automationsDescriptionMany": "연결된 자동화도 함께 삭제됩니다.",
     "moreAutomations": "+ {{count}}개 더",
     "confirmWithAutomations": "삭제",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "코드 복사",
     "copy": "복사",
     "copied": "복사됨"
+  },
+  "workbench": {
+    "aria": "대화 워크벤치",
+    "panes": "창",
+    "panesInTab": "{{title}}의 창",
+    "dropPane": "{{pane}}을(를) {{tab}}으로 이동",
+    "moveToTab": "탭으로 이동",
+    "layout": "창 레이아웃",
+    "addPane": "창 추가",
+    "promotePane": "{{title}}을(를) 기본 창으로 설정",
+    "paneActions": "{{title}} 창 작업",
+    "detachPane": "{{title}}을(를) 별도 주제로 이동",
+    "composerAria": "{{title}}에 메시지 보내기",
+    "layouts": {
+      "columns": "열",
+      "rows": "행",
+      "grid": "그리드",
+      "main-stack": "기본 창과 스택",
+      "monocle": "단일 창"
+    }
   },
   "common": {
     "dismiss": "닫기",

@@ -973,6 +973,10 @@
     "unarchive": "Desarchivar",
     "showArchived": "Mostrar archivados",
     "hideArchived": "Ocultar archivados",
+    "select": "Seleccionar",
+    "cancelSelection": "Cancelar selección",
+    "selectedCount": "{{count}} seleccionados",
+    "deleteSelected": "Eliminar",
     "delete": "Eliminar",
     "newChat": "Nuevo tema",
     "groups": {
@@ -987,10 +991,13 @@
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
+    "titleMany": "¿Eliminar {{count}} chats y paneles?",
     "description": "Esta acción no se puede deshacer.",
+    "descriptionMany": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
     "confirm": "Eliminar",
     "automationsDescription": "Este chat tiene automatizaciones programadas. Al eliminarlo también se eliminarán.",
+    "automationsDescriptionMany": "También se eliminarán las automatizaciones vinculadas.",
     "moreAutomations": "+ {{count}} más",
     "confirmWithAutomations": "Eliminar",
     "schedule": {
@@ -1385,6 +1392,26 @@
     "copyAria": "Copiar código",
     "copy": "Copiar",
     "copied": "Copiado"
+  },
+  "workbench": {
+    "aria": "Área de conversaciones",
+    "panes": "Paneles",
+    "panesInTab": "Paneles de {{title}}",
+    "dropPane": "Mover {{pane}} a {{tab}}",
+    "moveToTab": "Mover a una pestaña",
+    "layout": "Diseño de paneles",
+    "addPane": "Añadir panel",
+    "promotePane": "Convertir {{title}} en el panel principal",
+    "paneActions": "Acciones del panel {{title}}",
+    "detachPane": "Mover {{title}} a su propio tema",
+    "composerAria": "Mensaje para {{title}}",
+    "layouts": {
+      "columns": "Columnas",
+      "rows": "Filas",
+      "grid": "Cuadrícula",
+      "main-stack": "Principal y pila",
+      "monocle": "Monóculo"
+    }
   },
   "common": {
     "dismiss": "Cerrar",

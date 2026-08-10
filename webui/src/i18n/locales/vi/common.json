@@ -972,6 +972,10 @@
     "unarchive": "Bỏ lưu trữ",
     "showArchived": "Hiện mục đã lưu trữ",
     "hideArchived": "Ẩn mục đã lưu trữ",
+    "select": "Chọn",
+    "cancelSelection": "Hủy chọn",
+    "selectedCount": "Đã chọn {{count}} mục",
+    "deleteSelected": "Xóa",
     "delete": "Xóa",
     "newChat": "Chủ đề mới",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",
+    "titleMany": "Xóa {{count}} cuộc trò chuyện và khung?",
     "description": "Không thể hoàn tác thao tác này.",
+    "descriptionMany": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
     "confirm": "Xóa",
     "automationsDescription": "Cuộc trò chuyện này có các tự động hóa đã lên lịch. Xóa cuộc trò chuyện cũng sẽ xóa chúng.",
+    "automationsDescriptionMany": "Các tự động hóa liên kết cũng sẽ bị xóa.",
     "moreAutomations": "+ {{count}} mục nữa",
     "confirmWithAutomations": "Xóa",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "Sao chép mã",
     "copy": "Sao chép",
     "copied": "Đã sao chép"
+  },
+  "workbench": {
+    "aria": "Không gian hội thoại",
+    "panes": "Khung",
+    "panesInTab": "Các khung trong {{title}}",
+    "dropPane": "Di chuyển {{pane}} vào {{tab}}",
+    "moveToTab": "Di chuyển vào thẻ",
+    "layout": "Bố cục khung",
+    "addPane": "Thêm khung",
+    "promotePane": "Đặt {{title}} làm khung chính",
+    "paneActions": "Thao tác cho khung {{title}}",
+    "detachPane": "Chuyển {{title}} thành chủ đề riêng",
+    "composerAria": "Nhắn tin cho {{title}}",
+    "layouts": {
+      "columns": "Cột",
+      "rows": "Hàng",
+      "grid": "Lưới",
+      "main-stack": "Khung chính và ngăn xếp",
+      "monocle": "Một khung"
+    }
   },
   "common": {
     "dismiss": "Đóng",

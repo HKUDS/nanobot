@@ -972,6 +972,10 @@
     "unarchive": "アーカイブを解除",
     "showArchived": "アーカイブ済みを表示",
     "hideArchived": "アーカイブ済みを隠す",
+    "select": "選択",
+    "cancelSelection": "選択を解除",
+    "selectedCount": "{{count}} 件を選択中",
+    "deleteSelected": "削除",
     "delete": "削除",
     "newChat": "新しいトピック",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
+    "titleMany": "{{count}} 件のチャットとペインを削除しますか？",
     "description": "この操作は元に戻せません。",
+    "descriptionMany": "この操作は元に戻せません。",
     "cancel": "キャンセル",
     "confirm": "削除",
     "automationsDescription": "このチャットにはスケジュール済みの自動タスクがあります。削除するとそれらも削除されます。",
+    "automationsDescriptionMany": "関連する自動タスクも削除されます。",
     "moreAutomations": "他 {{count}} 件",
     "confirmWithAutomations": "削除",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "コードをコピー",
     "copy": "コピー",
     "copied": "コピーしました"
+  },
+  "workbench": {
+    "aria": "会話ワークベンチ",
+    "panes": "ペイン",
+    "panesInTab": "{{title}} のペイン",
+    "dropPane": "{{pane}} を {{tab}} に移動",
+    "moveToTab": "タブへ移動",
+    "layout": "ペインレイアウト",
+    "addPane": "ペインを追加",
+    "promotePane": "{{title}} をメインペインにする",
+    "paneActions": "{{title}} ペインの操作",
+    "detachPane": "{{title}} を独立したトピックに移動",
+    "composerAria": "{{title}} へのメッセージ",
+    "layouts": {
+      "columns": "列",
+      "rows": "行",
+      "grid": "グリッド",
+      "main-stack": "メインとスタック",
+      "monocle": "モノクル"
+    }
   },
   "common": {
     "dismiss": "閉じる",

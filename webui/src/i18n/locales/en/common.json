@@ -986,6 +986,10 @@
     "unarchive": "Unarchive",
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
+    "select": "Select",
+    "cancelSelection": "Cancel selection",
+    "selectedCount": "{{count}} selected",
+    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -1000,10 +1004,13 @@
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
+    "titleMany": "Delete {{count}} topics and panes?",
     "description": "This action cannot be undone.",
+    "descriptionMany": "This action cannot be undone.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "automationsDescription": "This chat has scheduled automations. Deleting it will also delete them.",
+    "automationsDescriptionMany": "Linked automations will also be deleted.",
     "moreAutomations": "+ {{count}} more",
     "confirmWithAutomations": "Delete",
     "schedule": {
@@ -1398,6 +1405,26 @@
     "copyAria": "Copy code",
     "copy": "Copy",
     "copied": "Copied"
+  },
+  "workbench": {
+    "aria": "Conversation workbench",
+    "panes": "Panes",
+    "panesInTab": "Panes in {{title}}",
+    "dropPane": "Move {{pane}} into {{tab}}",
+    "moveToTab": "Move to tab",
+    "layout": "Pane layout",
+    "addPane": "Add pane",
+    "promotePane": "Make {{title}} the primary pane",
+    "paneActions": "{{title}} pane actions",
+    "detachPane": "Move {{title}} to its own topic",
+    "composerAria": "Message {{title}}",
+    "layouts": {
+      "columns": "Columns",
+      "rows": "Rows",
+      "grid": "Grid",
+      "main-stack": "Main and stack",
+      "monocle": "Monocle"
+    }
   },
   "common": {
     "dismiss": "Dismiss",

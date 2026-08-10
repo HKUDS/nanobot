@@ -986,6 +986,10 @@
     "unarchive": "Desarquivar",
     "showArchived": "Mostrar arquivadas",
     "hideArchived": "Ocultar arquivadas",
+    "select": "Selecionar",
+    "cancelSelection": "Cancelar seleção",
+    "selectedCount": "{{count}} selecionados",
+    "deleteSelected": "Excluir",
     "delete": "Excluir",
     "newChat": "Novo tópico",
     "groups": {
@@ -1000,10 +1004,13 @@
   },
   "deleteConfirm": {
     "title": "Excluir esta conversa?",
+    "titleMany": "Excluir {{count}} conversas e painéis?",
     "description": "Esta ação não pode ser desfeita.",
+    "descriptionMany": "Esta ação não pode ser desfeita.",
     "cancel": "Cancelar",
     "confirm": "Excluir",
     "automationsDescription": "Esta conversa possui automações agendadas. Excluí-la também excluirá essas automações.",
+    "automationsDescriptionMany": "As automações vinculadas também serão excluídas.",
     "moreAutomations": "+ {{count}} a mais",
     "confirmWithAutomations": "Excluir",
     "schedule": {
@@ -1398,6 +1405,26 @@
     "copyAria": "Copiar código",
     "copy": "Copiar",
     "copied": "Copiado"
+  },
+  "workbench": {
+    "aria": "Área de conversas",
+    "panes": "Painéis",
+    "panesInTab": "Painéis em {{title}}",
+    "dropPane": "Mover {{pane}} para {{tab}}",
+    "moveToTab": "Mover para uma aba",
+    "layout": "Layout de painéis",
+    "addPane": "Adicionar painel",
+    "promotePane": "Tornar {{title}} o painel principal",
+    "paneActions": "Ações do painel {{title}}",
+    "detachPane": "Mover {{title}} para seu próprio tópico",
+    "composerAria": "Mensagem para {{title}}",
+    "layouts": {
+      "columns": "Colunas",
+      "rows": "Linhas",
+      "grid": "Grade",
+      "main-stack": "Principal e pilha",
+      "monocle": "Monóculo"
+    }
   },
   "common": {
     "dismiss": "Descartar",

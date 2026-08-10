@@ -972,6 +972,10 @@
     "unarchive": "Batalkan arsip",
     "showArchived": "Tampilkan yang diarsipkan",
     "hideArchived": "Sembunyikan yang diarsipkan",
+    "select": "Pilih",
+    "cancelSelection": "Batalkan pilihan",
+    "selectedCount": "{{count}} dipilih",
+    "deleteSelected": "Hapus",
     "delete": "Hapus",
     "newChat": "Topik baru",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
+    "titleMany": "Hapus {{count}} obrolan dan panel?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
+    "descriptionMany": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
     "confirm": "Hapus",
     "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
+    "automationsDescriptionMany": "Automasi terkait juga akan dihapus.",
     "moreAutomations": "+ {{count}} lagi",
     "confirmWithAutomations": "Hapus",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "Salin kode",
     "copy": "Salin",
     "copied": "Tersalin"
+  },
+  "workbench": {
+    "aria": "Ruang kerja percakapan",
+    "panes": "Panel",
+    "panesInTab": "Panel di {{title}}",
+    "dropPane": "Pindahkan {{pane}} ke {{tab}}",
+    "moveToTab": "Pindahkan ke tab",
+    "layout": "Tata letak panel",
+    "addPane": "Tambah panel",
+    "promotePane": "Jadikan {{title}} panel utama",
+    "paneActions": "Tindakan panel {{title}}",
+    "detachPane": "Pindahkan {{title}} ke topik tersendiri",
+    "composerAria": "Pesan untuk {{title}}",
+    "layouts": {
+      "columns": "Kolom",
+      "rows": "Baris",
+      "grid": "Kisi",
+      "main-stack": "Utama dan tumpukan",
+      "monocle": "Panel tunggal"
+    }
   },
   "common": {
     "dismiss": "Tutup",

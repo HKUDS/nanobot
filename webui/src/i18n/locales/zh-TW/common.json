@@ -972,6 +972,10 @@
     "unarchive": "取消封存",
     "showArchived": "顯示封存",
     "hideArchived": "隱藏封存",
+    "select": "選取",
+    "cancelSelection": "取消選取",
+    "selectedCount": "已選取 {{count}} 項",
+    "deleteSelected": "刪除",
     "delete": "刪除",
     "newChat": "新增話題",
     "groups": {
@@ -986,10 +990,13 @@
   },
   "deleteConfirm": {
     "title": "刪除這個話題？",
+    "titleMany": "刪除這 {{count}} 個話題和窗格？",
     "description": "此操作無法復原。",
+    "descriptionMany": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除",
     "automationsDescription": "這個話題含有已排程的自動任務。刪除話題時也會一併刪除這些任務。",
+    "automationsDescriptionMany": "關聯的自動任務也會一併刪除。",
     "moreAutomations": "另有 {{count}} 個",
     "confirmWithAutomations": "刪除",
     "schedule": {
@@ -1384,6 +1391,26 @@
     "copyAria": "複製程式碼",
     "copy": "複製",
     "copied": "已複製"
+  },
+  "workbench": {
+    "aria": "對話工作台",
+    "panes": "窗格",
+    "panesInTab": "{{title}} 中的窗格",
+    "dropPane": "將 {{pane}} 移入 {{tab}}",
+    "moveToTab": "移動到分頁",
+    "layout": "窗格佈局",
+    "addPane": "新增窗格",
+    "promotePane": "將 {{title}} 設為主窗格",
+    "paneActions": "{{title}} 窗格操作",
+    "detachPane": "將 {{title}} 移至獨立主題",
+    "composerAria": "傳送訊息給 {{title}}",
+    "layouts": {
+      "columns": "欄佈局",
+      "rows": "列佈局",
+      "grid": "網格",
+      "main-stack": "主窗格與堆疊",
+      "monocle": "單窗格"
+    }
   },
   "common": {
     "dismiss": "關閉",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
@@ -311,9 +312,17 @@ interface ThreadShellProps {
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hideSidebarToggle?: boolean;
   hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
+  hideHeaderTitle?: boolean;
   hideHeader?: boolean;
+  headerActions?: ReactNode;
+  headerPortalTarget?: HTMLElement | null;
+  headerActive?: boolean;
+  composerPortalTarget?: HTMLElement | null;
+  composerActive?: boolean;
+  composerInputAriaLabel?: string;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
@@ -598,9 +607,17 @@ export function ThreadShell({
   theme = "light",
   onToggleTheme = () => {},
   hideSidebarToggleForHostChrome = false,
+  hideSidebarToggle = false,
   hostChromeTitleInset = false,
   hideThemeButton = false,
+  hideHeaderTitle = false,
   hideHeader = false,
+  headerActions,
+  headerPortalTarget,
+  headerActive = true,
+  composerPortalTarget,
+  composerActive = true,
+  composerInputAriaLabel,
   workspaceScope = null,
   workspaceDefaultScope = null,
   workspaceControls = null,
@@ -1405,6 +1422,7 @@ export function ThreadShell({
         <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
+          inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
           placeholder={
             showHeroComposer
@@ -1449,6 +1467,7 @@ export function ThreadShell({
         <ThreadComposer
           onSend={handleWelcomeSend}
           disabled={booting}
+          inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
           placeholder={
             booting
@@ -1508,28 +1527,33 @@ export function ThreadShell({
     />
   ) : undefined;
 
+  const threadHeader = !hideHeader ? (
+    <ThreadHeader
+      title={title}
+      onToggleSidebar={onToggleSidebar}
+      theme={theme}
+      onToggleTheme={onToggleTheme}
+      hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
+      hideSidebarToggle={hideSidebarToggle}
+      hostChromeTitleInset={hostChromeTitleInset}
+      hideThemeButton={hideThemeButton}
+      hideTitle={hideHeaderTitle}
+      actions={headerActions}
+      minimal={!session && !loading}
+      promptNavigatorAction={promptNavigatorAction}
+      sessionInfoAction={sessionInfoAction}
+      temporaryChatEnabled={temporaryChatEnabled}
+      temporaryChatDisabled={booting || turnActive}
+      onTemporaryChatEnabledChange={
+        showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+      }
+    />
+  ) : null;
+
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {!hideHeader ? (
-          <ThreadHeader
-            title={title}
-            onToggleSidebar={onToggleSidebar}
-            theme={theme}
-            onToggleTheme={onToggleTheme}
-            hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
-            hostChromeTitleInset={hostChromeTitleInset}
-            hideThemeButton={hideThemeButton}
-            minimal={!session && !loading}
-            promptNavigatorAction={promptNavigatorAction}
-            sessionInfoAction={sessionInfoAction}
-            temporaryChatEnabled={temporaryChatEnabled}
-            temporaryChatDisabled={booting || turnActive}
-            onTemporaryChatEnabledChange={
-              showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
-            }
-          />
-        ) : null}
+        {headerPortalTarget === undefined ? threadHeader : null}
         <FilePreviewAvailabilityProvider
           resolve={historyKey ? resolveFilePreviewAvailability : undefined}
         >
@@ -1539,7 +1563,7 @@ export function ThreadShell({
             temporary={temporary}
             isStreaming={turnActive}
             emptyState={emptyState}
-            composer={composer}
+            composer={composerPortalTarget === undefined ? composer : null}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1559,6 +1583,19 @@ export function ThreadShell({
           />
         </FilePreviewAvailabilityProvider>
       </div>
+      {headerPortalTarget && headerActive
+        ? createPortal(threadHeader, headerPortalTarget)
+        : null}
+      {composerPortalTarget ? createPortal(
+        <div
+          hidden={!composerActive}
+          aria-hidden={!composerActive}
+          data-testid={composerActive ? "active-pane-composer" : undefined}
+        >
+          {composer}
+        </div>,
+        composerPortalTarget,
+      ) : null}
       {filePreviewPath && historyKey ? (
         <FilePreviewPanel
           sessionKey={historyKey}

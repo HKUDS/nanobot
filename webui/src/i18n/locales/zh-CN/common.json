@@ -986,6 +986,10 @@
     "unarchive": "取消归档",
     "showArchived": "显示归档",
     "hideArchived": "隐藏归档",
+    "select": "选择",
+    "cancelSelection": "取消选择",
+    "selectedCount": "已选择 {{count}} 项",
+    "deleteSelected": "删除",
     "delete": "删除",
     "newChat": "新建话题",
     "groups": {
@@ -1000,10 +1004,13 @@
   },
   "deleteConfirm": {
     "title": "删除这个话题？",
+    "titleMany": "删除这 {{count}} 个话题和窗格？",
     "description": "此操作无法撤销。",
+    "descriptionMany": "此操作无法撤销。",
     "cancel": "取消",
     "confirm": "删除",
     "automationsDescription": "这个话题有关联的自动任务。删除话题也会删除这些自动任务。",
+    "automationsDescriptionMany": "关联的自动任务也会一并删除。",
     "moreAutomations": "另有 {{count}} 个",
     "confirmWithAutomations": "删除",
     "schedule": {
@@ -1398,6 +1405,26 @@
     "copyAria": "复制代码",
     "copy": "复制",
     "copied": "已复制"
+  },
+  "workbench": {
+    "aria": "会话工作台",
+    "panes": "窗格",
+    "panesInTab": "{{title}} 中的窗格",
+    "dropPane": "将 {{pane}} 移入 {{tab}}",
+    "moveToTab": "移动到标签页",
+    "layout": "窗格布局",
+    "addPane": "添加窗格",
+    "promotePane": "将 {{title}} 设为主窗格",
+    "paneActions": "{{title}} 窗格操作",
+    "detachPane": "将 {{title}} 移至独立主题",
+    "composerAria": "向 {{title}} 发送消息",
+    "layouts": {
+      "columns": "列布局",
+      "rows": "行布局",
+      "grid": "网格",
+      "main-stack": "主窗格与堆栈",
+      "monocle": "单窗格"
+    }
   },
   "common": {
     "dismiss": "关闭",

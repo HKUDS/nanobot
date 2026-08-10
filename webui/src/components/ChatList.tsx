@@ -1,22 +1,33 @@
 import {
   memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type RefObject,
 } from "react";
 import {
   Archive,
   ArchiveRestore,
+  BringToFront,
+  CornerDownRight,
   Folder,
+  ListChecks,
   MessageCircleDashed,
   MoreHorizontal,
+  PanelsTopLeft,
   Pencil,
   Pin,
   PinOff,
   Plus,
+  Square,
+  SquareCheckBig,
+  SquareMinus,
   Trash2,
+  Unplug,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -25,6 +36,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -43,7 +57,13 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
-import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
+import {
+  clearDraggedSession,
+  writeDraggedPane,
+  writeDraggedSession,
+  type DraggedPane,
+} from "@/lib/session-drag";
+import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
@@ -52,6 +72,21 @@ const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[8.5rem] min-w-[8.5rem]";
 
+export interface SidebarPaneGroup {
+  topicKey: string;
+  activePaneKey: string;
+  panes: Array<{
+    key: string;
+    chatId: string;
+    title: string;
+  }>;
+}
+
+export interface SidebarDeleteItem {
+  key: string;
+  label: string;
+}
+
 interface ChatListProps {
   sessions: ChatSummary[];
   temporarySessions?: ChatSummary[];
@@ -59,9 +94,17 @@ interface ChatListProps {
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  paneGroups?: Record<string, SidebarPaneGroup>;
+  onSelectPane?: (tabKey: string, paneKey: string) => void;
+  onDetachPane?: (tabKey: string, paneKey: string) => void;
+  onPromotePane?: (tabKey: string, paneKey: string) => void;
+  attachableTabKeys?: string[];
+  paneAcceptingTabKeys?: string[];
+  onAttachPane?: (paneKey: string, tabKey: string) => void;
   onReorderSessions?: (keys: string[]) => void;
   onToggleGroup?: (groupId: string) => void;
   onRequestRenameProject?: (projectKey: string, label: string) => void;
@@ -92,9 +135,17 @@ export const ChatList = memo(function ChatList({
   onSelect,
   onCloseTemporaryChat,
   onRequestDelete,
+  onRequestDeleteMany,
   onTogglePin,
   onRequestRename,
   onToggleArchive,
+  paneGroups = {},
+  onSelectPane,
+  onDetachPane,
+  onPromotePane,
+  attachableTabKeys = [],
+  paneAcceptingTabKeys = [],
+  onAttachPane,
   onReorderSessions,
   onToggleGroup,
   onRequestRenameProject,
@@ -124,7 +175,49 @@ export const ChatList = memo(function ChatList({
     edge: "before" | "after";
     key: string;
   } | null>(null);
+  const [draggedSessionHeight, setDraggedSessionHeight] = useState(0);
+  const [draggedPane, setDraggedPane] = useState<DraggedPane | null>(null);
+  const [tabAttachTargetKey, setTabAttachTargetKey] = useState<string | null>(null);
+  const tabAttachTargetRef = useRef<string | null>(null);
+  const tabRowRefs = useRef(new Map<string, HTMLLIElement>());
+  const pendingTabRectsRef = useRef<Map<string, DOMRect> | null>(null);
+  const tabLayoutAnimationsRef = useRef(new Map<string, Animation>());
+  const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
+  const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   const activeRowRef = useRef<HTMLDivElement>(null);
+  const selectedPaneGroup = activeKey ? paneGroups[activeKey] : undefined;
+  const selectedRowKey = selectedPaneGroup
+    ? selectedPaneGroup.activePaneKey
+    : activeKey;
+  const attachableTabs = useMemo(() => new Set(attachableTabKeys), [attachableTabKeys]);
+  const paneAcceptingTabs = useMemo(
+    () => new Set(paneAcceptingTabKeys),
+    [paneAcceptingTabKeys],
+  );
+  const deleteItemsByKey = useMemo(() => {
+    const items = new Map<string, SidebarDeleteItem>();
+    for (const group of Object.values(paneGroups)) {
+      for (const pane of group.panes) {
+        items.set(pane.key, { key: pane.key, label: pane.title });
+      }
+    }
+    for (const session of sessions) {
+      if (items.has(session.key)) continue;
+      items.set(session.key, {
+        key: session.key,
+        label: displayTitle(session, titleOverrides, t("chat.newChat")),
+      });
+    }
+    return items;
+  }, [paneGroups, sessions, t, titleOverrides]);
+  const paneMoveTargets = useMemo(() => sessions
+    .filter((session) => paneAcceptingTabs.has(session.key))
+    .map((session) => ({
+      key: session.key,
+      title: deleteItemsByKey.get(session.key)?.label ?? session.title ?? session.chatId,
+    })), [deleteItemsByKey, paneAcceptingTabs, sessions]);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -196,6 +289,80 @@ export const ChatList = memo(function ChatList({
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
   }, [showArchived, sort]);
 
+  useEffect(() => {
+    if (!deleteSelectionMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setDeleteSelectionMode(false);
+      setSelectedDeleteKeys(new Set());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [deleteSelectionMode]);
+
+  const measureTabRows = useCallback(() => {
+    const rects = new Map<string, DOMRect>();
+    for (const [key, row] of tabRowRefs.current) {
+      rects.set(key, row.getBoundingClientRect());
+    }
+    return rects;
+  }, []);
+
+  const updateTabAttachTarget = useCallback((next: string | null) => {
+    if (tabAttachTargetRef.current === next) return;
+    for (const animation of tabLayoutAnimationsRef.current.values()) animation.cancel();
+    tabLayoutAnimationsRef.current.clear();
+    pendingTabRectsRef.current = measureTabRows();
+    tabAttachTargetRef.current = next;
+    setTabAttachTargetKey(next);
+  }, [measureTabRows]);
+
+  const resetDragState = useCallback(() => {
+    clearDraggedSession();
+    setDraggedSessionKey(null);
+    setDraggedPane(null);
+    setSessionDropTarget(null);
+    updateTabAttachTarget(null);
+    setDraggedSessionHeight(0);
+  }, [updateTabAttachTarget]);
+
+  useLayoutEffect(() => {
+    const previousRects = pendingTabRectsRef.current;
+    if (!previousRects) return;
+    pendingTabRectsRef.current = null;
+    const nextRects = measureTabRows();
+    const reduceMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) return;
+    for (const [key, nextRect] of nextRects) {
+      const previousRect = previousRects.get(key);
+      const row = tabRowRefs.current.get(key);
+      if (!previousRect || !row || typeof row.animate !== "function") continue;
+      const deltaY = previousRect.top - nextRect.top;
+      if (Math.abs(deltaY) < 0.5) continue;
+      const animation = row.animate(
+        [
+          { transform: `translateY(${deltaY}px)` },
+          { transform: "translateY(0)" },
+        ],
+        {
+          duration: 180,
+          easing: "cubic-bezier(0.2, 0, 0, 1)",
+        },
+      );
+      tabLayoutAnimationsRef.current.set(key, animation);
+      animation.addEventListener("finish", () => {
+        if (tabLayoutAnimationsRef.current.get(key) === animation) {
+          tabLayoutAnimationsRef.current.delete(key);
+        }
+      }, { once: true });
+    }
+  }, [measureTabRows, tabAttachTargetKey]);
+
+  useEffect(() => () => {
+    for (const animation of tabLayoutAnimationsRef.current.values()) animation.cancel();
+  }, []);
+
   if (loading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] text-muted-foreground">
@@ -218,10 +385,48 @@ export const ChatList = memo(function ChatList({
   const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
 
   const canReorderSession = (targetKey: string) => (
-    !!draggedSessionKey
+    !deleteSelectionMode
+    && !!draggedSessionKey
     && draggedSessionKey !== targetKey
     && sessionLanes.get(draggedSessionKey) === sessionLanes.get(targetKey)
   );
+  const beginDeleteSelection = (keys: string[]) => {
+    setDeleteSelectionMode(true);
+    setSelectedDeleteKeys(new Set(keys.filter((key) => deleteItemsByKey.has(key))));
+  };
+  const toggleDeleteSelection = (keys: string[]) => {
+    setSelectedDeleteKeys((current) => {
+      const next = new Set(current);
+      const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
+      const remove = validKeys.length > 0 && validKeys.every((key) => next.has(key));
+      for (const key of validKeys) {
+        if (remove) next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  };
+  const closeDeleteSelection = () => {
+    setDeleteSelectionMode(false);
+    setSelectedDeleteKeys(new Set());
+  };
+  const requestDeleteItems = (items: SidebarDeleteItem[]) => {
+    if (items.length === 0) return;
+    if (onRequestDeleteMany) onRequestDeleteMany(items);
+    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label);
+  };
+  const requestDeleteKeys = (keys: string[]) => {
+    requestDeleteItems(keys
+      .map((key) => deleteItemsByKey.get(key))
+      .filter((item): item is SidebarDeleteItem => item !== undefined));
+  };
+  const confirmDeleteSelection = () => {
+    requestDeleteKeys(Array.from(selectedDeleteKeys));
+    closeDeleteSelection();
+  };
+  const draggedItemTitle = draggedPane
+    ? deleteItemsByKey.get(draggedPane.paneKey)?.label
+    : draggedSessionKey ? deleteItemsByKey.get(draggedSessionKey)?.label : undefined;
   const reorderSession = (targetKey: string, edge: "before" | "after") => {
     if (!draggedSessionKey || !canReorderSession(targetKey) || !onReorderSessions) return;
     const keys = groups.flatMap((group) => group.sessions.map((session) => session.key));
@@ -240,7 +445,7 @@ export const ChatList = memo(function ChatList({
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
       <SidebarSelectionHighlight
         targetRef={activeRowRef}
-        activeId={activeKey}
+        activeId={draggedSessionKey || draggedPane ? null : selectedRowKey}
         scope="sessions"
         data-chat-list-content
         className="relative min-w-0 space-y-3 px-2 py-1.5"
@@ -265,6 +470,12 @@ export const ChatList = memo(function ChatList({
           );
           const hiddenInGroup = Math.max(0, group.sessions.length - visibleSessions.length);
           const canToggleFold = group.sessions.length > COLLAPSED_CHATS_VISIBLE_COUNT;
+          const reorderOffsets = sessionReorderOffsets(
+            visibleSessions.map((session) => session.key),
+            draggedSessionKey,
+            sessionDropTarget,
+            draggedSessionHeight,
+          );
 
           return (
             <section key={group.id} aria-label={group.label} className="relative z-[1]">
@@ -298,12 +509,28 @@ export const ChatList = memo(function ChatList({
               {group.kind === "project" && collapsedGroups[group.id] ? null : (
                 <ul className="space-y-0.5">
                   {visibleSessions.map((s) => {
-                    const active = s.key === activeKey;
+                    const topicActive = s.key === activeKey;
+                    const paneGroup = paneGroups[s.key];
                     const fallbackTitle = t("chat.fallbackTitle", {
                       id: s.chatId.slice(0, 6),
                     });
                     const generatedTitle = s.title?.trim() || "";
                     const title = displayTitle(s, titleOverrides, t("chat.newChat"));
+                    const resolvedPaneGroup = paneGroup ?? {
+                      topicKey: s.key,
+                      activePaneKey: s.key,
+                      panes: [{ key: s.key, chatId: s.chatId, title }],
+                    };
+                    const active = topicActive && resolvedPaneGroup.activePaneKey === s.key;
+                    const paneCount = resolvedPaneGroup.panes.length;
+                    const tabDeleteKeys = resolvedPaneGroup.panes.map((pane) => pane.key);
+                    const tabSelected = tabDeleteKeys.every((key) => (
+                      selectedDeleteKeys.has(key)
+                    ));
+                    const tabPartiallySelected = !tabSelected && tabDeleteKeys.some((key) => (
+                      selectedDeleteKeys.has(key)
+                    ));
+                    const isAttachTarget = tabAttachTargetKey === s.key;
                     const tooltipTitle =
                       titleOverrides[s.key]?.trim() ||
                       generatedTitle ||
@@ -318,24 +545,83 @@ export const ChatList = memo(function ChatList({
                     const projectMode = group.kind === "project";
                     const activityState = running.has(s.chatId)
                       ? "running"
-                      : updated.has(s.chatId) && !active
+                      : updated.has(s.chatId) && !topicActive
                         ? "updated"
                         : null;
                     return (
                       <li
                         key={s.key}
-                        className="relative min-w-0"
+                        ref={(element) => {
+                          if (element) tabRowRefs.current.set(s.key, element);
+                          else tabRowRefs.current.delete(s.key);
+                        }}
+                        data-session-dragging={draggedSessionKey === s.key ? "true" : undefined}
+                        data-session-displaced={reorderOffsets.has(s.key) ? "true" : undefined}
+                        data-tab-attach-target={tabAttachTargetKey === s.key ? "true" : undefined}
+                        className={cn(
+                          "relative min-w-0 rounded-xl transition-[transform,opacity,background-color,box-shadow] duration-200 [transition-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+                          draggedSessionKey === s.key && "opacity-0",
+                          isAttachTarget
+                            && "bg-sidebar-accent/35 shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border))]",
+                        )}
+                        style={{
+                          transform: reorderOffsets.has(s.key)
+                            ? `translateY(${reorderOffsets.get(s.key)}px)`
+                            : undefined,
+                        }}
                         onDragOver={(event) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const relativeY = rect.height > 0
+                            ? (event.clientY - rect.top) / rect.height
+                            : 0.5;
+                          const paneCanAttach = Boolean(
+                            !deleteSelectionMode
+                            && draggedPane
+                            && draggedPane.sourceTabKey !== s.key
+                            && paneAcceptingTabs.has(s.key)
+                            && onAttachPane,
+                          );
+                          const tabCanAttach = Boolean(
+                            !deleteSelectionMode
+                            && draggedSessionKey
+                            && draggedSessionKey !== s.key
+                            && attachableTabs.has(draggedSessionKey)
+                            && paneAcceptingTabs.has(s.key)
+                            && relativeY >= 0.25
+                            && relativeY <= 0.75
+                            && onAttachPane,
+                          );
+                          if (paneCanAttach || tabCanAttach) {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            setSessionDropTarget(null);
+                            updateTabAttachTarget(s.key);
+                            return;
+                          }
+                          updateTabAttachTarget(null);
                           if (!canReorderSession(s.key)) return;
                           event.preventDefault();
                           event.dataTransfer.dropEffect = "move";
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          setSessionDropTarget({
+                          const nextTarget = {
                             key: s.key,
                             edge: event.clientY < rect.top + rect.height / 2 ? "before" : "after",
-                          });
+                          } as const;
+                          setSessionDropTarget((current) => (
+                            current?.key === nextTarget.key && current.edge === nextTarget.edge
+                              ? current
+                              : nextTarget
+                          ));
                         }}
                         onDrop={(event) => {
+                          if (tabAttachTargetKey === s.key && onAttachPane) {
+                            const paneKey = draggedPane?.paneKey ?? draggedSessionKey;
+                            if (paneKey) {
+                              event.preventDefault();
+                              onAttachPane(paneKey, s.key);
+                            }
+                            resetDragState();
+                            return;
+                          }
                           if (!canReorderSession(s.key)) return;
                           event.preventDefault();
                           const rect = event.currentTarget.getBoundingClientRect();
@@ -343,23 +629,13 @@ export const ChatList = memo(function ChatList({
                             ? "before"
                             : "after";
                           reorderSession(s.key, edge);
-                          setDraggedSessionKey(null);
-                          setSessionDropTarget(null);
+                          resetDragState();
                         }}
                       >
-                        {sessionDropTarget?.key === s.key ? (
-                          <span
-                            aria-hidden
-                            data-session-drop-edge={sessionDropTarget.edge}
-                            className={cn(
-                              "pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-primary",
-                              sessionDropTarget.edge === "before" ? "-top-px" : "-bottom-px",
-                            )}
-                          />
-                        ) : null}
                         <div
                           ref={active ? activeRowRef : undefined}
                           data-chat-row={s.key}
+                          data-sidebar-tab={s.key}
                           className={cn(
                             "group flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
                             SIDEBAR_SELECTION_ITEM_CLASS,
@@ -367,36 +643,75 @@ export const ChatList = memo(function ChatList({
                             active
                               ? "text-sidebar-accent-foreground"
                               : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+                            isAttachTarget
+                              && "bg-sidebar-accent/65 text-sidebar-accent-foreground",
+                            deleteSelectionMode && (tabSelected || tabPartiallySelected)
+                              && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
                         >
                           <button
                             type="button"
-                            onClick={() => onSelect(s.key)}
-                            draggable
+                            onClick={() => {
+                              if (deleteSelectionMode) {
+                                toggleDeleteSelection(tabDeleteKeys);
+                                return;
+                              }
+                              if (topicActive && paneGroup && onSelectPane) {
+                                onSelectPane(s.key, s.key);
+                                return;
+                              }
+                              onSelect(s.key);
+                            }}
+                            draggable={!deleteSelectionMode}
                             onDragStart={(event) => {
                               setDraggedSessionKey(s.key);
+                              setDraggedPane(null);
                               setSessionDropTarget(null);
+                              updateTabAttachTarget(null);
+                              setDraggedSessionHeight(
+                                event.currentTarget.closest("li")?.getBoundingClientRect().height
+                                  ?? event.currentTarget.getBoundingClientRect().height,
+                              );
                               writeDraggedSession(event.dataTransfer, s.key);
                             }}
-                            onDragEnd={() => {
-                              clearDraggedSession();
-                              setDraggedSessionKey(null);
-                              setSessionDropTarget(null);
-                            }}
+                            onDragEnd={resetDragState}
                             aria-current={active ? "page" : undefined}
+                            aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                             title={tooltipTitle}
                             className={cn(
-                              "min-w-0 flex-1 overflow-hidden text-left",
-                              "cursor-grab active:cursor-grabbing",
+                              "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
+                              deleteSelectionMode
+                                ? "cursor-default"
+                                : "cursor-grab active:cursor-grabbing",
                               compact ? "py-1" : "py-1.5",
                               projectMode && "pl-7",
                             )}
                           >
+                            {deleteSelectionMode ? (
+                              <SelectionIndicator
+                                checked={tabSelected}
+                                partial={tabPartiallySelected}
+                              />
+                            ) : paneCount > 1 || isAttachTarget ? (
+                              <PanelsTopLeft
+                                aria-hidden
+                                className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+                              />
+                            ) : null}
+                            <span className="min-w-0 flex-1 overflow-hidden">
                             {projectMode ? (
                               <span className="flex w-full min-w-0 items-baseline gap-2">
                                 <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                   {title}
                                 </span>
+                                {paneCount > 1 ? (
+                                  <span
+                                    aria-hidden
+                                    className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground/55"
+                                  >
+                                    {paneCount}/{MAX_WORKBENCH_PANES}
+                                  </span>
+                                ) : null}
                                 {isPinned ? <PinnedChatIndicator label={labels.pinned} /> : null}
                                 {timestamp ? (
                                   <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground/58">
@@ -409,6 +724,14 @@ export const ChatList = memo(function ChatList({
                                 <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                   {title}
                                 </span>
+                                {paneCount > 1 ? (
+                                  <span
+                                    aria-hidden
+                                    className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground/55"
+                                  >
+                                    {paneCount}/{MAX_WORKBENCH_PANES}
+                                  </span>
+                                ) : null}
                                 {isPinned ? <PinnedChatIndicator label={labels.pinned} /> : null}
                               </span>
                             )}
@@ -422,15 +745,16 @@ export const ChatList = memo(function ChatList({
                                 {timestamp}
                               </span>
                             ) : null}
+                            </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />
-                          <DropdownMenu modal={false}>
+                          {!deleteSelectionMode ? <DropdownMenu modal={false}>
                             <DropdownMenuTrigger
                               className={cn(
                                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
                                 "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
                                 "focus-visible:opacity-100",
-                                active && "opacity-100",
+                                topicActive && "opacity-100",
                               )}
                               aria-label={t("chat.actions", { title })}
                             >
@@ -442,6 +766,17 @@ export const ChatList = memo(function ChatList({
                               portalContainer={actionMenuPortalContainer}
                               onCloseAutoFocus={(event) => event.preventDefault()}
                             >
+                              {paneGroup
+                              && paneGroup.panes.findIndex((pane) => pane.key === s.key) > 0
+                              && onPromotePane ? (
+                                <DropdownMenuItem onSelect={() => onPromotePane(s.key, s.key)}>
+                                  <BringToFront className="h-4 w-4 shrink-0" />
+                                  {t("workbench.promotePane", {
+                                    defaultValue: "Make {{title}} the primary pane",
+                                    title,
+                                  })}
+                                </DropdownMenuItem>
+                              ) : null}
                               <DropdownMenuItem
                                 onSelect={() => onTogglePin(s.key)}
                               >
@@ -468,18 +803,71 @@ export const ChatList = memo(function ChatList({
                                 )}
                                 {isArchived ? t("chat.unarchive") : t("chat.archive")}
                               </DropdownMenuItem>
+                              {attachableTabs.has(s.key) && onAttachPane ? (
+                                <MoveToTabSubmenu
+                                  targets={paneMoveTargets.filter((target) => target.key !== s.key)}
+                                  onMove={(targetKey) => onAttachPane(s.key, targetKey)}
+                                />
+                              ) : null}
+                              <DropdownMenuItem
+                                onSelect={() => beginDeleteSelection(tabDeleteKeys)}
+                              >
+                                <ListChecks className="h-4 w-4 shrink-0" />
+                                {t("chat.select", { defaultValue: "Select" })}
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 tone="destructive"
                                 onSelect={() => {
-                                  window.setTimeout(() => onRequestDelete(s.key, title), 0);
+                                  window.setTimeout(() => requestDeleteKeys(tabDeleteKeys), 0);
                                 }}
                               >
                                 <Trash2 className="h-4 w-4 shrink-0" />
                                 {t("chat.delete")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
-                          </DropdownMenu>
+                          </DropdownMenu> : null}
                         </div>
+                        {paneCount > 1 || isAttachTarget ? (
+                          <ActivePaneRows
+                            group={resolvedPaneGroup}
+                            tabTitle={title}
+                            tabActive={topicActive}
+                            activeRowRef={activeRowRef}
+                            running={running}
+                            updated={updated}
+                            onSelectPane={onSelectPane}
+                            onRequestDelete={onRequestDelete}
+                            onRequestRename={onRequestRename}
+                            onDetachPane={onDetachPane}
+                            onPromotePane={onPromotePane}
+                            moveTargets={paneMoveTargets.filter((target) => (
+                              target.key !== resolvedPaneGroup.topicKey
+                            ))}
+                            onAttachPane={onAttachPane}
+                            deleteSelectionMode={deleteSelectionMode}
+                            selectedDeleteKeys={selectedDeleteKeys}
+                            onToggleDeleteSelection={toggleDeleteSelection}
+                            onBeginDeleteSelection={beginDeleteSelection}
+                            dropPreview={isAttachTarget && draggedItemTitle ? {
+                              paneTitle: draggedItemTitle,
+                              targetTitle: title,
+                            } : null}
+                            draggedPaneKey={draggedPane?.paneKey ?? null}
+                            onPaneDragStart={(event, pane) => {
+                              setDraggedPane(pane);
+                              setDraggedSessionKey(null);
+                              setSessionDropTarget(null);
+                              updateTabAttachTarget(null);
+                              setDraggedSessionHeight(
+                                event.currentTarget.closest("li")?.getBoundingClientRect().height
+                                  ?? event.currentTarget.getBoundingClientRect().height,
+                              );
+                              writeDraggedPane(event.dataTransfer, pane);
+                            }}
+                            onPaneDragEnd={resetDragState}
+                            actionMenuPortalContainer={actionMenuPortalContainer}
+                          />
+                        ) : null}
                       </li>
                     );
                   })}
@@ -510,10 +898,328 @@ export const ChatList = memo(function ChatList({
             </button>
           </div>
         ) : null}
+        {deleteSelectionMode ? (
+          <div
+            data-testid="delete-selection-bar"
+            className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-2 rounded-2xl border border-sidebar-border/80 bg-popover/95 p-1.5 pl-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+          >
+            <button
+              type="button"
+              onClick={closeDeleteSelection}
+              aria-label={t("chat.cancelSelection", {
+                defaultValue: "Cancel selection",
+              })}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+            <span className="min-w-0 flex-1 truncate px-1 text-[12.5px] font-medium text-foreground/85">
+              {t("chat.selectedCount", {
+                defaultValue: "{{count}} selected",
+                count: selectedDeleteKeys.size,
+              })}
+            </span>
+            <button
+              type="button"
+              disabled={selectedDeleteKeys.size === 0}
+              onClick={confirmDeleteSelection}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-destructive px-3 text-[12px] font-semibold text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              {t("chat.deleteSelected", { defaultValue: "Delete" })}
+            </button>
+          </div>
+        ) : null}
       </SidebarSelectionHighlight>
     </div>
   );
 });
+
+function sessionReorderOffsets(
+  keys: string[],
+  draggedKey: string | null,
+  target: { edge: "before" | "after"; key: string } | null,
+  draggedHeight: number,
+): Map<string, number> {
+  const offsets = new Map<string, number>();
+  if (!draggedKey || !target || draggedHeight <= 0) return offsets;
+  const sourceIndex = keys.indexOf(draggedKey);
+  if (sourceIndex < 0 || target.key === draggedKey) return offsets;
+  const remaining = keys.filter((key) => key !== draggedKey);
+  const targetIndex = remaining.indexOf(target.key);
+  if (targetIndex < 0) return offsets;
+  const finalIndex = targetIndex + (target.edge === "after" ? 1 : 0);
+
+  if (sourceIndex < finalIndex) {
+    for (let index = sourceIndex + 1; index <= finalIndex; index += 1) {
+      offsets.set(keys[index], -draggedHeight);
+    }
+  } else if (sourceIndex > finalIndex) {
+    for (let index = finalIndex; index < sourceIndex; index += 1) {
+      offsets.set(keys[index], draggedHeight);
+    }
+  }
+  return offsets;
+}
+
+function ActivePaneRows({
+  group,
+  tabTitle,
+  tabActive,
+  activeRowRef,
+  running,
+  updated,
+  onSelectPane,
+  onRequestDelete,
+  onRequestRename,
+  onDetachPane,
+  onPromotePane,
+  moveTargets,
+  onAttachPane,
+  deleteSelectionMode,
+  selectedDeleteKeys,
+  onToggleDeleteSelection,
+  onBeginDeleteSelection,
+  dropPreview,
+  draggedPaneKey,
+  onPaneDragStart,
+  onPaneDragEnd,
+  actionMenuPortalContainer,
+}: {
+  group: SidebarPaneGroup;
+  tabTitle: string;
+  tabActive: boolean;
+  activeRowRef: RefObject<HTMLDivElement>;
+  running: ReadonlySet<string>;
+  updated: ReadonlySet<string>;
+  onSelectPane?: (tabKey: string, paneKey: string) => void;
+  onRequestDelete: (key: string, label: string) => void;
+  onRequestRename: (key: string, label: string) => void;
+  onDetachPane?: (tabKey: string, paneKey: string) => void;
+  onPromotePane?: (tabKey: string, paneKey: string) => void;
+  moveTargets: Array<{ key: string; title: string }>;
+  onAttachPane?: (paneKey: string, tabKey: string) => void;
+  deleteSelectionMode: boolean;
+  selectedDeleteKeys: ReadonlySet<string>;
+  onToggleDeleteSelection: (keys: string[]) => void;
+  onBeginDeleteSelection: (keys: string[]) => void;
+  dropPreview: { paneTitle: string; targetTitle: string } | null;
+  draggedPaneKey: string | null;
+  onPaneDragStart: (event: DragEvent<HTMLButtonElement>, pane: DraggedPane) => void;
+  onPaneDragEnd: () => void;
+  actionMenuPortalContainer?: HTMLElement | null;
+}) {
+  const { t } = useTranslation();
+  const childPanes = group.panes.filter((pane) => pane.key !== group.topicKey);
+
+  return (
+    <ul
+      aria-label={t("workbench.panesInTab", {
+        defaultValue: "Panes in {{title}}",
+        title: tabTitle,
+      })}
+      className={cn(
+        "relative ml-5 mr-1 mt-0.5 space-y-0.5 rounded-bl-lg border-l border-sidebar-border/60 py-0.5 pl-2 pr-0.5",
+        dropPreview && "pb-1",
+      )}
+    >
+      {childPanes.map((pane) => {
+        const index = group.panes.findIndex((candidate) => candidate.key === pane.key);
+        const active = tabActive && pane.key === group.activePaneKey;
+        const activityState = running.has(pane.chatId)
+          ? "running"
+          : updated.has(pane.chatId) && !active
+            ? "updated"
+            : null;
+        const paneActionsLabel = t("workbench.paneActions", {
+          defaultValue: "{{title}} pane actions",
+          title: pane.title,
+        });
+        const selected = selectedDeleteKeys.has(pane.key);
+
+        return (
+          <li
+            key={pane.key}
+            data-pane-dragging={draggedPaneKey === pane.key ? "true" : undefined}
+            className="relative min-w-0 before:absolute before:-left-2 before:top-1/2 before:h-px before:w-2 before:bg-sidebar-border/45"
+          >
+            <div
+              ref={active ? activeRowRef : undefined}
+              data-chat-row={pane.key}
+              data-sidebar-pane={pane.key}
+              className={cn(
+                "group/pane flex min-h-7 min-w-0 items-center gap-1 rounded-lg px-2 text-[12.5px]",
+                SIDEBAR_SELECTION_ITEM_CLASS,
+                active
+                  ? "text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/72 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+                deleteSelectionMode && selected
+                  && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (deleteSelectionMode) {
+                    onToggleDeleteSelection([pane.key]);
+                    return;
+                  }
+                  onSelectPane?.(group.topicKey, pane.key);
+                }}
+                draggable={!deleteSelectionMode}
+                onDragStart={(event) => onPaneDragStart(event, {
+                  paneKey: pane.key,
+                  sourceTabKey: group.topicKey,
+                })}
+                onDragEnd={onPaneDragEnd}
+                aria-current={active ? "true" : undefined}
+                aria-pressed={deleteSelectionMode ? selected : undefined}
+                title={pane.title}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 py-1 text-left font-medium leading-5",
+                  deleteSelectionMode ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                )}
+              >
+                {deleteSelectionMode ? (
+                  <SelectionIndicator checked={selected} partial={false} />
+                ) : null}
+                <span className="min-w-0 flex-1 truncate">{pane.title}</span>
+              </button>
+              <SessionActivityIndicator state={activityState} />
+              {!deleteSelectionMode ? <DropdownMenu modal={false}>
+                <DropdownMenuTrigger
+                  className={cn(
+                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity",
+                    "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover/pane:opacity-100",
+                    "focus-visible:opacity-100",
+                    active && "opacity-100",
+                  )}
+                  aria-label={paneActionsLabel}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className={ACTION_MENU_CONTENT_CLASS}
+                  portalContainer={actionMenuPortalContainer}
+                  onCloseAutoFocus={(event) => event.preventDefault()}
+                >
+                  {index > 0 && onPromotePane ? (
+                    <DropdownMenuItem onSelect={() => onPromotePane(group.topicKey, pane.key)}>
+                      <BringToFront className="h-4 w-4 shrink-0" />
+                      {t("workbench.promotePane", {
+                        defaultValue: "Make {{title}} the primary pane",
+                        title: pane.title,
+                      })}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem
+                    onSelect={() => onRequestRename(pane.key, pane.title)}
+                  >
+                    <Pencil className="h-4 w-4 shrink-0" />
+                    {t("chat.rename")}
+                  </DropdownMenuItem>
+                  {onDetachPane ? (
+                    <DropdownMenuItem onSelect={() => onDetachPane(group.topicKey, pane.key)}>
+                      <Unplug className="h-4 w-4 shrink-0" />
+                      {t("workbench.detachPane", {
+                        defaultValue: "Move {{title}} to its own topic",
+                        title: pane.title,
+                      })}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {onAttachPane ? (
+                    <MoveToTabSubmenu
+                      targets={moveTargets}
+                      onMove={(targetKey) => onAttachPane(pane.key, targetKey)}
+                    />
+                  ) : null}
+                  <DropdownMenuItem
+                    onSelect={() => onBeginDeleteSelection([pane.key])}
+                  >
+                    <ListChecks className="h-4 w-4 shrink-0" />
+                    {t("chat.select", { defaultValue: "Select" })}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    tone="destructive"
+                    onSelect={() => {
+                      window.setTimeout(() => onRequestDelete(pane.key, pane.title), 0);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0" />
+                    {t("chat.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu> : null}
+            </div>
+          </li>
+        );
+      })}
+      {dropPreview ? (
+        <li
+          data-pane-drop-preview
+          role="status"
+          aria-label={t("workbench.dropPane", {
+            defaultValue: "Move {{pane}} into {{tab}}",
+            pane: dropPreview.paneTitle,
+            tab: dropPreview.targetTitle,
+          })}
+          className="relative min-w-0 before:absolute before:-left-2 before:top-1/2 before:h-px before:w-2 before:bg-primary/45"
+        >
+          <div className="flex min-h-7 items-center gap-2 rounded-lg border border-primary/30 bg-primary/[0.07] px-2 text-[12.5px] font-medium text-foreground/80 shadow-[inset_0_0_0_1px_hsl(var(--background)/0.5)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150">
+            <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-primary/75" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{dropPreview.paneTitle}</span>
+          </div>
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+function SelectionIndicator({
+  checked,
+  partial,
+}: {
+  checked: boolean;
+  partial: boolean;
+}) {
+  const Icon = partial ? SquareMinus : checked ? SquareCheckBig : Square;
+  return (
+    <Icon
+      aria-hidden
+      className={cn(
+        "h-4 w-4 shrink-0",
+        checked || partial ? "text-primary" : "text-muted-foreground/55",
+      )}
+    />
+  );
+}
+
+function MoveToTabSubmenu({
+  targets,
+  onMove,
+}: {
+  targets: Array<{ key: string; title: string }>;
+  onMove: (targetKey: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (targets.length === 0) return null;
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
+        {t("workbench.moveToTab", { defaultValue: "Move to tab" })}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {targets.map((target) => (
+          <DropdownMenuItem key={target.key} onSelect={() => onMove(target.key)}>
+            <span className="max-w-56 truncate">{target.title}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
 
 function TemporaryChatSection({
   sessions,

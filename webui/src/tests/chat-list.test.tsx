@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
-import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
+import { PANE_DRAG_TYPE, SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -40,6 +40,26 @@ function rect({
     bottom: top + height,
     toJSON: () => ({}),
   } as DOMRect;
+}
+
+function dragOverAt(
+  element: Element,
+  clientY: number,
+  dataTransfer: Record<string, unknown>,
+): void {
+  const event = createEvent.dragOver(element, { dataTransfer });
+  Object.defineProperty(event, "clientY", { value: clientY });
+  fireEvent(element, event);
+}
+
+function dropAt(
+  element: Element,
+  clientY: number,
+  dataTransfer: Record<string, unknown>,
+): void {
+  const event = createEvent.drop(element, { dataTransfer });
+  Object.defineProperty(event, "clientY", { value: clientY });
+  fireEvent(element, event);
 }
 
 describe("ChatList", () => {
@@ -82,7 +102,13 @@ describe("ChatList", () => {
     fireEvent.dragEnd(reference, { dataTransfer });
   });
 
-  it("reorders chats around a Codex-style insertion line", () => {
+  it("reorders topics with a displaced-neighbor preview instead of an insertion line", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect({
+      left: 0,
+      top: 0,
+      width: 284,
+      height: 32,
+    }));
     const onReorderSessions = vi.fn();
     const sessions = [
       session({ chatId: "alpha", title: "Alpha" }),
@@ -112,10 +138,14 @@ describe("ChatList", () => {
     };
     fireEvent.dragStart(screen.getByRole("button", { name: "Alpha" }), { dataTransfer });
     const charlieRow = screen.getByRole("button", { name: "Charlie" }).closest("li")!;
-    fireEvent.dragOver(charlieRow, { clientY: 1, dataTransfer });
-    expect(charlieRow.querySelector("[data-session-drop-edge='after']"))
-      .toBeInTheDocument();
-    fireEvent.drop(charlieRow, { clientY: 1, dataTransfer });
+    dragOverAt(charlieRow, 24, dataTransfer);
+    expect(document.querySelector("[data-session-drop-edge]")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bravo" }).closest("li"))
+      .toHaveAttribute("data-session-displaced", "true");
+    expect(charlieRow).toHaveStyle({ transform: "translateY(-32px)" });
+    expect(screen.getByRole("button", { name: "Alpha" }).closest("li"))
+      .toHaveAttribute("data-session-dragging", "true");
+    dropAt(charlieRow, 24, dataTransfer);
 
     expect(onReorderSessions).toHaveBeenCalledWith([
       "websocket:bravo",
@@ -150,6 +180,228 @@ describe("ChatList", () => {
     const text = section.textContent ?? "";
     expect(text.indexOf("Bravo")).toBeLessThan(text.indexOf("Charlie"));
     expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
+  });
+
+  it("shows every tab's pane membership in the sidebar tree", async () => {
+    const onSelect = vi.fn();
+    const onSelectPane = vi.fn();
+    const onDetachPane = vi.fn();
+    const onPromotePane = vi.fn();
+    const onRequestRename = vi.fn();
+    const onAttachPane = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            topicKey: "websocket:root",
+            activePaneKey: "websocket:child",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+          "websocket:target": {
+            topicKey: "websocket:target",
+            activePaneKey: "websocket:target-child",
+            panes: [
+              { key: "websocket:target", chatId: "target", title: "Target tab" },
+              {
+                key: "websocket:target-child",
+                chatId: "target-child",
+                title: "Target research",
+              },
+            ],
+          },
+        }}
+        onSelect={onSelect}
+        onSelectPane={onSelectPane}
+        onDetachPane={onDetachPane}
+        onPromotePane={onPromotePane}
+        paneAcceptingTabKeys={["websocket:target"]}
+        onAttachPane={onAttachPane}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={onRequestRename}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const child = screen.getByRole("button", { name: "Research pane" });
+    expect(child.closest("[data-sidebar-pane]"))
+      .toHaveAttribute("data-sidebar-pane", "websocket:child");
+    expect(child).toHaveAttribute("aria-current", "true");
+    const targetTabRow = screen.getByRole("button", { name: "Target tab" }).closest("li")!;
+    const targetChild = within(targetTabRow).getByRole("button", {
+      name: "Target research",
+    });
+    expect(targetChild.closest("[data-sidebar-pane]"))
+      .toHaveAttribute("data-sidebar-pane", "websocket:target-child");
+    expect(targetChild).not.toHaveAttribute("aria-current");
+    fireEvent.click(targetChild);
+    expect(onSelectPane).toHaveBeenCalledWith(
+      "websocket:target",
+      "websocket:target-child",
+    );
+    fireEvent.click(child);
+    expect(onSelectPane).toHaveBeenCalledWith("websocket:root", "websocket:child");
+
+    fireEvent.click(screen.getByRole("button", { name: "Root topic" }));
+    expect(onSelectPane).toHaveBeenCalledWith("websocket:root", "websocket:root");
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Research pane pane actions",
+    }), { button: 0, ctrlKey: false });
+    const moveToTab = await screen.findByRole("menuitem", { name: "Move to tab" });
+    fireEvent.pointerMove(moveToTab, { pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab" }));
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Research pane pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", {
+      name: "Move Research pane to its own topic",
+    }));
+    expect(onDetachPane).toHaveBeenCalledWith("websocket:root", "websocket:child");
+
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(child, { dataTransfer });
+    expect(child.closest("li")).toHaveAttribute("data-pane-dragging", "true");
+    expect(child.closest("li")).not.toHaveClass("opacity-0");
+    const targetTab = screen.getByRole("button", { name: "Target tab" });
+    dragOverAt(targetTab.closest("li")!, 0, dataTransfer);
+    expect(targetTab.closest("li"))
+      .toHaveAttribute("data-tab-attach-target", "true");
+    expect(within(targetTab.closest("li")!).getByRole("status", {
+      name: "Move Research pane into Target tab",
+    })).toHaveTextContent("Research pane");
+    dropAt(targetTab.closest("li")!, 0, dataTransfer);
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      PANE_DRAG_TYPE,
+      JSON.stringify({
+        paneKey: "websocket:child",
+        sourceTabKey: "websocket:root",
+      }),
+    );
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
+  });
+
+  it("selects a whole tab or individual panes for one bulk delete", async () => {
+    const onRequestDeleteMany = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            topicKey: "websocket:root",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onRequestDeleteMany={onRequestDeleteMany}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for Root topic",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Research pane" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Target tab" }));
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByTestId("delete-selection-bar")).getByRole("button", {
+      name: "Delete",
+    }));
+
+    expect(onRequestDeleteMany).toHaveBeenCalledWith([
+      { key: "websocket:root", label: "Root topic" },
+      { key: "websocket:child", label: "Research pane" },
+      { key: "websocket:target", label: "Target tab" },
+    ]);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it("reattaches a one-pane tab through the center of another tab", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect({
+      left: 0,
+      top: 0,
+      width: 284,
+      height: 32,
+    }));
+    const onAttachPane = vi.fn();
+    const onReorderSessions = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+    };
+
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "detached", title: "Detached pane" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey={null}
+        attachableTabKeys={["websocket:detached", "websocket:target"]}
+        paneAcceptingTabKeys={["websocket:detached", "websocket:target"]}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onReorderSessions={onReorderSessions}
+      />,
+    );
+
+    const detached = screen.getByRole("button", { name: "Detached pane" });
+    fireEvent.dragStart(detached, {
+      dataTransfer,
+    });
+    expect(detached.closest("li"))
+      .toHaveAttribute("data-session-dragging", "true");
+    const target = screen.getByRole("button", { name: "Target tab" }).closest("li")!;
+    dragOverAt(target, 16, dataTransfer);
+    expect(target).toHaveAttribute("data-tab-attach-target", "true");
+    expect(document.querySelector("[data-session-displaced='true']"))
+      .not.toBeInTheDocument();
+    dropAt(target, 16, dataTransfer);
+
+    expect(onAttachPane).toHaveBeenCalledWith(
+      "websocket:detached",
+      "websocket:target",
+    );
+    expect(onReorderSessions).not.toHaveBeenCalled();
   });
 
   it("shows temporary chats separately and lets the user reopen or close them", async () => {
