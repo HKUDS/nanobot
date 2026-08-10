@@ -189,6 +189,11 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
+      - name: Verify Docker Compose startup
+        env:
+          HOME: ${{ runner.temp }}
+        run: docker compose run --rm --no-deps --build -T nanobot-cli status
+
       - name: Verify default WhatsApp dependencies
         run: docker run --rm --entrypoint python nanobot:test -c "import neonize, segno"
 
