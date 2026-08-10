@@ -3132,6 +3132,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
+        assert providers["orcarouter"]["label"] == "OrcaRouter"
+        assert providers["orcarouter"]["configured"] is False
+        assert providers["orcarouter"]["api_key_required"] is True
+        assert providers["orcarouter"]["default_api_base"] == "https://api.orcarouter.ai/v1"
         assert providers["skywork"]["label"] == "Skywork"
         assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/agent/v1"
         assert providers["ant_ling"]["label"] == "Ant Ling"

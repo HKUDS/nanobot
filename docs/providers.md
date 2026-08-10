@@ -123,6 +123,40 @@ appended to nanobot's generated functions. This keeps unrelated local tools such
 available in the same request. Responses-only server tools require an API surface that the
 OpenRouter provider does not currently enable.
 
+### OrcaRouter Gateway
+
+[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible model routing gateway. Configure
+the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
+
+```json
+{
+  "providers": {
+    "orcarouter": {
+      "apiKey": "${ORCAROUTER_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "orcarouter",
+      "model": "orcarouter/auto",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Use the model ID exactly as OrcaRouter lists it. `orcarouter/auto` routes to a
+suitable upstream automatically; explicit IDs such as
+`anthropic/claude-sonnet-4.6` or `openai/gpt-5` are also accepted. OrcaRouter API keys start with
+`sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under
+**Settings → Models**.
+
 ### Eden AI Gateway
 
 Eden AI exposes an OpenAI-compatible chat-completions endpoint at

@@ -52,6 +52,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "novita",
   "ollama",
   "openrouter",
+  "orcarouter",
   "ovms",
   "siliconflow",
   "vllm",
@@ -577,6 +578,7 @@ export function optionRowsWithCurrent(
 export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
+  orcarouter: Sparkles,
   skywork: Sparkles,
   aihubmix: Triangle,
   anthropic: Brain,
