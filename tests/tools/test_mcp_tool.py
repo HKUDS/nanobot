@@ -1082,10 +1082,22 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["exception", "cancellation"])
 async def test_connect_mcp_servers_one_failure_does_not_block_others(
     monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
 ) -> None:
-    sessions = {"good": _make_fake_session(["demo"])}
+    bad_session = _make_fake_session([])
+
+    async def _cancel_initialize() -> None:
+        raise asyncio.CancelledError("cancelled by SDK")
+
+    if failure_mode == "cancellation":
+        bad_session.initialize = _cancel_initialize
+    sessions = {
+        "bad": bad_session,
+        "good": _make_fake_session(["demo"]),
+    }
 
     class _SelectiveClientSession:
         def __init__(self, read: object, _write: object) -> None:
@@ -1099,7 +1111,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     @asynccontextmanager
     async def _selective_stdio_client(params: object):
-        if params.command == "bad":
+        if params.command == "bad" and failure_mode == "exception":
             raise RuntimeError("boom")
         yield params.command, object()
 
@@ -1109,8 +1121,8 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
         {
-            "good": MCPServerConfig(command="good"),
             "bad": MCPServerConfig(command="bad"),
+            "good": MCPServerConfig(command="good"),
         },
         registry,
     )
@@ -1119,6 +1131,36 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     assert registry.tool_names == ["mcp_good_demo"]
     assert set(stacks) == {"good"}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_propagates_external_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    @asynccontextmanager
+    async def _blocking_stdio_client(_params: object):
+        try:
+            started.set()
+            await asyncio.Event().wait()
+            yield object(), object()
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _blocking_stdio_client)
+
+    task = asyncio.create_task(
+        connect_mcp_servers({"slow": MCPServerConfig(command="slow")}, ToolRegistry())
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await asyncio.wait_for(closed.wait(), timeout=1.0)
 
 
 @pytest.mark.asyncio

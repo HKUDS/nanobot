@@ -975,11 +975,8 @@ async def connect_mcp_servers(
     from mcp.client.streamable_http import streamable_http_client
 
     async def open_single_server(
-        name: str, cfg: "MCPServerConfig"
-    ) -> tuple[str, AsyncExitStack | None]:
-        server_stack = AsyncExitStack()
-        await server_stack.__aenter__()
-
+        name: str, cfg: "MCPServerConfig", server_stack: AsyncExitStack
+    ) -> bool:
         try:
             transport_type = cfg.type
             if not transport_type:
@@ -991,8 +988,7 @@ async def connect_mcp_servers(
                     )
                 else:
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
-                    await server_stack.aclose()
-                    return name, None
+                    return False
 
             if transport_type in {"sse", "streamableHttp"}:
                 ok, error = validate_url_target(cfg.url)
@@ -1003,8 +999,7 @@ async def connect_mcp_servers(
                         _redact_url(cfg.url),
                         error,
                     )
-                    await server_stack.aclose()
-                    return name, None
+                    return False
 
             if transport_type == "stdio":
                 command, args, env = _normalize_windows_stdio_command(
@@ -1022,8 +1017,7 @@ async def connect_mcp_servers(
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    await server_stack.aclose()
-                    return name, None
+                    return False
 
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
@@ -1050,8 +1044,7 @@ async def connect_mcp_servers(
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    await server_stack.aclose()
-                    return name, None
+                    return False
 
                 http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
@@ -1067,8 +1060,7 @@ async def connect_mcp_servers(
                 )
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
-                await server_stack.aclose()
-                return name, None
+                return False
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
@@ -1171,7 +1163,7 @@ async def connect_mcp_servers(
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
             )
-            return name, server_stack
+            return True
 
         except Exception as e:
             hint = ""
@@ -1191,9 +1183,7 @@ async def connect_mcp_servers(
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
             logger.exception("MCP server '{}': failed to connect: {}", name, hint)
-            with suppress(Exception):
-                await server_stack.aclose()
-            return name, None
+            return False
 
     async def connect_single_server(
         name: str, cfg: "MCPServerConfig"
@@ -1203,30 +1193,30 @@ async def connect_mcp_servers(
         close_requested = asyncio.Event()
 
         async def own_connection() -> None:
-            stack: AsyncExitStack | None = None
             try:
-                _, stack = await open_single_server(name, cfg)
-                if not ready.done():
-                    ready.set_result(stack is not None)
-                if stack is not None:
-                    await close_requested.wait()
+                async with AsyncExitStack() as stack:
+                    connected = await open_single_server(name, cfg, stack)
+                    if not ready.done():
+                        ready.set_result(connected)
+                    if connected:
+                        await close_requested.wait()
             except BaseException as exc:
                 if not ready.done():
                     ready.set_exception(exc)
                 raise
-            finally:
-                if stack is not None:
-                    await stack.aclose()
 
         owner = asyncio.create_task(own_connection(), name=f"mcp:{name}")
         connection = _OwnedMCPConnection(owner, close_requested)
         try:
             connected = await ready
-        except BaseException:
+        except BaseException as exc:
             close_requested.set()
             owner.cancel()
             with suppress(BaseException):
                 await asyncio.shield(owner)
+            if isinstance(exc, asyncio.CancelledError) and not task_is_cancelling():
+                logger.warning("MCP server '{}': connection cancelled by server/SDK", name)
+                return name, None
             raise
         if not connected:
             await connection.aclose()
