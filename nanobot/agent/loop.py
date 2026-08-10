@@ -36,6 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
@@ -196,6 +197,11 @@ class AgentLoop:
     @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
+
+    @property
+    def last_usage(self) -> Mapping[str, int]:
+        """Latest aggregate usage exposed through the runtime-control snapshot."""
+        return self._last_usage
 
     @property
     def provider(self) -> LLMProvider:
@@ -448,7 +454,6 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
-        self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -623,10 +628,13 @@ class AgentLoop:
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
 
-        # MyTool needs runtime state reference — manual registration
+        # MyTool receives only the explicit runtime-control capability.
         if self.tools_config.my.enable:
             self.tools.register(
-                MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
+                MyTool(
+                    runtime_control=AgentRuntimeControl(self),
+                    modify_allowed=self.tools_config.my.allow_set,
+                )
             )
             registered.append("my")
 
