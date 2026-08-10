@@ -270,6 +270,12 @@ http://127.0.0.1:8765
 
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
+| Symptom | Check |
+|---|---|
+| A temporary chat disappeared after a reload or reconnect | This is expected. Temporary chats exist only for the current WebUI connection and are not saved to history or memory. Use a regular topic for anything you need to retain. |
+| A skills.sh install says that `npx` is required | Install Node.js with `npx` on the gateway machine, or choose a SkillHub skill that does not require `npx`. |
+| A remote browser says skill installation is disabled | Install from a same-machine WebUI. For a private deployment where every authenticated user is trusted to install third-party skill instructions or scripts, explicitly enable `tools.webuiAllowRemotePackageInstall`. |
+
 See [`webui.md#lan-access`](./webui.md#lan-access) for LAN setup and [`../webui/README.md`](../webui/README.md) for frontend development.
 
 ## Chat App Problems
