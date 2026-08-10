@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   forwardRef,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -230,6 +231,31 @@ function isProviderOAuthPending(
   return (payload as ProviderOAuthPending).status === "pending";
 }
 
+function isExpectedMcpOAuthPendingReloadFailure(
+  payload: McpPresetsPayload,
+  expectedName?: string,
+): boolean {
+  if (
+    !expectedName
+    || payload.last_action?.ok === false
+    || payload.hot_reload?.ok !== false
+  ) return false;
+
+  const normalizedName = expectedName.trim().toLowerCase();
+  const failed = payload.hot_reload.failed ?? [];
+  if (
+    !normalizedName
+    || failed.length !== 1
+    || failed[0].trim().toLowerCase() !== normalizedName
+  ) return false;
+
+  return payload.presets.some((preset) => (
+    preset.name.trim().toLowerCase() === normalizedName
+    && preset.auth === "oauth"
+    && preset.status === "authorization_required"
+  ));
+}
+
 type AppsKindFilter = "ready" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
@@ -278,6 +304,7 @@ type ProviderForm = {
 };
 type CustomProviderDraft = ProviderForm & { name: string };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
+type CustomMcpAuth = "none" | "oauth" | "headers";
 
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
@@ -467,6 +494,7 @@ const SETTINGS_SEARCH_INPUT_CLASS = cn(
 interface CustomMcpForm {
   name: string;
   transport: CustomMcpTransport;
+  auth: CustomMcpAuth;
   command: string;
   args: string;
   url: string;
@@ -499,6 +527,7 @@ const EMPTY_PENDING_RESTART_SECTIONS: PendingRestartSections = {
 const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   name: "",
   transport: "stdio",
+  auth: "none",
   command: "",
   args: "",
   url: "",
@@ -2229,10 +2258,15 @@ export function SettingsView({
   const applyMcpActionFeedback = (
     payload: McpPresetsPayload,
     announceSuccess = false,
+    expectedOAuthPendingName?: string,
   ) => {
+    const expectedOAuthPending = isExpectedMcpOAuthPendingReloadFailure(
+      payload,
+      expectedOAuthPendingName,
+    );
     const actionError = payload.last_action?.ok === false
       ? payload.last_action.error || payload.last_action.message
-      : payload.hot_reload?.ok === false
+      : payload.hot_reload?.ok === false && !expectedOAuthPending
         ? payload.hot_reload.message
         : null;
     setMcpError(actionError || null);
@@ -2275,6 +2309,9 @@ export function SettingsView({
 
   const handleSaveCustomMcp = async () => {
     const name = customMcpForm.name.trim();
+    const expectsOAuthAuthorization = (
+      customMcpForm.transport !== "stdio" && customMcpForm.auth === "oauth"
+    );
     const key = `custom:${name || "new"}`;
     setMcpPresetAction(key);
     setMcpMessage(null);
@@ -2283,15 +2320,26 @@ export function SettingsView({
       const payload = await saveCustomMcpServer(client, {
         name,
         transport: customMcpForm.transport,
+        auth:
+          customMcpForm.transport !== "stdio" && customMcpForm.auth === "oauth"
+            ? "oauth"
+            : "",
         command: customMcpForm.command,
         args: customMcpForm.args,
         url: customMcpForm.url,
         env: customMcpForm.env,
-        headers: customMcpForm.headers,
+        headers:
+          customMcpForm.transport !== "stdio" && customMcpForm.auth === "headers"
+            ? customMcpForm.headers
+            : "",
         tool_timeout: customMcpForm.toolTimeout,
       });
       setMcpPresets(payload);
-      applyMcpActionFeedback(payload);
+      applyMcpActionFeedback(
+        payload,
+        false,
+        expectsOAuthAuthorization ? name : undefined,
+      );
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -8547,6 +8595,9 @@ function McpCustomServerPanel({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const oauthHelpId = useId();
+  const headersInputId = useId();
+  const headersHelpId = useId();
   const [activeMode, setActiveMode] = useState<"custom" | "import" | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const customBusy = actionKey?.startsWith("custom:") ?? false;
@@ -8560,6 +8611,11 @@ function McpCustomServerPanel({
     { value: "stdio", label: "stdio" },
     { value: "streamableHttp", label: "HTTP" },
     { value: "sse", label: "SSE" },
+  ];
+  const authenticationOptions: Array<{ value: CustomMcpAuth; label: string }> = [
+    { value: "none", label: tx("settings.mcp.authNone", "None") },
+    { value: "oauth", label: "OAuth" },
+    { value: "headers", label: tx("settings.mcp.authHeaders", "Headers") },
   ];
 
   return (
@@ -8654,17 +8710,66 @@ function McpCustomServerPanel({
                 />
               </label>
             )}
-            <Button
-              type="button"
-              size="sm"
-              onClick={onSave}
-              disabled={!canSave || customBusy}
-              className="h-9 shrink-0 rounded-full px-4 text-[12.5px] font-semibold"
-            >
-              {customBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-              {tx("settings.mcp.saveCustom", "Save MCP")}
-            </Button>
           </div>
+
+          {remote ? (
+            <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-end">
+              <fieldset
+                className="min-w-0"
+                aria-describedby={form.auth === "oauth" ? oauthHelpId : undefined}
+              >
+                <legend className="mb-1.5 block text-[11.5px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.authentication", "Authentication")}
+                </legend>
+                <SegmentedControl
+                  value={form.auth}
+                  options={authenticationOptions}
+                  onChange={(value) => update("auth", value as CustomMcpAuth)}
+                  className="w-full sm:w-auto"
+                  itemClassName="min-w-0 flex-1 sm:flex-none"
+                />
+              </fieldset>
+              {form.auth === "oauth" ? (
+                <p
+                  id={oauthHelpId}
+                  className="pb-1 text-[12px] leading-5 text-muted-foreground"
+                >
+                  {tx(
+                    "settings.mcp.oauthAfterSave",
+                    "Save the server, then select Connect to sign in.",
+                  )}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {remote && form.auth === "headers" ? (
+            <div className="mt-3 min-w-0">
+              <label
+                htmlFor={headersInputId}
+                className="mb-1 block text-[11.5px] font-medium text-muted-foreground"
+              >
+                {tx("settings.mcp.headers", "Headers JSON")}
+              </label>
+              <Textarea
+                id={headersInputId}
+                aria-describedby={headersHelpId}
+                value={form.headers}
+                onChange={(event) => update("headers", event.target.value)}
+                placeholder={'{"Authorization":"Bearer ..."}'}
+                className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
+              />
+              <p
+                id={headersHelpId}
+                className="mt-1 text-[11.5px] leading-5 text-muted-foreground"
+              >
+                {tx(
+                  "settings.mcp.headersHelp",
+                  "Add the request headers used by this server.",
+                )}
+              </p>
+            </div>
+          ) : null}
 
           <Button
             type="button"
@@ -8683,7 +8788,14 @@ function McpCustomServerPanel({
           </Button>
 
           {advancedOpen ? (
-            <div className="mt-2 grid gap-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_180px]">
+            <div
+              className={cn(
+                "mt-2 grid gap-2",
+                remote
+                  ? "xl:grid-cols-[minmax(0,1fr)_180px]"
+                  : "xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_180px]",
+              )}
+            >
               {!remote ? (
                 <label className="min-w-0">
                   <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
@@ -8696,19 +8808,7 @@ function McpCustomServerPanel({
                     className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
                   />
                 </label>
-              ) : (
-                <label className="min-w-0">
-                  <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                    {tx("settings.mcp.headers", "Headers JSON")}
-                  </span>
-                  <Textarea
-                    value={form.headers}
-                    onChange={(event) => update("headers", event.target.value)}
-                    placeholder={'{"Authorization":"Bearer ..."}'}
-                    className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
-                  />
-                </label>
-              )}
+              ) : null}
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
                   {tx("settings.mcp.env", "Env JSON")}
@@ -8733,6 +8833,19 @@ function McpCustomServerPanel({
               </label>
             </div>
           ) : null}
+
+          <div className="mt-3 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onSave}
+              disabled={!canSave || customBusy}
+              className="h-9 w-full rounded-full px-4 text-[12.5px] font-semibold sm:w-auto"
+            >
+              {customBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+              {tx("settings.mcp.saveCustom", "Save MCP")}
+            </Button>
+          </div>
         </div>
       ) : null}
 

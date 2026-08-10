@@ -773,6 +773,98 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
+  it("configures OAuth for a custom remote MCP without importing JSON", async () => {
+    const customPreset = {
+      ...xmindMcpPreset,
+      name: "team-mcp",
+      display_name: "team-mcp",
+      source: "custom",
+      installed: true,
+      status: "authorization_required",
+      connection_summary: "https://mcp.example.com/mcp",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.custom") {
+        return {
+          presets: [customPreset],
+          installed_count: 1,
+          hot_reload: {
+            ok: false,
+            message: "MCP config reloaded, but some servers did not connect: team-mcp",
+            failed: ["team-mcp"],
+          },
+          last_action: { ok: true, message: "Saved custom MCP server team-mcp." },
+        };
+      }
+      return settingsPayload();
+    });
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+
+    expect(screen.queryByText("Authentication")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Server name"), {
+      target: { value: "team-mcp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "HTTP" }));
+    fireEvent.change(screen.getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/mcp" },
+    });
+
+    const authentication = screen.getByRole("group", { name: "Authentication" });
+    const oauth = within(authentication).getByRole("button", { name: "OAuth" });
+    expect(oauth).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(within(authentication).getByRole("button", { name: "Headers" }));
+    fireEvent.change(screen.getByLabelText("Headers JSON"), {
+      target: { value: '{"Authorization":"Bearer stale"}' },
+    });
+    expect(screen.getByText("Add the request headers used by this server.")).toBeInTheDocument();
+
+    fireEvent.click(oauth);
+    expect(oauth).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByLabelText("Headers JSON")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Save the server, then select Connect to sign in."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save MCP" }));
+
+    await waitFor(() => {
+      const saveCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.mcp.custom",
+      );
+      expect(saveCall).toBeDefined();
+      const values = saveCall?.[1] as Record<string, string>;
+      expect(values).toMatchObject({
+        name: "team-mcp",
+        transport: "streamableHttp",
+        url: "https://mcp.example.com/mcp",
+        auth: "oauth",
+      });
+      expect(values).not.toHaveProperty("headers");
+      expect(saveCall?.[2]).toBe(20_000);
+    });
+    expect(await screen.findByRole("button", { name: "Connect team-mcp" }))
+      .toBeInTheDocument();
+    expect(
+      screen.queryByText("MCP config reloaded, but some servers did not connect: team-mcp"),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers a pasted callback flow when the remote WebUI uses HTTP", async () => {
     let completed = false;
     const callbackUrl =

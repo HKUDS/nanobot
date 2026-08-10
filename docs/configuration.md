@@ -1978,10 +1978,12 @@ MCP servers can run locally over stdio or connect remotely over HTTP:
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
 | **Streamable HTTP / SSE** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/mcp`) |
 
-Remote HTTP servers may use browser OAuth instead of static headers. Add
-`auth: "oauth"`, then open **Apps → MCP** in the WebUI and choose **Connect**.
-Known presets such as Xmind, Notion, and Linear add the config automatically on
-first click.
+Remote HTTP servers may use browser OAuth instead of static headers. In the
+WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or
+SSE, and choose **OAuth** under **Authentication**. Save the server, then choose
+**Connect**. For manual configuration, add `auth: "oauth"` and open
+**Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add
+the config automatically on first click.
 
 ```json
 {

@@ -949,6 +949,19 @@ describe("webui API helpers", () => {
       20_000,
     );
 
+    const oauthCustom = {
+      name: "company-mcp",
+      transport: "streamableHttp",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+    };
+    await saveCustomMcpServer(mutationTransport, oauthCustom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      oauthCustom,
+      20_000,
+    );
+
     await importMcpConfig(
       mutationTransport,
       '{"mcpServers":{"docs":{"command":"npx"}}}',
