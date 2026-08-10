@@ -80,6 +80,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     name="create_goal",
                     arguments={
                         "objective": "Implement the agreed migration plan and run its tests.",
+                        "completion_evidence": "migration applied and its tests pass",
                     },
                 )
             ],
@@ -102,7 +103,10 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                 ToolCallRequest(
                     id="call_create_again",
                     name="create_goal",
-                    arguments={"objective": "Start an unrelated follow-up."},
+                    arguments={
+                        "objective": "Start an unrelated follow-up.",
+                        "completion_evidence": "follow-up artifact exists",
+                    },
                 )
             ],
             usage={},
@@ -287,7 +291,10 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
                 ToolCallRequest(
                     id="call_create",
                     name="create_goal",
-                    arguments={"objective": "Unauthorized persistent objective."},
+                    arguments={
+                        "objective": "Unauthorized persistent objective.",
+                        "completion_evidence": "unauthorized artifact exists",
+                    },
                 )
             ],
             usage={},
@@ -634,3 +641,219 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     args = mgr._announce_result.await_args.args
     assert args[3] == "Task completed but no final response was generated."
     assert args[5] == "ok"
+
+
+def _admission_loop(tmp_path, responses):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    script = list(responses)
+
+    async def scripted(**_kwargs):
+        if script:
+            return script.pop(0)
+        return LLMResponse(content="idle", tool_calls=[], usage={})
+
+    provider.chat_with_retry = AsyncMock(side_effect=scripted)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+    loop.max_iterations = 4
+    return loop
+
+
+def _user_msg(content):
+    from nanobot.bus.events import InboundMessage
+
+    return InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=content)
+
+
+@pytest.mark.asyncio
+async def test_goal_clarification_reopens_admission_on_next_user_turn(tmp_path):
+    from nanobot.session.goal_state import GOAL_ADMISSION_PENDING_KEY
+
+    loop = _admission_loop(tmp_path, [
+        # /goal turn: material input missing -> one clarification, no tool calls
+        LLMResponse(content="Which repo should the plan target?", tool_calls=[], usage={}),
+        # answer turn: window open -> create_goal succeeds without a new /goal
+        LLMResponse(
+            content="recording goal",
+            tool_calls=[ToolCallRequest(
+                id="c1",
+                name="create_goal",
+                arguments={
+                    "objective": "Write a two-week Rust learning plan in repo X.",
+                    "completion_evidence": "plan.md exists in repo X and covers 14 days",
+                },
+            )],
+            usage={},
+        ),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+
+    first = await loop._process_message(_user_msg("/goal write a rust learning plan"))
+    assert first is not None
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY)
+    assert session.metadata.get(GOAL_STATE_KEY) is None
+
+    second = await loop._process_message(_user_msg("repo X please"))
+    assert second is not None
+    assert session.metadata[GOAL_STATE_KEY]["status"] == "active"
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY) is None
+    # The answer turn saw the pending guidance, not the /goal admission block.
+    requests = loop.provider.chat_with_retry.await_args_list
+    assert "Resolve the pending goal request" in str(requests[1].kwargs["messages"])
+
+
+@pytest.mark.asyncio
+async def test_goal_admission_window_is_single_shot(tmp_path):
+    from nanobot.session.goal_state import GOAL_ADMISSION_PENDING_KEY
+
+    loop = _admission_loop(tmp_path, [
+        LLMResponse(content="Which repo?", tool_calls=[], usage={}),
+        # answer turn: model does not create a goal -> window closes anyway
+        LLMResponse(content="Understood, up to you.", tool_calls=[], usage={}),
+        # third turn: window gone -> create_goal is rejected
+        LLMResponse(
+            content="trying late create",
+            tool_calls=[ToolCallRequest(
+                id="c2",
+                name="create_goal",
+                arguments={
+                    "objective": "Late goal.",
+                    "completion_evidence": "late artifact exists",
+                },
+            )],
+            usage={},
+        ),
+        LLMResponse(content="ok", tool_calls=[], usage={}),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+
+    await loop._process_message(_user_msg("/goal write a plan"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY)
+
+    await loop._process_message(_user_msg("hmm let me think"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY) is None
+
+    await loop._process_message(_user_msg("repo X"))
+    assert session.metadata.get(GOAL_STATE_KEY) is None
+    final_request = loop.provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+    assert "create_goal is unavailable for this turn" in str(final_request)
+
+
+@pytest.mark.asyncio
+async def test_goal_turn_that_mutates_goal_does_not_reopen_admission(tmp_path):
+    from nanobot.session.goal_state import GOAL_ADMISSION_PENDING_KEY
+
+    loop = _admission_loop(tmp_path, [
+        LLMResponse(
+            content="recording",
+            tool_calls=[ToolCallRequest(
+                id="c3",
+                name="create_goal",
+                arguments={
+                    "objective": "Do the bounded thing.",
+                    "completion_evidence": "artifact exists",
+                },
+            )],
+            usage={},
+        ),
+        LLMResponse(
+            content="done already",
+            tool_calls=[ToolCallRequest(
+                id="c4",
+                name="update_goal",
+                arguments={"action": "complete", "recap": "Done."},
+            )],
+            usage={},
+        ),
+        LLMResponse(content="all done", tool_calls=[], usage={}),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+
+    await loop._process_message(_user_msg("/goal do the bounded thing"))
+
+    # Goal was created and completed within the /goal turn: blob changed -> no window.
+    assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_command_closes_admission_window(tmp_path):
+    from nanobot.session.goal_state import GOAL_ADMISSION_PENDING_KEY
+
+    loop = _admission_loop(tmp_path, [
+        LLMResponse(content="Which repo?", tool_calls=[], usage={}),
+        # Turn after the command: the window must already be closed.
+        LLMResponse(
+            content="trying late create",
+            tool_calls=[ToolCallRequest(
+                id="c5",
+                name="create_goal",
+                arguments={
+                    "objective": "Late goal.",
+                    "completion_evidence": "late artifact exists",
+                },
+            )],
+            usage={},
+        ),
+        LLMResponse(content="ok", tool_calls=[], usage={}),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+
+    await loop._process_message(_user_msg("/goal write a plan"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY)
+
+    # /help short-circuits at the command stage and never reaches SAVE.
+    await loop._process_message(_user_msg("/help"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY) is None
+
+    await loop._process_message(_user_msg("what's for lunch"))
+    assert session.metadata.get(GOAL_STATE_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_new_session_command_closes_admission_window(tmp_path):
+    from nanobot.session.goal_state import GOAL_ADMISSION_PENDING_KEY
+
+    loop = _admission_loop(tmp_path, [
+        LLMResponse(content="Which repo?", tool_calls=[], usage={}),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+
+    await loop._process_message(_user_msg("/goal write a plan"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY)
+
+    await loop._process_message(_user_msg("/new"))
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY) is None
+    # /new invalidates the cache, so the reload must not resurrect the window.
+    assert loop.sessions.get_or_create("cli:direct").metadata.get(
+        GOAL_ADMISSION_PENDING_KEY
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_system_turn_neither_consumes_nor_clears_admission_window(tmp_path):
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.goal_state import (
+        GOAL_ADMISSION_PENDING_KEY,
+        set_goal_admission_pending,
+    )
+
+    loop = _admission_loop(tmp_path, [
+        LLMResponse(content="noted", tool_calls=[], usage={}),
+    ])
+    session = loop.sessions.get_or_create("cli:direct")
+    set_goal_admission_pending(session.metadata)
+    loop.sessions.save(session)
+
+    await loop._process_message(InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:direct",
+        content="Subagent result: background job finished.",
+    ))
+
+    assert session.metadata.get(GOAL_ADMISSION_PENDING_KEY)
