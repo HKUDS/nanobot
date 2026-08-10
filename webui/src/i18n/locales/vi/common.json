@@ -10,13 +10,12 @@
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
     "auth": {
-      "title": "Cần xác thực",
-      "hint": "Nhập mật khẩu truy cập WebUI cho gateway nanobot này.",
-      "label": "Mật khẩu truy cập WebUI",
-      "placeholder": "Nhập mật khẩu",
+      "label": "Mật khẩu",
+      "showPassword": "Hiện mật khẩu",
+      "hidePassword": "Ẩn mật khẩu",
       "submit": "Kết nối",
-      "required": "Nhập mật khẩu truy cập WebUI.",
-      "invalid": "Mật khẩu không đúng. Hãy kiểm tra và thử lại."
+      "required": "Nhập mật khẩu.",
+      "invalid": "Mật khẩu không đúng. Hãy thử lại."
     },
     "account": {
       "section": "Tài khoản",

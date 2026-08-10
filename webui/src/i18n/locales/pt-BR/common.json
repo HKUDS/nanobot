@@ -10,13 +10,12 @@
       "gatewayHint": "Verifique se o gateway está em execução (`nanobot gateway`) e se esta página está aberta na mesma máquina."
     },
     "auth": {
-      "title": "Autenticação necessária",
-      "hint": "Digite a senha de acesso à WebUI deste gateway do nanobot.",
-      "label": "Senha de acesso à WebUI",
-      "placeholder": "Digite a senha",
+      "label": "Senha",
+      "showPassword": "Mostrar senha",
+      "hidePassword": "Ocultar senha",
       "submit": "Conectar",
-      "required": "Digite a senha de acesso à WebUI.",
-      "invalid": "Essa senha não funcionou. Confira e tente novamente."
+      "required": "Digite a senha.",
+      "invalid": "Senha incorreta. Tente novamente."
     },
     "account": {
       "section": "Conta",

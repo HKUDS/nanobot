@@ -10,13 +10,12 @@
       "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前页面与网关运行在同一台机器上。"
     },
     "auth": {
-      "title": "需要验证",
-      "hint": "请输入此 nanobot 网关的 WebUI 访问密码。",
-      "label": "WebUI 访问密码",
-      "placeholder": "输入密码",
+      "label": "密码",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码",
       "submit": "连接",
-      "required": "请输入 WebUI 访问密码。",
-      "invalid": "密码不正确，请检查后重试。"
+      "required": "请输入密码。",
+      "invalid": "密码错误，请重试。"
     },
     "account": {
       "section": "账户",

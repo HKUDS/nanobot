@@ -315,17 +315,45 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Authentication required" }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("WebUI access password")).toHaveAttribute(
+    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+      .toBeInTheDocument();
+    const password = screen.getByLabelText("Password");
+    expect(password).toHaveAttribute(
       "autocomplete",
       "current-password",
     );
+    expect(password).not.toHaveAttribute("placeholder");
+    expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("That password did not work. Check it and try again."),
+      screen.queryByText("Incorrect password. Try again."),
     ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("toggles password visibility without changing the password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("Password");
+    await user.type(password, "correct horse battery staple");
+    expect(password).toHaveAttribute("type", "password");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("correct horse battery staple");
+    const hidePassword = screen.getByRole("button", { name: "Hide password" });
+    expect(hidePassword).toHaveFocus();
+
+    await user.click(hidePassword);
+
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("correct horse battery staple");
+    expect(screen.getByRole("button", { name: "Show password" })).toHaveFocus();
   });
 
   it("explains and focuses an empty auth password", async () => {
@@ -335,16 +363,16 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("WebUI access password");
+    const password = await screen.findByLabelText("Password");
     const connect = screen.getByRole("button", { name: "Connect" });
     expect(connect).toBeEnabled();
     fireEvent.click(connect);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter the WebUI access password.",
+      "Enter your password.",
     );
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAttribute("aria-describedby", "webui-auth-hint webui-auth-error");
+    expect(password).toHaveAttribute("aria-describedby", "webui-auth-error");
     expect(password).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
@@ -358,11 +386,10 @@ describe("App layout", () => {
 
     render(<App />);
 
+    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+      .toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Authentication required" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("That password did not work. Check it and try again."),
+      screen.queryByText("Incorrect password. Try again."),
     ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -374,13 +401,13 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("WebUI access password");
+    const password = await screen.findByLabelText("Password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    const retryPassword = await screen.findByLabelText("WebUI access password");
+    const retryPassword = await screen.findByLabelText("Password");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "That password did not work. Check it and try again.",
+      "Incorrect password. Try again.",
     );
     expect(retryPassword).toHaveAttribute("aria-invalid", "true");
     expect(retryPassword).toHaveFocus();

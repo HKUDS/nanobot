@@ -10,13 +10,12 @@
       "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
     "auth": {
-      "title": "Authentification requise",
-      "hint": "Saisissez le mot de passe d’accès à la WebUI de cette passerelle nanobot.",
-      "label": "Mot de passe d’accès à la WebUI",
-      "placeholder": "Saisissez le mot de passe",
+      "label": "Mot de passe",
+      "showPassword": "Afficher le mot de passe",
+      "hidePassword": "Masquer le mot de passe",
       "submit": "Se connecter",
-      "required": "Saisissez le mot de passe d’accès à la WebUI.",
-      "invalid": "Ce mot de passe ne fonctionne pas. Vérifiez-le et réessayez."
+      "required": "Saisissez le mot de passe.",
+      "invalid": "Mot de passe incorrect. Réessayez."
     },
     "account": {
       "section": "Compte",

@@ -10,13 +10,12 @@
       "gatewayHint": "請確認閘道已啟動（`nanobot gateway`），並且目前頁面與閘道在同一台機器上開啟。"
     },
     "auth": {
-      "title": "需要驗證",
-      "hint": "請輸入此 nanobot 閘道的 WebUI 存取密碼。",
-      "label": "WebUI 存取密碼",
-      "placeholder": "輸入密碼",
+      "label": "密碼",
+      "showPassword": "顯示密碼",
+      "hidePassword": "隱藏密碼",
       "submit": "連線",
-      "required": "請輸入 WebUI 存取密碼。",
-      "invalid": "密碼不正確，請檢查後再試一次。"
+      "required": "請輸入密碼。",
+      "invalid": "密碼錯誤，請再試一次。"
     },
     "account": {
       "section": "帳戶",

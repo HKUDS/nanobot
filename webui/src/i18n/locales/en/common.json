@@ -10,13 +10,12 @@
       "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
     },
     "auth": {
-      "title": "Authentication required",
-      "hint": "Enter the WebUI access password for this nanobot gateway.",
-      "label": "WebUI access password",
-      "placeholder": "Enter password",
+      "label": "Password",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
       "submit": "Connect",
-      "required": "Enter the WebUI access password.",
-      "invalid": "That password did not work. Check it and try again."
+      "required": "Enter your password.",
+      "invalid": "Incorrect password. Try again."
     },
     "account": {
       "section": "Account",

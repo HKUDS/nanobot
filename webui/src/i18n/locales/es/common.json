@@ -10,13 +10,12 @@
       "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
     "auth": {
-      "title": "Autenticación requerida",
-      "hint": "Introduce la contraseña de acceso a la WebUI de este gateway de nanobot.",
-      "label": "Contraseña de acceso a la WebUI",
-      "placeholder": "Introduce la contraseña",
+      "label": "Contraseña",
+      "showPassword": "Mostrar contraseña",
+      "hidePassword": "Ocultar contraseña",
       "submit": "Conectar",
-      "required": "Introduce la contraseña de acceso a la WebUI.",
-      "invalid": "La contraseña no es correcta. Compruébala e inténtalo de nuevo."
+      "required": "Introduce la contraseña.",
+      "invalid": "Contraseña incorrecta. Inténtalo de nuevo."
     },
     "account": {
       "section": "Cuenta",

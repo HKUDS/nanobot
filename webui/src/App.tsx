@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { Eye, EyeOff, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -318,6 +318,7 @@ function AuthForm({
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<"required" | "invalid" | null>(
     failed ? "invalid" : null,
@@ -342,35 +343,47 @@ function AuthForm({
         onSubmit={handleSubmit}
         className="flex w-full max-w-sm flex-col gap-4"
       >
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-lg font-semibold">{t("app.auth.title")}</h1>
-          <p id="webui-auth-hint" className="text-sm text-muted-foreground">
-            {t("app.auth.hint")}
-          </p>
-        </div>
         <div className="space-y-2">
-          <label htmlFor="webui-access-password" className="text-sm font-medium text-foreground">
-            {t("app.auth.label")}
-          </label>
-          <Input
-            ref={inputRef}
-            id="webui-access-password"
-            name="webui-access-password"
-            type="password"
-            autoComplete="current-password"
-            placeholder={t("app.auth.placeholder")}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              setValidationError(null);
-            }}
-            disabled={submitting}
-            aria-invalid={validationError ? true : undefined}
-            aria-describedby={
-              validationError ? "webui-auth-hint webui-auth-error" : "webui-auth-hint"
-            }
-            autoFocus
-          />
+          <h1 className="text-sm font-medium text-foreground">
+            <label htmlFor="webui-access-password">{t("app.auth.label")}</label>
+          </h1>
+          <div className="relative">
+            <Input
+              ref={inputRef}
+              id="webui-access-password"
+              name="webui-access-password"
+              type={passwordVisible ? "text" : "password"}
+              autoComplete="current-password"
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setValidationError(null);
+              }}
+              disabled={submitting}
+              aria-invalid={validationError ? true : undefined}
+              aria-describedby={validationError ? "webui-auth-error" : undefined}
+              className="pr-10 focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+              autoFocus
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={submitting}
+              aria-label={t(
+                passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
+              )}
+              aria-controls="webui-access-password"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {passwordVisible ? (
+                <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              ) : (
+                <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              )}
+            </Button>
+          </div>
           {errorMessage ? (
             <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
               {errorMessage}

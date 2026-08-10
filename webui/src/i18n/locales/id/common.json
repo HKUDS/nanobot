@@ -10,13 +10,12 @@
       "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
     },
     "auth": {
-      "title": "Autentikasi diperlukan",
-      "hint": "Masukkan kata sandi akses WebUI untuk gateway nanobot ini.",
-      "label": "Kata sandi akses WebUI",
-      "placeholder": "Masukkan kata sandi",
+      "label": "Kata sandi",
+      "showPassword": "Tampilkan kata sandi",
+      "hidePassword": "Sembunyikan kata sandi",
       "submit": "Hubungkan",
-      "required": "Masukkan kata sandi akses WebUI.",
-      "invalid": "Kata sandi tersebut tidak cocok. Periksa lalu coba lagi."
+      "required": "Masukkan kata sandi.",
+      "invalid": "Kata sandi salah. Coba lagi."
     },
     "account": {
       "section": "Akun",
