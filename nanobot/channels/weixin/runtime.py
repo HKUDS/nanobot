@@ -726,9 +726,9 @@ class WeixinChannel(BaseChannel):
                 break
         return tokens
 
-    async def _fetch_qr_code(self) -> tuple[str, str]:
-        """Fetch a fresh QR code. Returns (qrcode_id, scan_url)."""
-        local_tokens = self._local_token_list()
+    async def _fetch_qr_code(self, *, force: bool = False) -> tuple[str, str]:
+        """Fetch a QR code without existing credentials when forced."""
+        local_tokens = [] if force else self._local_token_list()
         data = await self._api_post(
             "ilink/bot/get_bot_qrcode?bot_type=3",
             {"local_token_list": local_tokens},
@@ -755,11 +755,11 @@ class WeixinChannel(BaseChannel):
             raise RuntimeError(f"Failed to get QR code from WeChat API: {data}")
         return qrcode_id, (qrcode_img_content or qrcode_id)
 
-    async def _qr_login(self) -> bool:
-        """Perform QR code login flow. Returns True on success."""
+    async def _qr_login(self, *, force: bool = False) -> bool:
+        """Perform QR login; forced flows accept only newly confirmed credentials."""
         try:
             refresh_count = 0
-            qrcode_id, scan_url = await self._fetch_qr_code()
+            qrcode_id, scan_url = await self._fetch_qr_code(force=force)
             self._print_qr_code(scan_url)
             current_poll_base_url = self.config.base_url
             verify_code = ""
@@ -825,11 +825,16 @@ class WeixinChannel(BaseChannel):
                     if refresh_count > MAX_QR_REFRESH_COUNT:
                         self.logger.warning("WeChat verification failed too many times")
                         return False
-                    qrcode_id, scan_url = await self._fetch_qr_code()
+                    qrcode_id, scan_url = await self._fetch_qr_code(force=force)
                     current_poll_base_url = self.config.base_url
                     self._print_qr_code(scan_url)
                     continue
                 elif status == "binded_redirect":
+                    if force:
+                        self.logger.error(
+                            "Forced WeChat login returned an existing binding without new credentials"
+                        )
+                        return False
                     if self._token or self._load_state():
                         self.logger.info("WeChat account is already connected")
                         return True
@@ -846,7 +851,7 @@ class WeixinChannel(BaseChannel):
                             MAX_QR_REFRESH_COUNT,
                         )
                         return False
-                    qrcode_id, scan_url = await self._fetch_qr_code()
+                    qrcode_id, scan_url = await self._fetch_qr_code(force=force)
                     current_poll_base_url = self.config.base_url
                     verify_code = ""
                     self._print_qr_code(scan_url)
@@ -893,8 +898,8 @@ class WeixinChannel(BaseChannel):
         self._client = self._new_http_client(httpx.Timeout(60, connect=30))
         self._running = True
 
-    async def connect_fetch_qr_code(self) -> tuple[str, str]:
-        return await self._fetch_qr_code()
+    async def connect_fetch_qr_code(self, *, force: bool = False) -> tuple[str, str]:
+        return await self._fetch_qr_code(force=force)
 
     async def connect_poll_qr_code(
         self,
@@ -954,7 +959,7 @@ class WeixinChannel(BaseChannel):
         self._client = self._new_http_client(httpx.Timeout(60, connect=30))
         self._running = True  # Enable polling loop in _qr_login()
         try:
-            return await self._qr_login()
+            return await self._qr_login(force=force)
         finally:
             self._running = False
             if self._client:
