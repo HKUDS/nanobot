@@ -3043,7 +3043,13 @@ function AppearanceSettings({
               label={localPrefs.codeWrap ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.brandLogos", "Brand logos")}>
+          <SettingsRow
+            title={tx("settings.rows.brandLogos", "Brand logos")}
+            description={tx(
+              "settings.legal.thirdPartyBrands",
+              "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
+            )}
+          >
             <ToggleButton
               checked={localPrefs.brandLogos}
               onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
@@ -7317,10 +7323,6 @@ function ChannelsSettings({
           </div>
         )}
       </section>
-
-      <div className={cn("shrink-0 pt-2", showingCompactDetail && "hidden")}>
-        <ThirdPartyBrandNotice />
-      </div>
     </div>
   );
 }
@@ -7572,8 +7574,6 @@ function AppsCatalogSettings({
           onImportConfig={onImportMcpConfig}
         />
       ) : null}
-
-      <ThirdPartyBrandNotice />
     </div>
   );
 }
@@ -9395,18 +9395,6 @@ function ProviderPickerIcon({
     >
       <Icon className="h-3 w-3" strokeWidth={2} />
     </span>
-  );
-}
-
-function ThirdPartyBrandNotice() {
-  const { t } = useTranslation();
-  return (
-    <p className="px-1 text-[11.5px] leading-5 text-muted-foreground/75">
-      {t("settings.legal.thirdPartyBrands", {
-        defaultValue:
-          "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
-      })}
-    </p>
   );
 }
 

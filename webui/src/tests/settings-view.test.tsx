@@ -386,6 +386,9 @@ async function chooseProviderToConfigure(label: string) {
 }
 
 describe("SettingsView Apps catalog", () => {
+  const thirdPartyBrandNotice =
+    "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.";
+
   beforeEach(() => {
     vi.stubGlobal(
       "matchMedia",
@@ -428,6 +431,32 @@ describe("SettingsView Apps catalog", () => {
       expect(saved.fileEditDisplayMode).toBe("diff");
     });
   });
+
+  it("shows the third-party brand notice only with the brand logo preference", () => {
+    renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+      showSidebar: true,
+    });
+
+    const brandLogosTitle = screen.getByText("Brand logos");
+    const brandLogosRow = brandLogosTitle.parentElement?.parentElement;
+
+    expect(brandLogosRow).not.toBeNull();
+    expect(
+      within(brandLogosRow as HTMLElement).getByText(thirdPartyBrandNotice),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(thirdPartyBrandNotice)).toHaveLength(1);
+  });
+
+  it.each(["apps", "channels"] as const)(
+    "does not repeat the third-party brand notice in %s",
+    (initialSection) => {
+      renderSettingsView({ initialSection, initialSettings: settingsPayload() });
+
+      expect(screen.queryByText(thirdPartyBrandNotice)).not.toBeInTheDocument();
+    },
+  );
 
   it("does not show the Settings kicker on the standalone Automations surface", async () => {
     const onBackToChat = vi.fn();
