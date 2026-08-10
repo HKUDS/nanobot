@@ -1,6 +1,7 @@
 """Base class for agent tools."""
 from __future__ import annotations
 
+import json
 import math
 import typing
 from abc import ABC, abstractmethod
@@ -310,9 +311,51 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
+    @staticmethod
+    def _container_types(schema: dict[str, Any]) -> set[str]:
+        """Recognize explicit container-only types, without choosing a union branch."""
+        options = [schema] if "type" in schema else schema.get("oneOf", schema.get("anyOf"))
+        if not isinstance(options, list) or not options:
+            return set()
+        types: set[str] = set()
+        for option in cast(list[Any], options):
+            if not isinstance(option, dict):
+                return set()
+            raw_type = cast(dict[str, Any], option).get("type")
+            members = cast(list[Any], raw_type) if isinstance(raw_type, list) else [raw_type]
+            for member in members:
+                if not isinstance(member, str) or member not in {"object", "array", "null"}:
+                    return set()
+                if member != "null":
+                    types.add(member)
+        return types
+
+    @classmethod
+    def _decode_json_container(cls, value: Any, schema: dict[str, Any]) -> Any:
+        """Decode a JSON string only when it contains the expected container type."""
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        expected_type = "object" if stripped.startswith("{") else "array"
+        if not stripped.startswith(("{", "[")) or expected_type not in cls._container_types(schema):
+            return value
+
+        try:
+            parsed = json.loads(stripped)
+        except (TypeError, ValueError):
+            return value
+
+        if expected_type == "object" and isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        if expected_type == "array" and isinstance(parsed, list):
+            return cast(list[Any], parsed)
+        return value
+
     def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
         if isinstance(schema, bool):
             return val
+        val = self._decode_json_container(val, schema)
         raw_type = schema.get("type")
         t = self._resolve_type(raw_type)
         if isinstance(raw_type, list):
