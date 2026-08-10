@@ -41,7 +41,6 @@ from nanobot.optional_features import (
 )
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
-from nanobot.webui.http_utils import case_insensitive_header
 from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
@@ -85,6 +84,7 @@ _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 
 _SKIP_FIELD = object()
 _CHANNEL_CONNECT_ACTIONS = frozenset({"start", "poll", "cancel"})
+_MCP_OAUTH_CALLBACK_URL_MAX_BYTES = 8 * 1024
 
 
 def _channel_connect_route(path: str) -> tuple[str, str] | None:
@@ -136,6 +136,7 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/pairing/approve",
     "/api/settings/pairing/deny",
     "/api/settings/mcp-oauth/start",
+    "/api/settings/mcp-oauth/complete",
     "/api/settings/mcp-oauth/cancel",
     *_MCP_PRESET_ACTIONS_BY_PATH,
 })
@@ -297,6 +298,8 @@ class WebUISettingsRouter:
             return await self._handle_mcp_oauth_start(request)
         if path == "/api/settings/mcp-oauth/status":
             return await self._handle_mcp_oauth_status(request)
+        if path == "/api/settings/mcp-oauth/complete":
+            return self._handle_mcp_oauth_complete(request)
         if path == "/api/settings/mcp-oauth/cancel":
             return await self._handle_mcp_oauth_cancel(request)
         if path == "/api/settings/version-check":
@@ -1283,6 +1286,27 @@ class WebUISettingsRouter:
             payload = await self._mcp_oauth.status(flow_id)
         except Exception as exc:
             return self._mcp_oauth_error_response(exc, action="status")
+        return self._json_response(payload)
+
+    def _handle_mcp_oauth_complete(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        query = self._query(request)
+        flow_id = (_query_first(query, "flow_id") or "").strip()
+        if not flow_id:
+            return self._error_response(400, "missing MCP OAuth flow ID")
+        callback_url = (_query_first(query, "callback_url") or "").strip()
+        if not callback_url:
+            return self._error_response(400, "Paste the complete callback URL to continue")
+        if len(callback_url.encode("utf-8")) > _MCP_OAUTH_CALLBACK_URL_MAX_BYTES:
+            return self._error_response(400, "The MCP OAuth callback URL is too long")
+        try:
+            payload = self._mcp_oauth.submit_callback_url(
+                flow_id=flow_id,
+                callback_url=callback_url,
+            )
+        except Exception as exc:
+            return self._mcp_oauth_error_response(exc, action="complete")
         return self._json_response(payload)
 
     async def _handle_mcp_oauth_cancel(self, request: WsRequest) -> Response:

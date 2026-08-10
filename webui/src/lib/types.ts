@@ -992,6 +992,7 @@ export interface McpOAuthFlowPayload {
   status: McpOAuthFlowStatus;
   expires_in: number;
   authorization_url?: string;
+  completion_input?: "callback_url";
   error?: string;
   hot_reload?: {
     ok: boolean;

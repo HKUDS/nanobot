@@ -363,6 +363,8 @@
       "preparingSignIn": "Preparing secure sign-in…",
       "openSignInToContinue": "Open the sign-in page to continue.",
       "finishSignInInBrowser": "Finish signing in in the browser window.",
+      "manualCallbackRequired": "Finish signing in, then paste the callback URL into nanobot.",
+      "manualCallbackHelp": "After approving access, the localhost page will not load. Copy its full URL from the address bar and paste it here.",
       "finishingConnection": "Finishing connection…",
       "activatingTools": "Activating tools…",
       "connected": "Connected.",

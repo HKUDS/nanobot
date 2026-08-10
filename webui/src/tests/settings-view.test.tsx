@@ -698,15 +698,6 @@ describe("SettingsView Apps catalog", () => {
           installed_count: connected ? 1 : 0,
         });
       }
-      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
-        return jsonResponse({
-          flow_id: "flow-123",
-          name: "xmind",
-          status: "authorization_required",
-          expires_in: 300,
-          authorization_url: "https://accounts.xmind.test/authorize?state=state-123",
-        });
-      }
       if (url === "/api/settings/mcp-oauth/status?flow_id=flow-123") {
         connected = true;
         return jsonResponse({
@@ -720,6 +711,18 @@ describe("SettingsView Apps catalog", () => {
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.oauth_start") {
+        return {
+          flow_id: "flow-123",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=state-123",
+        };
+      }
+      return settingsPayload();
+    });
     const replace = vi.fn();
     const popup = {
       opener: window,
@@ -770,6 +773,105 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
+  it("offers a pasted callback flow when the remote WebUI uses HTTP", async () => {
+    let completed = false;
+    const callbackUrl =
+      "http://127.0.0.1:8765/auth/mcp/callback?code=oauth-code&state=manual-state";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({
+          presets: [completed
+            ? {
+              ...xmindMcpPreset,
+              installed: true,
+              configured: true,
+              available: true,
+              status: "configured",
+              connection_summary: "https://app.xmind.com/api/mcp",
+            }
+            : xmindMcpPreset],
+          installed_count: completed ? 1 : 0,
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/status?flow_id=flow-manual") {
+        return jsonResponse({
+          flow_id: "flow-manual",
+          name: "xmind",
+          status: completed ? "connected" : "authorization_required",
+          expires_in: 298,
+          completion_input: "callback_url",
+          authorization_url: completed
+            ? undefined
+            : "https://accounts.xmind.test/authorize?state=manual-state",
+          hot_reload: completed ? { ok: true, requires_restart: false } : undefined,
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.oauth_start") {
+        return {
+          flow_id: "flow-manual",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          completion_input: "callback_url",
+          authorization_url: "https://accounts.xmind.test/authorize?state=manual-state",
+        };
+      }
+      if (action === "settings.mcp.oauth_complete") {
+        completed = true;
+        return {
+          flow_id: "flow-manual",
+          name: "xmind",
+          status: "connecting",
+          expires_in: 299,
+          completion_input: "callback_url",
+        };
+      }
+      return settingsPayload();
+    });
+    const popup = {
+      opener: window,
+      closed: false,
+      location: { replace: vi.fn() },
+      document: { title: "", body: { textContent: "" } },
+      focus: vi.fn(),
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+
+    const callbackInput = await screen.findByRole("textbox", { name: "Full callback URL" });
+    expect(screen.getByText(/localhost page will not load/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Finish signing in, then paste the callback URL into nanobot.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.change(callbackInput, { target: { value: callbackUrl } });
+    fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_complete",
+      { flow_id: "flow-manual", callback_url: callbackUrl },
+      20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Xmind connected." }, { timeout: 2500 }))
+      .toHaveTextContent("Connected");
+    expect(screen.queryByRole("textbox", { name: "Full callback URL" })).not.toBeInTheDocument();
+    expect(popup.close).toHaveBeenCalledTimes(1);
+  });
+
   it("lets the user cancel an active OAuth connection after closing the popup", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -778,29 +880,32 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
       }
-      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
-        return jsonResponse({
-          flow_id: "flow-cancel",
-          name: "xmind",
-          status: "authorization_required",
-          expires_in: 300,
-          authorization_url: "https://accounts.xmind.test/authorize?state=cancel",
-        });
-      }
-      if (url === "/api/settings/mcp-oauth/cancel?flow_id=flow-cancel") {
-        return jsonResponse({
-          flow_id: "flow-cancel",
-          name: "xmind",
-          status: "cancelled",
-          expires_in: 299,
-        });
-      }
       if (url === "/api/settings/mcp-oauth/status?flow_id=flow-cancel") {
         return new Promise<Response>(() => {});
       }
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.oauth_start") {
+        return {
+          flow_id: "flow-cancel",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=cancel",
+        };
+      }
+      if (action === "settings.mcp.oauth_cancel") {
+        return {
+          flow_id: "flow-cancel",
+          name: "xmind",
+          status: "cancelled",
+          expires_in: 299,
+        };
+      }
+      return settingsPayload();
+    });
     const popup = {
       opener: window,
       closed: false,
@@ -820,9 +925,10 @@ describe("SettingsView Apps catalog", () => {
     popup.closed = true;
     fireEvent.click(cancelButton);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/settings/mcp-oauth/cancel?flow_id=flow-cancel",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_cancel",
+      { flow_id: "flow-cancel" },
+      20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Connecting Xmind" })).not.toBeInTheDocument();
@@ -850,33 +956,32 @@ describe("SettingsView Apps catalog", () => {
           installed_count: 1,
         });
       }
-      if (url === "/api/settings/mcp-presets/remove?name=xmind") {
-        return jsonResponse({
-          presets: [xmindMcpPreset],
-          installed_count: 0,
-          requires_restart: false,
-          hot_reload: {
-            ok: true,
-            message: "MCP config reloaded without restarting nanobot.",
-          },
-          last_action: {
-            ok: true,
-            message: "Removed MCP preset for Xmind. MCP config reloaded without restarting nanobot.",
-            removed: true,
-          },
-        });
-      }
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      presets: [xmindMcpPreset],
+      installed_count: 0,
+      requires_restart: false,
+      hot_reload: {
+        ok: true,
+        message: "MCP config reloaded without restarting nanobot.",
+      },
+      last_action: {
+        ok: true,
+        message: "Removed MCP preset for Xmind. MCP config reloaded without restarting nanobot.",
+        removed: true,
+      },
+    });
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/remove?name=xmind",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.remove",
+      { name: "xmind" },
+      20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
     expect(screen.queryByText(/Removed MCP preset|reloaded without restarting/)).not.toBeInTheDocument();
@@ -890,18 +995,21 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
       }
-      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
-        return jsonResponse({
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.oauth_start") {
+        return {
           flow_id: "flow-blocked",
           name: "xmind",
           status: "authorization_required",
           expires_in: 300,
           authorization_url: "https://accounts.xmind.test/authorize?state=blocked",
-        });
+        };
       }
-      return new Promise<Response>(() => {});
+      return settingsPayload();
     });
-    vi.stubGlobal("fetch", fetchMock);
     const popup = {
       opener: window,
       closed: false,
@@ -940,15 +1048,6 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
       }
-      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
-        return jsonResponse({
-          flow_id: "flow-coop",
-          name: "xmind",
-          status: "authorization_required",
-          expires_in: 300,
-          authorization_url: "https://accounts.xmind.test/authorize?state=coop",
-        });
-      }
       if (url === "/api/settings/mcp-oauth/status?flow_id=flow-coop") {
         statusCalls += 1;
         return jsonResponse({
@@ -965,6 +1064,18 @@ describe("SettingsView Apps catalog", () => {
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.mcp.oauth_start") {
+        return {
+          flow_id: "flow-coop",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=coop",
+        };
+      }
+      return settingsPayload();
+    });
     const popup = {
       opener: window,
       get closed() {

@@ -363,6 +363,8 @@
       "preparingSignIn": "Preparando login seguro…",
       "openSignInToContinue": "Abra a página de login para continuar.",
       "finishSignInInBrowser": "Conclua o login na janela do navegador.",
+      "manualCallbackRequired": "Conclua o login e cole a URL de callback no nanobot.",
+      "manualCallbackHelp": "Depois de autorizar o acesso, a página localhost não será carregada. Copie a URL completa da barra de endereços e cole-a aqui.",
       "finishingConnection": "Finalizando conexão…",
       "activatingTools": "Ativando ferramentas…",
       "connected": "Conectado.",

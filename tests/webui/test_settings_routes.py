@@ -116,6 +116,45 @@ async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page(
     submit.assert_called_once_with(state="state-123", code="oauth-code", error=None)
 
 
+@pytest.mark.asyncio
+async def test_mcp_oauth_manual_completion_reads_websocket_payload() -> None:
+    callback_url = (
+        "http://127.0.0.1:8765/auth/mcp/callback?code=oauth-code&state=state-123"
+    )
+    router = _router()
+    submit = MagicMock(
+        return_value={
+            "flow_id": "flow-123",
+            "name": "linear",
+            "status": "connecting",
+            "expires_in": 299,
+            "completion_input": "callback_url",
+        }
+    )
+    router._mcp_oauth = SimpleNamespace(submit_callback_url=submit)
+    request = _mutation_request(
+        "/api/settings/mcp-oauth/complete",
+        {"flow_id": "flow-123", "callback_url": callback_url},
+    )
+
+    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/complete")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body)["status"] == "connecting"
+    assert b"oauth-code" not in response.body
+    submit.assert_called_once_with(flow_id="flow-123", callback_url=callback_url)
+
+    denied = _router(authorized=False)
+    denied_response = await denied.dispatch(
+        None,
+        request,
+        "/api/settings/mcp-oauth/complete",
+    )
+    assert denied_response is not None
+    assert denied_response.status_code == 401
+
+
 @pytest.mark.parametrize(
     ("provider", "authorization_response"),
     [

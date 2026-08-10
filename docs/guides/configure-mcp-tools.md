@@ -32,7 +32,9 @@ For local interactive setup:
 1. Run `nanobot webui` and open **Apps**.
 2. Choose a known MCP server preset, or add a custom stdio, HTTP, or SSE server.
    For Xmind, Notion, Linear, or another OAuth-enabled entry, click **Connect**
-   and approve access in the browser window; there is no callback URL or code to copy.
+   and approve access in the browser window. HTTPS and localhost WebUIs return
+   automatically. From a remote plain-HTTP WebUI, copy the complete localhost
+   callback URL from the browser address bar and paste it into nanobot.
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
 5. Mention the connected MCP server with `@` in the next message and ask for a small test action.

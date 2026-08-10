@@ -207,7 +207,8 @@ turn. The default **Ready** view shows only tools that can be used immediately:
 - **MCP** lists Model Context Protocol servers. Presets provide known
   configurations, and the **Add MCP server** panel accepts stdio, HTTP, and SSE
   servers. OAuth presets such as Xmind, Notion, and Linear open their sign-in
-  page in the browser and return to nanobot automatically.
+  page in the browser. HTTPS and localhost WebUIs return automatically; a remote
+  plain-HTTP WebUI shows one field for pasting the complete localhost callback URL.
 
 Apps intentionally does not list nanobot runtime support packages such as
 `api` or `bedrock`. Those packages enable providers, servers, or channels; they

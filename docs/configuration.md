@@ -2006,9 +2006,12 @@ from Apps also removes its saved OAuth credentials. Normal gateway startup never
 opens a browser or registers a new OAuth client when credentials are
 missing—interactive authorization starts only after a user clicks **Connect**.
 
-For a remotely accessed WebUI, use HTTPS and configure
-`channels.websocket.publicWsUrl` with the public `wss://` endpoint so nanobot can
-register the matching HTTPS callback. A loopback WebUI may use HTTP.
+For a remotely accessed WebUI, HTTPS is recommended. Configure
+`channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so
+nanobot can register the matching HTTPS callback and finish automatically. A
+loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP,
+nanobot instead registers a localhost callback and asks you to paste the complete
+callback URL from the browser address bar after authorization.
 
 > [!IMPORTANT]
 > HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.

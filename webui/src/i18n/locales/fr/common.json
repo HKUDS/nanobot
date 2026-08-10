@@ -548,6 +548,8 @@
       "preparingSignIn": "Préparation d’une connexion sécurisée…",
       "openSignInToContinue": "Ouvrez la page de connexion pour continuer.",
       "finishSignInInBrowser": "Terminez la connexion dans la fenêtre du navigateur.",
+      "manualCallbackRequired": "Terminez la connexion, puis collez l’URL de rappel dans nanobot.",
+      "manualCallbackHelp": "Après avoir autorisé l’accès, la page localhost ne se chargera pas. Copiez son URL complète depuis la barre d’adresse et collez-la ici.",
       "finishingConnection": "Finalisation de la connexion…",
       "activatingTools": "Activation des outils…",
       "connected": "Connecté.",

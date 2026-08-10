@@ -548,6 +548,8 @@
       "preparingSignIn": "Preparando un inicio de sesión seguro…",
       "openSignInToContinue": "Abre la página de inicio de sesión para continuar.",
       "finishSignInInBrowser": "Termina de iniciar sesión en la ventana del navegador.",
+      "manualCallbackRequired": "Termina de iniciar sesión y pega la URL de devolución en nanobot.",
+      "manualCallbackHelp": "Después de aprobar el acceso, la página de localhost no se cargará. Copia la URL completa de la barra de direcciones y pégala aquí.",
       "finishingConnection": "Finalizando la conexión…",
       "activatingTools": "Activando herramientas…",
       "connected": "Conectado.",

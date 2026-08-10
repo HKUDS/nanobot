@@ -548,6 +548,8 @@
       "preparingSignIn": "安全なサインインを準備しています…",
       "openSignInToContinue": "サインインページを開いて続行してください。",
       "finishSignInInBrowser": "ブラウザウィンドウでサインインを完了してください。",
+      "manualCallbackRequired": "サインインを完了し、コールバック URL を nanobot に貼り付けてください。",
+      "manualCallbackHelp": "アクセスを承認すると localhost ページは開きません。アドレスバーから完全な URL をコピーして、ここに貼り付けてください。",
       "finishingConnection": "接続を完了しています…",
       "activatingTools": "ツールを有効にしています…",
       "connected": "接続しました。",

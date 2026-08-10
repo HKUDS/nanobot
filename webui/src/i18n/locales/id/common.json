@@ -548,6 +548,8 @@
       "preparingSignIn": "Menyiapkan proses masuk yang aman…",
       "openSignInToContinue": "Buka halaman masuk untuk melanjutkan.",
       "finishSignInInBrowser": "Selesaikan proses masuk di jendela browser.",
+      "manualCallbackRequired": "Selesaikan proses masuk, lalu tempel URL callback ke nanobot.",
+      "manualCallbackHelp": "Setelah menyetujui akses, halaman localhost tidak akan terbuka. Salin URL lengkap dari bilah alamat lalu tempel di sini.",
       "finishingConnection": "Menyelesaikan koneksi…",
       "activatingTools": "Mengaktifkan alat…",
       "connected": "Terhubung.",

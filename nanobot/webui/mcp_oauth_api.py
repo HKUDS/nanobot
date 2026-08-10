@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
 from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
@@ -44,6 +44,7 @@ class _McpOAuthFlow:
     name: str
     cfg: MCPServerConfig
     redirect_uri: str
+    manual_callback: bool
     expires_at: float
     authorization_ready: asyncio.Event = field(default_factory=asyncio.Event)
     callback_result: asyncio.Future[tuple[str, str | None]] | None = None
@@ -55,11 +56,16 @@ class _McpOAuthFlow:
     reload_result: dict[str, Any] | None = None
 
 
-def validate_mcp_oauth_redirect_uri(redirect_uri: str) -> str:
-    """Allow HTTPS callbacks, plus loopback HTTP for a local gateway."""
-    parsed = urlsplit(redirect_uri.strip())
+def _parse_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, SplitResult, int | None]:
+    cleaned = redirect_uri.strip()
+    parsed = urlsplit(cleaned)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise McpOAuthError("Invalid MCP OAuth callback URL") from exc
     if (
         not parsed.netloc
+        or not parsed.hostname
         or parsed.path != MCP_OAUTH_CALLBACK_PATH
         or parsed.query
         or parsed.fragment
@@ -67,13 +73,28 @@ def validate_mcp_oauth_redirect_uri(redirect_uri: str) -> str:
         or parsed.password is not None
     ):
         raise McpOAuthError("Invalid MCP OAuth callback URL")
+    return cleaned, parsed, port
+
+
+def validate_mcp_oauth_redirect_uri(redirect_uri: str) -> str:
+    """Allow HTTPS callbacks, plus loopback HTTP for a local gateway."""
+    cleaned, parsed, _port = _parse_mcp_oauth_redirect_uri(redirect_uri)
     if parsed.scheme == "https":
-        return redirect_uri.strip()
+        return cleaned
     if parsed.scheme == "http" and is_loopback_host(parsed.netloc):
-        return redirect_uri.strip()
-    raise McpOAuthError(
-        "Remote MCP OAuth requires HTTPS. Configure a public wss:// URL or use localhost."
-    )
+        return cleaned
+    raise McpOAuthError("MCP OAuth callbacks must use HTTPS or localhost")
+
+
+def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
+    """Use a pasteable loopback callback when a remote WebUI is served over HTTP."""
+    cleaned, parsed, port = _parse_mcp_oauth_redirect_uri(redirect_uri)
+    if parsed.scheme != "http" or is_loopback_host(parsed.netloc):
+        return validate_mcp_oauth_redirect_uri(cleaned), False
+
+    loopback = "127.0.0.1" if port is None else f"127.0.0.1:{port}"
+    manual_redirect_uri = urlunsplit(("http", loopback, parsed.path, "", ""))
+    return validate_mcp_oauth_redirect_uri(manual_redirect_uri), True
 
 
 class McpOAuthManager:
@@ -93,7 +114,7 @@ class McpOAuthManager:
         reset_credentials: bool = False,
     ) -> dict[str, Any]:
         self._prune()
-        redirect_uri = validate_mcp_oauth_redirect_uri(redirect_uri)
+        redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
         await self._cancel_name(name)
 
         loop = asyncio.get_running_loop()
@@ -103,6 +124,7 @@ class McpOAuthManager:
             name=name,
             cfg=cfg,
             redirect_uri=redirect_uri,
+            manual_callback=manual_callback,
             expires_at=now + _FLOW_TTL_S,
             callback_result=loop.create_future(),
         )
@@ -165,6 +187,56 @@ class McpOAuthManager:
         else:
             callback_result.set_result((code, state))
         return flow.name
+
+    def submit_callback_url(self, *, flow_id: str, callback_url: str) -> dict[str, Any]:
+        """Complete a flow from a full browser callback URL pasted into the WebUI."""
+        self._prune()
+        flow = self._flow(flow_id)
+        parsed = urlsplit(callback_url.strip())
+        expected = urlsplit(flow.redirect_uri)
+        if (
+            not parsed.query
+            or parsed.fragment
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.scheme != expected.scheme
+            or parsed.netloc != expected.netloc
+            or parsed.path != expected.path
+        ):
+            raise McpOAuthError(
+                "Paste the complete callback URL from the browser address bar."
+            )
+        try:
+            query = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=16)
+        except ValueError as exc:
+            raise McpOAuthError(
+                "Paste the complete callback URL from the browser address bar."
+            ) from exc
+
+        states = query.get("state", [])
+        state = states[0] if len(states) == 1 else ""
+        if not state or state != flow.state:
+            raise McpOAuthError(
+                "This callback belongs to a different or expired authorization request. "
+                "Start again.",
+                status=410,
+            )
+
+        codes = query.get("code", [])
+        errors = query.get("error", [])
+        if len(codes) > 1 or len(errors) > 1 or (codes and errors):
+            raise McpOAuthError(
+                "Paste the complete callback URL from the browser address bar."
+            )
+        code = codes[0] if len(codes) == 1 else None
+        error = errors[0] if len(errors) == 1 else None
+        if (not code and not error) or (code is not None and len(code) > 8192):
+            raise McpOAuthError(
+                "Paste the complete callback URL from the browser address bar."
+            )
+
+        self.submit_callback(state=state, code=code, error=error)
+        return self._payload(flow)
 
     async def cancel(self, flow_id: str) -> dict[str, Any]:
         self._prune()
@@ -293,6 +365,8 @@ class McpOAuthManager:
             "status": status,
             "expires_in": max(0, int(flow.expires_at - time.monotonic())),
         }
+        if flow.manual_callback:
+            payload["completion_input"] = "callback_url"
         if flow.authorization_url and status == "authorization_required":
             payload["authorization_url"] = flow.authorization_url
         if flow.error:

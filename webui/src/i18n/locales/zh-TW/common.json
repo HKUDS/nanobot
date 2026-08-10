@@ -548,6 +548,8 @@
       "preparingSignIn": "正在準備安全登入…",
       "openSignInToContinue": "開啟登入頁面以繼續。",
       "finishSignInInBrowser": "請在瀏覽器視窗中完成登入。",
+      "manualCallbackRequired": "完成登入後，將回呼 URL 貼到 nanobot。",
+      "manualCallbackHelp": "授權後，localhost 頁面將無法開啟。請複製網址列中的完整 URL 並貼到這裡。",
       "finishingConnection": "正在完成連線…",
       "activatingTools": "正在啟用工具…",
       "connected": "已連線。",

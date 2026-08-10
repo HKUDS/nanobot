@@ -167,6 +167,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
     "settings.mcp.tools": "/api/settings/mcp-presets/tools",
     "settings.mcp.oauth_start": "/api/settings/mcp-oauth/start",
+    "settings.mcp.oauth_complete": "/api/settings/mcp-oauth/complete",
     "settings.mcp.oauth_cancel": "/api/settings/mcp-oauth/cancel",
 }
 

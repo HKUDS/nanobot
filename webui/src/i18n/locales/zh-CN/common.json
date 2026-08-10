@@ -363,6 +363,8 @@
       "preparingSignIn": "正在准备安全登录…",
       "openSignInToContinue": "打开登录页面以继续。",
       "finishSignInInBrowser": "请在浏览器窗口中完成登录。",
+      "manualCallbackRequired": "完成登录后，将回调 URL 粘贴到 nanobot。",
+      "manualCallbackHelp": "授权后，localhost 页面将无法打开。请复制地址栏中的完整 URL 并粘贴到这里。",
       "finishingConnection": "正在完成连接…",
       "activatingTools": "正在启用工具…",
       "connected": "已连接。",

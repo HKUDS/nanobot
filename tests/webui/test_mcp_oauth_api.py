@@ -8,6 +8,7 @@ from nanobot.config.schema import MCPServerConfig
 from nanobot.webui.mcp_oauth_api import (
     McpOAuthError,
     McpOAuthManager,
+    prepare_mcp_oauth_redirect_uri,
     validate_mcp_oauth_redirect_uri,
 )
 
@@ -94,6 +95,81 @@ async def test_browser_flow_forwards_callback_and_hot_reloads_once(
 
 
 @pytest.mark.asyncio
+async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = McpOAuthManager()
+    connection = _Connection()
+    received: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_oauth_api.validate_url_target",
+        lambda _url: (True, ""),
+    )
+
+    async def connect(_servers, _registry, *, oauth_handlers):
+        handlers = oauth_handlers["linear"]
+        received["redirect_uri"] = handlers.redirect_uri
+        await handlers.redirect_handler(
+            "https://accounts.example.com/authorize?client_id=test&state=manual-state"
+        )
+        received["callback"] = await handlers.callback_handler()
+        return {"linear": connection}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+
+    started = await manager.start(
+        "linear",
+        _config(),
+        "http://192.0.2.10:8765/auth/mcp/callback",
+        reload_mcp=lambda: asyncio.sleep(
+            0,
+            result={"ok": True, "requires_restart": False},
+        ),
+    )
+
+    assert started["status"] == "authorization_required"
+    assert started["completion_input"] == "callback_url"
+    assert received["redirect_uri"] == "http://127.0.0.1:8765/auth/mcp/callback"
+
+    with pytest.raises(McpOAuthError, match="complete callback URL"):
+        manager.submit_callback_url(
+            flow_id=started["flow_id"],
+            callback_url=(
+                "http://127.0.0.1:8765/wrong?code=oauth-code&state=manual-state"
+            ),
+        )
+    with pytest.raises(McpOAuthError, match="different or expired"):
+        manager.submit_callback_url(
+            flow_id=started["flow_id"],
+            callback_url=(
+                "http://127.0.0.1:8765/auth/mcp/callback"
+                "?code=oauth-code&state=other-state"
+            ),
+        )
+
+    submitted = manager.submit_callback_url(
+        flow_id=started["flow_id"],
+        callback_url=(
+            "http://127.0.0.1:8765/auth/mcp/callback"
+            "?code=oauth-code&state=manual-state"
+        ),
+    )
+    assert submitted["status"] == "connecting"
+
+    for _ in range(20):
+        await asyncio.sleep(0)
+        result = await manager.status(started["flow_id"])
+        if result["status"] == "connected":
+            break
+
+    assert result["status"] == "connected"
+    assert result["completion_input"] == "callback_url"
+    assert received["callback"] == ("oauth-code", "manual-state")
+    assert connection.closed is True
+
+
+@pytest.mark.asyncio
 async def test_browser_flow_surfaces_provider_denial_without_callback_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -176,7 +252,19 @@ def test_redirect_uri_requires_https_except_for_loopback() -> None:
         "http://127.0.0.1:8765/auth/mcp/callback"
     ) == "http://127.0.0.1:8765/auth/mcp/callback"
 
-    with pytest.raises(McpOAuthError, match="requires HTTPS"):
+    with pytest.raises(McpOAuthError, match="HTTPS or localhost"):
         validate_mcp_oauth_redirect_uri("http://192.0.2.10/auth/mcp/callback")
     with pytest.raises(McpOAuthError, match="Invalid"):
         validate_mcp_oauth_redirect_uri("https://agent.example.com/wrong")
+
+
+def test_remote_http_redirect_prepares_a_manual_loopback_callback() -> None:
+    assert prepare_mcp_oauth_redirect_uri(
+        "https://agent.example.com/auth/mcp/callback"
+    ) == ("https://agent.example.com/auth/mcp/callback", False)
+    assert prepare_mcp_oauth_redirect_uri(
+        "http://127.0.0.1:8765/auth/mcp/callback"
+    ) == ("http://127.0.0.1:8765/auth/mcp/callback", False)
+    assert prepare_mcp_oauth_redirect_uri(
+        "http://agent.example.com:9443/auth/mcp/callback"
+    ) == ("http://127.0.0.1:9443/auth/mcp/callback", True)

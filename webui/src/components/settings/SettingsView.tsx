@@ -115,6 +115,7 @@ import { isLoopbackHost } from "@/lib/network";
 import {
   cancelMcpOAuth,
   checkVersion,
+  completeMcpOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -760,6 +761,9 @@ export function SettingsView({
   const mcpOAuthPopupRef = useRef<Window | null>(null);
   const mcpOAuthNavigatedUrlRef = useRef<string | null>(null);
   const [mcpOAuthPopupBlocked, setMcpOAuthPopupBlocked] = useState(false);
+  const [mcpOAuthCallbackUrl, setMcpOAuthCallbackUrl] = useState("");
+  const [mcpOAuthCompleting, setMcpOAuthCompleting] = useState(false);
+  const [mcpOAuthCallbackError, setMcpOAuthCallbackError] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
@@ -2071,6 +2075,9 @@ export function SettingsView({
     mcpOAuthFlowRef.current = null;
     setMcpOAuthFlow(null);
     setMcpPresetAction(null);
+    setMcpOAuthCallbackUrl("");
+    setMcpOAuthCompleting(false);
+    setMcpOAuthCallbackError(null);
 
     if (flow.status === "connected") {
       try {
@@ -2135,6 +2142,9 @@ export function SettingsView({
         mcpOAuthFlowRef.current = null;
         setMcpOAuthFlow(null);
         setMcpPresetAction(null);
+        setMcpOAuthCallbackUrl("");
+        setMcpOAuthCompleting(false);
+        setMcpOAuthCallbackError(null);
         setMcpError((err as Error).message);
         return;
       }
@@ -2147,6 +2157,9 @@ export function SettingsView({
     setMcpPresetAction(key);
     setMcpMessage(null);
     setMcpError(null);
+    setMcpOAuthCallbackUrl("");
+    setMcpOAuthCompleting(false);
+    setMcpOAuthCallbackError(null);
     try {
       const flow = await startMcpOAuth(client, name);
       mcpOAuthFlowRef.current = flow;
@@ -2158,6 +2171,9 @@ export function SettingsView({
       mcpOAuthFlowRef.current = null;
       setMcpOAuthFlow(null);
       setMcpPresetAction(null);
+      setMcpOAuthCallbackUrl("");
+      setMcpOAuthCompleting(false);
+      setMcpOAuthCallbackError(null);
       setMcpError((err as Error).message);
     }
   };
@@ -2168,6 +2184,9 @@ export function SettingsView({
     mcpOAuthFlowRef.current = null;
     setMcpOAuthFlow(null);
     setMcpPresetAction(null);
+    setMcpOAuthCallbackUrl("");
+    setMcpOAuthCompleting(false);
+    setMcpOAuthCallbackError(null);
     closeMcpOAuthPopup();
     try {
       await cancelMcpOAuth(client, flow.flow_id);
@@ -2180,6 +2199,31 @@ export function SettingsView({
     const authorizationUrl = mcpOAuthFlowRef.current?.authorization_url;
     if (!authorizationUrl) return;
     openMcpOAuthPopup(authorizationUrl);
+  };
+
+  const handleMcpOAuthComplete = async () => {
+    const flow = mcpOAuthFlowRef.current;
+    const callbackUrl = mcpOAuthCallbackUrl.trim();
+    if (!flow || flow.completion_input !== "callback_url") return;
+    if (!callbackUrl) {
+      setMcpOAuthCallbackError(t("settings.oauth.pasteCallbackToContinue"));
+      return;
+    }
+    setMcpOAuthCompleting(true);
+    setMcpOAuthCallbackError(null);
+    try {
+      const next = await completeMcpOAuth(client, flow.flow_id, callbackUrl);
+      if (mcpOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      mcpOAuthFlowRef.current = next;
+      setMcpOAuthFlow(next);
+    } catch (err) {
+      if (mcpOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      setMcpOAuthCallbackError((err as Error).message);
+    } finally {
+      if (mcpOAuthFlowRef.current?.flow_id === flow.flow_id) {
+        setMcpOAuthCompleting(false);
+      }
+    }
   };
 
   const applyMcpActionFeedback = (
@@ -2487,6 +2531,9 @@ export function SettingsView({
             mcpActionKey={mcpPresetAction}
             mcpOAuthFlow={mcpOAuthFlow}
             mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
+            mcpOAuthCallbackUrl={mcpOAuthCallbackUrl}
+            mcpOAuthCompleting={mcpOAuthCompleting}
+            mcpOAuthCallbackError={mcpOAuthCallbackError}
             cliMessage={cliAppsMessage}
             cliError={cliAppsError}
             cliFocusName={cliAppsFocusName}
@@ -2504,6 +2551,11 @@ export function SettingsView({
             onMcpOAuthConnect={handleMcpOAuthConnect}
             onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
             onMcpOAuthOpen={handleMcpOAuthOpen}
+            onMcpOAuthCallbackUrlChange={(value) => {
+              setMcpOAuthCallbackUrl(value);
+              setMcpOAuthCallbackError(null);
+            }}
+            onMcpOAuthComplete={() => void handleMcpOAuthComplete()}
             onDismissStatus={() => {
               setCliAppsMessage(null);
               setCliAppsError(null);
@@ -7555,6 +7607,9 @@ function AppsCatalogSettings({
   mcpActionKey,
   mcpOAuthFlow,
   mcpOAuthPopupBlocked,
+  mcpOAuthCallbackUrl,
+  mcpOAuthCompleting,
+  mcpOAuthCallbackError,
   cliMessage,
   cliError,
   cliFocusName,
@@ -7572,6 +7627,8 @@ function AppsCatalogSettings({
   onMcpOAuthConnect,
   onMcpOAuthCancel,
   onMcpOAuthOpen,
+  onMcpOAuthCallbackUrlChange,
+  onMcpOAuthComplete,
   onDismissStatus,
   onBackToChat,
   onMcpFieldChange,
@@ -7593,6 +7650,9 @@ function AppsCatalogSettings({
   mcpActionKey: string | null;
   mcpOAuthFlow: McpOAuthFlowPayload | null;
   mcpOAuthPopupBlocked: boolean;
+  mcpOAuthCallbackUrl: string;
+  mcpOAuthCompleting: boolean;
+  mcpOAuthCallbackError: string | null;
   cliMessage: string | null;
   cliError: string | null;
   cliFocusName: string | null;
@@ -7610,6 +7670,8 @@ function AppsCatalogSettings({
   onMcpOAuthConnect: (name: string) => void;
   onMcpOAuthCancel: () => void;
   onMcpOAuthOpen: () => void;
+  onMcpOAuthCallbackUrlChange: (value: string) => void;
+  onMcpOAuthComplete: () => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
   onMcpFieldChange: (presetName: string, fieldName: string, value: string) => void;
@@ -7675,7 +7737,12 @@ function AppsCatalogSettings({
     (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
   const oauthStatusAnnouncement = mcpOAuthFlow
-    ? mcpOAuthStatusText(mcpOAuthFlow.status, mcpOAuthPopupBlocked, tx)
+    ? mcpOAuthStatusText(
+      mcpOAuthFlow.status,
+      mcpOAuthPopupBlocked,
+      tx,
+      mcpOAuthFlow.completion_input,
+    )
     : "";
   return (
     <div className="space-y-7">
@@ -7757,12 +7824,17 @@ function AppsCatalogSettings({
                   actionKey={mcpActionKey}
                   oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
                   oauthPopupBlocked={mcpOAuthPopupBlocked}
+                  oauthCallbackUrl={mcpOAuthCallbackUrl}
+                  oauthCompleting={mcpOAuthCompleting}
+                  oauthCallbackError={mcpOAuthCallbackError}
                   showBrandLogos={showBrandLogos}
                   onFieldChange={onMcpFieldChange}
                   onAction={onMcpAction}
                   onOAuthConnect={onMcpOAuthConnect}
                   onOAuthCancel={onMcpOAuthCancel}
                   onOAuthOpen={onMcpOAuthOpen}
+                  onOAuthCallbackUrlChange={onMcpOAuthCallbackUrlChange}
+                  onOAuthComplete={onMcpOAuthComplete}
                   onToolsChange={onMcpToolsChange}
                 />
               ),
@@ -7915,12 +7987,17 @@ function McpAppsCatalogRow({
   actionKey,
   oauthFlow,
   oauthPopupBlocked,
+  oauthCallbackUrl,
+  oauthCompleting,
+  oauthCallbackError,
   showBrandLogos,
   onFieldChange,
   onAction,
   onOAuthConnect,
   onOAuthCancel,
   onOAuthOpen,
+  onOAuthCallbackUrlChange,
+  onOAuthComplete,
   onToolsChange,
 }: {
   preset: McpPresetInfo;
@@ -7928,12 +8005,17 @@ function McpAppsCatalogRow({
   actionKey: string | null;
   oauthFlow: McpOAuthFlowPayload | null;
   oauthPopupBlocked: boolean;
+  oauthCallbackUrl: string;
+  oauthCompleting: boolean;
+  oauthCallbackError: string | null;
   showBrandLogos: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onOAuthConnect: (name: string) => void;
   onOAuthCancel: () => void;
   onOAuthOpen: () => void;
+  onOAuthCallbackUrlChange: (value: string) => void;
+  onOAuthComplete: () => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
 }) {
   const { t } = useTranslation();
@@ -7960,6 +8042,11 @@ function McpAppsCatalogRow({
   const allowAllTools = enabledTools.includes("*");
   const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
   const description = preset.description || preset.note || preset.requires || preset.name;
+  const manualCallback =
+    oauthFlow?.completion_input === "callback_url" && Boolean(oauthFlow.authorization_url);
+  const callbackInputId = `mcp-oauth-callback-${preset.name}`;
+  const callbackHelpId = `${callbackInputId}-help`;
+  const callbackErrorId = `${callbackInputId}-error`;
 
   useEffect(() => {
     if (preset.configured || !preset.install_supported) setSetupOpen(false);
@@ -8119,10 +8206,96 @@ function McpAppsCatalogRow({
         </div>
       </div>
 
-      {oauthFlow && oauthPopupBlocked && oauthFlow.authorization_url ? (
+      {manualCallback ? (
+        <form
+          className="mx-3 mb-3 min-w-0 space-y-3 rounded-[14px] bg-background/55 p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onOAuthComplete();
+          }}
+        >
+          <div className="flex min-w-0 items-start gap-2.5 text-[12.5px] text-muted-foreground">
+            <Clipboard className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <div className="min-w-0 space-y-1">
+              <p className="font-medium text-foreground">
+                {t("settings.oauth.pasteCallbackToContinue")}
+              </p>
+              <p id={callbackHelpId} className="leading-5">
+                {tx(
+                  "settings.mcp.manualCallbackHelp",
+                  "After approving access, the localhost page will not load. Copy its full URL from the address bar and paste it here.",
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="min-w-0 space-y-2">
+            <label
+              htmlFor={callbackInputId}
+              className="block text-xs font-medium text-foreground"
+            >
+              {t("settings.oauth.callbackUrl")}
+            </label>
+            <Textarea
+              id={callbackInputId}
+              value={oauthCallbackUrl}
+              onChange={(event) => onOAuthCallbackUrlChange(event.target.value)}
+              placeholder={t("settings.oauth.callbackUrlPlaceholder")}
+              autoComplete="off"
+              spellCheck={false}
+              required
+              aria-invalid={Boolean(oauthCallbackError)}
+              aria-describedby={
+                oauthCallbackError
+                  ? `${callbackHelpId} ${callbackErrorId}`
+                  : callbackHelpId
+              }
+              className="min-h-[88px] w-full resize-y break-all font-mono text-[12px] leading-5"
+            />
+            {oauthCallbackError ? (
+              <p
+                id={callbackErrorId}
+                role="alert"
+                className="text-[12px] leading-5 text-destructive"
+              >
+                {oauthCallbackError}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOAuthOpen}
+              className="h-9 w-full rounded-full px-3 text-[12px] font-semibold sm:w-auto"
+            >
+              {tx("settings.mcp.continueSignIn", "Continue sign-in")}
+              <ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden />
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={oauthCompleting}
+              className="h-9 w-full rounded-full px-3 text-[12px] font-semibold sm:w-auto"
+            >
+              {oauthCompleting ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : null}
+              {t("settings.oauth.finishSignIn")}
+            </Button>
+          </div>
+        </form>
+      ) : oauthFlow && oauthPopupBlocked && oauthFlow.authorization_url ? (
         <div className="mx-3 mb-3 flex flex-col gap-2.5 rounded-[14px] bg-background/55 p-3">
           <div className="flex min-w-0 items-center gap-2.5 text-[12.5px] text-muted-foreground">
-            <span>{mcpOAuthStatusText(oauthFlow.status, oauthPopupBlocked, tx)}</span>
+            <span>
+              {mcpOAuthStatusText(
+                oauthFlow.status,
+                oauthPopupBlocked,
+                tx,
+                oauthFlow.completion_input,
+              )}
+            </span>
           </div>
           <div className="flex shrink-0 items-center justify-end gap-2">
             <Button
@@ -8598,11 +8771,18 @@ function mcpOAuthStatusText(
   status: McpOAuthFlowPayload["status"],
   popupBlocked: boolean,
   tx: (key: string, fallback: string) => string,
+  completionInput?: McpOAuthFlowPayload["completion_input"],
 ): string {
   switch (status) {
     case "starting":
       return tx("settings.mcp.preparingSignIn", "Preparing secure sign-in...");
     case "authorization_required":
+      if (completionInput === "callback_url") {
+        return tx(
+          "settings.mcp.manualCallbackRequired",
+          "Finish signing in, then paste the callback URL into nanobot.",
+        );
+      }
       return popupBlocked
         ? tx("settings.mcp.openSignInToContinue", "Open the sign-in page to continue.")
         : tx("settings.mcp.finishSignInInBrowser", "Finish signing in in the browser window.");

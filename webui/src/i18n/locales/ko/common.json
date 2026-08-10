@@ -548,6 +548,8 @@
       "preparingSignIn": "안전한 로그인을 준비하는 중…",
       "openSignInToContinue": "계속하려면 로그인 페이지를 여세요.",
       "finishSignInInBrowser": "브라우저 창에서 로그인을 완료하세요.",
+      "manualCallbackRequired": "로그인을 완료한 다음 콜백 URL을 nanobot에 붙여 넣으세요.",
+      "manualCallbackHelp": "접근을 승인하면 localhost 페이지가 열리지 않습니다. 주소 표시줄에서 전체 URL을 복사해 여기에 붙여 넣으세요.",
       "finishingConnection": "연결을 마무리하는 중…",
       "activatingTools": "도구를 활성화하는 중…",
       "connected": "연결됨.",

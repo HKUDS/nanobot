@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelMcpOAuth,
   configureChannel,
+  completeMcpOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -548,6 +549,23 @@ describe("webui API helpers", () => {
     });
   });
 
+  it("extracts user-facing messages from JSON API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => JSON.stringify({ error: "Paste the complete callback URL." }),
+      }),
+    );
+
+    await expect(fetchMcpOAuthStatus("tok", "flow-123")).rejects.toMatchObject({
+      status: 400,
+      message: "Paste the complete callback URL.",
+    });
+  });
+
   it("times out when an API request never responds", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
@@ -897,6 +915,15 @@ describe("webui API helpers", () => {
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/mcp-oauth/status?flow_id=flow-123",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    const callbackUrl =
+      "http://127.0.0.1:8765/auth/mcp/callback?code=secret&state=state-123";
+    await completeMcpOAuth(mutationTransport, "flow-123", callbackUrl);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_complete",
+      { flow_id: "flow-123", callback_url: callbackUrl },
+      20_000,
     );
 
     await cancelMcpOAuth(mutationTransport, "flow-123");

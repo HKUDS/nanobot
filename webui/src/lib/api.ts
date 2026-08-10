@@ -98,7 +98,19 @@ async function request<T>(
   );
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
-    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+    let message = text;
+    if (text.startsWith("{")) {
+      try {
+        const payload: unknown = JSON.parse(text);
+        if (payload && typeof payload === "object") {
+          const error = (payload as { error?: unknown }).error;
+          if (typeof error === "string" && error.trim()) message = error.trim();
+        }
+      } catch {
+        // Preserve non-JSON error bodies exactly as returned by the gateway.
+      }
+    }
+    throw new ApiError(res.status, message || `HTTP ${res.status}`);
   }
   const contentType = res.headers?.get?.("content-type") ?? "";
   if (contentType && !contentType.toLowerCase().includes("application/json")) {
@@ -711,6 +723,18 @@ export async function fetchMcpOAuthStatus(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function completeMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+  callbackUrl: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_complete",
+    { flow_id: flowId, callback_url: callbackUrl },
   );
 }
 

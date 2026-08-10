@@ -548,6 +548,8 @@
       "preparingSignIn": "Đang chuẩn bị đăng nhập an toàn…",
       "openSignInToContinue": "Mở trang đăng nhập để tiếp tục.",
       "finishSignInInBrowser": "Hoàn tất đăng nhập trong cửa sổ trình duyệt.",
+      "manualCallbackRequired": "Hoàn tất đăng nhập, rồi dán URL callback vào nanobot.",
+      "manualCallbackHelp": "Sau khi phê duyệt quyền truy cập, trang localhost sẽ không tải được. Hãy sao chép URL đầy đủ từ thanh địa chỉ và dán vào đây.",
       "finishingConnection": "Đang hoàn tất kết nối…",
       "activatingTools": "Đang kích hoạt công cụ…",
       "connected": "Đã kết nối.",
