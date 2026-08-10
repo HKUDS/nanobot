@@ -1137,6 +1137,36 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it.each([
+    ["Windows", "D:\\Users\\test\\.nanobot\\workspace", "D:\\path\\to\\project"],
+    ["macOS", "/Users/test/.nanobot/workspace", "/Users/name/project"],
+    ["Linux", "/home/test/.nanobot/workspace", "/home/name/project"],
+  ])("uses a %s path example for the project picker", async (_, projectPath, placeholder) => {
+    const user = userEvent.setup();
+    const defaultScope = {
+      project_path: projectPath,
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByLabelText("Paste path")).toHaveAttribute("placeholder", placeholder);
+  });
+
   it("slides project controls closed without offering a compact replacement", () => {
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",

@@ -34,6 +34,14 @@ import {
   shortWorkspacePath,
 } from "@/lib/workspace";
 
+function workspacePathPlaceholder(defaultWorkspacePath: string, macPlaceholder: string): string {
+  const normalized = defaultWorkspacePath.trim().replace(/\\/g, "/");
+  const windowsDrive = normalized.match(/^([A-Za-z]):\//)?.[1];
+  if (windowsDrive) return `${windowsDrive.toUpperCase()}:\\path\\to\\project`;
+  if (normalized.startsWith("/Users/")) return macPlaceholder;
+  return "/home/name/project";
+}
+
 export function WorkspaceProjectPicker({
   isHero,
   compact = false,
@@ -241,7 +249,10 @@ export function WorkspaceProjectPicker({
                   setPathDraft(event.target.value);
                   setPathError(null);
                 }}
-                placeholder={t("workspace.dialog.manualPlaceholder")}
+                placeholder={workspacePathPlaceholder(
+                  defaultScope.project_path,
+                  t("workspace.dialog.manualPlaceholder"),
+                )}
                 aria-label={t("workspace.dialog.manual")}
                 aria-invalid={pathError || error ? true : undefined}
                 aria-describedby={pathError || error ? pathErrorId : undefined}
