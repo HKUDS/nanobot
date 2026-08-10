@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import secrets
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ _LOGO_URI = AnyHttpUrl(
 
 class _StoredServer(TypedDict, total=False):
     server_fingerprint: str
+    write_lease: str
     tokens: dict[str, Any]
     client_info: dict[str, Any]
     redirect_uri: str
@@ -83,6 +85,9 @@ def _stored_server(value: object) -> _StoredServer | None:
     fingerprint = raw.get("server_fingerprint")
     if isinstance(fingerprint, str):
         entry["server_fingerprint"] = fingerprint
+    write_lease = raw.get("write_lease")
+    if isinstance(write_lease, str) and write_lease:
+        entry["write_lease"] = write_lease
     redirect_uri = raw.get("redirect_uri")
     if isinstance(redirect_uri, str):
         entry["redirect_uri"] = redirect_uri
@@ -141,6 +146,7 @@ class MCPOAuthStorage:
     def __init__(self, server_name: str, server_url: str) -> None:
         self.server_name = server_name
         self.server_fingerprint = _server_fingerprint(server_url)
+        self._write_lease: str | None = None
 
     def _entry_unlocked(self, payload: _CredentialStore) -> _StoredServer | None:
         servers = payload["servers"]
@@ -149,20 +155,72 @@ class MCPOAuthStorage:
             return None
         return entry
 
+    def _bind_entry_unlocked(
+        self,
+        payload: _CredentialStore,
+        *,
+        create: bool,
+    ) -> tuple[_StoredServer | None, bool]:
+        entry = self._entry_unlocked(payload)
+        if self._write_lease is not None:
+            if entry is None or entry.get("write_lease") != self._write_lease:
+                return None, False
+            return entry, False
+        if entry is None:
+            if not create:
+                return None, False
+            self._write_lease = secrets.token_urlsafe(24)
+            entry = _StoredServer(
+                server_fingerprint=self.server_fingerprint,
+                write_lease=self._write_lease,
+            )
+            payload["servers"][self.server_name] = entry
+            return entry, True
+        write_lease = entry.get("write_lease")
+        changed = not isinstance(write_lease, str) or not write_lease
+        if changed:
+            write_lease = secrets.token_urlsafe(24)
+            entry["write_lease"] = write_lease
+        self._write_lease = write_lease
+        return entry, changed
+
     def _read_entry_sync(self) -> _StoredServer | None:
         path = _store_path()
         with _with_store_lock(path):
-            return self._entry_unlocked(_read_store_unlocked(path))
+            payload = _read_store_unlocked(path)
+            entry, changed = self._bind_entry_unlocked(payload, create=False)
+            if changed:
+                _write_store_unlocked(path, payload)
+            return entry
 
-    def _update_entry_sync(self, update: Callable[[_StoredServer], None]) -> None:
+    def _update_entry_sync(
+        self,
+        update: Callable[[_StoredServer], None],
+        *,
+        create: bool = True,
+        claim: bool = False,
+    ) -> None:
         path = _store_path()
         with _with_store_lock(path):
             payload = _read_store_unlocked(path)
-            servers = payload["servers"]
-            entry = self._entry_unlocked(payload)
-            if entry is None:
-                entry = _StoredServer(server_fingerprint=self.server_fingerprint)
-                servers[self.server_name] = entry
+            if claim:
+                # A browser flow owns subsequent SDK writes until another flow
+                # claims the entry or the configured server is removed.
+                entry = self._entry_unlocked(payload)
+                if entry is None:
+                    entry = _StoredServer(server_fingerprint=self.server_fingerprint)
+                    payload["servers"][self.server_name] = entry
+                self._write_lease = secrets.token_urlsafe(24)
+                entry["write_lease"] = self._write_lease
+            else:
+                entry, _ = self._bind_entry_unlocked(payload, create=create)
+                if entry is None:
+                    if self._write_lease is not None:
+                        logger.info(
+                            "Ignored stale MCP OAuth credential update for '{}'",
+                            self.server_name,
+                        )
+                    return
             update(entry)
             payload["version"] = _STORE_VERSION
             _write_store_unlocked(path, payload)
@@ -190,7 +248,7 @@ class MCPOAuthStorage:
         def update(entry: _StoredServer) -> None:
             entry.pop("tokens", None)
 
-        await asyncio.to_thread(self._update_entry_sync, update)
+        await asyncio.to_thread(self._update_entry_sync, update, create=False)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         entry = await asyncio.to_thread(self._read_entry_sync)
@@ -227,7 +285,7 @@ class MCPOAuthStorage:
                 entry.pop("client_info", None)
             entry["redirect_uri"] = redirect_uri
 
-        await asyncio.to_thread(self._update_entry_sync, update)
+        await asyncio.to_thread(self._update_entry_sync, update, claim=True)
 
     def has_credentials(self) -> bool:
         entry = self._read_entry_sync()

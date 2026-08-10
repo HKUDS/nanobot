@@ -107,6 +107,33 @@ async def test_reset_and_delete_credentials_are_scoped_to_one_server(
 
 
 @pytest.mark.asyncio
+async def test_deleted_credentials_reject_late_writes_from_stale_oauth_flow(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.linear.example/mcp"
+    stale = MCPOAuthStorage("linear", server_url)
+    await stale.prepare_redirect_uri("https://old.example/auth/mcp/callback")
+
+    assert delete_mcp_oauth_credentials("linear")
+    await stale.set_tokens(OAuthToken(access_token="late-after-delete"))
+    assert not mcp_oauth_has_credentials("linear", server_url)
+
+    replacement = MCPOAuthStorage("linear", server_url)
+    await replacement.prepare_redirect_uri("https://new.example/auth/mcp/callback")
+    await stale.set_tokens(OAuthToken(access_token="late-after-replacement"))
+
+    assert not mcp_oauth_has_credentials("linear", server_url)
+    assert await replacement.get_tokens() is None
+
+    await replacement.set_tokens(OAuthToken(access_token="fresh-token"))
+    stored = await replacement.get_tokens()
+    assert stored is not None
+    assert stored.access_token == "fresh-token"
+
+
+@pytest.mark.asyncio
 async def test_create_mcp_oauth_auth_uses_browser_handlers_and_persists_redirect(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
