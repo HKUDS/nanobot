@@ -14,7 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping, cast
+from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
@@ -24,6 +24,9 @@ from nanobot.config.schema import MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
 
 QueryParams = dict[str, list[str]]
+
+if TYPE_CHECKING:
+    from nanobot.webui.settings_services import WebUISettingsConfig
 
 _MCP_PRESET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _SECRET_QUERY_RE = re.compile(
@@ -841,8 +844,9 @@ def mcp_presets_payload(
     *,
     last_action: dict[str, Any] | None = None,
     tool_preview: Mapping[str, list[str]] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
-    config = load_config()
+    config = load_config(config_path) if config_path is not None else load_config()
     known = _known_preset_names()
     preset_rows = [
         _preset_payload(preset, config.tools.mcp_servers)
@@ -928,7 +932,11 @@ async def _close_mcp_stacks(stacks: Mapping[str, Any]) -> None:
             await stack.aclose()
 
 
-async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
+async def mcp_presets_test_action(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     """Connect to an enabled MCP preset and report its tool surface."""
     from nanobot.agent.tools.mcp import connect_mcp_servers
 
@@ -941,16 +949,22 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
     display_name = _display_name_for(name, preset)
 
     try:
-        config = resolve_config_env_vars(load_config())
+        config = resolve_config_env_vars(
+            load_config(config_path) if config_path is not None else load_config(),
+            config_path=config_path,
+        )
     except ValueError as exc:
-        return mcp_presets_payload(last_action={
-            "ok": False,
-            "message": _scrub_test_error(str(exc)),
-            "error": _scrub_test_error(str(exc)),
-            "tool_count": 0,
-            "tool_names": [],
-            "checked_at": _checked_at(),
-        })
+        return mcp_presets_payload(
+            last_action={
+                "ok": False,
+                "message": _scrub_test_error(str(exc)),
+                "error": _scrub_test_error(str(exc)),
+                "tool_count": 0,
+                "tool_names": [],
+                "checked_at": _checked_at(),
+            },
+            config_path=config_path,
+        )
 
     cfg = config.tools.mcp_servers.get(name)
     if cfg is None:
@@ -968,7 +982,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path)
 
     if cfg.command and not _command_available(cfg.command):
         last_action = {
@@ -979,7 +993,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path)
 
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
@@ -1040,7 +1054,11 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
 
     tool_names = last_action.get("tool_names", [])
     preview = {name: tool_names} if tool_names else None
-    return mcp_presets_payload(last_action=last_action, tool_preview=preview)
+    return mcp_presets_payload(
+        last_action=last_action,
+        tool_preview=preview,
+        config_path=config_path,
+    )
 
 
 def _parse_json_value(raw: str | None, *, fallback: Any) -> Any:
@@ -1221,24 +1239,35 @@ def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
     return out
 
 
-def custom_mcp_action(action: str, query: QueryParams) -> dict[str, Any]:
-    config = load_config()
+def custom_mcp_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = load_config(config_path) if config_path is not None else load_config()
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
         config.tools.mcp_servers[name] = cfg
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_server_action_message(action, name))
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action=_server_action_message(action, name),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
     if action in {"import", "import-cursor"}:
         servers = _import_mcp_servers(_query_first(query, "config"))
         config.tools.mcp_servers.update(servers)
-        save_config(config)
-        payload = mcp_presets_payload(last_action={
-            "ok": True,
-            "message": f"Imported {len(servers)} MCP server(s).",
-        })
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action={
+                "ok": True,
+                "message": f"Imported {len(servers)} MCP server(s).",
+            },
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1249,29 +1278,40 @@ def custom_mcp_action(action: str, query: QueryParams) -> dict[str, Any]:
             raise McpPresetError("unknown MCP server", status=404)
         cfg.enabled_tools = _parse_enabled_tools(_query_first(query, "enabled_tools"))
         config.tools.mcp_servers[name] = cfg
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_server_action_message(action, name))
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action=_server_action_message(action, name),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
     raise McpPresetError(f"unknown MCP action '{action}'", status=404)
 
 
-def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
+def mcp_presets_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise McpPresetError("missing MCP preset name")
     preset = _preset_by_name_optional(name)
 
-    config = load_config()
+    config = load_config(config_path) if config_path is not None else load_config()
     existing = config.tools.mcp_servers.get(name)
 
     if action == "enable":
         if preset is None:
             raise McpPresetError("unknown MCP preset", status=404)
         config.tools.mcp_servers[preset.name] = _materialize_server(preset, query, existing)
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_action_message(action, preset))
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action=_action_message(action, preset),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1287,7 +1327,7 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
             except OSError as exc:
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
-            save_config(config)
+            save_config(config, config_path)
         last_action = (
             _action_message(action, preset)
             if preset is not None
@@ -1303,7 +1343,10 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
                 f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
             )
             last_action["verification_failed"] = ["managed_paths_absent"]
-        payload = mcp_presets_payload(last_action=last_action)
+        payload = mcp_presets_payload(
+            last_action=last_action,
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1339,13 +1382,21 @@ async def mcp_presets_settings_action(
     query: QueryParams,
     *,
     reload_mcp: McpReload | None = None,
+    config: WebUISettingsConfig | None = None,
 ) -> dict[str, Any]:
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
+    config_path = config.path if config is not None else None
     if action is None:
-        return mcp_presets_payload()
+        return mcp_presets_payload(config_path=config_path)
     if action == "test":
-        return await mcp_presets_test_action(query)
-    if action in _CUSTOM_ACTIONS:
+        return await mcp_presets_test_action(query, config_path=config_path)
+    if config is not None:
+        operation = custom_mcp_action if action in _CUSTOM_ACTIONS else mcp_presets_action
+        payload = await asyncio.to_thread(
+            config.run_serialized,
+            lambda path: operation(action, query, config_path=path),
+        )
+    elif action in _CUSTOM_ACTIONS:
         payload = await asyncio.to_thread(custom_mcp_action, action, query)
     else:
         payload = await asyncio.to_thread(mcp_presets_action, action, query)

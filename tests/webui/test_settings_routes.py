@@ -8,12 +8,15 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
+from nanobot.config.loader import get_config_path
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.settings_routes import WebUISettingsRouter
+from nanobot.webui.settings_services import WebUISettingsServices
 
 
 def _router(*, authorized: bool = True) -> WebUISettingsRouter:
     return WebUISettingsRouter(
+        settings=WebUISettingsServices.create(get_config_path()),
         bus=SimpleNamespace(),
         logger=SimpleNamespace(exception=lambda *_args: None),
         check_api_token=lambda _request: authorized,
@@ -54,7 +57,13 @@ async def test_oauth_completion_reads_websocket_payload(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def complete(query, authorization_response=None):
+    def complete(
+        query,
+        authorization_response=None,
+        *,
+        oauth_flows=None,
+        config_path=None,
+    ):
         captured.update(query=query, authorization_response=authorization_response)
         return {
             "status": "pending",
@@ -127,7 +136,7 @@ async def test_model_preset_mutation_routes(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def mutate(query):
+    def mutate(query, *, config_path=None):
         captured["query"] = query
         return {"routed": function_name}
 

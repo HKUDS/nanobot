@@ -204,6 +204,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.settings_services import WebUISettingsServices
 
 def _decode_api_key(raw_key: str) -> str | None:
     key = unquote(raw_key)
@@ -292,6 +293,7 @@ class GatewayHTTPHandler:
         media: WebUIMediaGateway,
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
+        settings: WebUISettingsServices,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -312,6 +314,7 @@ class GatewayHTTPHandler:
         self.media = media
         self.ingress = ingress
         self.workspaces = workspaces
+        self.settings = settings
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills: set[str] = (
             disabled_skills if disabled_skills is not None else set()
@@ -330,6 +333,7 @@ class GatewayHTTPHandler:
 
         self._capabilities = _rc(runtime_surface, runtime_capabilities_overrides or {})
         self.settings_routes = WebUISettingsRouter(
+            settings=settings,
             bus=bus,
             logger=self._log,
             check_api_token=self.check_api_token,

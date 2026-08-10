@@ -14,11 +14,11 @@ import math
 import os
 import re
 import secrets
-import threading
 import time
 from collections.abc import Iterable
 from contextlib import suppress
-from typing import Any, Literal, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -48,6 +48,9 @@ from nanobot.webui.workspaces import (
 
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
+
+if TYPE_CHECKING:
+    from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
 
 def _version_payload() -> dict[str, Any]:
@@ -133,9 +136,6 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _WEBUI_OAUTH_TIMEOUT_S = 600
-_WEBUI_OAUTH_MAX_FLOWS = 8
-_webui_oauth_flows: dict[str, tuple[str, Any]] = {}
-_webui_oauth_flows_lock = threading.Lock()
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -146,6 +146,21 @@ class WebUISettingsError(ValueError):
         super().__init__(message)
         self.message = message
         self.status = status
+
+
+def _load_settings_config(config_path: Path | None) -> Config:
+    return load_config(config_path) if config_path is not None else load_config()
+
+
+def _save_settings_config(config: Config, config_path: Path | None) -> None:
+    if config_path is None:
+        save_config(config)
+    else:
+        save_config(config, config_path)
+
+
+def _settings_config_path(config_path: Path | None) -> Path:
+    return config_path if config_path is not None else get_config_path()
 
 
 def _normalize_surface(surface: str | None) -> RuntimeSurface:
@@ -764,7 +779,11 @@ def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def provider_models_payload(query: QueryParams) -> dict[str, Any]:
+def provider_models_payload(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     """Fetch an OpenAI-compatible provider's model list for Settings.
 
     The result is advisory only: users can always type a custom model id. This
@@ -775,7 +794,7 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
     if not provider_name:
         raise WebUISettingsError("provider is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     resolved_provider = _resolve_settings_provider(config, provider_name)
     if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
@@ -1117,8 +1136,9 @@ def settings_payload(
     runtime_capability_overrides: dict[str, Any] | None = None,
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
-    config = load_config()
+    config = _load_settings_config(config_path)
     defaults = config.agents.defaults
     active_preset_name = defaults.model_preset or "default"
     effective_preset = config.resolve_preset()
@@ -1299,7 +1319,7 @@ def settings_payload(
             "providers": _transcription_provider_rows(config),
         },
         "runtime": {
-            "config_path": str(get_config_path().expanduser()),
+            "config_path": str(_settings_config_path(config_path).expanduser()),
             "workspace_path": str(config.workspace_path),
             "gateway_host": config.gateway.host,
             "gateway_port": config.gateway.port,
@@ -1341,14 +1361,18 @@ def settings_payload(
     )
 
 
-def settings_usage_payload() -> dict[str, Any]:
+def settings_usage_payload(*, config_path: Path | None = None) -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
-    config = load_config()
+    config = _load_settings_config(config_path)
     return token_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
-def update_agent_settings(query: QueryParams) -> dict[str, Any]:
-    config = load_config()
+def update_agent_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
     defaults = config.agents.defaults
     changed = False
     restart_required = False
@@ -1425,11 +1449,15 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
             restart_required = True
 
     if changed:
-        save_config(config)
-    return settings_payload(requires_restart=restart_required)
+        _save_settings_config(config, config_path)
+    return settings_payload(requires_restart=restart_required, config_path=config_path)
 
 
-def create_model_configuration(query: QueryParams) -> dict[str, Any]:
+def create_model_configuration(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     label = (_query_first_alias(query, "label", "displayName") or "").strip()
     raw_name = (_query_first(query, "name") or label).strip()
     model = (_query_first(query, "model") or "").strip()
@@ -1443,7 +1471,7 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("provider is required")
 
     name = _model_configuration_slug(raw_name or label)
-    config = load_config()
+    config = _load_settings_config(config_path)
     if name in config.model_presets:
         raise WebUISettingsError("configuration already exists", status=409)
     _validate_configured_provider(config, provider)
@@ -1476,18 +1504,22 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
     )
-    save_config(config)
-    payload = settings_payload()
+    _save_settings_config(config, config_path)
+    payload = settings_payload(config_path=config_path)
     payload["created_model_preset"] = name
     return payload
 
 
-def update_model_configuration(query: QueryParams) -> dict[str, Any]:
+def update_model_configuration(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name or name == "default":
         raise WebUISettingsError("model configuration is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     preset = config.model_presets.get(name)
     if preset is None:
         raise WebUISettingsError("unknown model configuration")
@@ -1554,11 +1586,15 @@ def update_model_configuration(query: QueryParams) -> dict[str, Any]:
             changed = True
 
     if changed:
-        save_config(config)
-    return settings_payload()
+        _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
-def update_model_call_order(query: QueryParams) -> dict[str, Any]:
+def update_model_call_order(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     raw_order = _query_first_alias(query, "order", "presetNames")
     if raw_order is None:
         raise WebUISettingsError("model call order is required")
@@ -1580,7 +1616,7 @@ def update_model_call_order(query: QueryParams) -> dict[str, Any]:
         cast(str, name).strip()
         for name in cast(list[object], order)
     ]
-    config = load_config()
+    config = _load_settings_config(config_path)
     _, editable = _model_call_order_state(config)
     if not editable:
         raise WebUISettingsError(
@@ -1599,13 +1635,17 @@ def update_model_call_order(query: QueryParams) -> dict[str, Any]:
     ):
         defaults.model_preset = normalized_order[0]
         defaults.fallback_models = fallback_models
-        save_config(config)
-    return settings_payload()
+        _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
-def migrate_model_configurations(_query: QueryParams | None = None) -> dict[str, Any]:
+def migrate_model_configurations(
+    _query: QueryParams | None = None,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     """Materialize legacy primary/inline model settings as named presets."""
-    config = load_config()
+    config = _load_settings_config(config_path)
     defaults = config.agents.defaults
     primary = config.resolve_preset()
     created: list[str] = []
@@ -1658,16 +1698,20 @@ def migrate_model_configurations(_query: QueryParams | None = None) -> dict[str,
 
     if created:
         defaults.fallback_models = fallback_models
-        save_config(config)
-    return settings_payload()
+        _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
-def delete_model_configuration(query: QueryParams) -> dict[str, Any]:
+def delete_model_configuration(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name or name == "default":
         raise WebUISettingsError("model configuration is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     if name not in config.model_presets:
         raise WebUISettingsError("unknown model configuration")
     defaults = config.agents.defaults
@@ -1681,11 +1725,15 @@ def delete_model_configuration(query: QueryParams) -> dict[str, Any]:
         )
 
     del config.model_presets[name]
-    save_config(config)
-    return settings_payload()
+    _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
-def create_provider_settings(query: QueryParams) -> dict[str, Any]:
+def create_provider_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     display_name = (_query_first_alias(query, "name", "displayName") or "").strip()
     if not display_name:
         raise WebUISettingsError("provider name is required")
@@ -1710,7 +1758,7 @@ def create_provider_settings(query: QueryParams) -> dict[str, Any]:
     if not api_base:
         raise WebUISettingsError("API base is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     if _provider_display_name_exists(config, display_name):
         raise WebUISettingsError("provider already exists", status=409)
 
@@ -1719,18 +1767,22 @@ def create_provider_settings(query: QueryParams) -> dict[str, Any]:
     updates["api_type"] = "auto"
     provider_config = _validated_provider_config(None, updates)
     setattr(config.providers, provider_key, provider_config)
-    save_config(config)
-    payload = settings_payload()
+    _save_settings_config(config, config_path)
+    payload = settings_payload(config_path=config_path)
     payload["created_provider"] = provider_key
     return payload
 
 
-def update_provider_settings(query: QueryParams) -> dict[str, Any]:
+def update_provider_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     resolved_provider = _resolve_settings_provider(config, provider_name)
     if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
@@ -1772,7 +1824,7 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     changed = updated_provider_config != provider_config
     if changed:
         setattr(config.providers, provider_key, updated_provider_config)
-        save_config(config)
+        _save_settings_config(config, config_path)
     image_config = config.tools.image_generation
     restart_required = (
         changed
@@ -1780,10 +1832,15 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
         and image_config.provider == provider_key
         and get_image_gen_provider(provider_key) is not None
     )
-    return settings_payload(requires_restart=restart_required)
+    return settings_payload(requires_restart=restart_required, config_path=config_path)
 
 
-def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
+def login_oauth_provider(
+    query: QueryParams,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
@@ -1798,7 +1855,10 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+            proxy = resolve_config_env_vars(
+                _load_settings_config(config_path),
+                config_path=config_path,
+            ).providers.openai_codex.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
         remote_browser_value = _query_first(query, "remote_browser")
@@ -1816,7 +1876,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except Exception as e:
             raise WebUISettingsError(f"OpenAI Codex OAuth login failed: {e}", status=502) from e
         flow_id = secrets.token_urlsafe(24)
-        _register_webui_oauth_flow(spec.name, flow_id, flow)
+        oauth_flows.register(spec.name, flow_id, flow)
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1840,13 +1900,16 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             token = login_github_copilot(print_fn=lambda _message: None)
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
-        return settings_payload()
+        return settings_payload(config_path=config_path)
 
     if spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import start_xai_oauth_login
 
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
+            proxy = resolve_config_env_vars(
+                _load_settings_config(config_path),
+                config_path=config_path,
+            ).providers.xai_grok.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
         try:
@@ -1857,7 +1920,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except Exception as e:
             raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=502) from e
         flow_id = secrets.token_urlsafe(24)
-        _register_webui_oauth_flow(spec.name, flow_id, flow)
+        oauth_flows.register(spec.name, flow_id, flow)
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1873,6 +1936,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
 def complete_oauth_provider(
     query: QueryParams,
     authorization_response: str | None = None,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     flow_id = (_query_first(query, "flow_id") or "").strip()
@@ -1882,7 +1948,7 @@ def complete_oauth_provider(
     if not flow_id:
         raise WebUISettingsError("flow_id is required")
 
-    flow = _get_webui_oauth_flow(spec.name, flow_id)
+    flow = oauth_flows.get(spec.name, flow_id)
     if flow is None:
         raise WebUISettingsError(f"{spec.label} sign-in expired. Start again.", status=410)
 
@@ -1904,7 +1970,7 @@ def complete_oauth_provider(
     except WebUISettingsError:
         raise
     except Exception as e:
-        _remove_webui_oauth_flow(spec.name, flow_id, flow)
+        oauth_flows.remove(spec.name, flow_id, flow)
         raise WebUISettingsError(f"{spec.label} OAuth login failed: {e}", status=502) from e
     if token is None:
         return {
@@ -1912,13 +1978,18 @@ def complete_oauth_provider(
             "provider": spec.name,
             "flow_id": flow_id,
         }
-    _remove_webui_oauth_flow(spec.name, flow_id, flow, cancel=False)
+    oauth_flows.remove(spec.name, flow_id, flow, cancel=False)
     if not token.access:
         raise WebUISettingsError("OAuth login failed", status=401)
-    return settings_payload()
+    return settings_payload(config_path=config_path)
 
 
-def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
+def logout_oauth_provider(
+    query: QueryParams,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
@@ -1932,7 +2003,7 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             from oauth_cli_kit.storage import FileTokenStorage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
-        _clear_webui_oauth_flows(spec.name)
+        oauth_flows.clear(spec.name)
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
@@ -1943,77 +2014,23 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
 
-        _clear_webui_oauth_flows(spec.name)
+        oauth_flows.clear(spec.name)
         logout_xai_oauth()
-        return settings_payload()
+        return settings_payload(config_path=config_path)
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
 
     for path in (token_path, token_path.with_suffix(".lock")):
         with suppress(FileNotFoundError):
             path.unlink()
-    return settings_payload()
+    return settings_payload(config_path=config_path)
 
 
-def _register_webui_oauth_flow(provider_name: str, flow_id: str, flow: Any) -> None:
-    discarded: list[Any] = []
-    with _webui_oauth_flows_lock:
-        for existing_id, (_provider_name, existing) in list(_webui_oauth_flows.items()):
-            if existing.expired:
-                discarded.append(_webui_oauth_flows.pop(existing_id)[1])
-        while len(_webui_oauth_flows) >= _WEBUI_OAUTH_MAX_FLOWS:
-            oldest_id = next(iter(_webui_oauth_flows))
-            discarded.append(_webui_oauth_flows.pop(oldest_id)[1])
-        _webui_oauth_flows[flow_id] = (provider_name, flow)
-    for existing in discarded:
-        existing.cancel()
-
-
-def _get_webui_oauth_flow(provider_name: str, flow_id: str) -> Any | None:
-    with _webui_oauth_flows_lock:
-        registered = _webui_oauth_flows.get(flow_id)
-        if registered is None or registered[0] != provider_name:
-            return None
-        flow = registered[1]
-        if not flow.expired:
-            return flow
-        _webui_oauth_flows.pop(flow_id, None)
-    flow.cancel()
-    return None
-
-
-def _remove_webui_oauth_flow(
-    provider_name: str,
-    flow_id: str,
-    flow: Any,
+def update_network_safety_settings(
+    query: QueryParams,
     *,
-    cancel: bool = True,
-) -> None:
-    with _webui_oauth_flows_lock:
-        registered = _webui_oauth_flows.get(flow_id)
-        if (
-            registered is not None
-            and registered[0] == provider_name
-            and registered[1] is flow
-        ):
-            _webui_oauth_flows.pop(flow_id)
-    if cancel:
-        flow.cancel()
-
-
-def _clear_webui_oauth_flows(provider_name: str) -> None:
-    with _webui_oauth_flows_lock:
-        flow_ids = [
-            flow_id
-            for flow_id, (registered_provider, _flow) in _webui_oauth_flows.items()
-            if registered_provider == provider_name
-        ]
-        flows = [_webui_oauth_flows.pop(flow_id)[1] for flow_id in flow_ids]
-    for flow in flows:
-        flow.cancel()
-
-
-def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     raw_allow = (
         _query_first_alias(query, "webui_allow_local_service_access", "webuiAllowLocalServiceAccess")
         or _query_first_alias(query, "allow_local_preview_access", "allowLocalPreviewAccess")
@@ -2022,7 +2039,7 @@ def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
     if raw_allow is None and raw_default_access_mode is None:
         raise WebUISettingsError("webui_allow_local_service_access or webui_default_access_mode is required")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     changed = False
     if raw_allow is not None:
         webui_allow_local_service_access = _parse_bool(raw_allow, "webui_allow_local_service_access")
@@ -2031,7 +2048,7 @@ def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
             changed = True
 
     if changed:
-        save_config(config)
+        _save_settings_config(config, config_path)
     if raw_default_access_mode is not None:
         default_access_mode = raw_default_access_mode.strip().lower()
         if default_access_mode == "restricted":
@@ -2042,16 +2059,20 @@ def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
             write_webui_default_access_mode(default_access_mode)
         except ValueError as exc:
             raise WebUISettingsError(str(exc)) from exc
-    return settings_payload(requires_restart=changed)
+    return settings_payload(requires_restart=changed, config_path=config_path)
 
 
-def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
+def update_web_search_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip().lower()
     provider_option = _WEB_SEARCH_PROVIDER_BY_NAME.get(provider_name)
     if provider_option is None:
         raise WebUISettingsError("unknown web search provider")
 
-    config = load_config()
+    config = _load_settings_config(config_path)
     search_config = config.tools.web.search
     web_config = config.tools.web
     previous_provider = search_config.provider
@@ -2130,13 +2151,17 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             restart_required = True
 
     if changed:
-        save_config(config)
-    return settings_payload(requires_restart=restart_required)
+        _save_settings_config(config, config_path)
+    return settings_payload(requires_restart=restart_required, config_path=config_path)
 
 
-def update_api_settings(query: QueryParams) -> dict[str, Any]:
+def update_api_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     """Update the managed OpenAI-compatible API configuration."""
-    config = load_config()
+    config = _load_settings_config(config_path)
     api = config.api
 
     host = _query_first(query, "host")
@@ -2173,12 +2198,16 @@ def update_api_settings(query: QueryParams) -> dict[str, Any]:
     if not is_loopback_host(api.host) and not api.api_key.strip():
         raise WebUISettingsError("an API key is required when the API is available on the network")
 
-    save_config(config)
-    return settings_payload()
+    _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
-def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
-    config = load_config()
+def update_image_generation_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
     image_config = config.tools.image_generation
     changed = False
 
@@ -2271,12 +2300,16 @@ def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("image generation provider is not configured")
 
     if changed:
-        save_config(config)
-    return settings_payload(requires_restart=changed)
+        _save_settings_config(config, config_path)
+    return settings_payload(requires_restart=changed, config_path=config_path)
 
 
-def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
-    config = load_config()
+def update_transcription_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
     transcription = config.transcription
     changed = False
 
@@ -2341,5 +2374,5 @@ def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
             changed = True
 
     if changed:
-        save_config(config)
-    return settings_payload()
+        _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)

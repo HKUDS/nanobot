@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.config.loader import get_config_path
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -29,6 +31,7 @@ class GatewayServices:
     """Explicit dependencies shared by WebSocket transport and HTTP routes."""
 
     http: GatewayHTTPHandler
+    settings: WebUISettingsServices
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
     ingress: WebUIIngressPolicy
@@ -50,6 +53,7 @@ def build_gateway_services(
     static_dist_path: Path | None,
     workspace_path: Path,
     default_restrict_to_workspace: bool,
+    config_path: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
@@ -63,6 +67,7 @@ def build_gateway_services(
     skill_state_action: Callable[[set[str]], None] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
+    settings = WebUISettingsServices.create(config_path or get_config_path())
     tokens = GatewayTokenStore()
     ingress = DEFAULT_WEBUI_INGRESS_POLICY
     minimum_frame_bytes = ingress.minimum_full_policy_frame_bytes()
@@ -102,6 +107,7 @@ def build_gateway_services(
         media=media,
         ingress=ingress,
         workspaces=workspaces,
+        settings=settings,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
         cron_service=cron_service,
@@ -115,6 +121,7 @@ def build_gateway_services(
     )
     return GatewayServices(
         http=http,
+        settings=settings,
         tokens=tokens,
         media=media,
         ingress=ingress,

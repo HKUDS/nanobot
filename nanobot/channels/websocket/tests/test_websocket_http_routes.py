@@ -916,7 +916,11 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
+    async def payload(
+        *,
+        installed_only: bool = False,
+        config_path: Path | None = None,
+    ) -> dict[str, Any]:
         return {
             "apps": [
                 {
@@ -946,7 +950,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.cli_apps_action",
-        lambda action, query: {
+        lambda action, query, *, config_path=None: {
             "apps": [],
             "installed_count": 1,
             "catalog_updated_at": "2026-04-18",
@@ -1404,7 +1408,7 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.nanobot_features_action",
-        lambda _action, _query, *, allow_install=True: {
+        lambda _action, _query, *, allow_install=True, config_path=None: {
             "features": [{
                 "name": "feishu",
                 "display_name": "Feishu",
@@ -1572,6 +1576,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
         query: dict[str, list[str]],
         *,
         allow_install: bool = True,
+        config_path: Path | None = None,
     ) -> dict[str, Any]:
         assert action == "enable"
         assert query == {"name": ["discord"], "instance_id": ["default"]}
@@ -1898,7 +1903,11 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_payload(*, installed_only: bool = False) -> dict[str, Any]:
+    async def slow_payload(
+        *,
+        installed_only: bool = False,
+        config_path: Path | None = None,
+    ) -> dict[str, Any]:
         assert installed_only is False
         entered.set()
         with suppress(asyncio.TimeoutError):
@@ -1941,7 +1950,11 @@ async def test_cli_apps_route_supports_installed_only_payload(
 ) -> None:
     calls: list[bool] = []
 
-    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
+    async def payload(
+        *,
+        installed_only: bool = False,
+        config_path: Path | None = None,
+    ) -> dict[str, Any]:
         calls.append(installed_only)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
@@ -1973,7 +1986,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 ) -> None:
     monkeypatch.setattr(
         "nanobot.webui.mcp_presets_api.mcp_presets_payload",
-        lambda: {
+        lambda **_kwargs: {
             "presets": [
                 {
                     "name": "browserbase",
@@ -2001,7 +2014,12 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
     preset_queries: list[tuple[str, dict[str, list[str]]]] = []
     custom_queries: list[tuple[str, dict[str, list[str]]]] = []
 
-    def _mcp_preset_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+    def _mcp_preset_action(
+        action: str,
+        query: dict[str, list[str]],
+        *,
+        config_path: Path | None = None,
+    ) -> dict[str, Any]:
         preset_queries.append((action, query))
         return {
             "presets": [],
@@ -2010,7 +2028,12 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
         }
 
-    def _custom_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+    def _custom_action(
+        action: str,
+        query: dict[str, list[str]],
+        *,
+        config_path: Path | None = None,
+    ) -> dict[str, Any]:
         custom_queries.append((action, query))
         return {
             "presets": [],

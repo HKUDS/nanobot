@@ -101,8 +101,14 @@ class ChannelManager:
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
+        config_path: Path | None = None,
     ):
+        if config_path is None:
+            from nanobot.config.loader import get_config_path
+
+            config_path = get_config_path()
         self.config = config
+        self._config_path = config_path.expanduser().resolve(strict=False)
         self.bus = bus
         self._session_manager = session_manager
         self._cron_service = cron_service
@@ -170,6 +176,7 @@ class ChannelManager:
                 static_dist_path=static_path,
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
                 runtime_surface=self._webui_runtime_surface,
