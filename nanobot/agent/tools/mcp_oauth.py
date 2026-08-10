@@ -49,6 +49,7 @@ class _StoredServer(TypedDict, total=False):
 class _CredentialStore(TypedDict):
     version: int
     servers: dict[str, _StoredServer]
+    generations: dict[str, str]
 
 
 class MCPAuthorizationRequiredError(RuntimeError):
@@ -74,7 +75,7 @@ def _server_fingerprint(server_url: str) -> str:
 
 
 def _empty_store() -> _CredentialStore:
-    return {"version": _STORE_VERSION, "servers": {}}
+    return {"version": _STORE_VERSION, "servers": {}, "generations": {}}
 
 
 def _stored_server(value: object) -> _StoredServer | None:
@@ -123,7 +124,17 @@ def _read_store_unlocked(path: Path) -> _CredentialStore:
         entry = _stored_server(value)
         if isinstance(name, str) and entry is not None:
             servers[name] = entry
-    return {"version": _STORE_VERSION, "servers": servers}
+    generations: dict[str, str] = {}
+    raw_generations = payload.get("generations")
+    if isinstance(raw_generations, dict):
+        for name, value in cast(dict[object, object], raw_generations).items():
+            if isinstance(name, str) and isinstance(value, str) and value:
+                generations[name] = value
+    return {
+        "version": _STORE_VERSION,
+        "servers": servers,
+        "generations": generations,
+    }
 
 
 def _with_store_lock(path: Path) -> FileLock:
@@ -146,7 +157,19 @@ class MCPOAuthStorage:
     def __init__(self, server_name: str, server_url: str) -> None:
         self.server_name = server_name
         self.server_fingerprint = _server_fingerprint(server_url)
+        self._observed_generation = self._read_generation_sync()
         self._write_lease: str | None = None
+
+    def _read_generation_sync(self) -> str | None:
+        path = _store_path()
+        if not path.exists():
+            return None
+        # Writes replace the whole file atomically, so this observes either side
+        # of a concurrent deletion without blocking the async connection path.
+        return _read_store_unlocked(path)["generations"].get(self.server_name)
+
+    def _generation_is_current(self, payload: _CredentialStore) -> bool:
+        return payload["generations"].get(self.server_name) == self._observed_generation
 
     def _entry_unlocked(self, payload: _CredentialStore) -> _StoredServer | None:
         servers = payload["servers"]
@@ -161,6 +184,8 @@ class MCPOAuthStorage:
         *,
         create: bool,
     ) -> tuple[_StoredServer | None, bool]:
+        if not self._generation_is_current(payload):
+            return None, False
         entry = self._entry_unlocked(payload)
         if self._write_lease is not None:
             if entry is None or entry.get("write_lease") != self._write_lease:
@@ -199,13 +224,19 @@ class MCPOAuthStorage:
         *,
         create: bool = True,
         claim: bool = False,
-    ) -> None:
+    ) -> bool:
         path = _store_path()
         with _with_store_lock(path):
             payload = _read_store_unlocked(path)
             if claim:
                 # A browser flow owns subsequent SDK writes until another flow
                 # claims the entry or the configured server is removed.
+                if not self._generation_is_current(payload):
+                    logger.info(
+                        "Ignored stale MCP OAuth credential claim for '{}'",
+                        self.server_name,
+                    )
+                    return False
                 entry = self._entry_unlocked(payload)
                 if entry is None:
                     entry = _StoredServer(server_fingerprint=self.server_fingerprint)
@@ -220,10 +251,11 @@ class MCPOAuthStorage:
                             "Ignored stale MCP OAuth credential update for '{}'",
                             self.server_name,
                         )
-                    return
+                    return False
             update(entry)
             payload["version"] = _STORE_VERSION
             _write_store_unlocked(path, payload)
+            return True
 
     async def get_tokens(self) -> OAuthToken | None:
         entry = await asyncio.to_thread(self._read_entry_sync)
@@ -285,7 +317,9 @@ class MCPOAuthStorage:
                 entry.pop("client_info", None)
             entry["redirect_uri"] = redirect_uri
 
-        await asyncio.to_thread(self._update_entry_sync, update, claim=True)
+        claimed = await asyncio.to_thread(self._update_entry_sync, update, claim=True)
+        if not claimed:
+            raise MCPAuthorizationRequiredError("MCP authorization was cancelled")
 
     def has_credentials(self) -> bool:
         entry = self._read_entry_sync()
@@ -356,13 +390,12 @@ def mcp_oauth_has_credentials(server_name: str, server_url: str) -> bool:
 def delete_mcp_oauth_credentials(server_name: str) -> bool:
     """Delete credentials for one config name without touching other MCP instances."""
     path = _store_path()
-    if not path.exists():
-        return False
     with _with_store_lock(path):
         payload = _read_store_unlocked(path)
         servers = payload["servers"]
-        if server_name not in servers:
-            return False
-        del servers[server_name]
+        removed = servers.pop(server_name, None) is not None
+        # Rotate even when no entry exists so a flow created before removal cannot
+        # claim the name later and resurrect credentials.
+        payload["generations"][server_name] = secrets.token_urlsafe(24)
         _write_store_unlocked(path, payload)
-        return True
+        return removed
