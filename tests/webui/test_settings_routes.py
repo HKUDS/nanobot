@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -28,6 +28,7 @@ def _router(*, authorized: bool = True) -> WebUISettingsRouter:
         ),
         runtime_surface="browser",
         runtime_capabilities={},
+        mcp_oauth_redirect_uri=lambda _request: "https://gateway.example/auth/mcp/callback",
     )
 
 
@@ -37,6 +38,82 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     request._nanobot_webui_mutation_payload = payload
     request._nanobot_trusted_proxy_authenticated = True
     return request
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monkeypatch) -> None:
+    config = SimpleNamespace(
+        type="streamableHttp",
+        auth="oauth",
+        url="https://app.xmind.com/api/mcp",
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
+        lambda _query, *, config_path=None: ("xmind", config),
+    )
+    router = _router()
+    start = AsyncMock(return_value={
+        "status": "authorization_required",
+        "flow_id": "flow-123",
+        "name": "xmind",
+        "authorization_url": "https://xmind.example/authorize?state=state-123",
+    })
+    router._mcp_oauth = SimpleNamespace(start=start)
+    request = _mutation_request(
+        "/api/settings/mcp-oauth/start",
+        {"name": "xmind"},
+    )
+
+    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body)["flow_id"] == "flow-123"
+    start.assert_awaited_once_with(
+        "xmind",
+        config,
+        "https://gateway.example/auth/mcp/callback",
+        reload_mcp=ANY,
+        reset_credentials=False,
+    )
+
+    denied = _router(authorized=False)
+    denied_response = await denied.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    assert denied_response is not None
+    assert denied_response.status_code == 401
+
+    failed = _router()
+    failed._mcp_oauth = SimpleNamespace(
+        start=AsyncMock(side_effect=RuntimeError("upstream secret response"))
+    )
+    failed_response = await failed.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    assert failed_response is not None
+    assert failed_response.status_code == 500
+    assert json.loads(failed_response.body) == {"error": "MCP OAuth start failed"}
+    assert b"upstream secret response" not in failed_response.body
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page() -> None:
+    router = _router(authorized=False)
+    submit = MagicMock(return_value="xmind")
+    router._mcp_oauth = SimpleNamespace(submit_callback=submit)
+    request = SimpleNamespace(
+        path="/auth/mcp/callback?code=oauth-code&state=state-123",
+        headers=Headers(),
+    )
+
+    response = await router.dispatch(None, request, "/auth/mcp/callback")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == "text/html; charset=utf-8"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    assert b"window.close" in response.body
+    assert b"Authorization received" in response.body
+    assert b"oauth-code" not in response.body
+    submit.assert_called_once_with(state="state-123", code="oauth-code", error=None)
 
 
 @pytest.mark.parametrize(

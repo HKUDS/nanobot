@@ -113,6 +113,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { isLoopbackHost } from "@/lib/network";
 import {
+  cancelMcpOAuth,
   checkVersion,
   completeProviderOAuth,
   createModelConfiguration,
@@ -126,6 +127,7 @@ import {
   fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
+  fetchMcpOAuthStatus,
   fetchNanobotFeatures,
   fetchProviderModels,
   importMcpConfig,
@@ -136,6 +138,7 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  startMcpOAuth,
   startApiService,
   stopApiService,
   updateAutomation,
@@ -181,6 +184,7 @@ import type {
   CliAppsPayload,
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
+  McpOAuthFlowPayload,
   McpPresetsPayload,
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
@@ -751,6 +755,11 @@ export function SettingsView({
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
   const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
+  const [mcpOAuthFlow, setMcpOAuthFlow] = useState<McpOAuthFlowPayload | null>(null);
+  const mcpOAuthFlowRef = useRef<McpOAuthFlowPayload | null>(null);
+  const mcpOAuthPopupRef = useRef<Window | null>(null);
+  const mcpOAuthNavigatedUrlRef = useRef<string | null>(null);
+  const [mcpOAuthPopupBlocked, setMcpOAuthPopupBlocked] = useState(false);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
@@ -1986,6 +1995,210 @@ export function SettingsView({
     }
   };
 
+  const closeMcpOAuthPopup = () => {
+    const popup = mcpOAuthPopupRef.current;
+    mcpOAuthPopupRef.current = null;
+    mcpOAuthNavigatedUrlRef.current = null;
+    if (!popup) return;
+    try {
+      if (!popup.closed) popup.close();
+    } catch {
+      // The authorization page may have navigated cross-origin before it closed itself.
+    }
+  };
+
+  const openMcpOAuthPopup = (authorizationUrl?: string): Window | null => {
+    let popup: Window | null = null;
+    try {
+      popup = window.open(
+        authorizationUrl ?? "about:blank",
+        "nanobot-mcp-oauth",
+        "popup,width=560,height=720,resizable=yes,scrollbars=yes",
+      );
+      if (popup) {
+        mcpOAuthPopupRef.current = popup;
+        mcpOAuthNavigatedUrlRef.current = authorizationUrl ?? null;
+        if (!authorizationUrl) {
+          try {
+            popup.document.title = t("settings.oauth.signingIn", { defaultValue: "Preparing sign-in…" });
+            popup.document.body.textContent = t("settings.mcp.preparingSignIn", {
+              defaultValue: "Preparing secure sign-in…",
+            });
+          } catch {
+            // about:blank can become unavailable if the window is reused mid-navigation.
+          }
+        }
+        try {
+          popup.opener = null;
+          popup.focus();
+        } catch {
+          // A cross-origin authorization page can restrict window access.
+        }
+      }
+    } catch {
+      // Browsers can reject popup creation before returning a window handle.
+    }
+    setMcpOAuthPopupBlocked(!popup);
+    return popup;
+  };
+
+  const navigateMcpOAuthPopup = (flow: McpOAuthFlowPayload) => {
+    const authorizationUrl = flow.authorization_url;
+    if (!authorizationUrl) return;
+    const popup = mcpOAuthPopupRef.current;
+    // OAuth pages can use Cross-Origin-Opener-Policy, which severs the
+    // WindowProxy and makes an open tab appear closed. Once navigation was
+    // requested, do not mistake that browser isolation for a blocked popup.
+    if (popup && mcpOAuthNavigatedUrlRef.current === authorizationUrl) return;
+    try {
+      if (popup && !popup.closed) {
+        popup.location.replace(authorizationUrl);
+        mcpOAuthNavigatedUrlRef.current = authorizationUrl;
+        popup.focus();
+        setMcpOAuthPopupBlocked(false);
+        return;
+      }
+      if (popup) return;
+    } catch {
+      // Fall through to the explicit Continue in browser action.
+    }
+    setMcpOAuthPopupBlocked(true);
+  };
+
+  const finishMcpOAuthFlow = async (flow: McpOAuthFlowPayload) => {
+    if (mcpOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+    closeMcpOAuthPopup();
+    mcpOAuthFlowRef.current = null;
+    setMcpOAuthFlow(null);
+    setMcpPresetAction(null);
+
+    if (flow.status === "connected") {
+      try {
+        const payload = await fetchMcpPresets(getToken());
+        setMcpPresets(payload);
+        notifyMcpPresetsChanged(payload);
+        setMcpMessage(null);
+        setMcpError(null);
+      } catch (err) {
+        setMcpError((err as Error).message);
+      }
+      return;
+    }
+
+    if (flow.status === "authorized" && flow.hot_reload) {
+      if (flow.hot_reload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      setMcpError(
+        flow.hot_reload.message
+        || t("settings.mcp.reloadFailed", {
+          defaultValue: "Signed in, but nanobot could not connect the tools. Try restarting nanobot.",
+        }),
+      );
+      return;
+    }
+
+    if (flow.status === "failed") {
+      setMcpError(
+        flow.error
+        || t("settings.mcp.oauthFailed", {
+          defaultValue: "Unable to connect. Try signing in again.",
+        }),
+      );
+    }
+  };
+
+  const monitorMcpOAuthFlow = async (initial: McpOAuthFlowPayload) => {
+    let current = initial;
+    while (mcpOAuthFlowRef.current?.flow_id === current.flow_id) {
+      navigateMcpOAuthPopup(current);
+      const terminal =
+        current.status === "connected"
+        || current.status === "failed"
+        || current.status === "cancelled"
+        || (current.status === "authorized" && Boolean(current.hot_reload));
+      if (terminal) {
+        await finishMcpOAuthFlow(current);
+        return;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+      if (mcpOAuthFlowRef.current?.flow_id !== current.flow_id) return;
+      try {
+        current = await fetchMcpOAuthStatus(getToken(), current.flow_id);
+        if (mcpOAuthFlowRef.current?.flow_id !== current.flow_id) return;
+        mcpOAuthFlowRef.current = current;
+        setMcpOAuthFlow(current);
+      } catch (err) {
+        if (mcpOAuthFlowRef.current?.flow_id !== current.flow_id) return;
+        closeMcpOAuthPopup();
+        mcpOAuthFlowRef.current = null;
+        setMcpOAuthFlow(null);
+        setMcpPresetAction(null);
+        setMcpError((err as Error).message);
+        return;
+      }
+    }
+  };
+
+  const handleMcpOAuthConnect = async (name: string) => {
+    openMcpOAuthPopup();
+    const key = `oauth:${name}`;
+    setMcpPresetAction(key);
+    setMcpMessage(null);
+    setMcpError(null);
+    try {
+      const flow = await startMcpOAuth(client, name);
+      mcpOAuthFlowRef.current = flow;
+      setMcpOAuthFlow(flow);
+      navigateMcpOAuthPopup(flow);
+      void monitorMcpOAuthFlow(flow);
+    } catch (err) {
+      closeMcpOAuthPopup();
+      mcpOAuthFlowRef.current = null;
+      setMcpOAuthFlow(null);
+      setMcpPresetAction(null);
+      setMcpError((err as Error).message);
+    }
+  };
+
+  const handleMcpOAuthCancel = async () => {
+    const flow = mcpOAuthFlowRef.current;
+    if (!flow) return;
+    mcpOAuthFlowRef.current = null;
+    setMcpOAuthFlow(null);
+    setMcpPresetAction(null);
+    closeMcpOAuthPopup();
+    try {
+      await cancelMcpOAuth(client, flow.flow_id);
+    } catch (err) {
+      setMcpError((err as Error).message);
+    }
+  };
+
+  const handleMcpOAuthOpen = () => {
+    const authorizationUrl = mcpOAuthFlowRef.current?.authorization_url;
+    if (!authorizationUrl) return;
+    openMcpOAuthPopup(authorizationUrl);
+  };
+
+  const applyMcpActionFeedback = (
+    payload: McpPresetsPayload,
+    announceSuccess = false,
+  ) => {
+    const actionError = payload.last_action?.ok === false
+      ? payload.last_action.error || payload.last_action.message
+      : payload.hot_reload?.ok === false
+        ? payload.hot_reload.message
+        : null;
+    setMcpError(actionError || null);
+    setMcpMessage(
+      actionError || !announceSuccess
+        ? null
+        : payload.last_action?.message ?? null,
+    );
+  };
+
   const handleMcpPresetAction = async (
     action: "enable" | "remove" | "test",
     name: string,
@@ -1998,7 +2211,7 @@ export function SettingsView({
     try {
       const payload = await runMcpPresetAction(client, action, name, values);
       setMcpPresets(payload);
-      setMcpMessage(payload.last_action?.message ?? null);
+      applyMcpActionFeedback(payload, action === "test");
       if (action !== "test") {
         notifyMcpPresetsChanged(payload);
       }
@@ -2034,7 +2247,7 @@ export function SettingsView({
         tool_timeout: customMcpForm.toolTimeout,
       });
       setMcpPresets(payload);
-      setMcpMessage(payload.last_action?.message ?? null);
+      applyMcpActionFeedback(payload);
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -2055,7 +2268,7 @@ export function SettingsView({
     try {
       const payload = await importMcpConfig(client, mcpConfigImport);
       setMcpPresets(payload);
-      setMcpMessage(payload.last_action?.message ?? null);
+      applyMcpActionFeedback(payload);
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -2076,7 +2289,7 @@ export function SettingsView({
     try {
       const payload = await updateMcpServerTools(client, name, enabledTools);
       setMcpPresets(payload);
-      setMcpMessage(payload.last_action?.message ?? null);
+      applyMcpActionFeedback(payload);
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -2272,6 +2485,8 @@ export function SettingsView({
             filter={appsKindFilter}
             cliActionKey={cliAppsAction}
             mcpActionKey={mcpPresetAction}
+            mcpOAuthFlow={mcpOAuthFlow}
+            mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
             cliMessage={cliAppsMessage}
             cliError={cliAppsError}
             cliFocusName={cliAppsFocusName}
@@ -2286,6 +2501,9 @@ export function SettingsView({
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
             onMcpAction={handleMcpPresetAction}
+            onMcpOAuthConnect={handleMcpOAuthConnect}
+            onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
+            onMcpOAuthOpen={handleMcpOAuthOpen}
             onDismissStatus={() => {
               setCliAppsMessage(null);
               setCliAppsError(null);
@@ -7335,6 +7553,8 @@ function AppsCatalogSettings({
   filter,
   cliActionKey,
   mcpActionKey,
+  mcpOAuthFlow,
+  mcpOAuthPopupBlocked,
   cliMessage,
   cliError,
   cliFocusName,
@@ -7349,6 +7569,9 @@ function AppsCatalogSettings({
   onFilterChange,
   onCliAction,
   onMcpAction,
+  onMcpOAuthConnect,
+  onMcpOAuthCancel,
+  onMcpOAuthOpen,
   onDismissStatus,
   onBackToChat,
   onMcpFieldChange,
@@ -7368,6 +7591,8 @@ function AppsCatalogSettings({
   filter: AppsKindFilter;
   cliActionKey: string | null;
   mcpActionKey: string | null;
+  mcpOAuthFlow: McpOAuthFlowPayload | null;
+  mcpOAuthPopupBlocked: boolean;
   cliMessage: string | null;
   cliError: string | null;
   cliFocusName: string | null;
@@ -7382,6 +7607,9 @@ function AppsCatalogSettings({
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onMcpOAuthConnect: (name: string) => void;
+  onMcpOAuthCancel: () => void;
+  onMcpOAuthOpen: () => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
   onMcpFieldChange: (presetName: string, fieldName: string, value: string) => void;
@@ -7398,7 +7626,7 @@ function AppsCatalogSettings({
   const filterOptions = [
     { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
     { value: "cli", label: tx("settings.apps.filterCli", "Apps") },
-    { value: "mcp", label: tx("settings.apps.filterMcp", "Integrations") },
+    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const items: AppsCatalogItem[] = [
@@ -7430,7 +7658,7 @@ function AppsCatalogSettings({
     : filter === "cli"
       ? tx("settings.apps.emptyApps", "No apps available.")
       : filter === "mcp"
-        ? tx("settings.apps.emptyIntegrations", "No integrations available.")
+        ? tx("settings.apps.emptyIntegrations", "No MCP tools available.")
         : tx("settings.apps.emptyReady", "No tools are ready yet.");
   const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery
     ? null
@@ -7446,8 +7674,12 @@ function AppsCatalogSettings({
     mcpError ||
     (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
+  const oauthStatusAnnouncement = mcpOAuthFlow
+    ? mcpOAuthStatusText(mcpOAuthFlow.status, mcpOAuthPopupBlocked, tx)
+    : "";
   return (
     <div className="space-y-7">
+      <div role="status" className="sr-only">{oauthStatusAnnouncement}</div>
       <section className="space-y-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
@@ -7484,7 +7716,7 @@ function AppsCatalogSettings({
 
       {requiresRestartPending ? (
         <RestartRequiredNotice
-          message={tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and features.")}
+          message={tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and MCP tools.")}
           onRestart={onRestart}
           isRestarting={isRestarting}
         />
@@ -7492,7 +7724,11 @@ function AppsCatalogSettings({
 
       <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.apps.featured", "Tools")}</SettingsSectionTitle>
+          <SettingsSectionTitle>
+            {filter === "mcp"
+              ? tx("settings.apps.mcpTools", "MCP tools")
+              : tx("settings.apps.featured", "Tools")}
+          </SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -7519,9 +7755,14 @@ function AppsCatalogSettings({
                   preset={item.preset}
                   values={mcpFieldValues[item.preset.name] ?? {}}
                   actionKey={mcpActionKey}
+                  oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
+                  oauthPopupBlocked={mcpOAuthPopupBlocked}
                   showBrandLogos={showBrandLogos}
                   onFieldChange={onMcpFieldChange}
                   onAction={onMcpAction}
+                  onOAuthConnect={onMcpOAuthConnect}
+                  onOAuthCancel={onMcpOAuthCancel}
+                  onOAuthOpen={onMcpOAuthOpen}
                   onToolsChange={onMcpToolsChange}
                 />
               ),
@@ -7548,13 +7789,13 @@ function AppsCatalogSettings({
               >
                 {emptyBrowseTarget === "cli"
                   ? tx("settings.apps.browseApps", "Browse apps")
-                  : tx("settings.apps.browseIntegrations", "Browse integrations")}
+                  : tx("settings.apps.browseIntegrations", "Browse MCP tools")}
               </Button>
             ) : (
               <p className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
                 {tx(
                   "settings.apps.emptyIntegrationsHint",
-                  "Add a custom integration below.",
+                  "Add a custom MCP server below.",
                 )}
               </p>
             )}
@@ -7672,17 +7913,27 @@ function McpAppsCatalogRow({
   preset,
   values,
   actionKey,
+  oauthFlow,
+  oauthPopupBlocked,
   showBrandLogos,
   onFieldChange,
   onAction,
+  onOAuthConnect,
+  onOAuthCancel,
+  onOAuthOpen,
   onToolsChange,
 }: {
   preset: McpPresetInfo;
   values: Record<string, string>;
   actionKey: string | null;
+  oauthFlow: McpOAuthFlowPayload | null;
+  oauthPopupBlocked: boolean;
   showBrandLogos: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onOAuthConnect: (name: string) => void;
+  onOAuthCancel: () => void;
+  onOAuthOpen: () => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
 }) {
   const { t } = useTranslation();
@@ -7693,7 +7944,10 @@ function McpAppsCatalogRow({
   const removeBusy = actionKey === `remove:${preset.name}`;
   const testBusy = actionKey === `test:${preset.name}`;
   const toolsBusy = actionKey === `tools:${preset.name}`;
-  const busy = enableBusy || removeBusy || testBusy || toolsBusy;
+  const oauthBusy = actionKey === `oauth:${preset.name}`;
+  const anotherOAuthBusy = Boolean(actionKey?.startsWith("oauth:")) && !oauthBusy;
+  const busy = enableBusy || removeBusy || testBusy || toolsBusy || oauthBusy;
+  const isOAuth = preset.auth === "oauth";
   const missingFields = preset.required_fields.filter((field) => field.required && !field.configured);
   const hasFields = preset.required_fields.length > 0;
   const needsSetupInput = missingFields.length > 0;
@@ -7706,13 +7960,16 @@ function McpAppsCatalogRow({
   const allowAllTools = enabledTools.includes("*");
   const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
   const description = preset.description || preset.note || preset.requires || preset.name;
-  const statusLabel = mcpPresetStatusLabel(preset.status, tx);
 
   useEffect(() => {
     if (preset.configured || !preset.install_supported) setSetupOpen(false);
   }, [preset.configured, preset.install_supported]);
 
   const enableOrOpenSetup = () => {
+    if (isOAuth) {
+      onOAuthConnect(preset.name);
+      return;
+    }
     if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
       setSetupOpen(true);
       return;
@@ -7739,7 +7996,7 @@ function McpAppsCatalogRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
-            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "Integration")}</AppsTypeBadge>
+            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
@@ -7749,7 +8006,11 @@ function McpAppsCatalogRow({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <AppsActionButton
-                    ariaLabel={statusLabel}
+                    ariaLabel={t("settings.mcp.connectedAccount", {
+                      name: preset.display_name,
+                      defaultValue: "{{name}} connected.",
+                    })}
+                    visibleLabel={tx("settings.mcp.connectedLabel", "Connected")}
                     busy={testBusy || toolsBusy}
                     disabled={busy}
                     tone="installed"
@@ -7788,32 +8049,84 @@ function McpAppsCatalogRow({
                 <Trash2 className="h-4 w-4" aria-hidden />
               </AppsActionButton>
             </>
+          ) : oauthFlow ? (
+            <AppsActionButton
+              ariaLabel={t("settings.mcp.connectingAccount", {
+                name: preset.display_name,
+                defaultValue: "Connecting {{name}}",
+              })}
+              visibleLabel={tx("settings.mcp.connectingLabel", "Connecting…")}
+              busy
+            />
+          ) : isOAuth && preset.install_supported ? (
+            <AppsActionButton
+              ariaLabel={t("settings.mcp.connectTitle", {
+                name: preset.display_name,
+                defaultValue: "Connect {{name}}",
+              })}
+              visibleLabel={tx("settings.mcp.setup", "Connect")}
+              busy={oauthBusy}
+              disabled={anotherOAuthBusy}
+              onClick={() => onOAuthConnect(preset.name)}
+            />
           ) : preset.installed && !preset.configured ? (
             <AppsActionButton
               ariaLabel={hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
+              visibleLabel={hasFields ? tx("settings.mcp.configure", "Connect") : tx("settings.mcp.enable", "Enable")}
               busy={enableBusy}
               onClick={() => {
                 if (hasFields) setSetupOpen(true);
                 else onAction("enable", preset.name, values);
               }}
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-            </AppsActionButton>
+            />
           ) : preset.install_supported ? (
             <AppsActionButton
-              ariaLabel={needsSetupInput ? tx("settings.mcp.setup", "Set up") : tx("settings.mcp.enable", "Enable")}
+              ariaLabel={t("settings.mcp.connectTitle", {
+                name: preset.display_name,
+                defaultValue: "Connect {{name}}",
+              })}
+              visibleLabel={tx("settings.mcp.setup", "Connect")}
               busy={enableBusy}
               onClick={enableOrOpenSetup}
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-            </AppsActionButton>
+            />
           ) : (
-            <AppsActionButton ariaLabel={tx("settings.mcp.comingSoon", "Coming soon")} disabled>
-              <Plus className="h-4 w-4" aria-hidden />
-            </AppsActionButton>
+            <AppsActionButton
+              ariaLabel={tx("settings.mcp.comingSoon", "Coming soon")}
+              visibleLabel={tx("settings.mcp.comingSoon", "Coming soon")}
+              disabled
+            />
           )}
         </div>
       </div>
+
+      {oauthFlow && oauthPopupBlocked && oauthFlow.authorization_url ? (
+        <div className="mx-3 mb-3 flex flex-col gap-2.5 rounded-[14px] bg-background/55 p-3">
+          <div className="flex min-w-0 items-center gap-2.5 text-[12.5px] text-muted-foreground">
+            <span>{mcpOAuthStatusText(oauthFlow.status, oauthPopupBlocked, tx)}</span>
+          </div>
+          <div className="flex shrink-0 items-center justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOAuthOpen}
+              className="h-8 rounded-full px-3 text-[12px] font-semibold"
+            >
+              {tx("settings.mcp.continueSignIn", "Continue sign-in")}
+              <ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onOAuthCancel}
+              className="h-8 rounded-full px-3 text-[12px] font-semibold text-muted-foreground"
+            >
+              {tx("settings.actions.cancel", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {setupOpen && preset.install_supported && hasFields ? (
         <div className="mx-3 mb-3 rounded-[14px] bg-background/55 p-3">
@@ -7952,13 +8265,15 @@ function AppsTypeBadge({ children }: { children: ReactNode }) {
 
 const AppsActionButton = forwardRef<HTMLButtonElement, {
   ariaLabel: string;
+  visibleLabel?: string;
   busy?: boolean;
   disabled?: boolean;
   tone?: "default" | "installed" | "danger";
   onClick?: () => void;
-  children: ReactNode;
+  children?: ReactNode;
 }>(function AppsActionButton({
   ariaLabel,
+  visibleLabel,
   busy,
   disabled,
   tone = "default",
@@ -7969,20 +8284,24 @@ const AppsActionButton = forwardRef<HTMLButtonElement, {
     <Button
       ref={ref}
       type="button"
-      size="icon"
+      size={visibleLabel ? "sm" : "icon"}
       variant="ghost"
       aria-label={ariaLabel}
       title={ariaLabel}
       disabled={disabled || busy}
       onClick={onClick}
       className={cn(
-        "h-9 w-9 rounded-full text-muted-foreground transition-colors",
+        "rounded-full text-muted-foreground transition-colors",
+        visibleLabel
+          ? "h-8 w-auto gap-1.5 px-3 text-[12px] font-semibold"
+          : "h-9 w-9",
         tone === "installed" && "bg-transparent hover:bg-muted/70 hover:text-foreground",
         tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
         tone === "default" && "bg-muted/70 hover:bg-muted hover:text-foreground",
       )}
     >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : children}
+      {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : children}
+      {visibleLabel ? <span>{visibleLabel}</span> : null}
     </Button>
   );
 });
@@ -8068,12 +8387,12 @@ function McpCustomServerPanel({
           </span>
           <div className="min-w-0">
             <h3 className="text-[13px] font-semibold leading-5 text-foreground">
-              {tx("settings.mcp.moreOptions", "Add integration")}
+              {tx("settings.mcp.moreOptions", "Add MCP server")}
             </h3>
             <p className="truncate text-[12px] text-muted-foreground">
               {tx(
                 "settings.mcp.moreOptionsSubtitle",
-                "Connect a custom tool server or import an existing configuration.",
+                "Connect a custom MCP server or import an existing configuration.",
               )}
             </p>
           </div>
@@ -8264,18 +8583,28 @@ function McpCustomServerPanel({
   );
 }
 
-function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string) => string): string {
+function mcpOAuthStatusText(
+  status: McpOAuthFlowPayload["status"],
+  popupBlocked: boolean,
+  tx: (key: string, fallback: string) => string,
+): string {
   switch (status) {
-    case "configured":
-      return tx("settings.mcp.statusConfigured", "Configured");
-    case "missing_credentials":
-      return tx("settings.mcp.statusMissingCredentials", "Needs key");
-    case "missing_dependency":
-      return tx("settings.mcp.statusMissingDependency", "Needs dependency");
-    case "coming_soon":
-      return tx("settings.mcp.statusComingSoon", "Coming soon");
-    default:
-      return tx("settings.mcp.statusNotInstalled", "Not enabled");
+    case "starting":
+      return tx("settings.mcp.preparingSignIn", "Preparing secure sign-in...");
+    case "authorization_required":
+      return popupBlocked
+        ? tx("settings.mcp.openSignInToContinue", "Open the sign-in page to continue.")
+        : tx("settings.mcp.finishSignInInBrowser", "Finish signing in in the browser window.");
+    case "connecting":
+      return tx("settings.mcp.finishingConnection", "Finishing connection...");
+    case "authorized":
+      return tx("settings.mcp.activatingTools", "Activating tools...");
+    case "connected":
+      return tx("settings.mcp.connected", "Connected.");
+    case "failed":
+      return tx("settings.mcp.connectionFailed", "Connection failed.");
+    case "cancelled":
+      return tx("settings.mcp.connectionCancelled", "Connection cancelled.");
   }
 }
 

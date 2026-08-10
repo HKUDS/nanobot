@@ -16,6 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
+from nanobot.agent.tools.mcp_oauth import (
+    delete_mcp_oauth_credentials,
+    mcp_oauth_has_credentials,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
@@ -338,6 +342,63 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         note="Requires Figma Desktop Dev Mode MCP to be running locally.",
     ),
     McpPreset(
+        name="xmind",
+        display_name="Xmind",
+        category="productivity",
+        description="Create, read, and edit cloud mind maps through Xmind.",
+        docs_url="https://xmind.com/user-guide/xmind-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="xmind.com",
+        brand_color="#F4B41A",
+        requires="Xmind account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://app.xmind.com/api/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Xmind OAuth.",
+    ),
+    McpPreset(
+        name="notion",
+        display_name="Notion",
+        category="productivity",
+        description="Read and update your Notion workspace through Notion MCP.",
+        docs_url="https://developers.notion.com/guides/mcp/get-started-with-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="notion.so",
+        brand_color="#111111",
+        requires="Notion account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://mcp.notion.com/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Notion OAuth.",
+    ),
+    McpPreset(
+        name="linear",
+        display_name="Linear",
+        category="productivity",
+        description="Find and manage Linear issues, projects, and comments.",
+        docs_url="https://linear.app/docs/mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="linear.app",
+        brand_color="#5E6AD2",
+        requires="Linear account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://mcp.linear.app/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Linear OAuth.",
+    ),
+    McpPreset(
         name="github",
         display_name="GitHub",
         category="code",
@@ -657,6 +718,8 @@ def _status_for(preset: McpPreset, cfg: MCPServerConfig | None) -> str:
         return "not_installed" if preset.install_supported else "coming_soon"
     if any(field.required and not _field_configured(field, cfg) for field in preset.fields):
         return "missing_credentials"
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url):
+        return "authorization_required"
     if cfg.command and not _command_available(cfg.command):
         return "missing_dependency"
     return "configured"
@@ -702,6 +765,7 @@ def _preset_manifest(preset: McpPreset, *, logo_url: str) -> dict[str, Any]:
         compact_dict({
             "type": "mcp",
             "transport": preset.transport,
+            "auth": server.auth if server and server.auth else None,
             "command": server.command if server and server.command else None,
             "args": list(server.args) if server and server.command else None,
             "url": _connection_summary(server) if server and server.url else None,
@@ -752,6 +816,7 @@ def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
             compact_dict({
                 "type": "mcp",
                 "transport": transport,
+                "auth": cfg.auth,
                 "command": cfg.command or None,
                 "url": _connection_summary(cfg) if cfg.url else None,
             })
@@ -779,7 +844,7 @@ def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
 def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerConfig]) -> dict[str, Any]:
     cfg = configured_servers.get(preset.name)
     status = _status_for(preset, cfg)
-    configured = cfg is not None and status not in {"missing_credentials"}
+    configured = cfg is not None and status not in {"missing_credentials", "authorization_required"}
     logo_url = _favicon_url(preset.brand_domain)
     return {
         "name": preset.name,
@@ -788,6 +853,7 @@ def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerCo
         "description": preset.description,
         "docs_url": preset.docs_url,
         "transport": preset.transport,
+        "auth": (cfg.auth if cfg is not None else (preset.server.auth if preset.server else None)),
         "requires": preset.requires,
         "note": preset.note,
         "install_supported": preset.install_supported,
@@ -814,7 +880,11 @@ def _custom_payload(
     transport = cfg.type
     if not transport:
         transport = "stdio" if cfg.command else ("sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp")
-    status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url):
+        status = "authorization_required"
+    else:
+        status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
+    configured = status != "authorization_required"
     return {
         "name": name,
         "display_name": name,
@@ -822,12 +892,13 @@ def _custom_payload(
         "description": "Custom MCP server from nanobot config.",
         "docs_url": "",
         "transport": transport,
+        "auth": cfg.auth,
         "requires": "",
         "note": "",
         "install_supported": True,
         "installed": True,
-        "configured": True,
-        "available": _config_available(cfg),
+        "configured": configured,
+        "available": configured and _config_available(cfg),
         "status": status,
         "logo_url": None,
         "brand_color": "#64748B",
@@ -1127,6 +1198,32 @@ def _normalize_transport(value: str | None, *, command: str = "", url: str = "")
     return normalized  # type: ignore[return-value]
 
 
+def _normalize_auth(
+    value: object,
+    *,
+    transport: Literal["stdio", "sse", "streamableHttp"],
+    url: str,
+    headers: Mapping[str, str],
+) -> Literal["oauth"] | None:
+    raw = str(value or "").strip().lower()
+    if not raw and url and not headers:
+        normalized_url = url.rstrip("/")
+        if any(
+            preset.server is not None
+            and preset.server.auth == "oauth"
+            and preset.server.url.rstrip("/") == normalized_url
+            for preset in MCP_PRESETS
+        ):
+            raw = "oauth"
+    if not raw:
+        return None
+    if raw != "oauth":
+        raise McpPresetError("unsupported MCP auth type")
+    if transport == "stdio":
+        raise McpPresetError("MCP OAuth requires a remote HTTP transport")
+    return "oauth"
+
+
 def _validated_server_name(name: str) -> str:
     if not name or _MCP_PRESET_NAME_RE.match(name) is None:
         raise McpPresetError("invalid MCP server name")
@@ -1142,6 +1239,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
         raise McpPresetError("stdio MCP servers require a command")
     if transport in {"sse", "streamableHttp"} and not url:
         raise McpPresetError("remote MCP servers require a URL")
+    headers = _parse_string_map(_query_first(query, "headers"))
+    auth = _normalize_auth(
+        _query_first(query, "auth"),
+        transport=transport,
+        url=url,
+        headers=headers,
+    )
     raw_timeout = (_query_first(query, "tool_timeout") or "").strip()
     tool_timeout = _DEFAULT_CUSTOM_TIMEOUT
     if raw_timeout:
@@ -1151,12 +1255,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
             raise McpPresetError("tool_timeout must be an integer") from exc
     cfg = MCPServerConfig(
         type=transport,
+        auth=auth,
         command=command if transport == "stdio" else "",
         args=_parse_string_list(_query_first(query, "args")),
         env=_parse_string_map(_query_first(query, "env")),
         cwd=(_query_first(query, "cwd") or "").strip() if transport == "stdio" else "",
         url=url if transport in {"sse", "streamableHttp"} else "",
-        headers=_parse_string_map(_query_first(query, "headers")),
+        headers=headers,
         tool_timeout=tool_timeout,
         enabled_tools=_parse_enabled_tools(_query_first(query, "enabled_tools")),
     )
@@ -1201,6 +1306,13 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     headers = cast(dict[object, object], headers_value)
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
         raise McpPresetError(f"MCP server '{server_name}' headers must be a string object")
+    typed_headers = cast(dict[str, str], headers)
+    auth = _normalize_auth(
+        server.get("auth"),
+        transport=transport,
+        url=url,
+        headers=typed_headers,
+    )
     if not isinstance(enabled_tools_value, list):
         enabled_tools_value = ["*"]
     else:
@@ -1209,12 +1321,13 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
             enabled_tools_value = ["*"]
     return server_name, MCPServerConfig(
         type=transport,
+        auth=auth,
         command=command if transport == "stdio" else "",
         args=cast(list[str], args),
         env=cast(dict[str, str], env),
         cwd=cwd if transport == "stdio" else "",
         url=url if transport in {"sse", "streamableHttp"} else "",
-        headers=cast(dict[str, str], headers),
+        headers=typed_headers,
         tool_timeout=timeout_int,
         enabled_tools=cast(list[str], enabled_tools_value),
     )
@@ -1239,6 +1352,15 @@ def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
     return out
 
 
+def _oauth_credentials_replaced(
+    previous: MCPServerConfig | None,
+    replacement: MCPServerConfig,
+) -> bool:
+    if previous is None or previous.auth != "oauth":
+        return False
+    return replacement.auth != "oauth" or replacement.url != previous.url
+
+
 def custom_mcp_action(
     action: str,
     query: QueryParams,
@@ -1248,8 +1370,11 @@ def custom_mcp_action(
     config = load_config(config_path) if config_path is not None else load_config()
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
+        delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
+        if delete_credentials:
+            delete_mcp_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
@@ -1259,8 +1384,15 @@ def custom_mcp_action(
 
     if action in {"import", "import-cursor"}:
         servers = _import_mcp_servers(_query_first(query, "config"))
+        delete_credentials = [
+            name
+            for name, cfg in servers.items()
+            if _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
+        ]
         config.tools.mcp_servers.update(servers)
         save_config(config, config_path)
+        for name in delete_credentials:
+            delete_mcp_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action={
                 "ok": True,
@@ -1287,6 +1419,27 @@ def custom_mcp_action(
         return payload
 
     raise McpPresetError(f"unknown MCP action '{action}'", status=404)
+
+
+def ensure_mcp_oauth_server(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> tuple[str, MCPServerConfig]:
+    """Materialize an OAuth preset on first click and return its saved config."""
+    name = _validated_server_name((_query_first(query, "name") or "").strip())
+    config = load_config(config_path) if config_path is not None else load_config()
+    cfg = config.tools.mcp_servers.get(name)
+    if cfg is None:
+        preset = _preset_by_name(name)
+        if preset.server is None or preset.server.auth != "oauth":
+            raise McpPresetError("MCP server does not support browser authorization", status=409)
+        cfg = _materialize_server(preset, query, None)
+        config.tools.mcp_servers[name] = cfg
+        save_config(config, config_path)
+    if cfg.auth != "oauth" or cfg.type not in {"sse", "streamableHttp"} or not cfg.url:
+        raise McpPresetError("MCP server is not configured for OAuth", status=409)
+    return name, cfg
 
 
 def mcp_presets_action(
@@ -1328,6 +1481,7 @@ def mcp_presets_action(
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config, config_path)
+            delete_mcp_oauth_credentials(name)
         last_action = (
             _action_message(action, preset)
             if preset is not None

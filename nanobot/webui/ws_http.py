@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -166,6 +166,8 @@ _WEBUI_MUTATION_PATHS = {
     "settings.mcp.import": "/api/settings/mcp-presets/import",
     "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
     "settings.mcp.tools": "/api/settings/mcp-presets/tools",
+    "settings.mcp.oauth_start": "/api/settings/mcp-oauth/start",
+    "settings.mcp.oauth_cancel": "/api/settings/mcp-oauth/cancel",
 }
 
 _WEBUI_CHANNEL_CONNECT_ACTIONS = {
@@ -344,6 +346,7 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
+            mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -616,6 +619,14 @@ class GatewayHTTPHandler:
         scheme = "wss" if secure else "ws"
         expected_path = _normalize_config_path(self.config.path)
         return f"{scheme}://{host}{expected_path}"
+
+    def _mcp_oauth_redirect_uri(self, request: WsRequest) -> str:
+        """Derive the browser callback from the same public origin as WebSocket bootstrap."""
+        from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
+
+        public_ws_url = urlsplit(self._bootstrap_ws_url(request))
+        scheme = "https" if public_ws_url.scheme == "wss" else "http"
+        return urlunsplit((scheme, public_ws_url.netloc, MCP_OAUTH_CALLBACK_PATH, "", ""))
 
     # -- Session routes -----------------------------------------------------
 

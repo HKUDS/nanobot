@@ -10,6 +10,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  McpOAuthFlowPayload,
   MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
@@ -683,6 +684,44 @@ export async function fetchMcpPresets(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function startMcpOAuth(
+  transport: WebUIMutationTransport,
+  name: string,
+  reset: boolean = false,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_start",
+    { name, ...(reset ? { reset: true } : {}) },
+    30_000,
+  );
+}
+
+export async function fetchMcpOAuthStatus(
+  token: string,
+  flowId: string,
+  base: string = "",
+): Promise<McpOAuthFlowPayload> {
+  const query = new URLSearchParams({ flow_id: flowId });
+  return request<McpOAuthFlowPayload>(
+    `${base}/api/settings/mcp-oauth/status?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function cancelMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_cancel",
+    { flow_id: flowId },
   );
 }
 

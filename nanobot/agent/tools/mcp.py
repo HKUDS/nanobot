@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from mcp.types import Prompt, Resource
     from mcp.types import Tool as MCPToolDefinition
 
+    from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
     from nanobot.config.schema import MCPServerConfig
 
 # Transient connection errors that warrant a single retry.
@@ -961,7 +962,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 
 async def connect_mcp_servers(
-    mcp_servers: "dict[str, MCPServerConfig]", registry: ToolRegistry
+    mcp_servers: "dict[str, MCPServerConfig]",
+    registry: ToolRegistry,
+    *,
+    oauth_handlers: Mapping[str, "MCPOAuthHandlers"] | None = None,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1001,6 +1005,29 @@ async def connect_mcp_servers(
                     )
                     return False
 
+            oauth_auth: httpx.Auth | None = None
+            if cfg.auth == "oauth":
+                if transport_type not in {"sse", "streamableHttp"}:
+                    logger.warning(
+                        "MCP server '{}': OAuth requires an SSE or Streamable HTTP transport",
+                        name,
+                    )
+                    return False
+                from nanobot.agent.tools.mcp_oauth import (
+                    MCPAuthorizationRequiredError,
+                    create_mcp_oauth_auth,
+                )
+
+                try:
+                    oauth_auth = await create_mcp_oauth_auth(
+                        name,
+                        cfg.url,
+                        (oauth_handlers or {}).get(name),
+                    )
+                except MCPAuthorizationRequiredError:
+                    logger.info("MCP server '{}': waiting for browser authorization", name)
+                    return False
+
             if transport_type == "stdio":
                 command, args, env = _normalize_windows_stdio_command(
                     cfg.command,
@@ -1038,22 +1065,30 @@ async def connect_mcp_servers(
                         **_pinned_transport_kwargs(),
                     )
 
+                sse_kwargs: dict[str, Any] = {
+                    "httpx_client_factory": httpx_client_factory,
+                }
+                if oauth_auth is not None:
+                    sse_kwargs["auth"] = oauth_auth
                 read, write = await server_stack.enter_async_context(
-                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                    sse_client(cfg.url, **sse_kwargs)
                 )
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
+                http_client_kwargs: dict[str, Any] = {
+                    "headers": cfg.headers or None,
+                    "event_hooks": {"request": [_validate_mcp_request_url]},
+                    "follow_redirects": True,
+                    "timeout": httpx.Timeout(30.0, connect=10.0),
+                    **_pinned_transport_kwargs(),
+                }
+                if oauth_auth is not None:
+                    http_client_kwargs["auth"] = oauth_auth
                 http_client = await server_stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
-                        follow_redirects=True,
-                        timeout=httpx.Timeout(30.0, connect=10.0),
-                        **_pinned_transport_kwargs(),
-                    )
+                    httpx.AsyncClient(**http_client_kwargs)
                 )
                 read, write, _ = await server_stack.enter_async_context(
                     streamable_http_client(cfg.url, http_client=http_client)

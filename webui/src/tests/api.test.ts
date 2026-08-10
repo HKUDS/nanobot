@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cancelMcpOAuth,
   configureChannel,
   completeProviderOAuth,
   createModelConfiguration,
@@ -14,6 +15,7 @@ import {
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
+  fetchMcpOAuthStatus,
   fetchMcpPresets,
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
@@ -41,6 +43,7 @@ import {
   saveCustomMcpServer,
   searchMarketplaceSkills,
   startApiService,
+  startMcpOAuth,
   stopApiService,
   cancelChannelConnect,
   pollChannelConnect,
@@ -880,6 +883,26 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.mcp.enable",
       { name: "browserbase", browserbase_api_key: "bb_live_test" },
+      20_000,
+    );
+
+    await startMcpOAuth(mutationTransport, "notion", true);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "notion", reset: true },
+      30_000,
+    );
+
+    await fetchMcpOAuthStatus("tok", "flow-123");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/mcp-oauth/status?flow_id=flow-123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    await cancelMcpOAuth(mutationTransport, "flow-123");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_cancel",
+      { flow_id: "flow-123" },
       20_000,
     );
   });

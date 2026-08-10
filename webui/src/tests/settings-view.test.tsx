@@ -334,6 +334,29 @@ const installedAnyGen = {
   skill_installed: true,
 };
 
+const xmindMcpPreset = {
+  name: "xmind",
+  display_name: "Xmind",
+  category: "productivity",
+  description: "Create, read, and edit cloud mind maps through Xmind.",
+  docs_url: "https://xmind.com/user-guide/xmind-mcp",
+  transport: "streamableHttp",
+  auth: "oauth" as const,
+  requires: "Xmind account",
+  note: "Connects securely in your browser with Xmind OAuth.",
+  install_supported: true,
+  installed: false,
+  configured: false,
+  available: false,
+  status: "not_installed",
+  logo_url: null,
+  brand_color: "#F4B41A",
+  required_fields: [],
+  connection_summary: "",
+  enabled_tools: ["*"],
+  source: "preset",
+};
+
 function renderSettingsView(
   options: {
     initialSection?:
@@ -652,6 +675,263 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
   });
 
+  it("connects an OAuth MCP from the Apps catalog without manual callback input", async () => {
+    let connected = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({
+          presets: [connected
+            ? {
+              ...xmindMcpPreset,
+              installed: true,
+              configured: true,
+              available: true,
+              status: "configured",
+              connection_summary: "https://app.xmind.com/api/mcp",
+            }
+            : xmindMcpPreset],
+          installed_count: connected ? 1 : 0,
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
+        return jsonResponse({
+          flow_id: "flow-123",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=state-123",
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/status?flow_id=flow-123") {
+        connected = true;
+        return jsonResponse({
+          flow_id: "flow-123",
+          name: "xmind",
+          status: "connected",
+          expires_in: 295,
+          hot_reload: { ok: true, requires_restart: false },
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const replace = vi.fn();
+    const popup = {
+      opener: window,
+      closed: false,
+      location: { replace },
+      document: { title: "", body: { textContent: "" } },
+      focus: vi.fn(),
+      close: vi.fn(),
+    };
+    const open = vi.fn(() => popup);
+    vi.stubGlobal("open", open);
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    expect(screen.getByText("MCP tools")).toBeInTheDocument();
+    const connectButton = await screen.findByRole("button", { name: "Connect Xmind" });
+    expect(connectButton).toHaveTextContent("Connect");
+    fireEvent.click(connectButton);
+
+    expect(open).toHaveBeenCalledWith(
+      "about:blank",
+      "nanobot-mcp-oauth",
+      "popup,width=560,height=720,resizable=yes,scrollbars=yes",
+    );
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(
+      "https://accounts.xmind.test/authorize?state=state-123",
+    ));
+    expect(popup.opener).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /authorization/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Finish signing in in the browser window.",
+    );
+    expect(screen.getByRole("button", { name: "Connecting Xmind" })).toHaveTextContent(
+      "Connecting…",
+    );
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+
+    expect(await screen.findByRole("button", { name: "Xmind connected." }, { timeout: 2500 }))
+      .toHaveTextContent("Connected");
+    expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
+    expect(popup.close).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/mcp-oauth/status?flow_id=flow-123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
+  it("silently removes an MCP when the card already shows the result", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({
+          presets: [{
+            ...xmindMcpPreset,
+            installed: true,
+            configured: true,
+            available: true,
+            status: "configured",
+            connection_summary: "https://app.xmind.com/api/mcp",
+          }],
+          installed_count: 1,
+        });
+      }
+      if (url === "/api/settings/mcp-presets/remove?name=xmind") {
+        return jsonResponse({
+          presets: [xmindMcpPreset],
+          installed_count: 0,
+          requires_restart: false,
+          hot_reload: {
+            ok: true,
+            message: "MCP config reloaded without restarting nanobot.",
+          },
+          last_action: {
+            ok: true,
+            message: "Removed MCP preset for Xmind. MCP config reloaded without restarting nanobot.",
+            removed: true,
+          },
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/mcp-presets/remove?name=xmind",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    ));
+    expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
+    expect(screen.queryByText(/Removed MCP preset|reloaded without restarting/)).not.toBeInTheDocument();
+  });
+
+  it("offers a one-click recovery when the OAuth popup is blocked", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
+        return jsonResponse({
+          flow_id: "flow-blocked",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=blocked",
+        });
+      }
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      closed: false,
+      location: { replace: vi.fn() },
+      focus: vi.fn(),
+      close: vi.fn(),
+    };
+    const open = vi.fn()
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(popup);
+    vi.stubGlobal("open", open);
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+
+    const continueButton = await screen.findByRole("button", { name: "Continue sign-in" });
+    expect(screen.getByRole("status")).toHaveTextContent("Open the sign-in page to continue.");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    fireEvent.click(continueButton);
+    expect(open).toHaveBeenLastCalledWith(
+      "https://accounts.xmind.test/authorize?state=blocked",
+      "nanobot-mcp-oauth",
+      "popup,width=560,height=720,resizable=yes,scrollbars=yes",
+    );
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it("does not mistake a COOP-isolated OAuth tab for a blocked popup", async () => {
+    let popupIsolated = false;
+    let statusCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-oauth/start?name=xmind") {
+        return jsonResponse({
+          flow_id: "flow-coop",
+          name: "xmind",
+          status: "authorization_required",
+          expires_in: 300,
+          authorization_url: "https://accounts.xmind.test/authorize?state=coop",
+        });
+      }
+      if (url === "/api/settings/mcp-oauth/status?flow_id=flow-coop") {
+        statusCalls += 1;
+        return jsonResponse({
+          flow_id: "flow-coop",
+          name: "xmind",
+          status: statusCalls === 1 ? "authorization_required" : "failed",
+          expires_in: 299,
+          error: statusCalls === 1 ? undefined : "Cancelled for test cleanup.",
+          authorization_url: statusCalls === 1
+            ? "https://accounts.xmind.test/authorize?state=coop"
+            : undefined,
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      get closed() {
+        return popupIsolated;
+      },
+      location: {
+        replace: vi.fn(() => {
+          popupIsolated = true;
+        }),
+      },
+      document: { title: "", body: { textContent: "" } },
+      focus: vi.fn(),
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+
+    await waitFor(() => expect(statusCalls).toBe(1), { timeout: 2000 });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Finish signing in in the browser window.",
+    );
+    expect(screen.queryByRole("button", { name: "Continue sign-in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
   it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -694,7 +974,7 @@ describe("SettingsView Apps catalog", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByText("Api")).not.toBeInTheDocument();
     expect(screen.queryByText("0 ready")).not.toBeInTheDocument();
@@ -2023,8 +2303,8 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
     expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Browse integrations" }));
-    expect(await screen.findByText("Add integration")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
+    expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
   });
 
   it("shows token activity on the overview", async () => {

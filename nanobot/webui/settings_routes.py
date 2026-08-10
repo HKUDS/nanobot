@@ -8,6 +8,7 @@ request mapping and response shaping.
 from __future__ import annotations
 
 import asyncio
+import html
 import inspect
 import json
 import time
@@ -19,6 +20,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp import request_mcp_reload
+from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
@@ -39,9 +41,12 @@ from nanobot.optional_features import (
 )
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import case_insensitive_header
+from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
-from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
+from nanobot.webui.mcp_oauth_api import McpOAuthManager
+from nanobot.webui.mcp_presets_api import ensure_mcp_oauth_server, mcp_presets_settings_action
 from nanobot.webui.nanobot_features_api import (
     nanobot_feature_instance_target,
     nanobot_features_action,
@@ -130,6 +135,8 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/channels/configure",
     "/api/settings/pairing/approve",
     "/api/settings/pairing/deny",
+    "/api/settings/mcp-oauth/start",
+    "/api/settings/mcp-oauth/cancel",
     *_MCP_PRESET_ACTIONS_BY_PATH,
 })
 
@@ -177,6 +184,7 @@ class WebUISettingsRouter:
         runtime_capabilities: dict[str, Any],
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
         self.bus = bus
@@ -189,6 +197,8 @@ class WebUISettingsRouter:
         self._runtime_capabilities = runtime_capabilities
         self._channel_feature_action = channel_feature_action
         self._channel_runtime_status = channel_runtime_status
+        self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
+        self._mcp_oauth = McpOAuthManager()
         self._restart_sections: set[str] = set()
         self._channel_connectors: dict[str, Any] = {}
 
@@ -202,6 +212,8 @@ class WebUISettingsRouter:
                 405,
                 "WebUI mutations require an authenticated WebSocket",
             )
+        if path == MCP_OAUTH_CALLBACK_PATH:
+            return self._handle_mcp_oauth_callback(request)
         if path == "/api/settings":
             return self._handle_settings(request)
         if path == "/api/settings/usage":
@@ -281,6 +293,12 @@ class WebUISettingsRouter:
             return self._handle_settings_pairing_action(request, "deny")
         if path == "/api/settings/mcp-presets":
             return await self._handle_settings_mcp_presets(request)
+        if path == "/api/settings/mcp-oauth/start":
+            return await self._handle_mcp_oauth_start(request)
+        if path == "/api/settings/mcp-oauth/status":
+            return await self._handle_mcp_oauth_status(request)
+        if path == "/api/settings/mcp-oauth/cancel":
+            return await self._handle_mcp_oauth_cancel(request)
         if path == "/api/settings/version-check":
             return await self._handle_settings_version_check(request)
         mcp_action = _MCP_PRESET_ACTIONS_BY_PATH.get(path)
@@ -1229,6 +1247,126 @@ class WebUISettingsRouter:
         if action is None:
             return self._json_response(payload)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    async def _handle_mcp_oauth_start(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        if self._mcp_oauth_redirect_uri is None:
+            return self._error_response(500, "MCP OAuth callback is not configured")
+        query = self._parse_mcp_settings_query(request)
+        try:
+            name, cfg = await asyncio.to_thread(
+                self.settings.mutate,
+                ensure_mcp_oauth_server,
+                query,
+            )
+            redirect_uri = self._mcp_oauth_redirect_uri(request)
+            reset = (_query_first(query, "reset") or "").lower() in {"1", "true", "yes"}
+            payload = await self._mcp_oauth.start(
+                name,
+                cfg,
+                redirect_uri,
+                reload_mcp=lambda: request_mcp_reload(self.bus),
+                reset_credentials=reset,
+            )
+        except Exception as exc:
+            return self._mcp_oauth_error_response(exc, action="start")
+        return self._json_response(payload)
+
+    async def _handle_mcp_oauth_status(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        flow_id = (_query_first(self._query(request), "flow_id") or "").strip()
+        if not flow_id:
+            return self._error_response(400, "missing MCP OAuth flow ID")
+        try:
+            payload = await self._mcp_oauth.status(flow_id)
+        except Exception as exc:
+            return self._mcp_oauth_error_response(exc, action="status")
+        return self._json_response(payload)
+
+    async def _handle_mcp_oauth_cancel(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        flow_id = (_query_first(self._query(request), "flow_id") or "").strip()
+        if not flow_id:
+            return self._error_response(400, "missing MCP OAuth flow ID")
+        try:
+            payload = await self._mcp_oauth.cancel(flow_id)
+        except Exception as exc:
+            return self._mcp_oauth_error_response(exc, action="cancel")
+        return self._json_response(payload)
+
+    def _handle_mcp_oauth_callback(self, request: WsRequest) -> Response:
+        query = self._query(request)
+        state = (_query_first(query, "state") or "").strip()
+        if not state:
+            return self._mcp_oauth_callback_page(
+                ok=False,
+                message="This authorization request is missing its security state.",
+                status=400,
+            )
+        try:
+            name = self._mcp_oauth.submit_callback(
+                state=state,
+                code=_query_first(query, "code"),
+                error=_query_first(query, "error"),
+            )
+        except Exception as exc:
+            status = int(getattr(exc, "status", 400))
+            message = str(getattr(exc, "message", "Could not complete MCP authorization"))
+            return self._mcp_oauth_callback_page(ok=False, message=message, status=status)
+        return self._mcp_oauth_callback_page(
+            ok=True,
+            message=f"Authorization received for {name}. Return to nanobot to finish connecting.",
+        )
+
+    def _mcp_oauth_error_response(self, exc: Exception, *, action: str) -> Response:
+        raw_status = getattr(exc, "status", 500)
+        status = raw_status if isinstance(raw_status, int) and 400 <= raw_status <= 599 else 500
+        if status >= 500:
+            self.logger.exception("MCP OAuth '{}' failed", action)
+            message = f"MCP OAuth {action} failed"
+        else:
+            raw_message = getattr(exc, "message", None)
+            message = raw_message if isinstance(raw_message, str) else "MCP OAuth request failed"
+        return self._error_response(status, message)
+
+    @staticmethod
+    def _mcp_oauth_callback_page(
+        *,
+        ok: bool,
+        message: str,
+        status: int = 200,
+    ) -> Response:
+        title = "Authorization received" if ok else "Connection failed"
+        safe_title = html.escape(title)
+        safe_message = html.escape(message)
+        close_script = "<script>setTimeout(() => window.close(), 700)</script>" if ok else ""
+        body = (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<title>{safe_title}</title><style>"
+            "body{font:16px system-ui;margin:0;min-height:100vh;display:grid;place-items:center;"
+            "background:#f7f7f6;color:#171717}.card{max-width:34rem;margin:2rem;padding:2rem;"
+            "border:1px solid #ddd;border-radius:16px;background:white}h1{font-size:1.35rem}"
+            "p{line-height:1.55;color:#555}</style></head><body><main class='card'>"
+            f"<h1>{safe_title}</h1><p>{safe_message}</p></main>{close_script}</body></html>"
+        ).encode("utf-8")
+        return _http_response(
+            body,
+            status=status,
+            content_type="text/html; charset=utf-8",
+            extra_headers=[
+                ("Cache-Control", "no-store"),
+                ("Referrer-Policy", "no-referrer"),
+                (
+                    "Content-Security-Policy",
+                    "default-src 'none'; base-uri 'none'; form-action 'none'; "
+                    "frame-ancestors 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+                ),
+            ],
+        )
 
     async def _handle_settings_version_check(self, request: WsRequest) -> Response:
         if not self._authorized(request):

@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from mcp.shared.auth import OAuthToken
 
+from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.config.loader import load_config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
@@ -38,6 +40,9 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "aws-docs",
         "brave-search",
         "postman",
+        "xmind",
+        "notion",
+        "linear",
     }.issubset(names)
     browserbase = next(preset for preset in payload["presets"] if preset["name"] == "browserbase")
     assert browserbase["installed"] is False
@@ -53,6 +58,37 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
     assert manifest["install"]["strategy"] == "config"
     assert manifest["remove"]["verification"] == ["config_absent"]
     assert manifest["trust"]["review_status"] == "builtin_preset"
+
+
+@pytest.mark.asyncio
+async def test_oauth_preset_is_one_click_configured_after_token_storage(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action("enable", {"name": ["xmind"]})
+
+    row = next(item for item in payload["presets"] if item["name"] == "xmind")
+    assert row["installed"] is True
+    assert row["configured"] is False
+    assert row["status"] == "authorization_required"
+    assert row["transport"] == "streamableHttp"
+    assert row["auth"] == "oauth"
+    config = load_config()
+    cfg = config.tools.mcp_servers["xmind"]
+    assert cfg.type == "streamableHttp"
+    assert cfg.auth == "oauth"
+    assert cfg.url == "https://app.xmind.com/api/mcp"
+
+    await MCPOAuthStorage("xmind", cfg.url).set_tokens(OAuthToken(access_token="secret"))
+    connected = mcp_presets_payload()
+    row = next(item for item in connected["presets"] if item["name"] == "xmind")
+    assert row["configured"] is True
+    assert row["status"] == "configured"
+
+    mcp_presets_action("remove", {"name": ["xmind"]})
+    assert await MCPOAuthStorage("xmind", cfg.url).get_tokens() is None
 
 
 def test_enable_browserbase_writes_scrubbed_config_payload(
@@ -296,11 +332,11 @@ def test_test_mcp_preset_scrubs_connection_errors(
     assert "<redacted>" in payload["last_action"]["error"]
 
 
-def test_unlisted_oauth_placeholder_is_not_enabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_oauth_placeholder_is_not_enabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
 
     with pytest.raises(McpPresetError) as exc:
-        mcp_presets_action("enable", {"name": ["linear"]})
+        mcp_presets_action("enable", {"name": ["asana"]})
 
     assert exc.value.status == 404
 
@@ -412,6 +448,72 @@ def test_import_mcp_config_and_tool_allowlist(
     row = next(item for item in payload["presets"] if item["name"] == "docs")
     assert row["enabled_tools"] == []
     assert load_config().tools.mcp_servers["docs"].enabled_tools == []
+
+
+def test_import_recognizes_known_and_explicit_oauth_servers(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = custom_mcp_action(
+        "import",
+        {
+            "config": [
+                (
+                    '{"mcpServers":{'
+                    '"notion-work":{"url":"https://mcp.notion.com/mcp"},'
+                    '"company-mcp":{"url":"https://mcp.example.com/mcp","auth":"oauth"},'
+                    '"notion-pat":{"url":"https://mcp.notion.com/mcp",'
+                    '"headers":{"Authorization":"Bearer secret"}}'
+                    '}}'
+                )
+            ],
+        },
+    )
+
+    config = load_config()
+    assert config.tools.mcp_servers["notion-work"].auth == "oauth"
+    assert config.tools.mcp_servers["company-mcp"].auth == "oauth"
+    assert config.tools.mcp_servers["notion-pat"].auth is None
+    rows = {row["name"]: row for row in payload["presets"]}
+    assert rows["notion-work"]["status"] == "authorization_required"
+    assert rows["company-mcp"]["status"] == "authorization_required"
+    assert rows["notion-pat"]["status"] == "configured"
+    assert "Bearer secret" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_replacing_oauth_config_removes_its_stored_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+            "auth": ["oauth"],
+        },
+    )
+    await MCPOAuthStorage("company-mcp", server_url).set_tokens(
+        OAuthToken(access_token="secret")
+    )
+    assert mcp_oauth_has_credentials("company-mcp", server_url)
+
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+        },
+    )
+
+    assert not mcp_oauth_has_credentials("company-mcp", server_url)
 
 
 def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(

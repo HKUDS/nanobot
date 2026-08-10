@@ -1210,6 +1210,129 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     assert timeout.pool == 30.0
 
 
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
+    transport: str,
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    oauth_auth = object()
+    oauth_handlers = object()
+    captured: dict[str, object] = {}
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    async def _create_auth(name: str, url: str, handlers: object) -> object:
+        captured.update(name=name, url=url, handlers=handlers)
+        return oauth_auth
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = RuntimeError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self) -> object:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _capturing_sse_client(
+        _url: str,
+        httpx_client_factory=None,
+        auth=None,
+    ):
+        captured["transport_auth"] = auth
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        assert http_client is not None
+        yield object(), object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    url = "https://mcp.example.com/sse" if transport == "sse" else "https://mcp.example.com/mcp"
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"remote": MCPServerConfig(type=transport, url=url, auth="oauth")},
+        registry,
+        oauth_handlers={"remote": oauth_handlers},  # type: ignore[arg-type]
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert captured["name"] == "remote"
+    assert captured["url"] == url
+    assert captured["handlers"] is oauth_handlers
+    if transport == "sse":
+        assert captured["transport_auth"] is oauth_auth
+    else:
+        client_kwargs = captured["client_kwargs"]
+        assert isinstance(client_kwargs, dict)
+        assert client_kwargs["auth"] is oauth_auth
+        assert client_kwargs["event_hooks"] == {"request": [mcp_mod._validate_mcp_request_url]}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AuthorizationRequiredError(RuntimeError):
+        pass
+
+    async def _create_auth(*_args: object) -> object:
+        raise AuthorizationRequiredError
+
+    probe_called = False
+
+    async def _probe(_url: str) -> bool:
+        nonlocal probe_called
+        probe_called = True
+        return True
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _probe)
+
+    stacks = await connect_mcp_servers(
+        {
+            "remote": MCPServerConfig(
+                type="streamableHttp",
+                url="https://mcp.example.com/mcp",
+                auth="oauth",
+            )
+        },
+        ToolRegistry(),
+    )
+
+    assert stacks == {}
+    assert not probe_called
+
+
 @pytest.mark.asyncio
 async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
     fake_mcp_runtime: dict[str, object | None],
