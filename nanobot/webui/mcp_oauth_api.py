@@ -321,6 +321,14 @@ class McpOAuthManager:
             return False
         try:
             flow.reload_result = await reload_mcp()
+            failed = flow.reload_result.get("failed")
+            if (
+                not flow.reload_result.get("ok")
+                and not flow.reload_result.get("requires_restart")
+                and isinstance(failed, list)
+                and flow.name in failed
+            ):
+                flow.reload_result = await reload_mcp()
         except Exception:
             flow.reload_result = {
                 "ok": False,

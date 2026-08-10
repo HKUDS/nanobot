@@ -558,8 +558,6 @@
       "finishingConnection": "연결을 마무리하는 중…",
       "activatingTools": "도구를 활성화하는 중…",
       "connected": "연결됨.",
-      "connectedLabel": "연결됨",
-      "connectedAccount": "{{name}} 연결됨.",
       "connectionFailed": "연결에 실패했습니다.",
       "connectionCancelled": "연결을 취소했습니다.",
       "reloadFailed": "로그인했지만 nanobot에서 도구를 연결하지 못했습니다. nanobot을 다시 시작해 보세요.",

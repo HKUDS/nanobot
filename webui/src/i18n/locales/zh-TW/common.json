@@ -558,8 +558,6 @@
       "finishingConnection": "正在完成連線…",
       "activatingTools": "正在啟用工具…",
       "connected": "已連線。",
-      "connectedLabel": "已連線",
-      "connectedAccount": "{{name}} 已連線。",
       "connectionFailed": "連線失敗。",
       "connectionCancelled": "已取消連線。",
       "reloadFailed": "已登入，但 nanobot 無法連接這些工具。請嘗試重新啟動 nanobot。",

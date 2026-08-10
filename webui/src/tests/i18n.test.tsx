@@ -83,7 +83,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.mcp.finishingConnection",
   "settings.mcp.activatingTools",
   "settings.mcp.connected",
-  "settings.mcp.connectedAccount",
   "settings.mcp.connectionFailed",
   "settings.mcp.connectionCancelled",
   "settings.mcp.reloadFailed",

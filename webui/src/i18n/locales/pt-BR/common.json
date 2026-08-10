@@ -373,8 +373,6 @@
       "finishingConnection": "Finalizando conexão…",
       "activatingTools": "Ativando ferramentas…",
       "connected": "Conectado.",
-      "connectedLabel": "Conectado",
-      "connectedAccount": "{{name}} está conectado.",
       "connectionFailed": "Falha na conexão.",
       "connectionCancelled": "Conexão cancelada.",
       "reloadFailed": "Login concluído, mas o nanobot não conseguiu conectar as ferramentas. Tente reiniciar o nanobot.",

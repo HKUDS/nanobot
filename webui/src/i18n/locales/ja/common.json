@@ -558,8 +558,6 @@
       "finishingConnection": "接続を完了しています…",
       "activatingTools": "ツールを有効にしています…",
       "connected": "接続しました。",
-      "connectedLabel": "接続済み",
-      "connectedAccount": "{{name}} に接続しました。",
       "connectionFailed": "接続に失敗しました。",
       "connectionCancelled": "接続をキャンセルしました。",
       "reloadFailed": "サインインしましたが、nanobot はツールに接続できませんでした。nanobot を再起動してください。",

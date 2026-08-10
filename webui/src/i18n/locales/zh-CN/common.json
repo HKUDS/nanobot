@@ -373,8 +373,6 @@
       "finishingConnection": "正在完成连接…",
       "activatingTools": "正在启用工具…",
       "connected": "已连接。",
-      "connectedLabel": "已连接",
-      "connectedAccount": "{{name}} 已连接。",
       "connectionFailed": "连接失败。",
       "connectionCancelled": "已取消连接。",
       "reloadFailed": "已登录，但 nanobot 无法连接这些工具。请尝试重启 nanobot。",

@@ -558,8 +558,6 @@
       "finishingConnection": "Đang hoàn tất kết nối…",
       "activatingTools": "Đang kích hoạt công cụ…",
       "connected": "Đã kết nối.",
-      "connectedLabel": "Đã kết nối",
-      "connectedAccount": "Đã kết nối {{name}}.",
       "connectionFailed": "Kết nối thất bại.",
       "connectionCancelled": "Đã hủy kết nối.",
       "reloadFailed": "Đã đăng nhập nhưng nanobot không thể kết nối các công cụ. Hãy thử khởi động lại nanobot.",

@@ -8082,6 +8082,7 @@ function McpAppsCatalogRow({
   const hasFields = preset.required_fields.length > 0;
   const needsSetupInput = missingFields.length > 0;
   const readyInstalled = preset.installed && preset.configured;
+  const statusLabel = mcpPresetStatusLabel(preset.status, tx);
   const canEnable =
     preset.install_supported &&
     (missingFields.length === 0 || missingFields.every((field) => Boolean(values[field.name]?.trim())));
@@ -8153,11 +8154,8 @@ function McpAppsCatalogRow({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <AppsActionButton
-                    ariaLabel={t("settings.mcp.connectedAccount", {
-                      name: preset.display_name,
-                      defaultValue: "{{name}} connected.",
-                    })}
-                    visibleLabel={tx("settings.mcp.connectedLabel", "Connected")}
+                    ariaLabel={`${preset.display_name}: ${statusLabel}`}
+                    visibleLabel={statusLabel}
                     busy={testBusy || toolsBusy}
                     disabled={busy}
                     tone="installed"
@@ -8909,6 +8907,24 @@ function mcpOAuthStatusText(
       return tx("settings.mcp.connectionFailed", "Connection failed.");
     case "cancelled":
       return tx("settings.mcp.connectionCancelled", "Connection cancelled.");
+  }
+}
+
+function mcpPresetStatusLabel(
+  status: string,
+  tx: (key: string, fallback: string) => string,
+): string {
+  switch (status) {
+    case "configured":
+      return tx("settings.mcp.statusConfigured", "Configured");
+    case "missing_credentials":
+      return tx("settings.mcp.statusMissingCredentials", "Needs key");
+    case "missing_dependency":
+      return tx("settings.mcp.statusMissingDependency", "Needs dependency");
+    case "coming_soon":
+      return tx("settings.mcp.statusComingSoon", "Coming soon");
+    default:
+      return tx("settings.mcp.statusNotInstalled", "Not enabled");
   }
 }
 

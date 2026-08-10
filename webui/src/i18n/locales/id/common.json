@@ -558,8 +558,6 @@
       "finishingConnection": "Menyelesaikan koneksi…",
       "activatingTools": "Mengaktifkan alat…",
       "connected": "Terhubung.",
-      "connectedLabel": "Terhubung",
-      "connectedAccount": "{{name}} terhubung.",
       "connectionFailed": "Koneksi gagal.",
       "connectionCancelled": "Koneksi dibatalkan.",
       "reloadFailed": "Anda sudah masuk, tetapi nanobot tidak dapat menghubungkan alat. Coba mulai ulang nanobot.",

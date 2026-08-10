@@ -30,7 +30,7 @@ def _config() -> MCPServerConfig:
 
 
 @pytest.mark.asyncio
-async def test_browser_flow_forwards_callback_and_hot_reloads_once(
+async def test_browser_flow_forwards_callback_and_retries_failed_hot_reload_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = McpOAuthManager()
@@ -55,6 +55,12 @@ async def test_browser_flow_forwards_callback_and_hot_reloads_once(
     async def reload_mcp() -> dict[str, object]:
         nonlocal reload_calls
         reload_calls += 1
+        if reload_calls == 1:
+            return {
+                "ok": False,
+                "requires_restart": False,
+                "failed": ["xmind"],
+            }
         return {"ok": True, "requires_restart": False}
 
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
@@ -74,9 +80,9 @@ async def test_browser_flow_forwards_callback_and_hot_reloads_once(
 
     for _ in range(10):
         await asyncio.sleep(0)
-        if reload_calls == 1:
+        if reload_calls == 2:
             break
-    assert reload_calls == 1
+    assert reload_calls == 2
 
     for _ in range(10):
         first, second = await asyncio.gather(
@@ -90,7 +96,7 @@ async def test_browser_flow_forwards_callback_and_hot_reloads_once(
     assert first["status"] == "connected"
     assert second["status"] == "connected"
     assert received["callback"] == ("oauth-code", "state-123")
-    assert reload_calls == 1
+    assert reload_calls == 2
     assert connection.closed is True
 
 

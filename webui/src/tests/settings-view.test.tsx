@@ -761,8 +761,8 @@ describe("SettingsView Apps catalog", () => {
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
-    expect(await screen.findByRole("button", { name: "Xmind connected." }, { timeout: 2500 }))
-      .toHaveTextContent("Connected");
+    expect(await screen.findByRole("button", { name: "Xmind: Configured" }, { timeout: 2500 }))
+      .toHaveTextContent("Configured");
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
@@ -958,8 +958,8 @@ describe("SettingsView Apps catalog", () => {
       { flow_id: "flow-manual", callback_url: callbackUrl },
       20_000,
     ));
-    expect(await screen.findByRole("button", { name: "Xmind connected." }, { timeout: 2500 }))
-      .toHaveTextContent("Connected");
+    expect(await screen.findByRole("button", { name: "Xmind: Configured" }, { timeout: 2500 }))
+      .toHaveTextContent("Configured");
     expect(screen.queryByRole("textbox", { name: "Full callback URL" })).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
