@@ -22,6 +22,7 @@ from nanobot.agent.plugins import (
     set_agent_plugin_enabled,
 )
 from nanobot.agent.tools.mcp_oauth import (
+    MCPAuthorizationStoreError,
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
 )
@@ -73,6 +74,24 @@ class McpPresetError(Exception):
         super().__init__(message)
         self.message = message
         self.status = status
+
+
+def _safe_delete_oauth_credentials(name: str) -> str:
+    """Best-effort OAuth credential cleanup after a config change is already committed.
+
+    Returns an empty string on success or a human-readable warning message if the
+    credential store could not be read. The config change must not be rolled back
+    for a store error — the server entry is already removed from config, so stale
+    credentials are inert until the store is repaired.
+    """
+    try:
+        delete_mcp_oauth_credentials(name)
+    except MCPAuthorizationStoreError as exc:
+        return (
+            f"Could not clean up OAuth credentials for '{name}': {exc}. "
+            "The config change was saved, but stale credentials may remain."
+        )
+    return ""
 
 
 @dataclass(frozen=True)
@@ -1462,13 +1481,16 @@ def custom_mcp_action(
         delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
+        credential_warning = ""
         if delete_credentials:
-            delete_mcp_oauth_credentials(name)
+            credential_warning = _safe_delete_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
         )
         payload["requires_restart"] = True
+        if credential_warning:
+            payload["credential_warning"] = credential_warning
         return payload
 
     if action in {"import", "import-cursor"}:
@@ -1480,8 +1502,10 @@ def custom_mcp_action(
         ]
         config.tools.mcp_servers.update(servers)
         save_config(config, config_path)
-        for name in delete_credentials:
-            delete_mcp_oauth_credentials(name)
+        credential_warnings = [
+            _safe_delete_oauth_credentials(name)
+            for name in delete_credentials
+        ]
         payload = mcp_presets_payload(
             last_action={
                 "ok": True,
@@ -1490,6 +1514,9 @@ def custom_mcp_action(
             config_path=config_path,
         )
         payload["requires_restart"] = True
+        warnings = [w for w in credential_warnings if w]
+        if warnings:
+            payload["credential_warning"] = " ".join(warnings)
         return payload
 
     if action == "tools":
@@ -1562,6 +1589,7 @@ def mcp_presets_action(
             raise McpPresetError("unknown MCP server", status=404)
         removed_runtime_files = False
         cleanup_error = ""
+        credential_warning = ""
         if name in config.tools.mcp_servers:
             existing_cfg = config.tools.mcp_servers[name]
             try:
@@ -1570,7 +1598,7 @@ def mcp_presets_action(
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config, config_path)
-            delete_mcp_oauth_credentials(name)
+            credential_warning = _safe_delete_oauth_credentials(name)
         last_action = (
             _action_message(action, preset)
             if preset is not None
@@ -1586,6 +1614,13 @@ def mcp_presets_action(
                 f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
             )
             last_action["verification_failed"] = ["managed_paths_absent"]
+        if credential_warning:
+            last_action["ok"] = False
+            last_action["message"] = f"{last_action['message']} {credential_warning}"
+            last_action["verification_failed"] = [
+                *(last_action.get("verification_failed") or []),
+                "oauth_credentials_absent",
+            ]
         payload = mcp_presets_payload(
             last_action=last_action,
             config_path=config_path,

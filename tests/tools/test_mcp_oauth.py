@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -9,6 +10,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from nanobot.agent.tools.mcp_oauth import (
     MCPAuthorizationRequiredError,
+    MCPAuthorizationStoreError,
     MCPOAuthHandlers,
     MCPOAuthStorage,
     create_mcp_oauth_auth,
@@ -61,6 +63,180 @@ async def test_mcp_oauth_storage_isolates_name_and_server_url(
     payload = json.loads((tmp_path / "auth" / "mcp.json").read_text(encoding="utf-8"))
     assert "https://mcp.example.com/mcp" not in str(payload)
     assert "access-secret" in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_transient_store_read_failure_does_not_wipe_credentials_on_update(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    first = MCPOAuthStorage("first", "https://mcp.example.com/mcp")
+    second = MCPOAuthStorage("second", "https://mcp.example.com/mcp")
+    await first.set_tokens(OAuthToken(access_token="first-token"))
+    await second.set_tokens(OAuthToken(access_token="second-token"))
+
+    store_path = tmp_path / "auth" / "mcp.json"
+    original = store_path.read_bytes()
+    real_read_text = Path.read_text
+
+    def fail_store_read(self: Path, *args: object, **kwargs: object) -> str:
+        if self == store_path:
+            raise PermissionError("temporarily locked")
+        return real_read_text(self, *args, **kwargs)
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "read_text", fail_store_read)
+        with pytest.raises(MCPAuthorizationStoreError):
+            await first.set_tokens(OAuthToken(access_token="replacement-token"))
+
+    assert store_path.read_bytes() == original
+    assert await MCPOAuthStorage("second", "https://mcp.example.com/mcp").get_tokens() == (
+        OAuthToken(access_token="second-token")
+    )
+
+
+@pytest.mark.asyncio
+async def test_transient_store_read_failure_does_not_wipe_credentials_on_delete(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    first = MCPOAuthStorage("first", "https://mcp.example.com/mcp")
+    second = MCPOAuthStorage("second", "https://mcp.example.com/mcp")
+    await first.set_tokens(OAuthToken(access_token="first-token"))
+    await second.set_tokens(OAuthToken(access_token="second-token"))
+
+    store_path = tmp_path / "auth" / "mcp.json"
+    original = store_path.read_bytes()
+    real_read_text = Path.read_text
+
+    def fail_store_read(self: Path, *args: object, **kwargs: object) -> str:
+        if self == store_path:
+            raise PermissionError("temporarily locked")
+        return real_read_text(self, *args, **kwargs)
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "read_text", fail_store_read)
+        with pytest.raises(MCPAuthorizationStoreError):
+            delete_mcp_oauth_credentials("first")
+
+    assert store_path.read_bytes() == original
+    assert await MCPOAuthStorage("first", "https://mcp.example.com/mcp").get_tokens() == (
+        OAuthToken(access_token="first-token")
+    )
+    assert await MCPOAuthStorage("second", "https://mcp.example.com/mcp").get_tokens() == (
+        OAuthToken(access_token="second-token")
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"unexpected": True},
+        {"servers": {"first": None}},
+        {"servers": {}, "generations": []},
+    ],
+)
+def test_invalid_store_structure_is_not_replaced(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    store_path = tmp_path / "auth" / "mcp.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(json.dumps(payload), encoding="utf-8")
+    original = store_path.read_bytes()
+
+    with pytest.raises(MCPAuthorizationStoreError):
+        delete_mcp_oauth_credentials("first")
+
+    assert store_path.read_bytes() == original
+
+
+def test_malformed_store_is_not_replaced(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    store_path = tmp_path / "auth" / "mcp.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text("{not-json", encoding="utf-8")
+    original = store_path.read_bytes()
+
+    with pytest.raises(MCPAuthorizationStoreError):
+        delete_mcp_oauth_credentials("first")
+
+    assert store_path.read_bytes() == original
+
+
+@pytest.mark.asyncio
+async def test_unreadable_store_does_not_crash_read_paths(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read-only operations return safe defaults when the store is unreadable."""
+    _use_data_dir(tmp_path, monkeypatch)
+    storage = MCPOAuthStorage("notion", "https://mcp.example.com/mcp")
+    await storage.set_tokens(OAuthToken(access_token="access-secret"))
+
+    store_path = tmp_path / "auth" / "mcp.json"
+    original = store_path.read_bytes()
+    real_read_text = Path.read_text
+
+    def fail_store_read(self: Path, *args: object, **kwargs: object) -> str:
+        if self == store_path:
+            raise PermissionError("temporarily locked")
+        return real_read_text(self, *args, **kwargs)
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "read_text", fail_store_read)
+
+        # __init__ must not raise – generation falls back to None.
+        fresh = MCPOAuthStorage("notion", "https://mcp.example.com/mcp")
+        assert fresh._observed_generation is None
+
+        # Read paths return safe defaults.
+        assert not mcp_oauth_has_credentials("notion", "https://mcp.example.com/mcp")
+        assert await fresh.get_tokens() is None
+        assert await fresh.get_client_info() is None
+        assert await fresh.redirect_uri() is None
+
+    # Store is untouched.
+    assert store_path.read_bytes() == original
+
+
+@pytest.mark.asyncio
+async def test_lock_timeout_does_not_crash_read_paths(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lock acquisition failure returns safe defaults instead of raising."""
+    _use_data_dir(tmp_path, monkeypatch)
+    storage = MCPOAuthStorage("notion", "https://mcp.example.com/mcp")
+    await storage.set_tokens(OAuthToken(access_token="access-secret"))
+
+    import filelock
+
+    real_filelock_init = filelock.FileLock.__init__
+
+    def slow_lock_init(self: filelock.FileLock, *args: object, **kwargs: object) -> None:
+        real_filelock_init(self, *args, **kwargs)
+        self.timeout = 0.01  # type: ignore[assignment]
+
+    def fail_acquire(self: filelock.FileLock, *args: object, **kwargs: object) -> None:
+        raise filelock.Timeout(str(self.lock_file))
+
+    with monkeypatch.context() as context:
+        context.setattr(filelock.FileLock, "__init__", slow_lock_init)
+        context.setattr(filelock.FileLock, "acquire", fail_acquire)
+
+        # Read paths must not raise — they return safe defaults.
+        assert not mcp_oauth_has_credentials("notion", "https://mcp.example.com/mcp")
+        assert await storage.get_tokens() is None
+        assert await storage.get_client_info() is None
+        assert await storage.redirect_uri() is None
 
 
 @pytest.mark.asyncio
