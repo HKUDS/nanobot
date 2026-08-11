@@ -129,6 +129,14 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
     )
 
 
+async def _connect_when_ready(url: str) -> Any:
+    while True:
+        try:
+            return await websockets.connect(url)
+        except OSError:
+            await asyncio.sleep(0.02)
+
+
 async def _webui_mutate(
     client: Any,
     action: str,
@@ -2865,10 +2873,13 @@ async def test_end_to_end_client_receives_ready_and_agent_sees_inbound(bus: Magi
     channel = _ch(bus, port=port)
 
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
 
     try:
-        async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=tester") as client:
+        client = await asyncio.wait_for(
+            _connect_when_ready(f"ws://127.0.0.1:{port}/ws?client_id=tester"),
+            timeout=5,
+        )
+        async with client:
             ready_raw = await client.recv()
             ready = json.loads(ready_raw)
             assert ready["event"] == "ready"
