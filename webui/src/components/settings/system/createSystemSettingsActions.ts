@@ -423,7 +423,7 @@ export function createSystemSettingsActions({
     }
   };
 
-  const handleMcpOAuthConnect = async (name: string) => {
+  const handleMcpOAuthConnect = async (name: string, reset = false) => {
     openMcpOAuthPopup();
     const key = `oauth:${name}`;
     setMcpPresetAction(key);
@@ -433,7 +433,7 @@ export function createSystemSettingsActions({
     setMcpOAuthCompleting(false);
     setMcpOAuthCallbackError(null);
     try {
-      const flow = await startMcpOAuth(client, name);
+      const flow = await startMcpOAuth(client, name, reset);
       mcpOAuthFlowRef.current = flow;
       setMcpOAuthFlow(flow);
       navigateMcpOAuthPopup(flow);
@@ -521,7 +521,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "disable" | "remove" | "test",
+    action: "enable" | "disable" | "remove" | "test" | "reconnect",
     name: string,
     values: Record<string, string> = {},
   ) => {

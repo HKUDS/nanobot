@@ -46,6 +46,10 @@ async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
     await mcp_tools.connect_missing_servers(state, tools)
 
 
+def mcp_runtime_status(state: Any) -> dict[str, mcp_tools.MCPRuntimeStatus]:
+    return mcp_tools.runtime_status(state)
+
+
 async def close_mcp(state: Any) -> None:
     await mcp_tools.close_mcp_servers(state)
 

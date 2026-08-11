@@ -6,7 +6,7 @@ import asyncio
 from contextlib import AsyncExitStack
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import anyio
 import pytest
@@ -155,6 +155,31 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
     assert attempts == 2
     assert loop._mcp_stacks == {}
+    assert loop.mcp_runtime_status() == {"test": "failed"}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    cfg = MCPServerConfig(
+        type="streamableHttp",
+        auth="oauth",
+        url="https://mcp.example.com/mcp",
+    )
+    loop = _make_loop(tmp_path, mcp_servers={"oauth-app": cfg})
+    connect = AsyncMock()
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", connect)
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
+        lambda _name, _url: False,
+    )
+
+    await loop._connect_mcp()
+
+    connect.assert_not_awaited()
+    assert loop.mcp_runtime_status() == {}
 
 
 @pytest.mark.asyncio

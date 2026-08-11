@@ -60,7 +60,10 @@ _MAX_TEST_TOOLS = 16
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
+_MCP_RUNTIME_STATUSES = {"connecting", "connected", "failed"}
+
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
+McpRuntimeStatus = Callable[[], Mapping[str, str]]
 
 
 class McpPresetError(Exception):
@@ -943,6 +946,7 @@ def mcp_presets_payload(
     *,
     last_action: dict[str, Any] | None = None,
     tool_preview: Mapping[str, list[str]] | None = None,
+    runtime_status: Mapping[str, str] | None = None,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = load_config(config_path) if config_path is not None else load_config()
@@ -970,7 +974,38 @@ def mcp_presets_payload(
     }
     if last_action is not None:
         payload["last_action"] = last_action
-    return payload
+    return attach_mcp_runtime_status(payload, runtime_status)
+
+
+def attach_mcp_runtime_status(
+    payload: dict[str, Any],
+    runtime_status: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    """Project safe, connection-attempt state onto configured MCP rows."""
+    if runtime_status is None:
+        return payload
+    projected = dict(payload)
+    raw_rows: object = payload.get("presets", [])
+    preset_rows = cast(list[object], raw_rows) if isinstance(raw_rows, list) else []
+    rows: list[Any] = []
+    for raw_row in preset_rows:
+        if not isinstance(raw_row, dict):
+            rows.append(raw_row)
+            continue
+        row = dict(cast(dict[str, Any], raw_row))
+        name = row.get("name")
+        status = runtime_status.get(name) if isinstance(name, str) else None
+        if (
+            status in _MCP_RUNTIME_STATUSES
+            and row.get("installed") is True
+            and row.get("configured") is True
+        ):
+            row["runtime_status"] = status
+        else:
+            row.pop("runtime_status", None)
+        rows.append(row)
+    projected["presets"] = rows
+    return projected
 
 
 def _display_name_for(name: str, preset: McpPreset | None = None) -> str:
@@ -1003,6 +1038,7 @@ def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[s
         "import-cursor": "Imported",
         "tools": "Updated tools for",
         "remove": "Removed",
+        "reconnect": "Retried connection for",
     }.get(action, "Updated")
     payload: dict[str, Any] = {
         "ok": ok,
@@ -1014,6 +1050,24 @@ def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[s
     elif action == "remove":
         payload["removed"] = True
         payload["verification"] = ["config_absent"]
+    return payload
+
+
+def mcp_reconnect_action(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate a configured server before asking the live runtime to retry it."""
+    name = _validated_server_name((_query_first(query, "name") or "").strip())
+    config = load_config(config_path) if config_path is not None else load_config()
+    if name not in config.tools.mcp_servers:
+        raise McpPresetError("unknown MCP server", status=404)
+    payload = mcp_presets_payload(
+        last_action=_server_action_message("reconnect", name),
+        config_path=config_path,
+    )
+    payload["requires_restart"] = True
     return payload
 
 
@@ -1571,12 +1625,16 @@ async def mcp_presets_settings_action(
     query: QueryParams,
     *,
     reload_mcp: McpReload | None = None,
+    mcp_runtime_status: McpRuntimeStatus | None = None,
     config: WebUISettingsConfig | None = None,
 ) -> dict[str, Any]:
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
     config_path = config.path if config is not None else None
     if action is None:
-        return mcp_presets_payload(config_path=config_path)
+        return mcp_presets_payload(
+            runtime_status=mcp_runtime_status() if mcp_runtime_status is not None else None,
+            config_path=config_path,
+        )
     name = (_query_first(query, "name") or "").strip()
     if name.startswith("plugin-"):
         plugin_config = load_config(config_path) if config_path is not None else load_config()
@@ -1601,8 +1659,18 @@ async def mcp_presets_settings_action(
                 payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
             return payload
     if action == "test":
-        return await mcp_presets_test_action(query, config_path=config_path)
-    if config is not None:
+        payload = await mcp_presets_test_action(query, config_path=config_path)
+        return attach_mcp_runtime_status(
+            payload,
+            mcp_runtime_status() if mcp_runtime_status is not None else None,
+        )
+    if action == "reconnect":
+        payload = await asyncio.to_thread(
+            mcp_reconnect_action,
+            query,
+            config_path=config_path,
+        )
+    elif config is not None:
         operation = custom_mcp_action if action in _CUSTOM_ACTIONS else mcp_presets_action
         payload = await asyncio.to_thread(
             config.run_serialized,
@@ -1614,4 +1682,7 @@ async def mcp_presets_settings_action(
         payload = await asyncio.to_thread(mcp_presets_action, action, query)
     if reload_mcp is not None:
         payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
-    return payload
+    return attach_mcp_runtime_status(
+        payload,
+        mcp_runtime_status() if mcp_runtime_status is not None else None,
+    )

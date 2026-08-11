@@ -668,6 +668,7 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
+        webui_mcp_runtime_status=agent.mcp_runtime_status,
         webui_skill_state_action=_webui_skill_state_action,
         config_path=Path(config_path),
     )

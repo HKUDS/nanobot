@@ -1,6 +1,7 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import i18n from "@/i18n";
 import {
   installSettingsViewTestHooks,
   jsonResponse,
@@ -138,6 +139,133 @@ describe("SettingsView Apps catalog", () => {
       "/api/settings/mcp-oauth/status?flow_id=flow-123",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
+  });
+
+  it("shows a real OAuth runtime failure and restarts authorization without a success check", async () => {
+    const failedPreset = {
+      ...xmindMcpPreset,
+      installed: true,
+      configured: true,
+      available: true,
+      status: "configured",
+      runtime_status: "failed",
+      connection_summary: "https://app.xmind.com/api/mcp",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [failedPreset], installed_count: 1 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("open", vi.fn(() => null));
+    requestMutationMock.mockRejectedValueOnce(new Error("Stopped after request assertion"));
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
+    expect(await screen.findByText("No tools are ready yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Xmind" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+
+    const heading = await screen.findByRole("heading", { name: "Xmind" });
+    const row = heading.closest("article");
+    expect(row).not.toBeNull();
+    expect(row?.parentElement).toHaveClass("xl:grid-cols-2");
+    expect(within(row as HTMLElement).queryByText("MCP")).not.toBeInTheDocument();
+    const failed = within(row as HTMLElement).getByText("Connection failed.");
+    expect(failed.closest("button")).toBeNull();
+    expect(failed.closest("p")?.querySelector(".lucide-triangle-alert")).not.toBeNull();
+    expect(row?.querySelector(".lucide-check")).toBeNull();
+    expect(within(row as HTMLElement).getByRole("button", { name: "Reconnect Xmind" })).toHaveTextContent(
+      "Reconnect",
+    );
+    const actions = within(row as HTMLElement).getByRole("button", { name: "Actions for Xmind" });
+    expect(actions).toHaveAttribute("aria-haspopup", "menu");
+    fireEvent.pointerDown(actions, { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: "Test" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await act(() => i18n.changeLanguage("zh-CN"));
+    expect(within(row as HTMLElement).getByText("连接失败。")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("button", { name: "Xmind 操作" }))
+      .toBeInTheDocument();
+    const reconnect = screen.getByRole("button", { name: "重新连接 Xmind" });
+    expect(reconnect).toHaveTextContent("重新连接");
+    fireEvent.click(reconnect);
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "xmind", reset: true },
+      30_000,
+    ));
+    await act(() => i18n.changeLanguage("en"));
+  });
+
+  it("retries a failed custom MCP and only shows a success check after it connects", async () => {
+    const failedCustom = {
+      ...xmindMcpPreset,
+      name: "team-docs",
+      display_name: "team-docs",
+      auth: null,
+      source: "custom",
+      installed: true,
+      configured: true,
+      available: true,
+      status: "configured",
+      runtime_status: "failed",
+      connection_summary: "https://mcp.example.com/mcp",
+    };
+    const connectedCustom = { ...failedCustom, runtime_status: "connected" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [failedCustom], installed_count: 1 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      presets: [connectedCustom],
+      installed_count: 1,
+      requires_restart: false,
+      hot_reload: {
+        ok: true,
+        message: "MCP connections refreshed without restarting nanobot.",
+        connected: ["team-docs"],
+        failed: [],
+      },
+      last_action: { ok: true, message: "Retried connection for MCP server team-docs." },
+    });
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    expect(await screen.findByText("Connection failed.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect team-docs" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.reconnect",
+      { name: "team-docs" },
+      20_000,
+    ));
+    const connected = await screen.findByRole("button", { name: "team-docs: Connected." });
+    expect(connected).toHaveTextContent("Connected.");
+    expect(connected.querySelector(".lucide-check")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    const readyHeading = await screen.findByRole("heading", { name: "team-docs" });
+    expect(within(readyHeading.closest("article") as HTMLElement).getByText("MCP"))
+      .toBeInTheDocument();
   });
 
   it("configures OAuth for a custom remote MCP without importing JSON", async () => {

@@ -9,7 +9,7 @@ import shutil
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Protocol, cast
 from weakref import WeakKeyDictionary
 
 import httpx
@@ -62,6 +62,10 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
+_MCP_RUNTIME_STATUSES: frozenset[MCPRuntimeStatus] = frozenset(
+    ("connecting", "connected", "failed")
+)
 
 
 class MCPConnection(Protocol):
@@ -1297,17 +1301,92 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
 
 
+def _runtime_status_store(
+    state: Any,
+    *,
+    create: bool = False,
+) -> dict[str, MCPRuntimeStatus] | None:
+    raw_statuses: object = getattr(state, "_mcp_runtime_statuses", None)
+    if isinstance(raw_statuses, dict):
+        return cast(dict[str, MCPRuntimeStatus], raw_statuses)
+    if not create:
+        return None
+    statuses: dict[str, MCPRuntimeStatus] = {}
+    state._mcp_runtime_statuses = statuses
+    return statuses
+
+
+def runtime_status(state: Any) -> dict[str, MCPRuntimeStatus]:
+    """Return the latest connection-attempt result for configured MCP servers."""
+    statuses = _runtime_status_store(state)
+    raw_configured: object = getattr(state, "_mcp_servers", None)
+    if statuses is None or not isinstance(raw_configured, dict):
+        return {}
+    configured = cast(dict[str, Any], raw_configured)
+    return {
+        name: status
+        for name, status in statuses.items()
+        if name in configured and status in _MCP_RUNTIME_STATUSES
+    }
+
+
+def _set_runtime_status(
+    state: Any,
+    server_names: Mapping[str, Any] | set[str] | list[str] | tuple[str, ...],
+    status: MCPRuntimeStatus,
+) -> None:
+    statuses = _runtime_status_store(state, create=True)
+    assert statuses is not None
+    for name in server_names:
+        statuses[name] = status
+
+
+def _record_connection_result(
+    state: Any,
+    attempted: Mapping[str, Any] | set[str] | list[str] | tuple[str, ...],
+    connected: Mapping[str, Any] | set[str] | list[str] | tuple[str, ...],
+) -> None:
+    attempted_names = set(attempted)
+    connected_names = set(connected)
+    _set_runtime_status(state, connected_names, "connected")
+    _set_runtime_status(state, attempted_names - connected_names, "failed")
+
+
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     async with _reload_lock(state):
         if getattr(state, "_mcp_closing", False):
             return
-        missing_servers = {
+        configured_missing = {
             name: cfg for name, cfg in state._mcp_servers.items() if name not in state._mcp_stacks
+        }
+        oauth_servers = {
+            name: cfg
+            for name, cfg in configured_missing.items()
+            if getattr(cfg, "auth", None) == "oauth"
+        }
+        authorization_pending: set[str] = set()
+        if oauth_servers:
+            from nanobot.agent.tools.mcp_oauth import mcp_oauth_has_credentials
+
+            authorization_pending = {
+                name
+                for name, cfg in oauth_servers.items()
+                if not mcp_oauth_has_credentials(name, cfg.url)
+            }
+        statuses = _runtime_status_store(state)
+        if statuses is not None:
+            for name in authorization_pending:
+                statuses.pop(name, None)
+        missing_servers = {
+            name: cfg
+            for name, cfg in configured_missing.items()
+            if name not in authorization_pending
         }
         if state._mcp_connecting or not missing_servers:
             return
         state._mcp_connecting = True
+        _set_runtime_status(state, missing_servers, "connecting")
         try:
             connected = await connect_mcp_servers(missing_servers, registry)
             if getattr(state, "_mcp_closing", False):
@@ -1315,6 +1394,7 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
                     await connection.aclose()
                 return
             state._mcp_stacks.update(connected)
+            _record_connection_result(state, missing_servers, connected)
             _attach_reconnect_handlers(state, registry, connected)
             if connected:
                 logger.info("MCP connected servers: {}", sorted(connected))
@@ -1323,8 +1403,10 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         except asyncio.CancelledError:
             if task_is_cancelling():
                 raise
+            _set_runtime_status(state, missing_servers, "failed")
             logger.warning("MCP connection cancelled (will retry next message)")
         except BaseException as e:
+            _set_runtime_status(state, missing_servers, "failed")
             logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
         finally:
             state._mcp_connecting = False
@@ -1380,6 +1462,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             tools_removed += _unregister_server_tools(registry, name)
             await _close_server(state, name)
 
+        runtime_statuses = _runtime_status_store(state)
+        if runtime_statuses is not None:
+            for name in [*removed, *authorization_pending]:
+                runtime_statuses.pop(name, None)
+
         state._mcp_servers = next_servers
         retry_missing = sorted(
             name
@@ -1394,6 +1481,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, MCPConnection] = {}
         if to_connect:
+            _set_runtime_status(state, to_connect, "connecting")
             connected = await connect_mcp_servers(to_connect, registry)
             if getattr(state, "_mcp_closing", False):
                 for connection in connected.values():
@@ -1404,6 +1492,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
                     "requires_restart": True,
                 }
             state._mcp_stacks.update(connected)
+            _record_connection_result(state, to_connect, connected)
             _attach_reconnect_handlers(state, registry, connected)
 
         failed = sorted(set(to_connect) - set(connected))
@@ -1562,12 +1651,14 @@ async def _refresh_terminated_server(
         _unregister_server_tools(registry, server_name)
         await _close_server(state, server_name)
 
+        _set_runtime_status(state, {server_name}, "connecting")
         connected = await connect_mcp_servers({server_name: cfg}, registry)
         if getattr(state, "_mcp_closing", False):
             for connection in connected.values():
                 await connection.aclose()
             return None
         state._mcp_stacks.update(connected)
+        _record_connection_result(state, {server_name}, connected)
         _attach_reconnect_handlers(state, registry, connected)
         if server_name not in connected:
             logger.warning("MCP server '{}' reconnect failed after session termination", server_name)
@@ -1621,6 +1712,9 @@ async def close_mcp_servers(state: Any) -> None:
     async with _reload_lock(state):
         connections = list(state._mcp_stacks.items())
         state._mcp_stacks.clear()
+        statuses = _runtime_status_store(state)
+        if statuses is not None:
+            statuses.clear()
         for name, connection in connections:
             try:
                 await connection.aclose()

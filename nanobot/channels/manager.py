@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -100,6 +100,7 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
+        webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
         config_path: Path | None = None,
     ):
@@ -119,6 +120,7 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
+        self._webui_mcp_runtime_status = webui_mcp_runtime_status
         self._webui_skill_state_action = webui_skill_state_action
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
@@ -187,6 +189,7 @@ class ChannelManager:
                 local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
+                mcp_runtime_status=self._webui_mcp_runtime_status,
                 skill_state_action=self._webui_skill_state_action,
                 logger=logger,
             )

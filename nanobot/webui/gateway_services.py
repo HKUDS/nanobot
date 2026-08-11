@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -64,6 +65,7 @@ def build_gateway_services(
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
@@ -116,6 +118,7 @@ def build_gateway_services(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
+        mcp_runtime_status=mcp_runtime_status,
         skill_state_action=skill_state_action,
         log=logger,
     )

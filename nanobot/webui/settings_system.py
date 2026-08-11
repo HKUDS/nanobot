@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -55,6 +55,7 @@ class SystemSettingsOperations:
     deny_code: SettingsOperation
     mcp_presets_action: SettingsOperation
     reload_mcp: SettingsOperation
+    mcp_runtime_status: Callable[[], Mapping[str, str]] | None
     check_for_update: SettingsOperation
     channel_feature_action: SettingsOperation | None = None
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
@@ -928,6 +929,7 @@ class SystemSettingsHandler:
                 action,
                 request.query,
                 reload_mcp=operations.reload_mcp,
+                mcp_runtime_status=operations.mcp_runtime_status,
                 config=self.settings.config,
             )
         except Exception as exc:

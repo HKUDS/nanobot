@@ -181,6 +181,72 @@ async def test_connect_missing_servers_propagates_external_cancellation(monkeypa
     assert state._mcp_connecting is False
 
 
+@pytest.mark.asyncio
+async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OAuthAuth(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = "Bearer saved-oauth-secret"
+            yield request
+
+    class AuthorizationRequiredError(RuntimeError):
+        pass
+
+    async def create_auth(_name: str, _url: str, _handlers=None) -> httpx.Auth:
+        return OAuthAuth()
+
+    @asynccontextmanager
+    async def rejected_streamable_http(url: str, http_client=None):
+        request = httpx.Request("POST", f"{url}?access_token=saved-oauth-secret")
+        response = httpx.Response(403, request=request)
+        raise httpx.HTTPStatusError(
+            "403 Forbidden for saved-oauth-secret",
+            request=request,
+            response=response,
+        )
+        yield object(), object(), object()
+
+    async def reachable(_url: str) -> bool:
+        return True
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
+    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        rejected_streamable_http,
+    )
+
+    class State:
+        pass
+
+    state = State()
+    state._mcp_closing = False
+    state._mcp_servers = {
+        "xmind": MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://app.xmind.com/api/mcp",
+        )
+    }
+    state._mcp_stacks = {}
+    state._mcp_runtime_statuses = {}
+    state._mcp_connecting = False
+
+    await mcp_mod.connect_missing_servers(state, ToolRegistry())
+
+    snapshot = mcp_mod.runtime_status(state)
+    assert snapshot == {"xmind": "failed"}
+    assert "saved-oauth-secret" not in str(snapshot)
+    assert "app.xmind.com" not in str(snapshot)
+
+
 def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",

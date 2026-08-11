@@ -172,8 +172,70 @@ async def test_oauth_preset_is_one_click_configured_after_token_storage(
     assert row["configured"] is True
     assert row["status"] == "configured"
 
+    failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    row = next(item for item in failed["presets"] if item["name"] == "xmind")
+    assert row["configured"] is True
+    assert row["status"] == "configured"
+    assert row["runtime_status"] == "failed"
+    assert "secret" not in str(row)
+
+    healthy = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    row = next(item for item in healthy["presets"] if item["name"] == "xmind")
+    assert row["runtime_status"] == "connected"
+
     mcp_presets_action("remove", {"name": ["xmind"]})
     assert await MCPOAuthStorage("xmind", cfg.url).get_tokens() is None
+
+
+@pytest.mark.asyncio
+async def test_settings_list_projects_runtime_snapshot_and_reconnects_custom_server(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["team-docs"],
+            "transport": ["streamableHttp"],
+            "url": ["https://mcp.example.com/mcp"],
+        },
+    )
+    statuses = {"team-docs": "failed"}
+    reload_calls = 0
+
+    async def reload_mcp() -> dict[str, object]:
+        nonlocal reload_calls
+        reload_calls += 1
+        statuses["team-docs"] = "connected"
+        return {
+            "ok": True,
+            "connected": ["team-docs"],
+            "failed": [],
+            "requires_restart": False,
+        }
+
+    listed = await mcp_presets_settings_action(
+        None,
+        {},
+        reload_mcp=reload_mcp,
+        mcp_runtime_status=lambda: statuses,
+    )
+    row = next(item for item in listed["presets"] if item["name"] == "team-docs")
+    assert row["configured"] is True
+    assert row["runtime_status"] == "failed"
+    assert reload_calls == 0
+
+    reconnected = await mcp_presets_settings_action(
+        "reconnect",
+        {"name": ["team-docs"]},
+        reload_mcp=reload_mcp,
+        mcp_runtime_status=lambda: statuses,
+    )
+    row = next(item for item in reconnected["presets"] if item["name"] == "team-docs")
+    assert row["runtime_status"] == "connected"
+    assert reconnected["requires_restart"] is False
+    assert reload_calls == 1
 
 
 def test_enable_browserbase_writes_scrubbed_config_payload(

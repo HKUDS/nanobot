@@ -14,7 +14,7 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -163,6 +163,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.mcp.disable": "/api/settings/mcp-presets/disable",
     "settings.mcp.remove": "/api/settings/mcp-presets/remove",
     "settings.mcp.test": "/api/settings/mcp-presets/test",
+    "settings.mcp.reconnect": "/api/settings/mcp-presets/reconnect",
     "settings.mcp.custom": "/api/settings/mcp-presets/custom",
     "settings.mcp.import": "/api/settings/mcp-presets/import",
     "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
@@ -306,6 +307,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
@@ -348,6 +350,7 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
+            mcp_runtime_status=mcp_runtime_status,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 

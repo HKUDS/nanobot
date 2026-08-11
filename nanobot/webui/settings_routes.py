@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
@@ -94,6 +94,7 @@ _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/disable": "disable",
     "/api/settings/mcp-presets/remove": "remove",
     "/api/settings/mcp-presets/test": "test",
+    "/api/settings/mcp-presets/reconnect": "reconnect",
     "/api/settings/mcp-presets/custom": "custom",
     "/api/settings/mcp-presets/import": "import",
     "/api/settings/mcp-presets/import-cursor": "import-cursor",
@@ -225,6 +226,7 @@ class WebUISettingsRouter:
         runtime_capabilities: dict[str, Any],
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
@@ -238,6 +240,7 @@ class WebUISettingsRouter:
         self._runtime_capabilities = runtime_capabilities
         self._channel_feature_action = channel_feature_action
         self._channel_runtime_status = channel_runtime_status
+        self._mcp_runtime_status = mcp_runtime_status
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
         self._mcp_oauth = McpOAuthManager()
         self._restart_sections: set[str] = set()
@@ -470,6 +473,7 @@ class WebUISettingsRouter:
             deny_code=deny_code,
             mcp_presets_action=mcp_presets_settings_action,
             reload_mcp=lambda: request_mcp_reload(self.bus),
+            mcp_runtime_status=self._mcp_runtime_status,
             check_for_update=check_for_update,
             channel_feature_action=self._channel_feature_action,
             channel_runtime_status=self._channel_runtime_status,
