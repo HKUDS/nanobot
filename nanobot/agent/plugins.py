@@ -118,7 +118,9 @@ def agent_plugin_mcp_servers(
             continue
         plugin_servers = _plugin_mcp_servers(workspace, plugin)
         for name, server in plugin_servers.items():
-            host_name = plugin.name if len(plugin_servers) == 1 else f"{plugin.name}-{name}"
+            # ``--`` cannot occur in a valid plugin identity, so multi-server
+            # namespaces cannot collide with a single-server plugin name.
+            host_name = plugin.name if len(plugin_servers) == 1 else f"{plugin.name}--{name}"
             servers[host_name] = server
     configured = configured or {}
     if collisions := servers.keys() & configured.keys():
@@ -146,7 +148,10 @@ def set_agent_plugin_enabled(workspace: Path, name: str, enabled: bool) -> None:
     data = _plugin_data_dir(workspace, plugin.name, create=True)
     marker = data / "enabled"
     if enabled:
-        marker.write_text(str(plugin.root), encoding="utf-8")
+        activation = _activation_marker(plugin)
+        if activation is None:
+            raise RuntimeError(f"Agent Plugin '{name}' changed while it was being enabled")
+        marker.write_text(activation, encoding="utf-8")
         marker.chmod(0o600)
     else:
         marker.unlink(missing_ok=True)
@@ -238,6 +243,7 @@ def _plugin_mcp_server(raw: object, root: Path, data: Path) -> MCPServerConfig |
             "args": [_expand(item, root, data) for item in server.args],
             "env": {
                 **{key: _expand(value, root, data) for key, value in server.env.items()},
+                "PYTHONDONTWRITEBYTECODE": "1",
                 "PLUGIN_ROOT": str(root),
                 "PLUGIN_DATA": str(data),
             },
@@ -303,9 +309,48 @@ def _plugin_data_dir(workspace: Path, name: str, *, create: bool) -> Path:
 def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
     marker = _plugin_data_dir(workspace, plugin.name, create=False) / "enabled"
     try:
-        return marker.is_file() and marker.read_text(encoding="utf-8") == str(plugin.root)
+        if not marker.is_file():
+            return False
+        current = marker.read_text(encoding="utf-8")
+        activation = _activation_marker(plugin)
+        if activation is None:
+            return False
+        if current == activation:
+            return True
+        if current == str(plugin.root):
+            marker.write_text(activation, encoding="utf-8")
+            marker.chmod(0o600)
+            return True
+        return False
     except OSError:
         return False
+
+
+def _activation_marker(plugin: AgentPlugin) -> str | None:
+    """Bind activation to one immutable package snapshot."""
+    digest = sha256()
+    try:
+        for candidate in sorted(plugin.root.rglob("*")):
+            relative = candidate.relative_to(plugin.root).as_posix()
+            digest.update(relative.encode())
+            if candidate.is_symlink():
+                digest.update(b"\0link\0")
+                digest.update(candidate.readlink().as_posix().encode())
+            elif candidate.is_file():
+                digest.update(b"\0file\0")
+                digest.update(candidate.read_bytes())
+            elif candidate.is_dir():
+                digest.update(b"\0dir\0")
+            else:
+                return None
+            digest.update(b"\0")
+    except OSError:
+        return None
+    return json.dumps(
+        {"fingerprint": digest.hexdigest(), "root": str(plugin.root)},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def _discover_plugin_skills(plugin_name: str, plugin_root: Path) -> list[tuple[str, Path]]:

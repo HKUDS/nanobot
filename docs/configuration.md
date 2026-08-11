@@ -2354,6 +2354,8 @@ nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>
 Directory presence means installed; activation is explicit in **Apps**. Skills use progressive loading and `$skill-name` invocation, with workspace > plugin > built-in precedence.
 Enabled `stdio` servers receive contained `PLUGIN_ROOT` and isolated `PLUGIN_DATA` paths; explicit
 `tools.mcpServers` entries win collisions. Invalid or escaping components are ignored.
+An enabled package is treated as immutable: changing any packaged file disables it until the user
+reviews and enables it again. Runtime state belongs under `PLUGIN_DATA`, not the package root.
 
 Enabled plugins run as the nanobot user; permissions are descriptive, not an OS sandbox. The optional `extensions.dev.nanobot.logo` accepts a contained PNG, JPEG, or WebP up to 256 KiB.
 

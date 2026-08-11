@@ -148,9 +148,20 @@ class _FsTool(Tool):
         )
 
     def _resolve_read(self, path: str) -> Path:
+        plugin_skill_dirs: list[Path] = []
+        if self._workspace is not None:
+            from nanobot.agent.plugins import enabled_agent_plugin_skills
+
+            try:
+                plugin_skill_dirs = [
+                    skill.parent
+                    for _name, skill in enabled_agent_plugin_skills(Path(self._workspace))
+                ]
+            except (OSError, RuntimeError):
+                pass
         return self._resolve_with_extra(
             path,
-            self._extra_read_allowed_dirs,
+            [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
             self._extra_read_allowed_files,
             include_media_dir=True,
             extra_files_require_allowed_root=True,

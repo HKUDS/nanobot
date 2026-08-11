@@ -14,6 +14,14 @@ from nanobot.agent.plugins import (
     set_agent_plugin_enabled,
 )
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
+from nanobot.config.schema import ToolsConfig
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    reset_workspace_scope,
+    validate_workspace_scope_payload,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -169,6 +177,72 @@ def test_plugin_mcp_requires_explicit_enable(tmp_path: Path) -> None:
     assert agent_plugin_mcp_servers(tmp_path) == {}
 
 
+def test_plugin_mcp_namespaces_cannot_shadow_plugin_identities(tmp_path: Path) -> None:
+    single = _plugin(tmp_path, "foo-bar")
+    multi = _plugin(tmp_path, "foo")
+    for root, servers in (
+        (single, {"main": {"type": "stdio", "command": "echo", "args": ["single"]}}),
+        (
+            multi,
+            {
+                "bar": {"type": "stdio", "command": "echo", "args": ["multi"]},
+                "other": {"type": "stdio", "command": "echo"},
+            },
+        ),
+    ):
+        _write_json(
+            root / "mcp.json",
+            {"$schema": AGENT_PLUGIN_MCP_SCHEMA, "mcpServers": servers},
+        )
+    set_agent_plugin_enabled(tmp_path, "foo-bar", True)
+    set_agent_plugin_enabled(tmp_path, "foo", True)
+
+    servers = agent_plugin_mcp_servers(tmp_path)
+
+    assert set(servers) == {"foo-bar", "foo--bar", "foo--other"}
+    assert servers["foo-bar"].args == ["single"]
+    assert servers["foo--bar"].args == ["multi"]
+
+
+@pytest.mark.asyncio
+async def test_restricted_project_can_read_only_enabled_plugin_skill(
+    tmp_path: Path,
+) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    plugin = _plugin(agent_workspace)
+    skill = _skill(plugin / "skills", "demo-skill")
+    resource = skill / "reference.md"
+    resource.write_text("plugin reference", encoding="utf-8")
+    ctx = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True),
+        workspace=str(agent_workspace),
+    )
+    read_tool = ReadFileTool.create(ctx)
+    write_tool = WriteFileTool.create(ctx)
+    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        read_result = await read_tool.execute(path=str(resource))
+        write_result = await write_tool.execute(path=str(resource), content="changed")
+        set_agent_plugin_enabled(agent_workspace, "demo", False)
+        disabled_result = await read_tool.execute(path=str(resource))
+    finally:
+        reset_workspace_scope(token)
+
+    assert "plugin reference" in read_result
+    assert "outside allowed directory" in write_result
+    assert "outside allowed directory" in disabled_result
+    assert resource.read_text(encoding="utf-8") == "plugin reference"
+
+
 def test_plugin_state_symlink_cannot_escape_config_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,5 +285,70 @@ def test_plugin_activation_requires_one_stable_package_identity(tmp_path: Path) 
 
     moved = tmp_path / "plugins" / "moved"
     roots[0].rename(moved)
+    assert discover_agent_plugins(tmp_path)[0].enabled is False
+    assert agent_plugin_mcp_servers(tmp_path) == {}
+
+
+def test_legacy_path_activation_is_upgraded_to_package_fingerprint(tmp_path: Path) -> None:
+    plugin = _plugin(tmp_path)
+    set_agent_plugin_enabled(tmp_path, "demo", True)
+    marker = next((tmp_path / "config" / "plugin-data").glob("*/demo/enabled"))
+    marker.write_text(str(plugin), encoding="utf-8")
+
+    assert discover_agent_plugins(tmp_path)[0].enabled is True
+    assert marker.read_text(encoding="utf-8").startswith('{"fingerprint":')
+
+
+def test_plugin_activation_does_not_survive_in_place_contract_replacement(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(tmp_path, "desktop")
+    mcp = plugin / "mcp.json"
+
+    def write_server(marker: str) -> None:
+        _write_json(
+            mcp,
+            {
+                "$schema": AGENT_PLUGIN_MCP_SCHEMA,
+                "mcpServers": {
+                    "server": {"type": "stdio", "command": "echo", "args": [marker]}
+                },
+            },
+        )
+
+    write_server("trusted")
+    set_agent_plugin_enabled(tmp_path, "desktop", True)
+    assert agent_plugin_mcp_servers(tmp_path)["desktop"].args == ["trusted"]
+
+    write_server("replacement")
+
+    assert discover_agent_plugins(tmp_path)[0].enabled is False
+    assert agent_plugin_mcp_servers(tmp_path) == {}
+
+
+def test_plugin_activation_does_not_survive_in_place_code_replacement(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(tmp_path, "desktop")
+    executable = plugin / "server.py"
+    executable.write_text("print('trusted')\n", encoding="utf-8")
+    _write_json(
+        plugin / "mcp.json",
+        {
+            "$schema": AGENT_PLUGIN_MCP_SCHEMA,
+            "mcpServers": {
+                "server": {
+                    "type": "stdio",
+                    "command": "python",
+                    "args": ["${PLUGIN_ROOT}/server.py"],
+                }
+            },
+        },
+    )
+    set_agent_plugin_enabled(tmp_path, "desktop", True)
+    assert discover_agent_plugins(tmp_path)[0].enabled is True
+
+    executable.write_text("print('replacement')\n", encoding="utf-8")
+
     assert discover_agent_plugins(tmp_path)[0].enabled is False
     assert agent_plugin_mcp_servers(tmp_path) == {}
