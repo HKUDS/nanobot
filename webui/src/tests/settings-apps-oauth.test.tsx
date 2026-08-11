@@ -208,6 +208,53 @@ describe("SettingsView Apps catalog", () => {
     await act(() => i18n.changeLanguage("en"));
   });
 
+  it("refreshes a connecting MCP snapshot until the runtime attempt settles", async () => {
+    const connectingPreset = {
+      ...xmindMcpPreset,
+      installed: true,
+      configured: true,
+      available: true,
+      status: "configured",
+      runtime_status: "connecting",
+      connection_summary: "https://app.xmind.com/api/mcp",
+    };
+    let mcpPresetRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        mcpPresetRequests += 1;
+        return jsonResponse({
+          presets: [{
+            ...connectingPreset,
+            runtime_status: mcpPresetRequests === 1 ? "connecting" : "connected",
+          }],
+          installed_count: 1,
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+
+    expect(await screen.findByRole("button", { name: "Xmind: Connecting…" }))
+      .toHaveTextContent("Connecting…");
+    expect(await screen.findByRole(
+      "button",
+      { name: "Xmind: Connected." },
+      { timeout: 2_500 },
+    )).toHaveTextContent("Connected.");
+    expect(mcpPresetRequests).toBe(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    expect(await screen.findByRole("heading", { name: "Xmind" })).toBeInTheDocument();
+  });
+
   it("retries a failed custom MCP and only shows a success check after it connects", async () => {
     const failedCustom = {
       ...xmindMcpPreset,

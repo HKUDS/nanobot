@@ -21,6 +21,8 @@ interface SystemSettingsEffectsOptions {
   pageVisible: boolean;
 }
 
+const MCP_RUNTIME_STATUS_REFRESH_MS = 1_000;
+
 export function useSystemSettingsEffects({
   state,
   activeSection,
@@ -149,26 +151,36 @@ export function useSystemSettingsEffects({
   }, [activeSection, getToken]);
 
   useEffect(() => {
-    if (activeSection !== "apps") return;
+    if (activeSection !== "apps" || !pageVisible) return;
     let cancelled = false;
-    setMcpPresetsLoading(true);
-    fetchMcpPresets(getToken())
-      .then((payload) => {
-        if (!cancelled) {
+    let retry: number | null = null;
+    const loadMcpPresets = (showLoading: boolean) => {
+      if (showLoading) setMcpPresetsLoading(true);
+      fetchMcpPresets(getToken())
+        .then((payload) => {
+          if (cancelled) return;
           setMcpPresets(payload);
           setMcpError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setMcpError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setMcpPresetsLoading(false);
-      });
+          if (payload.presets.some((preset) => preset.runtime_status === "connecting")) {
+            retry = window.setTimeout(() => {
+              retry = null;
+              loadMcpPresets(false);
+            }, MCP_RUNTIME_STATUS_REFRESH_MS);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) setMcpError((err as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled && showLoading) setMcpPresetsLoading(false);
+        });
+    };
+    loadMcpPresets(true);
     return () => {
       cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, getToken]);
+  }, [activeSection, getToken, pageVisible]);
 
   const refreshAutomations = useCallback(
     async (showLoading = false) => {
