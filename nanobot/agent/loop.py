@@ -36,6 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
@@ -94,7 +95,7 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.mcp import MCPConnection
+    from nanobot.agent.tools.mcp import MCPConnection, MCPRuntimeStatus
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
@@ -196,6 +197,11 @@ class AgentLoop:
     @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
+
+    @property
+    def last_usage(self) -> Mapping[str, int]:
+        """Latest aggregate usage exposed through the runtime-control snapshot."""
+        return self._last_usage
 
     @property
     def provider(self) -> LLMProvider:
@@ -395,6 +401,7 @@ class AgentLoop:
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, MCPConnection] = {}
+        self._mcp_runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
@@ -448,7 +455,6 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
-        self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -480,6 +486,8 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        from nanobot.agent.plugins import agent_plugin_mcp_servers
+
         return cls(
             bus=bus,
             provider=provider,
@@ -494,7 +502,7 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
+            mcp_servers=agent_plugin_mcp_servers(config.workspace_path, config.tools.mcp_servers),
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
@@ -623,10 +631,13 @@ class AgentLoop:
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
 
-        # MyTool needs runtime state reference — manual registration
+        # MyTool receives only the explicit runtime-control capability.
         if self.tools_config.my.enable:
             self.tools.register(
-                MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
+                MyTool(
+                    runtime_control=AgentRuntimeControl(self),
+                    modify_allowed=self.tools_config.my.allow_set,
+                )
             )
             registered.append("my")
 
@@ -635,6 +646,10 @@ class AgentLoop:
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
+
+    def mcp_runtime_status(self) -> dict[str, MCPRuntimeStatus]:
+        """Return connection state learned from real MCP runtime attempts."""
+        return agent_context.mcp_runtime_status(self)
 
     def register_runtime_context_provider(
         self,

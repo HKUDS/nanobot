@@ -132,6 +132,26 @@ Dream is a periodic consolidation job. It reads accumulated history and updates 
 
 See [`memory.md`](./memory.md) for the detailed design.
 
+## Apps and Agent Plugins
+
+Agent Plugins are nanobot's common package and activation boundary for
+installable capabilities. They organize existing extension types instead of
+replacing them:
+
+| Part | Role |
+|---|---|
+| Agent Plugin | Installable package that can bundle skills, MCP servers, or both |
+| Skill | Workflow guidance loaded progressively or invoked with `$skill-name` |
+| MCP server | Runtime tools exposed to the agent |
+| CLI App | Locally managed executable whose adapter is packaged and activated like a plugin |
+| Apps | WebUI surface for reviewing and managing these capabilities |
+
+Native providers, channels, built-in tools, standalone workspace skills, and
+directly configured MCP servers keep their existing extension paths. See
+[`webui.md#apps`](./webui.md#apps) for the user-facing flow and
+[`configuration.md#agent-plugins-v1`](./configuration.md#agent-plugins-v1) for
+the package contract.
+
 ## Tools and Safety
 
 Tools are discovered automatically from built-in modules and plugin entry points. Common tool groups include:

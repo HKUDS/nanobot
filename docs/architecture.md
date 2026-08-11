@@ -201,8 +201,10 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Provider | Add `ProviderSpec` in `providers/registry.py`, add schema field in `config/schema.py`, implement provider only if the generic backend is not enough |
 | Channel | Export a `ChannelPlugin` descriptor, keep its runtime and optional setup surfaces in one package, and follow [`channel-package-guide.md`](./channel-package-guide.md) |
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
-| MCP | Add `tools.mcpServers` config |
-| Skill | Add workspace skill files under `<workspace>/skills/` or built-in skills under `nanobot/skills/` |
+| Agent Plugin | Add a v1 package under `<workspace>/plugins/` and enable it from Apps |
+| MCP | Add `tools.mcpServers` config or bundle the server in an Agent Plugin |
+| Skill | Add workspace skills under `<workspace>/skills/`, bundle them in an Agent Plugin, or add built-in skills under `nanobot/skills/` |
+| CLI App | Add it to the CLI Apps catalog; the installer owns its executable lifecycle and writes a skills-only Agent Plugin |
 
 Prefer existing registry/discovery patterns over ad hoc wiring.
 

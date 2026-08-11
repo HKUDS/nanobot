@@ -4,10 +4,67 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import type { StreamError } from "@/lib/nanobot-client";
-import type { ConnectionStatus, InboundEvent, GoalStateWsPayload } from "@/lib/types";
+import type {
+  ConnectionStatus,
+  GoalStateWsPayload,
+  InboundEvent,
+  UIMessage,
+} from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
+import projectionFixture from "./fixtures/live-replay-event-projection.json";
 
-const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
+const EMPTY_MESSAGES: UIMessage[] = [];
+
+interface ProjectionFixtureCase {
+  name: string;
+  chat_id: string;
+  initial_messages: UIMessage[];
+  live_events: InboundEvent[];
+  expected: Array<Record<string, unknown>>;
+}
+
+const PROJECTION_FIXTURE_CASES = (
+  projectionFixture as unknown as { cases: ProjectionFixtureCase[] }
+).cases;
+const SEMANTIC_MESSAGE_FIELDS = [
+  "role",
+  "content",
+  "kind",
+  "traces",
+  "toolEvents",
+  "fileEdits",
+  "images",
+  "media",
+  "cliApps",
+  "mcpPresets",
+  "sessionMentions",
+  "reasoning",
+  "latencyMs",
+  "source",
+  "turnId",
+  "turnPhase",
+  "turnSeq",
+] as const satisfies ReadonlyArray<keyof UIMessage>;
+
+function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknown>> {
+  const segmentAliases = new Map<string, string>();
+  return messages.map((message) => {
+    const row: Record<string, unknown> = {};
+    for (const field of SEMANTIC_MESSAGE_FIELDS) {
+      const value = message[field];
+      if (value !== undefined && value !== null) row[field] = value;
+    }
+    if (message.activitySegmentId) {
+      let alias = segmentAliases.get(message.activitySegmentId);
+      if (!alias) {
+        alias = `segment-${segmentAliases.size + 1}`;
+        segmentAliases.set(message.activitySegmentId, alias);
+      }
+      row.activitySegmentId = alias;
+    }
+    return row;
+  });
+}
 
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
@@ -2840,4 +2897,22 @@ describe("useNanobotStream", () => {
     expect(result.current.goalState).toEqual({ active: false });
   });
 
+});
+
+describe("live/replay projection before canonical-event revision migration", () => {
+  it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+      { wrapper: wrap(fake.client) },
+    );
+
+    for (const event of fixtureCase.live_events) {
+      act(() => {
+        fake.emit(fixtureCase.chat_id, event);
+      });
+    }
+
+    expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+  });
 });

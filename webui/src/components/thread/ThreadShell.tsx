@@ -1261,7 +1261,7 @@ export function ThreadShell({
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      if (booting) return;
+      if (booting) return false;
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
@@ -1270,12 +1270,13 @@ export function ThreadShell({
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
         setBooting(false);
-        return;
+        return false;
       }
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
+      return true;
     },
     [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );

@@ -100,6 +100,29 @@ Gateway-style setup for model IDs served through OpenRouter.
 
 Use the model ID exactly as OpenRouter lists it.
 
+To opt into OpenRouter server-managed search and fetch, add:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "extraBody": {
+        "tools": [
+          { "type": "openrouter:web_search" },
+          { "type": "openrouter:web_fetch" }
+        ]
+      }
+    }
+  }
+}
+```
+
+Chat Completions-compatible OpenRouter
+[server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are
+appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file`
+available in the same request. Responses-only server tools require an API surface that the
+OpenRouter provider does not currently enable.
+
 ### Eden AI Gateway
 
 Eden AI exposes an OpenAI-compatible chat-completions endpoint at

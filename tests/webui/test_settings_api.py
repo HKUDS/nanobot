@@ -12,7 +12,6 @@ from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfi
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
-    _clear_webui_oauth_flows,
     _docs_version,
     _model_catalog_kind,
     _oauth_provider_status,
@@ -36,9 +35,15 @@ from nanobot.webui.settings_api import (
     update_transcription_settings,
     update_web_search_settings,
 )
+from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
+
+
+@pytest.fixture
+def oauth_flows() -> WebUIOAuthFlowRegistry:
+    return WebUIOAuthFlowRegistry()
 
 
 def test_settings_payload_propagates_preset_resolution_failure(
@@ -1490,6 +1495,7 @@ def test_xai_grok_status_accepts_refreshable_login(
 def test_openai_codex_oauth_login_passes_configured_proxy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
@@ -1522,7 +1528,10 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
         fake_start,
     )
 
-    payload = login_oauth_provider({"provider": ["openai-codex"]})
+    payload = login_oauth_provider(
+        {"provider": ["openai-codex"]},
+        oauth_flows=oauth_flows,
+    )
 
     assert captured == {
         "proxy": proxy,
@@ -1548,15 +1557,17 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_api.settings_payload",
-        lambda: {"settings": "ready"},
+        lambda **_kwargs: {"settings": "ready"},
     )
 
     pending = complete_oauth_provider(
         {"provider": ["openai-codex"], "flow_id": [payload["flow_id"]]},
+        oauth_flows=oauth_flows,
     )
     completed = complete_oauth_provider(
         {"provider": ["openai-codex"], "flow_id": [payload["flow_id"]]},
         "http://localhost:1455/auth/callback?code=secret&state=test",
+        oauth_flows=oauth_flows,
     )
 
     assert pending == {
@@ -1574,6 +1585,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
 def test_openai_codex_remote_login_uses_headless_dependency_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -1599,10 +1611,11 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
 
     try:
         payload = login_oauth_provider(
-            {"provider": ["openai-codex"], "remote_browser": ["true"]}
+            {"provider": ["openai-codex"], "remote_browser": ["true"]},
+            oauth_flows=oauth_flows,
         )
     finally:
-        _clear_webui_oauth_flows("openai_codex")
+        oauth_flows.clear("openai_codex")
 
     assert payload["completion_input"] == "callback_url"
     assert captured["open_browser"] is False
@@ -1611,6 +1624,7 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
 
 def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     real_import = builtins.__import__
 
@@ -1622,7 +1636,10 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider({"provider": ["openai-codex"]})
+        login_oauth_provider(
+            {"provider": ["openai-codex"]},
+            oauth_flows=oauth_flows,
+        )
 
     assert str(exc.value) == (
         "This nanobot installation is missing the required oauth-cli-kit package. "
@@ -1632,6 +1649,7 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
 
 def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     real_import = builtins.__import__
 
@@ -1643,7 +1661,10 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider({"provider": ["github-copilot"]})
+        login_oauth_provider(
+            {"provider": ["github-copilot"]},
+            oauth_flows=oauth_flows,
+        )
 
     assert str(exc.value) == (
         "This nanobot installation is missing the required oauth-cli-kit package. "
@@ -1654,6 +1675,7 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
 def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
@@ -1675,7 +1697,10 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
 
     monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
 
-    payload = login_oauth_provider({"provider": ["xai-grok"]})
+    payload = login_oauth_provider(
+        {"provider": ["xai-grok"]},
+        oauth_flows=oauth_flows,
+    )
 
     assert captured["proxy"] == proxy
     assert captured["timeout_s"] == 600
@@ -1699,15 +1724,17 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_api.settings_payload",
-        lambda: {"settings": "ready"},
+        lambda **_kwargs: {"settings": "ready"},
     )
 
     pending = complete_oauth_provider(
         {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
+        oauth_flows=oauth_flows,
     )
     completed = complete_oauth_provider(
         {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
         "secret",
+        oauth_flows=oauth_flows,
     )
 
     assert pending == {
@@ -1722,6 +1749,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
 def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -1734,7 +1762,10 @@ def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
     monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
 
     with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider({"provider": ["xai-grok"]})
+        login_oauth_provider(
+            {"provider": ["xai-grok"]},
+            oauth_flows=oauth_flows,
+        )
 
     assert exc.value.status == 502
     assert str(exc.value) == (
@@ -1746,6 +1777,7 @@ def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
 def test_xai_grok_logout_removes_token_through_shared_lock(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -1759,7 +1791,10 @@ def test_xai_grok_logout_removes_token_through_shared_lock(
         lambda: token_path,
     )
 
-    logout_oauth_provider({"provider": ["xai-grok"]})
+    logout_oauth_provider(
+        {"provider": ["xai-grok"]},
+        oauth_flows=oauth_flows,
+    )
 
     assert not token_path.exists()
 

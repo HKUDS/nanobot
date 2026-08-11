@@ -25,7 +25,9 @@ async def test_weixin_connect_store_saves_confirmed_qr_login(
     )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+    async def fake_fetch_qr_code(
+        self: WeixinChannel, **_kwargs: Any
+    ) -> tuple[str, str]:
         return "qr-1", "https://qr.example/1"
 
     async def fake_api_get_with_base(
@@ -86,14 +88,31 @@ async def test_weixin_reconnect_keeps_existing_account_until_scan_succeeds(
     )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
-        return "qr-reconnect", "https://qr.example/reconnect"
+    observed_force: list[bool] = []
+
+    async def fake_fetch_qr_code(
+        self: WeixinChannel,
+        *,
+        force: bool = False,
+    ) -> tuple[str, str]:
+        observed_force.append(force)
+        return f"qr-reconnect-{len(observed_force)}", "https://qr.example/reconnect"
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        **_kwargs: Any,
+    ) -> dict[str, str]:
+        return {"status": "expired"}
 
     monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
 
     store = WeixinConnectStore()
     started = await store.start(force=True)
+    refreshed = await store.poll(started["session_id"])
 
+    assert refreshed["status"] == "pending"
+    assert observed_force == [True, True]
     assert json.loads(state_file.read_text(encoding="utf-8")) == existing
     cancelled = await store.cancel(started["session_id"])
     assert cancelled["status"] == "cancelled"
@@ -116,7 +135,9 @@ async def test_weixin_cancel_wins_over_inflight_confirmation(
     poll_started = asyncio.Event()
     release_poll = asyncio.Event()
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+    async def fake_fetch_qr_code(
+        self: WeixinChannel, **_kwargs: Any
+    ) -> tuple[str, str]:
         return "qr-cancel", "https://qr.example/cancel"
 
     async def fake_api_get_with_base(
@@ -162,7 +183,9 @@ async def test_weixin_connect_store_handles_verification_code(
     )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+    async def fake_fetch_qr_code(
+        self: WeixinChannel, **_kwargs: Any
+    ) -> tuple[str, str]:
         return "qr-verify", "https://qr.example/verify"
 
     responses = [
@@ -204,7 +227,7 @@ async def test_weixin_connect_store_handles_verification_code(
 
 
 @pytest.mark.asyncio
-async def test_weixin_connect_store_treats_existing_binding_as_success(
+async def test_weixin_connect_store_rejects_existing_binding_during_forced_login(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -221,7 +244,12 @@ async def test_weixin_connect_store_treats_existing_binding_as_success(
     )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+    async def fake_fetch_qr_code(
+        self: WeixinChannel,
+        *,
+        force: bool = False,
+    ) -> tuple[str, str]:
+        assert force is True
         return "qr-existing", "https://qr.example/existing"
 
     async def fake_api_get_with_base(
@@ -237,8 +265,8 @@ async def test_weixin_connect_store_treats_existing_binding_as_success(
     started = await store.start(force=True)
     completed = await store.poll(started["session_id"])
 
-    assert completed["status"] == "succeeded"
-    assert "already connected" in completed["message"]
+    assert completed["status"] == "failed"
+    assert "new WeChat login" in completed["message"]
     assert json.loads((state_dir / "account.json").read_text())["token"] == "working-token"
 
 
@@ -255,7 +283,9 @@ async def test_weixin_connect_store_rejects_existing_binding_without_local_crede
     )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+    async def fake_fetch_qr_code(
+        self: WeixinChannel, **_kwargs: Any
+    ) -> tuple[str, str]:
         return "qr-missing", "https://qr.example/missing"
 
     async def fake_api_get_with_base(
@@ -268,7 +298,7 @@ async def test_weixin_connect_store_rejects_existing_binding_without_local_crede
     monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
 
     store = WeixinConnectStore()
-    started = await store.start(force=True)
+    started = await store.start(force=False)
     completed = await store.poll(started["session_id"])
 
     assert completed["status"] == "failed"

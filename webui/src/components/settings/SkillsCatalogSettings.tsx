@@ -269,7 +269,7 @@ function SkillDetailSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { getToken } = useClient();
+  const { client, getToken } = useClient();
   const { t } = useTranslation();
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -321,7 +321,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await updateSkillEnabled(getToken(), activeSkill.name, !enabled);
+      const payload = await updateSkillEnabled(client, activeSkill.name, !enabled);
       notifySkillsChanged(payload);
       const updated = payload.skills.find((item) => item.name === activeSkill.name);
       if (updated) {
@@ -345,7 +345,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await deleteSkill(getToken(), activeSkill.name);
+      const payload = await deleteSkill(client, activeSkill.name);
       notifySkillsChanged(payload);
       onOpenChange(false);
     } catch (reason) {

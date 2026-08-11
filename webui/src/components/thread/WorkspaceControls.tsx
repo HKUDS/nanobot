@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, ChevronDown, Folder, Hand } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -34,6 +34,14 @@ import {
   shortWorkspacePath,
 } from "@/lib/workspace";
 
+function workspacePathPlaceholder(defaultWorkspacePath: string, macPlaceholder: string): string {
+  const normalized = defaultWorkspacePath.trim().replace(/\\/g, "/");
+  const windowsDrive = normalized.match(/^([A-Za-z]):\//)?.[1];
+  if (windowsDrive) return `${windowsDrive.toUpperCase()}:\\path\\to\\project`;
+  if (normalized.startsWith("/Users/")) return macPlaceholder;
+  return "/home/name/project";
+}
+
 export function WorkspaceProjectPicker({
   isHero,
   compact = false,
@@ -60,6 +68,9 @@ export function WorkspaceProjectPicker({
   const [pathDraft, setPathDraft] = useState("");
   const [pathError, setPathError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
+  const pathErrorId = useId();
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const projectLabel = currentProjectScope
     ? currentProjectScope.project_name || projectNameFromPath(currentProjectScope.project_path)
@@ -82,8 +93,16 @@ export function WorkspaceProjectPicker({
   }, [disabled]);
 
   useEffect(() => {
-    if (error && visible && !disabled) setOpen(true);
+    if (!error || !visible || disabled) return;
+    const frame = window.requestAnimationFrame(() => triggerRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
   }, [disabled, error, visible]);
+
+  useEffect(() => {
+    if (!open || !error) return;
+    const frame = window.requestAnimationFrame(() => pathInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [error, open]);
 
   const applyProjectPath = useCallback(
     (projectPath: string, projectName?: string) => {
@@ -129,6 +148,7 @@ export function WorkspaceProjectPicker({
           : "flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4",
       )}>
         <button
+          ref={triggerRef}
           type="button"
           disabled={disabled || pickingFolder}
           aria-label={t("thread.composer.workspace.projectAria")}
@@ -164,6 +184,7 @@ export function WorkspaceProjectPicker({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
+            ref={triggerRef}
             type="button"
             disabled={disabled}
             aria-label={t("thread.composer.workspace.projectAria")}
@@ -221,18 +242,21 @@ export function WorkspaceProjectPicker({
               }}
             >
               <Input
+                ref={pathInputRef}
                 value={pathDraft}
                 disabled={disabled}
                 onChange={(event) => {
                   setPathDraft(event.target.value);
                   setPathError(null);
                 }}
-                placeholder={t("workspace.dialog.manualPlaceholder")}
-                aria-label={t("workspace.dialog.manual")}
-                className={cn(
-                  "h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]",
-                  "focus-visible:ring-1 focus-visible:ring-foreground/10 focus-visible:ring-offset-0",
+                placeholder={workspacePathPlaceholder(
+                  defaultScope.project_path,
+                  t("workspace.dialog.manualPlaceholder"),
                 )}
+                aria-label={t("workspace.dialog.manual")}
+                aria-invalid={pathError || error ? true : undefined}
+                aria-describedby={pathError || error ? pathErrorId : undefined}
+                className="h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]"
               />
               <Button
                 type="submit"
@@ -243,13 +267,22 @@ export function WorkspaceProjectPicker({
               </Button>
             </form>
             {pathError || error ? (
-              <p role="alert" className="px-1 text-[11.5px] font-medium text-destructive">
+              <p
+                id={pathErrorId}
+                role="alert"
+                className="px-1 text-[11.5px] font-medium text-destructive"
+              >
                 {pathError ?? error}
               </p>
             ) : null}
           </div>
         </PopoverContent>
       </Popover>
+      {!compact && error && !open ? (
+        <span role="alert" className="ml-2 min-w-0 truncate text-[11.5px] font-medium text-destructive">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -37,6 +37,7 @@ dependencies = [
     "readability-lxml>=0.8.4,<1.0.0",
     "lxml-html-clean>=0.4.0,<1.0.0",
     "rich>=14.0.0,<15.0.0",
+    "qrcode[pil]>=8.0",
     "croniter>=6.0.0,<7.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "questionary>=2.0.0,<3.0.0",

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -68,6 +69,8 @@ class Schema(ABC):
             return [f"{label} should be number"]
         if t in _JSON_TYPE_MAP and t not in ("integer", "number") and not isinstance(val, _JSON_TYPE_MAP[t]):
             return [f"{label} should be {t}"]
+        if t == "number" and isinstance(val, float) and not math.isfinite(val):
+            return [f"{label} must be finite"]
 
         errors: list[str] = []
         if "enum" in schema and val not in schema["enum"]:

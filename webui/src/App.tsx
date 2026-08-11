@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { Eye, EyeOff, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -316,13 +316,23 @@ function AuthForm({
   onSecret: (secret: string) => void;
 }) {
   const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(
+    failed ? "invalid" : null,
+  );
+  const errorMessage = validationError ? t(`app.auth.${validationError}`) : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const secret = value.trim();
-    if (!secret) return;
+    if (!secret) {
+      setValidationError("required");
+      inputRef.current?.focus();
+      return;
+    }
     setSubmitting(true);
     onSecret(secret);
   };
@@ -333,27 +343,57 @@ function AuthForm({
         onSubmit={handleSubmit}
         className="flex w-full max-w-sm flex-col gap-4"
       >
-        <div className="flex flex-col items-center gap-1 text-center">
-          <p className="text-lg font-semibold">{t("app.auth.title")}</p>
-          <p className="text-sm text-muted-foreground">{t("app.auth.hint")}</p>
+        <div className="space-y-2">
+          <h1 className="text-sm font-medium text-foreground">
+            <label htmlFor="webui-access-password">{t("app.auth.label")}</label>
+          </h1>
+          <div className="relative">
+            <Input
+              ref={inputRef}
+              id="webui-access-password"
+              name="webui-access-password"
+              type={passwordVisible ? "text" : "password"}
+              autoComplete="current-password"
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setValidationError(null);
+              }}
+              disabled={submitting}
+              aria-invalid={validationError ? true : undefined}
+              aria-describedby={validationError ? "webui-auth-error" : undefined}
+              className="pr-10"
+              autoFocus
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={submitting}
+              aria-label={t(
+                passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
+              )}
+              aria-controls="webui-access-password"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {passwordVisible ? (
+                <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              ) : (
+                <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              )}
+            </Button>
+          </div>
+          {errorMessage ? (
+            <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
         </div>
-        {failed && (
-          <p className="text-center text-sm text-destructive">
-            {t("app.auth.invalid")}
-          </p>
-        )}
-        <Input
-          type="password"
-          placeholder={t("app.auth.placeholder")}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={submitting}
-          autoFocus
-        />
         <Button
           type="submit"
           className="w-full"
-          disabled={!value.trim() || submitting}
+          disabled={submitting}
         >
           {t("app.auth.submit")}
         </Button>
@@ -2041,7 +2081,7 @@ function Shell({
       setPairingBusyCode(code);
       setPairingError(null);
       try {
-        const payload = await runPairingAction(getToken(), action, code);
+        const payload = await runPairingAction(client, action, code);
         setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
         setSnoozedPairingCodes((current) => {
           if (!current.has(code)) return current;
@@ -2056,7 +2096,7 @@ function Shell({
         setPairingBusyCode(null);
       }
     },
-    [getToken, refreshPairingRequests],
+    [client, refreshPairingRequests],
   );
 
   const onDismissPairingRequest = useCallback((code: string) => {

@@ -27,6 +27,7 @@ import type {
   NanobotFeatureInfo,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 import {
   WEIXIN_AUTH_EXPIRED_MESSAGE,
@@ -64,6 +65,7 @@ export function WeixinPanel({
   onAction,
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
+  const { client } = useClient();
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const channelTx = channelTranslator(t, "weixin");
@@ -150,7 +152,7 @@ export function WeixinPanel({
     setSaveState("idle");
     try {
       const payload = await configureChannel(
-        context.token,
+        client,
         "weixin",
         channelValuesForSave(editableFieldsRef.current, values),
         { enable: context.enabled },
@@ -168,7 +170,7 @@ export function WeixinPanel({
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     if (

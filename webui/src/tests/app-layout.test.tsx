@@ -19,6 +19,7 @@ const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
+const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
@@ -242,6 +243,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
+    requestMutation = requestMutationSpy;
     discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
@@ -270,7 +272,8 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
-    setSidebarStateSpy.mockReset();
+    setSidebarStateSpy.mockReset().mockResolvedValue({});
+    requestMutationSpy.mockReset();
     discardTemporaryChatSpy.mockReset();
     let temporaryChatCounter = 0;
     newTemporaryChatSpy.mockImplementation(async () => (
@@ -315,9 +318,66 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
-    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+      .toBeInTheDocument();
+    const password = screen.getByLabelText("Password");
+    expect(password).toHaveAttribute(
+      "autocomplete",
+      "current-password",
+    );
+    expect(password).not.toHaveAttribute("placeholder");
+    expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Incorrect password. Try again."),
+    ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("toggles password visibility without changing the password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("Password");
+    await user.type(password, "correct horse battery staple");
+    expect(password).toHaveAttribute("type", "password");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("correct horse battery staple");
+    const hidePassword = screen.getByRole("button", { name: "Hide password" });
+    expect(hidePassword).toHaveFocus();
+
+    await user.click(hidePassword);
+
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("correct horse battery staple");
+    expect(screen.getByRole("button", { name: "Show password" })).toHaveFocus();
+  });
+
+  it("explains and focuses an empty auth password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("Password");
+    const connect = screen.getByRole("button", { name: "Connect" });
+    expect(connect).toBeEnabled();
+    fireEvent.click(connect);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter your password.",
+    );
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAttribute("aria-describedby", "webui-auth-error");
+    expect(password).toHaveFocus();
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
   it("shows the auth form when bootstrap does not issue an API token", async () => {
@@ -329,8 +389,11 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
-    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+      .toBeInTheDocument();
+    expect(
+      screen.queryByText("Incorrect password. Try again."),
+    ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -341,11 +404,16 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByPlaceholderText("Password");
+    const password = await screen.findByLabelText("Password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    expect(await screen.findByText("Invalid password. Try again.")).toBeInTheDocument();
+    const retryPassword = await screen.findByLabelText("Password");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Incorrect password. Try again.",
+    );
+    expect(retryPassword).toHaveAttribute("aria-invalid", "true");
+    expect(retryPassword).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -363,6 +431,25 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it("uses one main landmark and a page heading in desktop settings", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    await act(async () => {
+      await import("@/components/settings/SettingsView");
+    });
+
+    expect(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll("main")).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
   });
 
   it("places Automations after Skills in the main sidebar", async () => {
@@ -652,6 +739,57 @@ describe("App layout", () => {
     });
   });
 
+  it("preserves the first message when the gateway rejects a project", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    createChatSpy.mockRejectedValueOnce(
+      new Error("workspace_scope_rejected:project_path must be an existing directory"),
+    );
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "restricted",
+        default_scope: {
+          project_path: "C:\\workspace",
+          project_name: "workspace",
+          access_mode: "restricted",
+          restrict_to_workspace: true,
+        },
+        controls: { can_change_project: true, can_use_full_access: true },
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "Choose project" }));
+    fireEvent.change(await screen.findByLabelText("Paste path"), {
+      target: { value: "C:\\missing-project" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    const message = screen.getByLabelText("Message input");
+    fireEvent.change(message, { target: { value: "keep this first message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    expect(message).toHaveValue("keep this first message");
+    const projectButton = screen.getByRole("button", { name: "Choose project" });
+    await waitFor(() => expect(projectButton).toHaveFocus());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    fireEvent.click(projectButton);
+    const projectPath = await screen.findByLabelText("Paste path");
+    expect(projectPath).toHaveValue("C:\\missing-project");
+    expect(projectPath).toHaveAttribute("aria-invalid", "true");
+    expect(projectPath).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    expect(window.location.hash).toBe("");
+    consoleError.mockRestore();
+  });
+
   it("restores the Settings route after a restart fallback hash", async () => {
     localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
     localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
@@ -746,40 +884,36 @@ describe("App layout", () => {
         }],
         raw_markdown: "---\nname: github\n---\nUse GitHub CLI.",
       },
-      "/api/webui/skills/update?name=github&enabled=false": {
-        skills: [
-          {
-            name: "cron",
-            description: "Schedule reminders.",
-            source: "builtin",
-            enabled: true,
-            deletable: false,
-            available: true,
-          },
-          {
-            name: "github",
-            description: "Work with GitHub.",
-            source: "builtin",
-            enabled: false,
-            deletable: false,
-            available: false,
-            unavailable_reason: "CLI: gh",
-          },
-          {
-            name: "custom-skill",
-            description: "A workspace skill.",
-            source: "workspace",
-            enabled: true,
-            deletable: true,
-            available: true,
-          },
-        ],
-        last_action: {
-          name: "github",
-          enabled: false,
-          deleted: false,
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "cron",
+          description: "Schedule reminders.",
+          source: "builtin",
+          enabled: true,
+          deletable: false,
+          available: true,
         },
-      },
+        {
+          name: "github",
+          description: "Work with GitHub.",
+          source: "builtin",
+          enabled: false,
+          deletable: false,
+          available: false,
+          unavailable_reason: "CLI: gh",
+        },
+        {
+          name: "custom-skill",
+          description: "A workspace skill.",
+          source: "workspace",
+          enabled: true,
+          deletable: true,
+          available: true,
+        },
+      ],
+      last_action: { name: "github", enabled: false, deleted: false },
     });
 
     render(<App />);
@@ -879,14 +1013,10 @@ describe("App layout", () => {
         },
         raw_markdown: "---\nname: custom-skill\n---\nWorkspace instructions.",
       },
-      "/api/webui/skills/delete?name=custom-skill": {
-        skills: [],
-        last_action: {
-          name: "custom-skill",
-          enabled: false,
-          deleted: true,
-        },
-      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [],
+      last_action: { name: "custom-skill", enabled: false, deleted: true },
     });
 
     render(<App />);
@@ -1018,9 +1148,8 @@ describe("App layout", () => {
       "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
         trends: { "acme/agent-skills/react-testing": [] },
       },
-      "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing":
-        () => pendingInstall,
     });
+    requestMutationSpy.mockImplementationOnce(() => pendingInstall);
 
     render(<App />);
 
@@ -1068,11 +1197,14 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/skills/install?provider=skills_sh&source=acme%2Fagent-skills&skill=react-testing",
-        expect.objectContaining({
-          headers: { Authorization: expect.any(String) },
-        }),
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "skill.install",
+        {
+          provider: "skills_sh",
+          source: "acme/agent-skills",
+          skill: "react-testing",
+        },
+        150_000,
       );
     });
     fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
@@ -1230,14 +1362,12 @@ describe("App layout", () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/webui/automations": { jobs: [pastOneShot] },
-      "/api/webui/automations/update?id=past-one-shot": {
-        jobs: [
-          {
-            ...pastOneShot,
-            payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
-          },
-        ],
-      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      jobs: [{
+        ...pastOneShot,
+        payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
+      }],
     });
 
     render(<App />);
@@ -1263,19 +1393,17 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/automations/update?id=past-one-shot",
-        expect.any(Object),
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "automation.update",
+        {
+          id: "past-one-shot",
+          values: {
+            name: "Past one-shot",
+            message: "Updated one-shot message",
+          },
+        },
+        20_000,
       );
-    });
-    const updateCall = vi.mocked(fetch).mock.calls.find(
-      ([url]) => String(url) === "/api/webui/automations/update?id=past-one-shot",
-    );
-    expect(updateCall).toBeTruthy();
-    const headers = updateCall?.[1]?.headers as Record<string, string>;
-    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
-      name: "Past one-shot",
-      message: "Updated one-shot message",
     });
   });
 
@@ -1698,6 +1826,9 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
       expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
@@ -2450,17 +2581,14 @@ describe("App layout", () => {
     mockFetchRoutes({
       "/api/settings": initialSettings,
     });
-    const fetchMock = vi.mocked(fetch);
     window.history.replaceState(null, "", "/#/settings?section=runtime");
 
     render(<App />);
 
     expect(await screen.findByText("UTC")).toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).startsWith("/api/settings/update?timezone="),
-      ),
-    ).toHaveLength(0);
+      requestMutationSpy.mock.calls.some(([action]) => action === "settings.agent.update"),
+    ).toBe(false);
     expect(screen.queryByRole("heading", { name: "Regional" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("Used for schedules and time-aware replies."),

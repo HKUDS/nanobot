@@ -85,6 +85,10 @@ class _GatewayAgentContractStub:
     tools = ToolRegistry()
 
     @staticmethod
+    def mcp_runtime_status() -> dict[str, str]:
+        return {}
+
+    @staticmethod
     def pending_cron_job_ids_for_session(_session_key: str) -> set[str]:
         return set()
 

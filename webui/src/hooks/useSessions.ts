@@ -257,13 +257,13 @@ export function useSessions(): {
 
   const deleteChat = useCallback(
     async (key: string, options?: { deleteAutomations?: boolean }) => {
-      const result = await apiDeleteSession(tokenRef.current, key, options);
+      const result = await apiDeleteSession(client, key, options);
       if (!result.deleted) return result;
       optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
       return result;
     },
-    [],
+    [client],
   );
 
   const getSessionAutomations = useCallback(async (key: string) => {
