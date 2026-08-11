@@ -1297,7 +1297,7 @@ class AgentRunner:
         calls in one round and their relative order isn't semantically
         meaningful for loop detection.
         """
-        parts = []
+        parts: list[str] = []
         for tc in tool_calls:
             if isinstance(tc.arguments, str):
                 args_repr = tc.arguments
