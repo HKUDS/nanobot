@@ -10,6 +10,7 @@ from nanobot.agent.plugins import (
     AGENT_PLUGIN_SCHEMA,
     agent_plugin_mcp_servers,
     discover_agent_plugins,
+    enabled_agent_plugin_skill_dirs,
     enabled_agent_plugin_skills,
     set_agent_plugin_enabled,
 )
@@ -206,7 +207,7 @@ def test_plugin_mcp_namespaces_cannot_shadow_plugin_identities(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_restricted_project_can_read_only_enabled_plugin_skill(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
@@ -222,6 +223,15 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     read_tool = ReadFileTool.create(ctx)
     write_tool = WriteFileTool.create(ctx)
     set_agent_plugin_enabled(agent_workspace, "demo", True)
+    activation_checks = 0
+    activation_marker = agent_plugins._activation_marker
+
+    def count_activation_checks(plugin: agent_plugins.AgentPlugin) -> str | None:
+        nonlocal activation_checks
+        activation_checks += 1
+        return activation_marker(plugin)
+
+    monkeypatch.setattr(agent_plugins, "_activation_marker", count_activation_checks)
     scope = validate_workspace_scope_payload(
         {"project_path": str(project), "access_mode": "restricted"},
         default_workspace=agent_workspace,
@@ -231,6 +241,7 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     token = bind_workspace_scope(scope)
     try:
         read_result = await read_tool.execute(path=str(resource))
+        repeated_read_result = await read_tool.execute(path=str(resource))
         write_result = await write_tool.execute(path=str(resource), content="changed")
         set_agent_plugin_enabled(agent_workspace, "demo", False)
         disabled_result = await read_tool.execute(path=str(resource))
@@ -238,6 +249,8 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
         reset_workspace_scope(token)
 
     assert "plugin reference" in read_result
+    assert "File unchanged since last read" in repeated_read_result
+    assert activation_checks == 1
     assert "outside allowed directory" in write_result
     assert "outside allowed directory" in disabled_result
     assert resource.read_text(encoding="utf-8") == "plugin reference"
@@ -330,6 +343,7 @@ def test_plugin_activation_does_not_survive_in_place_code_replacement(
     tmp_path: Path,
 ) -> None:
     plugin = _plugin(tmp_path, "desktop")
+    _skill(plugin / "skills", "demo")
     executable = plugin / "server.py"
     executable.write_text("print('trusted')\n", encoding="utf-8")
     _write_json(
@@ -347,8 +361,10 @@ def test_plugin_activation_does_not_survive_in_place_code_replacement(
     )
     set_agent_plugin_enabled(tmp_path, "desktop", True)
     assert discover_agent_plugins(tmp_path)[0].enabled is True
+    assert enabled_agent_plugin_skill_dirs(tmp_path) == (plugin / "skills" / "demo",)
 
     executable.write_text("print('replacement')\n", encoding="utf-8")
 
     assert discover_agent_plugins(tmp_path)[0].enabled is False
+    assert enabled_agent_plugin_skill_dirs(tmp_path) == ()
     assert agent_plugin_mcp_servers(tmp_path) == {}

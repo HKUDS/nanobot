@@ -150,13 +150,12 @@ class _FsTool(Tool):
     def _resolve_read(self, path: str) -> Path:
         plugin_skill_dirs: list[Path] = []
         if self._workspace is not None:
-            from nanobot.agent.plugins import enabled_agent_plugin_skills
+            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
 
             try:
-                plugin_skill_dirs = [
-                    skill.parent
-                    for _name, skill in enabled_agent_plugin_skills(Path(self._workspace))
-                ]
+                plugin_skill_dirs = list(
+                    enabled_agent_plugin_skill_dirs(Path(self._workspace))
+                )
             except (OSError, RuntimeError):
                 pass
         return self._resolve_with_extra(

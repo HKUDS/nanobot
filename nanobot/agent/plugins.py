@@ -23,6 +23,7 @@ AGENT_PLUGIN_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.js
 _PLUGIN_NAME = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 _MCP_SERVER_FIELDS = {"type", "command", "args", "env", "cwd"}
 _MAX_LOGO_BYTES = 256 * 1024
+_SKILL_CACHE: dict[tuple[Path, Path], tuple[tuple[str, Path], ...]] = {}
 
 
 @dataclass(frozen=True)
@@ -64,13 +65,35 @@ def _installed_plugins(workspace: Path) -> list[AgentPlugin]:
 
 
 def enabled_agent_plugin_skills(workspace: Path) -> list[tuple[str, Path]]:
-    """Return skills from plugins the user has explicitly enabled."""
-    return [
+    """Verify and return skills from plugins the user has explicitly enabled."""
+    skills = [
         skill
         for plugin in _installed_plugins(workspace)
         if _enabled(workspace, plugin)
         for skill in _discover_plugin_skills(plugin.name, plugin.root)
     ]
+    _SKILL_CACHE[_skill_cache_key(workspace)] = tuple(skills)
+    return skills
+
+
+def enabled_agent_plugin_skill_dirs(workspace: Path) -> tuple[Path, ...]:
+    """Return the last verified skill roots, verifying once on a cache miss."""
+    key = _skill_cache_key(workspace)
+    skills = _SKILL_CACHE.get(key)
+    if skills is None:
+        skills = tuple(enabled_agent_plugin_skills(workspace))
+    return tuple(path.parent for _name, path in skills)
+
+
+def _skill_cache_key(workspace: Path) -> tuple[Path, Path]:
+    return (
+        workspace.expanduser().resolve(),
+        get_config_path().expanduser().resolve(),
+    )
+
+
+def _invalidate_skill_cache(workspace: Path) -> None:
+    _SKILL_CACHE.pop(_skill_cache_key(workspace), None)
 
 
 def _load_manifest(plugin_root: Path) -> AgentPlugin | None:
@@ -155,6 +178,7 @@ def set_agent_plugin_enabled(workspace: Path, name: str, enabled: bool) -> None:
         marker.chmod(0o600)
     else:
         marker.unlink(missing_ok=True)
+    _invalidate_skill_cache(workspace)
 
 
 def _string(value: object) -> str:
@@ -314,6 +338,8 @@ def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
         current = marker.read_text(encoding="utf-8")
         activation = _activation_marker(plugin)
         if activation is None:
+            marker.unlink(missing_ok=True)
+            _invalidate_skill_cache(workspace)
             return False
         if current == activation:
             return True
@@ -321,8 +347,11 @@ def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
             marker.write_text(activation, encoding="utf-8")
             marker.chmod(0o600)
             return True
+        marker.unlink(missing_ok=True)
+        _invalidate_skill_cache(workspace)
         return False
     except OSError:
+        _invalidate_skill_cache(workspace)
         return False
 
 
