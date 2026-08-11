@@ -20,6 +20,21 @@ def test_subprocess_env_excludes_api_keys(monkeypatch, tmp_path) -> None:
     assert "PATH" in env
 
 
+def test_subprocess_env_excludes_api_keys_on_windows(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.apps.cli.service.sys.platform", "win32")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-leak")
+
+    manager = CliAppManager(workspace=tmp_path, data_dir=tmp_path / "cli-apps")
+    env = manager._subprocess_env()
+
+    assert "OPENAI_API_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+    assert env["PYTHONUNBUFFERED"] == "1"
+    assert env["SYSTEMROOT"]
+    assert all(isinstance(value, str) for value in env.values())
+
+
 def test_run_passes_filtered_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-leak")
     manager = CliAppManager(workspace=tmp_path, data_dir=tmp_path / "cli-apps")

@@ -1010,7 +1010,7 @@ class CliAppManager:
                 "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
                 "PYTHONUNBUFFERED": "1",
             }
-            return {k: v for k, v in env.items() if v is not None}
+            return env
         return {
             "HOME": os.environ.get("HOME", "/tmp"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
