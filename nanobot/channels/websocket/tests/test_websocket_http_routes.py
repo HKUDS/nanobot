@@ -75,6 +75,7 @@ def _make_handler(
     local_trigger_pending_ids: Any | None = None,
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
+    mcp_reload: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -94,6 +95,7 @@ def _make_handler(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
+        mcp_reload=mcp_reload,
     )
 
 
@@ -111,6 +113,7 @@ def _ch(
     local_trigger_pending_ids: Any | None = None,
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
+    mcp_reload: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -134,6 +137,7 @@ def _ch(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
+        mcp_reload=mcp_reload,
     )
     return InProcessHttpChannel(cfg, bus, gateway=gateway)
 
@@ -2054,14 +2058,15 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         _custom_action,
     )
 
-    async def _hot_reload(_bus):
+    async def _hot_reload():
         return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}
 
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_mcp_reload",
-        _hot_reload,
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=29913,
+        mcp_reload=_hot_reload,
     )
-    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)
     server_task = asyncio.create_task(channel.start())
     try:
         deny = await _http_get("http://127.0.0.1:29913/api/settings/mcp-presets")

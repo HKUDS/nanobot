@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent import context as agent_context
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import (
@@ -712,7 +711,7 @@ def test_exec_session_manager_preserves_single_cleanup_error():
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
+def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
     async def run() -> None:
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
@@ -723,14 +722,13 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
         sid = _session_id(initial)
         process = manager._sessions[sid].process
 
-        monkeypatch.setattr(agent_context, "close_mcp", lambda _state: asyncio.sleep(0))
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
         loop._exec_session_manager = manager
         loop.subagents = SimpleNamespace(close=AsyncMock())
 
-        await loop.close_mcp()
-        await loop.close_mcp()
+        await loop.aclose()
+        await loop.aclose()
 
         assert process.returncode is not None
         assert manager._sessions == {}
@@ -739,7 +737,7 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(monkeypatch):
+def test_agent_loop_shutdown_attempts_all_cleanup_after_errors():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
@@ -749,16 +747,12 @@ def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(monkeypatch):
         loop._exec_session_manager = SimpleNamespace(
             close_all=AsyncMock(side_effect=OSError("exec cleanup failed")),
         )
-        close_mcp = AsyncMock()
-        monkeypatch.setattr(agent_context, "close_mcp", close_mcp)
-
         with pytest.raises(BaseExceptionGroup) as exc_info:
-            await loop.close_mcp()
+            await loop.aclose()
 
         assert len(exc_info.value.exceptions) == 2
         loop.subagents.close.assert_awaited_once()
         loop._exec_session_manager.close_all.assert_awaited_once()
-        close_mcp.assert_awaited_once_with(loop)
 
     asyncio.run(run())
 
@@ -892,7 +886,7 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_preserves_single_cleanup_error(monkeypatch):
+def test_agent_loop_shutdown_preserves_single_cleanup_error():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
@@ -900,13 +894,9 @@ def test_agent_loop_shutdown_preserves_single_cleanup_error(monkeypatch):
             close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
         )
         loop._exec_session_manager = SimpleNamespace(close_all=AsyncMock())
-        close_mcp = AsyncMock()
-        monkeypatch.setattr(agent_context, "close_mcp", close_mcp)
-
         with pytest.raises(RuntimeError, match="subagent cleanup failed"):
-            await loop.close_mcp()
+            await loop.aclose()
 
         loop._exec_session_manager.close_all.assert_awaited_once()
-        close_mcp.assert_awaited_once_with(loop)
 
     asyncio.run(run())

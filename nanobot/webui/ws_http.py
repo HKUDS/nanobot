@@ -14,7 +14,7 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -308,6 +308,7 @@ class GatewayHTTPHandler:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
@@ -351,6 +352,7 @@ class GatewayHTTPHandler:
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
             mcp_runtime_status=mcp_runtime_status,
+            mcp_reload=mcp_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 

@@ -538,7 +538,7 @@ class TestNewCommandArchival:
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
 
-        await loop.close_mcp()
+        await loop.aclose()
         assert call_count == 1
 
     @pytest.mark.asyncio
@@ -572,7 +572,7 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
 
-        await loop.close_mcp()
+        await loop.aclose()
         assert archived_count == 3
         assert archived_session_key == "cli:test"
 
@@ -603,8 +603,8 @@ class TestNewCommandArchival:
         assert loop.sessions.get_or_create("cli:test").messages == []
 
     @pytest.mark.asyncio
-    async def test_close_mcp_drains_background_tasks(self, tmp_path: Path) -> None:
-        """close_mcp waits for background tasks to complete."""
+    async def test_aclose_drains_background_tasks(self, tmp_path: Path) -> None:
+        """aclose waits for background tasks to complete."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -632,5 +632,5 @@ class TestNewCommandArchival:
 
         assert not archived.is_set()
         release_archive.set()
-        await loop.close_mcp()
+        await loop.aclose()
         assert archived.is_set()

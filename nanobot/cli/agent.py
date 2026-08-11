@@ -13,6 +13,8 @@ from rich.console import Console
 from nanobot import __logo__
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.mcp import MCPProvider
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -84,6 +86,8 @@ def agent(
     # Create cron service with workspace-scoped store
     cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(runtime_config, tools)
 
     _set_nanobot_logs(logs)
 
@@ -95,6 +99,7 @@ def agent(
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
+            tool_registry=tools,
         )
     except ValueError as exc:
         _print_agent_start_error(exc)
@@ -105,6 +110,12 @@ def agent(
             format_restart_completed_message(restart_notice.started_at_raw),
             render_markdown=False,
         )
+
+    async def _close_runtime() -> None:
+        try:
+            await agent_loop.aclose()
+        finally:
+            await mcp_provider.aclose()
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
@@ -149,30 +160,33 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once() -> None:
-            renderer = StreamRenderer(
-                render_markdown=markdown,
-                bot_name=runtime_config.agents.defaults.bot_name,
-                bot_icon=runtime_config.agents.defaults.bot_icon,
-            )
-            response = await agent_loop.process_direct(
-                message,
-                session_id,
-                on_progress=_make_progress(renderer),
-                on_stream=renderer.on_delta,
-                on_stream_end=renderer.on_end,
-            )
-            if not renderer.streamed:
-                await renderer.close()
-                print_kwargs: dict[str, Any] = {}
-                if renderer.header_printed:
-                    print_kwargs["show_header"] = False
-                cli_terminal._print_agent_response(
-                    response.content if response else "",
+            try:
+                await mcp_provider.connect()
+                renderer = StreamRenderer(
                     render_markdown=markdown,
-                    metadata=response.metadata if response else None,
-                    **print_kwargs,
+                    bot_name=runtime_config.agents.defaults.bot_name,
+                    bot_icon=runtime_config.agents.defaults.bot_icon,
                 )
-            await agent_loop.close_mcp()
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    on_progress=_make_progress(renderer),
+                    on_stream=renderer.on_delta,
+                    on_stream_end=renderer.on_end,
+                )
+                if not renderer.streamed:
+                    await renderer.close()
+                    print_kwargs: dict[str, Any] = {}
+                    if renderer.header_printed:
+                        print_kwargs["show_header"] = False
+                    cli_terminal._print_agent_response(
+                        response.content if response else "",
+                        render_markdown=markdown,
+                        metadata=response.metadata if response else None,
+                        **print_kwargs,
+                    )
+            finally:
+                await _close_runtime()
 
         asyncio.run(run_once())
     else:
@@ -209,6 +223,7 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive() -> None:
+            await mcp_provider.connect()
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
@@ -347,6 +362,6 @@ def agent(
                 agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
+                await _close_runtime()
 
         asyncio.run(run_interactive())

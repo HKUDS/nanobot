@@ -14,6 +14,8 @@ from rich.console import Console
 from nanobot import __logo__, __version__
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.mcp import MCPProvider
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -233,6 +235,7 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
 
 async def _close_gateway_runtime(
     agent: AgentLoop,
+    mcp_provider: MCPProvider,
     channels: Any,
     tasks: list[asyncio.Task[Any]],
     runtime_tasks: asyncio.Future[list[Any]] | None,
@@ -240,18 +243,13 @@ async def _close_gateway_runtime(
     task_wait_timeout: float = 15.0,
     close_timeout: float = 15.0,
 ) -> None:
-    """Cancel runtime tasks, then deterministically close agent resources.
+    """Cancel runtime tasks, then deterministically close application resources.
 
     Order matters: runtime tasks (including the agent loop and any in-flight
-    turn) are cancelled and awaited -- bounded -- before exec sessions,
-    subagents, and MCP servers are torn down, so no active turn is using a
-    shared resource when it closes. The final close is bounded and idempotent:
-    the agent loop's own finally also calls ``close_mcp()``, so this runs again
-    as a no-op when that path already completed, and as the guaranteed final
-    close when it was skipped or cut short (which previously left asyncio
-    subprocess transports alive past ``loop.close()``, producing
-    "RuntimeError: Event loop is closed" noise and potentially orphaned
-    processes at interpreter exit).
+    turn) are cancelled and awaited -- bounded -- before the loop-owned resources
+    and the application-owned MCP provider are torn down. The final close is
+    bounded and idempotent, so it also covers a cancelled or incomplete loop
+    cleanup without leaving subprocess transports alive past ``loop.close()``.
     """
     # Some SDKs swallow task cancellation while attempting to reconnect.
     # Close channel transports before waiting for their runners to exit.
@@ -272,10 +270,14 @@ async def _close_gateway_runtime(
             task.cancel()
     if runtime_tasks is not None and not runtime_tasks.done():
         runtime_tasks.cancel()
-    try:
-        await asyncio.wait_for(agent.close_mcp(), timeout=close_timeout)
-    except BaseException as exc:  # noqa: BLE001 - shutdown must proceed
-        logger.warning("Gateway shutdown: agent resource cleanup incomplete: {}", exc)
+    for label, close in (
+        ("agent", agent.aclose),
+        ("MCP provider", mcp_provider.aclose),
+    ):
+        try:
+            await asyncio.wait_for(close(), timeout=close_timeout)
+        except BaseException as exc:  # noqa: BLE001 - shutdown must proceed
+            logger.warning("Gateway shutdown: {} cleanup incomplete: {}", label, exc)
     # Retrieving an already-finished gather prevents noisy unhandled exceptions,
     # but never wait for it here: its children were bounded individually above.
     if runtime_tasks is not None and runtime_tasks.done():
@@ -414,6 +416,9 @@ def _run_gateway(
         route_policy=WebuiTurnRoutePolicy(session_manager),
     )
 
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(config, tools)
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -431,6 +436,7 @@ def _run_gateway(
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
+        tool_registry=tools,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
@@ -512,6 +518,7 @@ def _run_gateway(
                 prompt, last_cursor = result
                 key = dream_session_key()
                 dream_runtime = agent.dream_runtime()
+                await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
@@ -589,6 +596,7 @@ def _run_gateway(
             if isinstance(message_tool, MessageTool):
                 suppress_token = message_tool.set_suppress_delivery(True)
             try:
+                await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
                     session_key="heartbeat",
@@ -668,7 +676,8 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
-        webui_mcp_runtime_status=agent.mcp_runtime_status,
+        webui_mcp_runtime_status=mcp_provider.runtime_status,
+        webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
         config_path=Path(config_path),
     )
@@ -844,6 +853,13 @@ def _run_gateway(
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
+            async def _run_agent() -> None:
+                try:
+                    await mcp_provider.connect()
+                    await agent.run()
+                finally:
+                    await mcp_provider.aclose()
+
             tasks = [
                 asyncio.create_task(
                     watch_config_file(
@@ -852,7 +868,7 @@ def _run_gateway(
                     ),
                     name="nanobot-config-watcher",
                 ),
-                asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
+                asyncio.create_task(_run_agent(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(
                     run_local_trigger_queue(
@@ -910,7 +926,13 @@ def _run_gateway(
                 agent.stop()
                 # Cancel runtime tasks first, then deterministically close
                 # exec/MCP resources while the event loop is still alive.
-                await _close_gateway_runtime(agent, channels, tasks, runtime_tasks)
+                await _close_gateway_runtime(
+                    agent,
+                    mcp_provider,
+                    channels,
+                    tasks,
+                    runtime_tasks,
+                )
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).

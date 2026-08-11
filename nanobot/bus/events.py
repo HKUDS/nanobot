@@ -16,7 +16,6 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 # loop to update runtime state without going through a user session.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 RUNTIME_CONTROL_ACK = "_ack"
-RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
 RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD = "image_generation_reload"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
