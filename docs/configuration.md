@@ -2349,7 +2349,7 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 
 ### Agent Plugins v1
 
-nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both.
+nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both. Agent Plugins are the common package and activation boundary for installable capabilities; they do not replace native providers, channels, tools, standalone workspace skills, or directly configured MCP servers.
 
 Directory presence means installed; activation is explicit in **Apps**. Skills use progressive loading and `$skill-name` invocation, with workspace > plugin > built-in precedence.
 Enabled `stdio` servers receive contained `PLUGIN_ROOT` and isolated `PLUGIN_DATA` paths; explicit

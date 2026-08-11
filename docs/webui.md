@@ -198,12 +198,16 @@ Test a new channel with a private DM. When a supported channel sends a pairing c
 
 ## Apps
 
-Open Apps from the sidebar to manage tools that nanobot can attach to a chat
-turn. The default **Ready** view shows only tools that can be used immediately:
+Open Apps from the sidebar to review and manage installable capabilities. The
+default **Ready** view shows only capabilities that can be used immediately:
 
-- **Apps** are local command-line adapters that nanobot runs on your machine.
-  Installing an adapter does not modify the native desktop or web app it
-  connects to.
+- **Agent Plugins** are local packages that can bundle skills, MCP servers, or
+  both. A package under `<workspace>/plugins/` is installed but remains inactive
+  until you enable it in Apps.
+- **CLI Apps** are local command-line adapters that nanobot runs on your
+  machine. Their installer manages the executable and exposes its adapter
+  through the same plugin activation model. Installing an adapter does not
+  modify the native desktop or web app it connects to.
 - **MCP** lists Model Context Protocol servers. Presets provide known
   configurations, and the **Add MCP server** panel accepts stdio, HTTP, and SSE
   servers. Custom HTTP/SSE servers can use no authentication, OAuth, or request
@@ -219,6 +223,7 @@ are not tools that can be attached to a turn with `@`. Manage them from
 included in nanobot and activate automatically when a file is attached. The
 equivalent CLI for optional integrations remains `nanobot plugins`. See
 [`cli-reference.md`](./cli-reference.md#optional-features).
+That command manages nanobot runtime extras, not Agent Plugin packages.
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
 preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
@@ -231,8 +236,9 @@ endpoint and exposes `web_search` and `web_fetch` without requiring an API key.
 It is an optional integration and does not replace nanobot's built-in web search
 provider; mention `@parallel-search` when a turn should use it.
 
-After an App or MCP server is available, mention it from the composer with `@`
-to attach that tool to the next message.
+After a CLI App or MCP server is available, mention it from the composer with
+`@` to attach that tool to the next message. Plugin-provided skills participate
+in normal skill discovery and can be invoked with `$skill-name`.
 
 ## Skills
 
