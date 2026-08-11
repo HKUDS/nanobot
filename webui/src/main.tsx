@@ -31,8 +31,13 @@ ReactDOM.createRoot(root).render(<App />);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js", {
-      updateViaCache: "none",
-    });
+    navigator.serviceWorker
+      .register("/sw.js", {
+        updateViaCache: "none",
+      })
+      .catch(() => {
+        // Service workers are progressive enhancement; registration failures
+        // (unsupported proxies, blocked storage) must not break the app.
+      });
   });
 }
