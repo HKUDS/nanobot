@@ -14,17 +14,17 @@
       "type": "image/png"
     },
     {
-      "src": "/brand/nanobot_icon_192.png",
+      "src": "/brand/nanobot_icon_192.png?v=2",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/brand/nanobot_icon_512.png",
+      "src": "/brand/nanobot_icon_512.png?v=2",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/brand/nanobot_icon_maskable.png",
+      "src": "/brand/nanobot_icon_maskable.png?v=2",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
