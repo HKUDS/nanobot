@@ -1047,6 +1047,14 @@ export function ParticleObject({
   }, [initialOptions]);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // OrbitControls sets touch-action to none while it attaches its listeners.
+    // Restore the embedding surface's policy after the controller is created.
+    canvas.style.touchAction = canvasTouchAction;
+  }, [canvasTouchAction]);
+
+  useEffect(() => {
     instanceRef.current?.setOptions(options);
   });
 

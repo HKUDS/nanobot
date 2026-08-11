@@ -9,7 +9,7 @@ nanobot Python distribution (`pip install nanobot-ai`).
 
 - **Source**: https://github.com/DavidHDev/canvas-ui
 - **Bundled**: `webui/src/components/canvasui/ParticleObject.tsx` and the compiled
-  `nanobot/web/dist/assets/index-*.js`
+  `nanobot/web/dist/assets/ParticleObject-*.js`
 - **Modifications**: adapted for nanobot's React WebUI, pointer interaction, reduced-motion
   behavior, and mobile scrolling
 

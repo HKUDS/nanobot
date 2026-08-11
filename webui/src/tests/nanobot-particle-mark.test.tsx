@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,10 +32,14 @@ describe("NanobotParticleMark", () => {
 
     render(<NanobotParticleMark theme="dark" />);
 
-    expect(screen.getByTestId("nanobot-particle-mark")).toHaveAttribute(
+    const mark = screen.getByTestId("nanobot-particle-mark");
+    expect(mark).toHaveAttribute(
       "data-particle-profile",
       "desktop",
     );
+    const source = mark.querySelector("img")?.getAttribute("src");
+    expect(source).toBe("/brand/nanobot_mark.svg");
+    expect(existsSync(resolve(process.cwd(), "public", source!.slice(1)))).toBe(true);
   });
 
   it("uses the compact particle profile on mobile viewports", () => {

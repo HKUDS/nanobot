@@ -6,7 +6,7 @@ interface NanobotParticleMarkProps {
   theme: "light" | "dark";
 }
 
-const LOGO_SRC = "/brand/nanobot_icon.png";
+const LOGO_SRC = "/brand/nanobot_mark.svg";
 const PARTICLES_ENABLED = import.meta.env.MODE !== "test";
 
 const ParticleObject = lazy(async () => {
