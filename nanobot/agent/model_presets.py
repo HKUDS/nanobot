@@ -25,6 +25,10 @@ def configured_model_presets(config: Config) -> dict[str, ModelPresetConfig]:
     return {**config.model_presets, "default": config.resolve_default_preset()}
 
 
+def configured_spawn_presets(config: Config) -> dict[str, ModelPresetConfig]:
+    return {name: config.model_presets[name] for name in config.agents.defaults.spawn_presets if name in config.model_presets}
+
+
 def load_model_preset_catalog(
     config_path: Path | None = None,
 ) -> dict[str, ModelPresetConfig]:

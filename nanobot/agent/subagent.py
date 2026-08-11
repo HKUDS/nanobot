@@ -13,6 +13,7 @@ from typing import Any, Callable, TypedDict
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.model_presets import PresetSnapshotLoader
 from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
@@ -27,7 +28,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
@@ -35,7 +36,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -104,6 +105,9 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        spawn_presets: dict[str, ModelPresetConfig] | None = None,
+        spawn_presets_loader: Callable[[], dict[str, ModelPresetConfig]] | None = None,
+        preset_snapshot_loader: PresetSnapshotLoader | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -146,6 +150,9 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self.spawn_presets: dict[str, ModelPresetConfig] = spawn_presets or {}
+        self._spawn_presets_loader = spawn_presets_loader
+        self._preset_snapshot_loader = preset_snapshot_loader
         self.fail_on_tool_error = (
             fail_on_tool_error
             if fail_on_tool_error is not None
@@ -228,6 +235,33 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
+    def available_spawn_presets(self) -> dict[str, ModelPresetConfig]:
+        if self._spawn_presets_loader is None:
+            return self.spawn_presets
+        return self._spawn_presets_loader()
+
+    def _validate_spawn_preset(self, model_preset: str | None) -> str | None:
+        """Validate model_preset against the spawn allowlist. Returns error string or None."""
+        if model_preset is None:
+            return None
+        try:
+            available_presets = self.available_spawn_presets()
+        except Exception as e:
+            logger.exception("Failed to load current spawn_presets")
+            return f"Cannot spawn subagent with model_preset {model_preset!r}: {e}"
+        if model_preset not in available_presets:
+            available = ", ".join(sorted(available_presets)) or "(none)"
+            return (
+                f"Cannot spawn subagent with model_preset {model_preset!r}: "
+                f"not in allowed spawn_presets. Available: {available}"
+            )
+        if self._preset_snapshot_loader is None:
+            return (
+                f"Cannot spawn subagent with model_preset {model_preset!r}: "
+                f"no preset loader configured. Contact the operator."
+            )
+        return None
+
     async def spawn(
         self,
         task: str,
@@ -238,14 +272,16 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        model_preset: str | None = None,
         *,
         runtime: LLMRuntime | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
+        error = self._validate_spawn_preset(model_preset)
+        if error is not None:
+            return error
         if runtime is None:
             runtime = self._compat_spawn_runtime()
-        if temperature is not None:
-            runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
@@ -272,6 +308,8 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                model_preset,
+                temperature=temperature,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -301,14 +339,16 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        model_preset: str | None = None,
         *,
         runtime: LLMRuntime | None = None,
     ) -> str:
         """Run a subagent synchronously and return its result to the caller."""
+        error = self._validate_spawn_preset(model_preset)
+        if error is not None:
+            return ToolResult.error(error)
         if runtime is None:
             runtime = self._compat_spawn_runtime()
-        if temperature is not None:
-            runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
@@ -334,7 +374,9 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                model_preset,
                 announce=False,
+                temperature=temperature,
             )
         )
         self._running_tasks[task_id] = inline_task
@@ -363,8 +405,10 @@ class SubagentManager:
         runtime: LLMRuntime,
         origin_message_id: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        model_preset: str | None = None,
         *,
         announce: bool = True,
+        temperature: float | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -402,6 +446,11 @@ class SubagentManager:
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
+                if model_preset is not None and self._preset_snapshot_loader is not None:
+                    snapshot = self._preset_snapshot_loader(model_preset)
+                    runtime = runtime_from_provider_snapshot(snapshot)
+                if temperature is not None:
+                    runtime = runtime.with_generation_overrides(temperature=temperature)
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -452,7 +501,8 @@ class SubagentManager:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            final_result = f"Error: {e}"
+            preset_ctx = f" (model_preset={model_preset!r})" if model_preset else ""
+            final_result = f"Error{preset_ctx}: {e}"
             if announce:
                 await self._announce_result(
                     task_id,
