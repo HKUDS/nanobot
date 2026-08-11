@@ -203,7 +203,7 @@
       "currentModel": "새 응답에 사용됩니다.",
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
-      "brandLogos": "설정에서 타사 제공자와 CLI 로고를 표시합니다.",
+      "brandLogos": "외부 아이콘 서비스에서 타사 브랜드 로고를 불러옵니다. 끄면 로컬 이니셜 아이콘을 사용합니다.",
       "cliAppsCatalog": "nanobot이 로컬에서 실행할 수 있는 앱 CLI 어댑터만 설치합니다. 네이티브 앱은 변경하지 않습니다.",
       "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다.",
       "logs": "네이티브 엔진 로그 폴더를 엽니다.",
@@ -587,11 +587,16 @@
       "title": "관측성", "configured": "nanobot이 추적 자격 증명을 사용할 수 있습니다.",
       "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "enable": "추적 지원 활성화"
     },
-    "legal": {
-      "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
-    },
     "apps": {
       "description": "nanobot에 도구를 추가한 뒤 채팅에서 @로 사용하세요.",
+      "discover": "둘러보기",
+      "installed": "설치됨",
+      "allApps": "모든 앱",
+      "addCustom": "사용자 지정 추가",
+      "emptyInstalled": "설치된 앱이 없습니다.",
+      "searchResults": "검색 결과",
+      "browseAll": "모두 보기",
+      "nextFeatured": "다른 추천 보기",
       "cliLabel": "앱",
       "mcpLabel": "MCP",
       "channelLabel": "채널",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}}개 사용 가능",
       "caption": "앱 {{cli}}개 · MCP 도구 {{mcp}}개",
       "searchPlaceholder": "앱 검색",
-      "featured": "도구",
+      "featured": "추천",
       "mcpTools": "MCP 도구",
       "loading": "앱을 불러오는 중...",
       "empty": "검색과 일치하는 도구가 없습니다.",

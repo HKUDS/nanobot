@@ -11,6 +11,7 @@ import {
 } from "@/components/settings/system/AppsSettings";
 import type {
   ApiServicePayload,
+  AppsDiscoveryPayload,
   AutomationsPayload,
   CliAppsPayload,
   McpOAuthFlowPayload,
@@ -21,6 +22,7 @@ import type {
 } from "@/lib/types";
 
 export function useSystemSettingsState() {
+  const [appsDiscovery, setAppsDiscovery] = useState<AppsDiscoveryPayload | null>(null);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
@@ -54,7 +56,7 @@ export function useSystemSettingsState() {
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("cli");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("discover");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export function useSystemSettingsState() {
     apiServiceAction,
     apiServiceError,
     apiServiceLoading,
+    appsDiscovery,
     appsKindFilter,
     appsQuery,
     automationAction,
@@ -115,6 +118,7 @@ export function useSystemSettingsState() {
     setApiServiceAction,
     setApiServiceError,
     setApiServiceLoading,
+    setAppsDiscovery,
     setAppsKindFilter,
     setAppsQuery,
     setAutomationAction,

@@ -8,6 +8,7 @@ import {
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
   fetchApiService,
+  fetchAppsDiscovery,
   fetchAutomations,
   fetchCliApps,
   fetchMcpPresets,
@@ -33,6 +34,7 @@ export function useSystemSettingsEffects({
     setApiService,
     setApiServiceError,
     setApiServiceLoading,
+    setAppsDiscovery,
     setAutomations,
     setAutomationsError,
     setAutomationsLoading,
@@ -46,6 +48,30 @@ export function useSystemSettingsEffects({
     setNanobotFeaturesError,
     setNanobotFeaturesLoading,
   } = state;
+
+  useEffect(() => {
+    if (activeSection !== "apps") return;
+    let cancelled = false;
+    let retry: number | null = null;
+    let retryCount = 0;
+    const load = () => {
+      fetchAppsDiscovery(getToken())
+        .then((payload) => {
+          if (cancelled) return;
+          setAppsDiscovery(payload);
+          if (payload.refresh_pending && retryCount < 3) {
+            retryCount += 1;
+            retry = window.setTimeout(load, CLI_APPS_REFRESH_RETRY_MS);
+          }
+        })
+        .catch(() => undefined);
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [activeSection, getToken, setAppsDiscovery]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;

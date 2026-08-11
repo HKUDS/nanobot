@@ -110,7 +110,7 @@ export function useSettingsController({
   } = capabilityState;
   const systemState = useSystemSettingsState();
   const {
-    apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsKindFilter, appsQuery,
+    apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsDiscovery, appsKindFilter, appsQuery,
     automationAction, automationPendingDelete, automationPendingEdit, automations,
     automationsError, automationsFilter, automationsLoading, automationsQuery, automationsSort,
     channelsQuery, cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
@@ -459,6 +459,7 @@ export function useSettingsController({
     apiServiceAction,
     apiServiceError,
     apiServiceLoading,
+    appsDiscovery,
     appsKindFilter,
     appsQuery,
     automationAction,

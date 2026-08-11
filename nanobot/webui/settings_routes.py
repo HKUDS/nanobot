@@ -15,6 +15,7 @@ from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, api_runtime_paths
+from nanobot.apps.discovery import discovery_payload
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
@@ -127,6 +128,7 @@ _CAPABILITY_ROUTES = {
 }
 
 _SYSTEM_ROUTES = {
+    "/api/settings/apps-discovery": "apps-discovery",
     "/api/settings/cli-apps": "cli-list",
     "/api/settings/cli-apps/install": "cli-install",
     "/api/settings/cli-apps/update": "cli-update",
@@ -461,6 +463,7 @@ class WebUISettingsRouter:
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
+            apps_discovery_payload=discovery_payload,
             cli_apps_payload=cli_apps_payload,
             cli_apps_action=cli_apps_action,
             nanobot_features_payload=nanobot_features_payload,

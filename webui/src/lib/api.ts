@@ -1,5 +1,6 @@
 import type {
   ApiServicePayload,
+  AppsDiscoveryPayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
@@ -485,6 +486,18 @@ export async function fetchCliApps(
 ): Promise<CliAppsPayload> {
   return request<CliAppsPayload>(
     `${base}/api/settings/cli-apps`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchAppsDiscovery(
+  token: string,
+  base: string = "",
+): Promise<AppsDiscoveryPayload> {
+  return request<AppsDiscoveryPayload>(
+    `${base}/api/settings/apps-discovery`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

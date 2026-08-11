@@ -241,7 +241,7 @@
       "activityMode": "Escolha quanto detalhe de atividade do agente é exibido por padrão.",
       "fileEditDisplay": "Escolha se a atividade de edição de arquivo é exibida como contagem de linhas ou como diferenças.",
       "codeWrap": "Mantém linhas longas de código legíveis em telas menores.",
-      "brandLogos": "Mostra logotipos de provedores terceiros e de CLIs em Configurações.",
+      "brandLogos": "Carrega logotipos de marcas de terceiros por serviços externos de ícones. Desative para usar iniciais locais.",
       "maxResults": "Resultados retornados por cada chamada de web_search.",
       "timeout": "Segundos antes de uma requisição de busca expirar.",
       "jinaReader": "Usa o Jina Reader para web_fetch quando disponível.",
@@ -557,9 +557,6 @@
       "capabilityOpenAISearch": "Pesquisa web da OpenAI",
       "capabilityOpenAISearchHelp": "Permite que modelos compatíveis com a Responses API pesquisem na web. A atividade de pesquisa aparece no chat."
     },
-    "legal": {
-      "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."
-    },
     "image": {
       "selectProvider": "Selecionar provedor",
       "selectAspect": "Selecionar proporção",
@@ -606,6 +603,14 @@
     },
     "apps": {
       "description": "Adicione ferramentas ao nanobot e mencione-as com @ na conversa.",
+      "discover": "Descobrir",
+      "installed": "Instalados",
+      "allApps": "Todos os apps",
+      "addCustom": "Adicionar personalizado",
+      "emptyInstalled": "Nenhum app instalado ainda.",
+      "searchResults": "Resultados da busca",
+      "browseAll": "Ver todos",
+      "nextFeatured": "Mostrar outros",
       "cliLabel": "Aplicativo",
       "mcpLabel": "MCP",
       "channelLabel": "Canal",
@@ -617,7 +622,7 @@
       "enabledSummary": "{{count}} prontos",
       "caption": "{{cli}} aplicativos · {{mcp}} ferramentas MCP",
       "searchPlaceholder": "Buscar ferramentas",
-      "featured": "Ferramentas",
+      "featured": "Destaques",
       "mcpTools": "Ferramentas MCP",
       "loading": "Carregando aplicativos...",
       "empty": "Nenhuma ferramenta corresponde à sua busca.",

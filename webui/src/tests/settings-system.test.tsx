@@ -71,6 +71,7 @@ describe("Settings system domains", () => {
 
     renderSettingsView();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Installed" }));
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText(/Control the desktop.*screen-recording, accessibility/)).toBeInTheDocument();
@@ -263,6 +264,7 @@ describe("Settings system domains", () => {
     renderSettingsView();
 
     expect(screen.queryByRole("heading", { name: "Apps" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Installed" }));
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     const uninstall = screen.getByRole("button", { name: "Uninstall app" });
 
@@ -282,7 +284,7 @@ describe("Settings system domains", () => {
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
   });
 
-  it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {
+  it("opens Apps on a focused Discover surface", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
@@ -294,6 +296,13 @@ describe("Settings system domains", () => {
       }
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/apps-discovery") {
+        return jsonResponse({
+          schema_version: 1,
+          updated_at: "2026-08-12T00:00:00Z",
+          featured: ["cli:anygen"],
+        });
       }
       if (url === "/api/settings/nanobot-features") {
         return jsonResponse({
@@ -319,15 +328,109 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "apps" });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Add tools to nanobot, then @ them in chat."),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByText("Add tools to nanobot, then @ them in chat.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discover" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Installed" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All apps" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add custom" })).toBeInTheDocument();
+    expect(screen.getByText("Featured")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByText("Api")).not.toBeInTheDocument();
     expect(screen.queryByText("0 ready")).not.toBeInTheDocument();
+  });
+
+  it("rotates only through the curated Featured candidates", async () => {
+    const apps = Array.from({ length: 7 }, (_, index) => ({
+      ...installedAnyGen,
+      name: `app-${index + 1}`,
+      display_name: `App ${index + 1}`,
+      installed: false,
+      status: "available",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps, installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/apps-discovery") {
+        return jsonResponse({
+          schema_version: 1,
+          updated_at: "2026-08-12T00:00:00Z",
+          featured: apps.map((app) => `cli:${app.name}`),
+        });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByText("App 1")).toBeInTheDocument();
+    expect(screen.queryByText("App 7")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show another" }));
+    expect(await screen.findByText("App 7")).toBeInTheDocument();
+    expect(screen.queryByText("App 1")).not.toBeInTheDocument();
+  });
+
+  it("does not promote uncurated apps when Featured has fewer than six entries", async () => {
+    const apps = [1, 2].map((index) => ({
+      ...installedAnyGen,
+      name: `app-${index}`,
+      display_name: `App ${index}`,
+      installed: false,
+      status: "available",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps, installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/apps-discovery") {
+        return jsonResponse({
+          schema_version: 1,
+          updated_at: "2026-08-12T00:00:00Z",
+          featured: ["cli:app-1"],
+        });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByText("App 1")).toBeInTheDocument();
+    expect(screen.queryByText("App 2")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show another" })).not.toBeInTheDocument();
+  });
+
+  it("clears search before opening custom MCP setup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "apps" });
+
+    const search = await screen.findByPlaceholderText("Search tools");
+    fireEvent.change(search, { target: { value: "AnyGen" } });
+    expect(await screen.findByText("Search results")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add custom" }));
+
+    expect(search).toHaveValue("");
+    expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
   });
 
   it("shows nanobot optional features and enables one", async () => {

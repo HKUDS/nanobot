@@ -241,7 +241,7 @@
       "activityMode": "选择默认显示多少智能体活动详情。",
       "fileEditDisplay": "选择文件编辑活动默认显示行数还是差异。",
       "codeWrap": "让长代码行在小屏幕上也易读。",
-      "brandLogos": "在设置中显示第三方提供商和 CLI 图标。",
+      "brandLogos": "从外部图标服务加载第三方品牌 Logo；关闭后使用本地首字母图标。",
       "maxResults": "每次 web_search 调用返回的结果数。",
       "timeout": "搜索提供商请求超时前等待的秒数。",
       "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
@@ -557,9 +557,6 @@
       "capabilityOpenAISearch": "OpenAI 联网搜索",
       "capabilityOpenAISearchHelp": "允许兼容 Responses API 的模型搜索网络，并在对话中展示搜索过程。"
     },
-    "legal": {
-      "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
-    },
     "image": {
       "selectProvider": "选择提供商",
       "selectAspect": "选择比例",
@@ -606,6 +603,14 @@
     },
     "apps": {
       "description": "将工具接入 nanobot，然后在对话中通过 @ 调用。",
+      "discover": "发现",
+      "installed": "已安装",
+      "allApps": "全部应用",
+      "addCustom": "自定义接入",
+      "emptyInstalled": "还没有安装应用。",
+      "searchResults": "搜索结果",
+      "browseAll": "浏览全部",
+      "nextFeatured": "换一批",
       "cliLabel": "应用",
       "mcpLabel": "MCP",
       "channelLabel": "渠道",
@@ -617,7 +622,7 @@
       "enabledSummary": "{{count}} 个可用",
       "caption": "{{cli}} 个应用 · {{mcp}} 个 MCP 工具",
       "searchPlaceholder": "搜索工具",
-      "featured": "工具",
+      "featured": "精选",
       "mcpTools": "MCP 工具",
       "loading": "正在加载应用...",
       "empty": "没有与搜索条件匹配的工具。",

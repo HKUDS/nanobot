@@ -104,7 +104,6 @@ _BRANDS: dict[str, tuple[str, str]] = {
     "audacity": ("audacity", "#0000CC"),
     "blender": ("blender", "#E87D0D"),
     "browser": ("googlechrome", "#4285F4"),
-    "calibre": ("calibre", "#45B29D"),
     "chromadb": ("chroma", "#FFDE2D"),
     "comfyui": ("comfyui", "#111827"),
     "contentful": ("contentful", "#2478CC"),
@@ -158,6 +157,7 @@ _BRANDS: dict[str, tuple[str, str]] = {
 _BRAND_DOMAINS: dict[str, tuple[str, str]] = {
     "3mf": ("3mf.io", "#00A1DE"),
     "anygen": ("anygen.io", "#111827"),
+    "calibre": ("calibre-ebook.com", "#45B29D"),
     "clibrowser": ("github.com/allthingssecurity/clibrowser", "#24292F"),
     "cloudanalyzer": ("github.com/rsasaki0109/CloudAnalyzer", "#2563EB"),
     "cloudcompare": ("cloudcompare.org", "#4D83C3"),
@@ -201,6 +201,13 @@ _BRAND_ALIASES: dict[str, str] = {
 }
 
 _BRAND_TRAILING_WORDS = ("cli", "workflow", "workflows", "app", "apps", "tool", "tools")
+_GENERIC_HOMEPAGE_HOSTS = frozenset({
+    "bitbucket.org",
+    "github.com",
+    "gitlab.com",
+    "npmjs.com",
+    "pypi.org",
+})
 
 
 def _now() -> float:
@@ -333,11 +340,25 @@ def _brand_candidates(app: dict[str, Any]) -> list[str]:
     return candidates
 
 
+def _homepage_domain(app: dict[str, Any]) -> str | None:
+    value = str(app.get("homepage") or "").strip()
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if parsed.scheme not in {"http", "https"} or host in _GENERIC_HOMEPAGE_HOSTS:
+        return None
+    if not host or "." not in host or any(not label for label in host.split(".")):
+        return None
+    return host
+
+
 def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
     declared_logo = str(app.get("logo_url") or "").strip()
+    declared_color = str(app.get("brand_color") or "").strip() or None
     if declared_logo.startswith(("https://", "/")):
-        declared_color = str(app.get("brand_color") or "").strip()
-        return declared_logo, declared_color or None
+        return declared_logo, declared_color
 
     brand = None
     domain_brand = None
@@ -349,13 +370,21 @@ def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
         domain_brand = _BRAND_DOMAINS.get(key)
         if domain_brand:
             break
+
+    brand_color = declared_color or (brand or domain_brand or (None, None))[1]
+    homepage_domain = _homepage_domain(app)
+    if homepage_domain:
+        return (
+            f"https://www.google.com/s2/favicons?domain={homepage_domain}&sz=64",
+            brand_color,
+        )
     if not brand:
         if not domain_brand:
             return None, None
         domain, color = domain_brand
         return f"https://www.google.com/s2/favicons?domain={domain}&sz=64", color
     slug, color = brand
-    return f"https://cdn.simpleicons.org/{slug}/{color.lstrip('#')}", color
+    return f"https://cdn.simpleicons.org/{slug}/{color.lstrip('#')}", brand_color
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:

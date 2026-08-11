@@ -203,7 +203,7 @@
       "currentModel": "Se usa para nuevas respuestas.",
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
-      "brandLogos": "Muestra logos de proveedores de terceros y CLI en Ajustes.",
+      "brandLogos": "Carga logotipos de marcas de terceros desde servicios de iconos externos. Desactívalo para usar iniciales locales.",
       "cliAppsCatalog": "Instala solo adaptadores CLI de aplicaciones que nanobot puede ejecutar localmente; las aplicaciones nativas no se modifican.",
       "cliAppsFilter": "Busca por aplicación, categoría o capacidad.",
       "logs": "Abre la carpeta de registros del motor nativo.",
@@ -588,11 +588,16 @@
       "title": "Observabilidad", "configured": "Las credenciales de trazas están disponibles para nanobot.",
       "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Habilitar soporte de trazas"
     },
-    "legal": {
-      "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
-    },
     "apps": {
       "description": "Añade herramientas a nanobot y luego úsalas con @ en el chat.",
+      "discover": "Descubrir",
+      "installed": "Instaladas",
+      "allApps": "Todas las apps",
+      "addCustom": "Añadir personalizada",
+      "emptyInstalled": "Aún no hay apps instaladas.",
+      "searchResults": "Resultados de búsqueda",
+      "browseAll": "Ver todas",
+      "nextFeatured": "Mostrar otras",
       "cliLabel": "Aplicación",
       "mcpLabel": "MCP",
       "channelLabel": "Canal",
@@ -604,7 +609,7 @@
       "enabledSummary": "{{count}} listos",
       "caption": "{{cli}} aplicaciones · {{mcp}} herramientas MCP",
       "searchPlaceholder": "Buscar aplicaciones",
-      "featured": "Herramientas",
+      "featured": "Destacadas",
       "mcpTools": "Herramientas MCP",
       "loading": "Cargando aplicaciones...",
       "empty": "Ninguna herramienta coincide con tu búsqueda.",

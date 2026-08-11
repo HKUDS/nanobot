@@ -43,6 +43,7 @@ SettingsOperation = Callable[..., Any]
 
 @dataclass(frozen=True)
 class SystemSettingsOperations:
+    apps_discovery_payload: SettingsOperation
     cli_apps_payload: SettingsOperation
     cli_apps_action: SettingsOperation
     nanobot_features_payload: SettingsOperation
@@ -372,6 +373,8 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "apps-discovery":
+            return await self._apps_discovery(operations)
         if action == "cli-list":
             return await self._cli_apps(request, operations)
         if action.startswith("cli-"):
@@ -418,6 +421,15 @@ class SystemSettingsHandler:
         if action == "version-check":
             return await self._version_check(operations)
         return SettingsRouteResult.failure(404, "unknown settings action")
+
+    async def _apps_discovery(
+        self,
+        operations: SystemSettingsOperations,
+    ) -> SettingsRouteResult:
+        payload = await operations.apps_discovery_payload(
+            data_dir=self.settings.config.path.parent / "catalog",
+        )
+        return SettingsRouteResult.success(payload)
 
     async def _cli_apps(
         self,

@@ -410,8 +410,8 @@ export function AppearanceSettings({
           <SettingsRow
             title={tx("settings.rows.brandLogos", "Brand logos")}
             description={tx(
-              "settings.legal.thirdPartyBrands",
-              "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
+              "settings.help.brandLogos",
+              "Load third-party brand logos from external icon services. Turn this off to use local initials.",
             )}
           >
             <ToggleButton
