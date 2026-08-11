@@ -75,22 +75,21 @@ class McpPresetError(Exception):
         self.status = status
 
 
-def _safe_delete_oauth_credentials(name: str) -> str:
-    """Best-effort OAuth credential cleanup after a config change is already committed.
+def _delete_oauth_credentials_before_config(name: str) -> None:
+    """Clear credentials before committing a config replacement or removal.
 
-    Returns an empty string on success or a human-readable warning message if the
-    credential store could not be read. The config change must not be rolled back
-    for a store error — the server entry is already removed from config, so stale
-    credentials are inert until the store is repaired.
+    The config and credential store are separate files, so they cannot share one
+    filesystem transaction. Clearing credentials first gives the safe failure mode:
+    if cleanup fails, the config remains unchanged; if the later config write fails,
+    the old config only loses its credentials and cannot reuse stale tokens.
     """
     try:
         delete_mcp_oauth_credentials(name)
-    except MCPAuthorizationStoreError as exc:
-        return (
-            f"Could not clean up OAuth credentials for '{name}': {exc}. "
-            "The config change was saved, but stale credentials may remain."
-        )
-    return ""
+    except (MCPAuthorizationStoreError, OSError) as exc:
+        raise McpPresetError(
+            f"Could not clear OAuth credentials for '{name}'; MCP config was not changed",
+            status=503,
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -1483,18 +1482,15 @@ def custom_mcp_action(
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
         delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
+        if delete_credentials:
+            _delete_oauth_credentials_before_config(name)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
-        credential_warning = ""
-        if delete_credentials:
-            credential_warning = _safe_delete_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
         )
         payload["requires_restart"] = True
-        if credential_warning:
-            payload["credential_warning"] = credential_warning
         return payload
 
     if action in {"import", "import-cursor"}:
@@ -1504,12 +1500,10 @@ def custom_mcp_action(
             for name, cfg in servers.items()
             if _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         ]
+        for name in delete_credentials:
+            _delete_oauth_credentials_before_config(name)
         config.tools.mcp_servers.update(servers)
         save_config(config, config_path)
-        credential_warnings = [
-            _safe_delete_oauth_credentials(name)
-            for name in delete_credentials
-        ]
         payload = mcp_presets_payload(
             last_action={
                 "ok": True,
@@ -1518,9 +1512,6 @@ def custom_mcp_action(
             config_path=config_path,
         )
         payload["requires_restart"] = True
-        warnings = [w for w in credential_warnings if w]
-        if warnings:
-            payload["credential_warning"] = " ".join(warnings)
         return payload
 
     if action == "tools":
@@ -1593,16 +1584,15 @@ def mcp_presets_action(
             raise McpPresetError("unknown MCP server", status=404)
         removed_runtime_files = False
         cleanup_error = ""
-        credential_warning = ""
         if name in config.tools.mcp_servers:
             existing_cfg = config.tools.mcp_servers[name]
+            _delete_oauth_credentials_before_config(name)
             try:
                 removed_runtime_files = _remove_managed_stdio_cwd(name, existing_cfg)
             except OSError as exc:
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config, config_path)
-            credential_warning = _safe_delete_oauth_credentials(name)
         last_action = (
             _action_message(action, preset)
             if preset is not None
@@ -1618,13 +1608,6 @@ def mcp_presets_action(
                 f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
             )
             last_action["verification_failed"] = ["managed_paths_absent"]
-        if credential_warning:
-            last_action["ok"] = False
-            last_action["message"] = f"{last_action['message']} {credential_warning}"
-            last_action["verification_failed"] = [
-                *(last_action.get("verification_failed") or []),
-                "oauth_credentials_absent",
-            ]
         payload = mcp_presets_payload(
             last_action=last_action,
             config_path=config_path,
