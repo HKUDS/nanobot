@@ -56,6 +56,10 @@ class MCPAuthorizationRequiredError(RuntimeError):
     """Raised when a background MCP connection needs interactive authorization."""
 
 
+class MCPAuthorizationStoreError(RuntimeError):
+    """Raised when the MCP OAuth credential store cannot be read safely."""
+
+
 @dataclass(frozen=True)
 class MCPOAuthHandlers:
     """Browser callbacks supplied only for a user-initiated OAuth attempt."""
@@ -83,25 +87,37 @@ def _stored_server(value: object) -> _StoredServer | None:
         return None
     raw = cast(dict[object, object], value)
     entry: _StoredServer = {}
-    fingerprint = raw.get("server_fingerprint")
-    if isinstance(fingerprint, str):
+    if "server_fingerprint" in raw:
+        fingerprint = raw["server_fingerprint"]
+        if not isinstance(fingerprint, str):
+            return None
         entry["server_fingerprint"] = fingerprint
-    write_lease = raw.get("write_lease")
-    if isinstance(write_lease, str) and write_lease:
+    if "write_lease" in raw:
+        write_lease = raw["write_lease"]
+        if not isinstance(write_lease, str) or not write_lease:
+            return None
         entry["write_lease"] = write_lease
-    redirect_uri = raw.get("redirect_uri")
-    if isinstance(redirect_uri, str):
+    if "redirect_uri" in raw:
+        redirect_uri = raw["redirect_uri"]
+        if not isinstance(redirect_uri, str):
+            return None
         entry["redirect_uri"] = redirect_uri
-    tokens = raw.get("tokens")
-    if isinstance(tokens, dict):
+    if "tokens" in raw:
+        tokens = raw["tokens"]
+        if not isinstance(tokens, dict):
+            return None
         token_values = cast(dict[object, object], tokens)
-        if all(isinstance(key, str) for key in token_values):
-            entry["tokens"] = cast(dict[str, Any], token_values)
-    client_info = raw.get("client_info")
-    if isinstance(client_info, dict):
+        if not all(isinstance(key, str) for key in token_values):
+            return None
+        entry["tokens"] = cast(dict[str, Any], token_values)
+    if "client_info" in raw:
+        client_info = raw["client_info"]
+        if not isinstance(client_info, dict):
+            return None
         client_values = cast(dict[object, object], client_info)
-        if all(isinstance(key, str) for key in client_values):
-            entry["client_info"] = cast(dict[str, Any], client_values)
+        if not all(isinstance(key, str) for key in client_values):
+            return None
+        entry["client_info"] = cast(dict[str, Any], client_values)
     return entry
 
 
@@ -112,24 +128,50 @@ def _read_store_unlocked(path: Path) -> _CredentialStore:
         return _empty_store()
     except (OSError, ValueError, TypeError) as exc:
         logger.warning("Could not read MCP OAuth credentials: {}", type(exc).__name__)
-        return _empty_store()
+        raise MCPAuthorizationStoreError(
+            "MCP OAuth credential store is unreadable; refusing to overwrite it"
+        ) from exc
     if not isinstance(raw, dict):
-        return _empty_store()
+        raise MCPAuthorizationStoreError(
+            "MCP OAuth credential store has an invalid top-level value; "
+            "refusing to overwrite it"
+        )
     payload = cast(dict[object, object], raw)
     raw_servers = payload.get("servers")
     if not isinstance(raw_servers, dict):
-        return _empty_store()
+        raise MCPAuthorizationStoreError(
+            "MCP OAuth credential store has an invalid servers section; "
+            "refusing to overwrite it"
+        )
     servers: dict[str, _StoredServer] = {}
     for name, value in cast(dict[object, object], raw_servers).items():
+        if not isinstance(name, str):
+            raise MCPAuthorizationStoreError(
+                "MCP OAuth credential store has an invalid server name; "
+                "refusing to overwrite it"
+            )
         entry = _stored_server(value)
-        if isinstance(name, str) and entry is not None:
-            servers[name] = entry
+        if entry is None:
+            raise MCPAuthorizationStoreError(
+                f"MCP OAuth credential store has an invalid entry for '{name}'; "
+                "refusing to overwrite it"
+            )
+        servers[name] = entry
     generations: dict[str, str] = {}
     raw_generations = payload.get("generations")
+    if raw_generations is not None and not isinstance(raw_generations, dict):
+        raise MCPAuthorizationStoreError(
+            "MCP OAuth credential store has an invalid generations section; "
+            "refusing to overwrite it"
+        )
     if isinstance(raw_generations, dict):
         for name, value in cast(dict[object, object], raw_generations).items():
-            if isinstance(name, str) and isinstance(value, str) and value:
-                generations[name] = value
+            if not isinstance(name, str) or not isinstance(value, str) or not value:
+                raise MCPAuthorizationStoreError(
+                    "MCP OAuth credential store has an invalid generation entry; "
+                    "refusing to overwrite it"
+                )
+            generations[name] = value
     return {
         "version": _STORE_VERSION,
         "servers": servers,
@@ -166,7 +208,14 @@ class MCPOAuthStorage:
             return None
         # Writes replace the whole file atomically, so this observes either side
         # of a concurrent deletion without blocking the async connection path.
-        return _read_store_unlocked(path)["generations"].get(self.server_name)
+        try:
+            return _read_store_unlocked(path)["generations"].get(self.server_name)
+        except MCPAuthorizationStoreError:
+            logger.warning(
+                "Could not read MCP OAuth generation for '{}'",
+                self.server_name,
+            )
+            return None
 
     def _generation_is_current(self, payload: _CredentialStore) -> bool:
         return payload["generations"].get(self.server_name) == self._observed_generation
@@ -211,12 +260,28 @@ class MCPOAuthStorage:
 
     def _read_entry_sync(self) -> _StoredServer | None:
         path = _store_path()
-        with _with_store_lock(path):
-            payload = _read_store_unlocked(path)
-            entry, changed = self._bind_entry_unlocked(payload, create=False)
-            if changed:
-                _write_store_unlocked(path, payload)
-            return entry
+        try:
+            with _with_store_lock(path):
+                try:
+                    payload = _read_store_unlocked(path)
+                except MCPAuthorizationStoreError:
+                    logger.warning(
+                        "Could not read MCP OAuth credentials for '{}'",
+                        self.server_name,
+                    )
+                    return None
+                entry, changed = self._bind_entry_unlocked(payload, create=False)
+                if changed:
+                    with suppress(OSError):
+                        _write_store_unlocked(path, payload)
+                return entry
+        except OSError as exc:
+            logger.warning(
+                "Could not read MCP OAuth credentials for '{}': {}",
+                self.server_name,
+                type(exc).__name__,
+            )
+            return None
 
     def _update_entry_sync(
         self,

@@ -1051,6 +1051,7 @@ async def connect_mcp_servers(
                     return False
                 from nanobot.agent.tools.mcp_oauth import (
                     MCPAuthorizationRequiredError,
+                    MCPAuthorizationStoreError,
                     create_mcp_oauth_auth,
                 )
 
@@ -1062,6 +1063,9 @@ async def connect_mcp_servers(
                     )
                 except MCPAuthorizationRequiredError:
                     logger.info("MCP server '{}': waiting for browser authorization", name)
+                    return False
+                except MCPAuthorizationStoreError as exc:
+                    logger.warning("MCP server '{}': {}", name, exc)
                     return False
 
             if transport_type == "stdio":
