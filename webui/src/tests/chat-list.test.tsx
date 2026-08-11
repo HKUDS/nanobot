@@ -72,6 +72,7 @@ describe("ChatList", () => {
     const dataTransfer = {
       effectAllowed: "",
       setData: vi.fn(),
+      setDragImage: vi.fn(),
     };
     render(
       <ChatList
@@ -99,7 +100,14 @@ describe("ChatList", () => {
       SESSION_DRAG_TYPE,
       "websocket:reference",
     );
+    expect(dataTransfer.setDragImage).toHaveBeenCalled();
+    expect(document.querySelector("[data-pane-drag-overlay]"))
+      .toHaveTextContent("Reference chat");
+    expect(reference.closest("li")).not.toHaveClass("opacity-0");
+    expect(document.querySelector("[data-tab-drag-placeholder]"))
+      .not.toBeInTheDocument();
     fireEvent.dragEnd(reference, { dataTransfer });
+    expect(document.querySelector("[data-pane-drag-overlay]")).not.toBeInTheDocument();
   });
 
   it("reorders topics with a displaced-neighbor preview instead of an insertion line", () => {
@@ -182,7 +190,7 @@ describe("ChatList", () => {
     expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
   });
 
-  it("shows every tab's pane membership in the sidebar tree", async () => {
+  it("shows every tab's pane membership in a sidebar tab group", async () => {
     const onSelect = vi.fn();
     const onSelectPane = vi.fn();
     const onDetachPane = vi.fn();
@@ -236,7 +244,8 @@ describe("ChatList", () => {
     expect(child.closest("[data-sidebar-pane]"))
       .toHaveAttribute("data-sidebar-pane", "websocket:child");
     expect(child).toHaveAttribute("aria-current", "true");
-    const targetTabRow = screen.getByRole("button", { name: "Target tab" }).closest("li")!;
+    const targetTabRow = screen.getByRole("button", { name: "Tab: Target tab" })
+      .closest("li")!;
     const targetChild = within(targetTabRow).getByRole("button", {
       name: "Target research",
     });
@@ -255,6 +264,10 @@ describe("ChatList", () => {
     expect(onSelectPane).toHaveBeenCalledWith("websocket:root", "websocket:root");
     expect(onSelect).not.toHaveBeenCalled();
 
+    onSelectPane.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Tab: Root topic" }));
+    expect(onSelectPane).not.toHaveBeenCalled();
+
     fireEvent.pointerDown(screen.getByRole("button", {
       name: "Research pane pane actions",
     }), { button: 0, ctrlKey: false });
@@ -267,25 +280,34 @@ describe("ChatList", () => {
       name: "Research pane pane actions",
     }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", {
-      name: "Move Research pane to its own topic",
+      name: "Move Research pane to a new tab",
     }));
     expect(onDetachPane).toHaveBeenCalledWith("websocket:root", "websocket:child");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Root topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    expect(screen.queryByRole("menuitem", { name: "Move to tab" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Move Root topic to a new tab" }))
+      .not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
 
     const dataTransfer = {
       effectAllowed: "",
       dropEffect: "",
       setData: vi.fn(),
     };
+    onAttachPane.mockClear();
     fireEvent.dragStart(child, { dataTransfer });
     expect(child.closest("li")).toHaveAttribute("data-pane-dragging", "true");
     expect(child.closest("li")).not.toHaveClass("opacity-0");
-    const targetTab = screen.getByRole("button", { name: "Target tab" });
+    const targetTab = screen.getByRole("button", { name: "Tab: Target tab" });
     dragOverAt(targetTab.closest("li")!, 0, dataTransfer);
     expect(targetTab.closest("li"))
-      .toHaveAttribute("data-tab-attach-target", "true");
-    expect(within(targetTab.closest("li")!).getByRole("status", {
-      name: "Move Research pane into Target tab",
-    })).toHaveTextContent("Research pane");
+      .not.toHaveAttribute("data-tab-attach-target");
+    expect(targetTab.closest("li")!.querySelector("[data-pane-snap-slot]"))
+      .not.toBeInTheDocument();
     dropAt(targetTab.closest("li")!, 0, dataTransfer);
     expect(dataTransfer.setData).toHaveBeenCalledWith(
       PANE_DRAG_TYPE,
@@ -294,7 +316,217 @@ describe("ChatList", () => {
         sourceTabKey: "websocket:root",
       }),
     );
-    expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
+    expect(onAttachPane).not.toHaveBeenCalled();
+    fireEvent.dragEnd(child, { dataTransfer });
+  });
+
+  it("collapses a multi-pane tab into one Chrome-style group header", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "root", title: "Root topic" })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            topicKey: "websocket:root",
+            activePaneKey: "websocket:child",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onSelectPane={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const tabGroup = screen.getByRole("button", { name: "Tab: Root topic" })
+      .closest("[data-sidebar-tab-group]")!;
+    expect(tabGroup).toHaveAttribute("data-sidebar-tab-group", "true");
+    expect(within(tabGroup).getByRole("list", { name: "Panes in Root topic" }))
+      .toBeInTheDocument();
+    expect(within(tabGroup).getByRole("button", { name: "Research pane" }))
+      .toHaveAttribute("aria-current", "true");
+    expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
+      .not.toHaveAttribute("aria-current");
+    expect(tabGroup).not.toHaveTextContent("2/4");
+
+    const collapse = within(tabGroup).getByRole("button", {
+      name: "Collapse panes in Root topic",
+    });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapse);
+
+    expect(tabGroup).toHaveAttribute("data-pane-group-collapsed", "true");
+    expect(within(tabGroup).queryByRole("button", { name: "Research pane" }))
+      .not.toBeInTheDocument();
+    expect(within(tabGroup).getByRole("button", {
+      name: "Expand panes in Root topic",
+    })).toHaveAttribute("aria-expanded", "false");
+    expect(within(tabGroup).getByRole("button", { name: "Tab: Root topic" })
+      .closest("[data-sidebar-tab]"))
+      .toHaveClass("bg-sidebar-selected");
+
+    fireEvent.click(within(tabGroup).getByRole("button", {
+      name: "Expand panes in Root topic",
+    }));
+    expect(within(tabGroup).getByRole("button", { name: "Research pane" }))
+      .toBeInTheDocument();
+    expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps the Pane opaque without exposing a slot in another tab", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect({
+      left: 0,
+      top: 0,
+      width: 240,
+      height: 28,
+    }));
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      setDragImage: vi.fn(),
+    };
+    const onAttachPane = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            topicKey: "websocket:root",
+            activePaneKey: "websocket:child",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        paneAcceptingTabKeys={["websocket:target"]}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const pane = screen.getByRole("button", { name: "Research pane" });
+    fireEvent.dragStart(pane, { clientX: 40, clientY: 40, dataTransfer });
+    expect(dataTransfer.setDragImage).toHaveBeenCalled();
+
+    const dragOver = createEvent.dragOver(
+      screen.getByRole("button", { name: "Target tab" }).closest("li")!,
+      { dataTransfer },
+    );
+    Object.defineProperties(dragOver, {
+      clientX: { value: 160 },
+      clientY: { value: 120 },
+    });
+    fireEvent(screen.getByRole("button", { name: "Target tab" }).closest("li")!, dragOver);
+
+    const paneRow = pane.closest("li")!;
+    const overlay = document.querySelector<HTMLElement>("[data-pane-drag-overlay]")!;
+    expect(overlay).toHaveStyle({
+      opacity: "1",
+      height: "28px",
+      transform: "translate3d(40px, 106px, 0)",
+      visibility: "visible",
+      width: "240px",
+    });
+    expect(overlay).toHaveTextContent("Research pane");
+    expect(overlay).toHaveClass(
+      "!bg-sidebar-selected",
+      "!shadow-none",
+    );
+    expect(overlay).toHaveStyle({ boxShadow: "none" });
+    expect(document.querySelector("[data-pane-snap-slot]")).not.toBeInTheDocument();
+    expect(paneRow.querySelector("[data-sidebar-pane]"))
+      .toHaveClass("!bg-transparent", "!text-transparent", "!shadow-none");
+    expect(paneRow.style.transform).toBe("");
+    expect(paneRow).not.toHaveClass("opacity-0");
+
+    dataTransfer.dropEffect = "none";
+    fireEvent.dragEnd(pane, { clientX: 160, clientY: 120, dataTransfer });
+    expect(onAttachPane).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-pane-drag-overlay]")).not.toBeInTheDocument();
+  });
+
+  it("repels sibling Panes and snaps the dragged Pane into the selected slot", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect({
+      left: 0,
+      top: 0,
+      width: 240,
+      height: 28,
+    }));
+    const onAttachPane = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      setDragImage: vi.fn(),
+    };
+
+    render(
+      <ChatList
+        sessions={[session({ chatId: "root", title: "Root topic" })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            topicKey: "websocket:root",
+            activePaneKey: "websocket:first",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:first", chatId: "first", title: "First pane" },
+              { key: "websocket:second", chatId: "second", title: "Second pane" },
+              { key: "websocket:third", chatId: "third", title: "Third pane" },
+            ],
+          },
+        }}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const first = screen.getByRole("button", { name: "First pane" });
+    const secondRow = screen.getByRole("button", { name: "Second pane" }).closest("li")!;
+    fireEvent.dragStart(first, { clientX: 40, clientY: 14, dataTransfer });
+    dragOverAt(secondRow, 20, dataTransfer);
+
+    expect(secondRow).toHaveAttribute("data-pane-displaced", "true");
+    expect(secondRow).toHaveStyle("transform: translateY(-30px)");
+    expect((first.closest("li") as HTMLElement).style.transform).toBe("");
+    const snapSlot = screen.getByRole("list", { name: "Panes in Root topic" })
+      .querySelector("[data-pane-snap-slot]")!;
+    expect(snapSlot).toHaveStyle("height: 28px; transform: translateY(60px)");
+    expect(snapSlot).toHaveClass("absolute", "bg-transparent");
+    expect(first.closest("li")).not.toHaveClass("opacity-0");
+
+    dropAt(snapSlot, 20, dataTransfer);
+    expect(onAttachPane).toHaveBeenCalledWith(
+      "websocket:first",
+      "websocket:root",
+      "websocket:third",
+    );
   });
 
   it("selects a whole tab or individual panes for one bulk delete", async () => {
@@ -330,6 +562,8 @@ describe("ChatList", () => {
     }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
 
+    expect(screen.getByRole("button", { name: "Tab: Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Root topic" }))
       .toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Research pane" }))
@@ -350,7 +584,7 @@ describe("ChatList", () => {
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
   });
 
-  it("reattaches a one-pane tab through the center of another tab", () => {
+  it("reorders one-pane tabs instead of attaching them through drag", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect({
       left: 0,
       top: 0,
@@ -392,16 +626,16 @@ describe("ChatList", () => {
       .toHaveAttribute("data-session-dragging", "true");
     const target = screen.getByRole("button", { name: "Target tab" }).closest("li")!;
     dragOverAt(target, 16, dataTransfer);
-    expect(target).toHaveAttribute("data-tab-attach-target", "true");
-    expect(document.querySelector("[data-session-displaced='true']"))
-      .not.toBeInTheDocument();
+    expect(target).not.toHaveAttribute("data-tab-attach-target");
+    expect(target).toHaveAttribute("data-session-displaced", "true");
+    expect(document.querySelector("[data-pane-snap-slot]")).not.toBeInTheDocument();
     dropAt(target, 16, dataTransfer);
 
-    expect(onAttachPane).toHaveBeenCalledWith(
-      "websocket:detached",
+    expect(onAttachPane).not.toHaveBeenCalled();
+    expect(onReorderSessions).toHaveBeenCalledWith([
       "websocket:target",
-    );
-    expect(onReorderSessions).not.toHaveBeenCalled();
+      "websocket:detached",
+    ]);
   });
 
   it("shows temporary chats separately and lets the user reopen or close them", async () => {
@@ -611,40 +845,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("positions one background highlight and resets it across hidden targets", () => {
-    let revealFrame: FrameRequestCallback | null = null;
-    let resizeObserverCallback: ResizeObserverCallback | null = null;
-    let activeTargetVisible = true;
-    class MockResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeObserverCallback = callback;
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-    vi.stubGlobal("ResizeObserver", MockResizeObserver);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      revealFrame = callback;
-      return 1;
-    });
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.hasAttribute("data-chat-list-content")) {
-          return rect({ left: 0, top: 0, width: 300, height: 200 });
-        }
-        if (this.getAttribute("data-chat-row") === "websocket:active") {
-          return activeTargetVisible
-            ? rect({ left: 8, top: 12, width: 284, height: 32 })
-            : rect({ left: 0, top: 0, width: 0, height: 0 });
-        }
-        if (this.getAttribute("data-chat-row") === "websocket:inactive") {
-          return rect({ left: 8, top: 48, width: 284, height: 40 });
-        }
-        return rect({ left: 0, top: 0, width: 0, height: 0 });
-      },
-    );
+  it("switches row-owned tab highlights without a moving selection surface", () => {
     const props = {
       sessions: [
         session({ chatId: "active", title: "Active topic" }),
@@ -664,45 +865,16 @@ describe("ChatList", () => {
       />,
     );
 
-    const highlight = screen.getByTestId("sessions-selection-highlight");
-    expect(highlight).toHaveClass(
-      "bg-sidebar-foreground/[0.055]",
-      "transition-[transform,width,height]",
-      "motion-reduce:transition-none",
-    );
-    expect(screen.queryByTestId("sessions-selection-highlight-surface"))
-      .not.toBeInTheDocument();
-    expect(resizeObserverCallback).not.toBeNull();
-
     const activeButton = screen.getByTitle("Active topic");
+    const inactiveButton = screen.getByTitle("Inactive topic");
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    expect(activeButton.parentElement).toHaveClass("transition-[color]");
-    expect(activeButton.parentElement).not.toHaveClass("transition-colors");
-    expect(activeButton.parentElement).not.toHaveClass(
-      "bg-sidebar-accent",
-      "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
+    expect(activeButton.closest("[data-sidebar-tab]")).toHaveClass(
+      "bg-sidebar-selected",
     );
-    expect(highlight).toHaveClass(
-      "transition-[transform,width,height]",
-      "motion-reduce:transition-none",
+    expect(inactiveButton.closest("[data-sidebar-tab]")).not.toHaveClass(
+      "bg-sidebar-selected",
     );
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
-    );
-
-    revealFrame?.(0);
-    expect(highlight.style.transitionProperty).toBe("");
-
-    activeTargetVisible = false;
-    resizeObserverCallback?.([], {} as ResizeObserver);
-    expect(highlight).toHaveStyle("opacity: 0");
-
-    activeTargetVisible = true;
-    resizeObserverCallback?.([], {} as ResizeObserver);
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
-    );
-    revealFrame?.(0);
+    expect(screen.queryByTestId("sessions-selection-highlight")).not.toBeInTheDocument();
 
     rerender(
       <ChatList
@@ -713,12 +885,17 @@ describe("ChatList", () => {
 
     expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
     expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0)",
+    expect(screen.getByTitle("Active topic").closest("[data-sidebar-tab]")).not.toHaveClass(
+      "bg-sidebar-selected",
+    );
+    expect(screen.getByTitle("Inactive topic").closest("[data-sidebar-tab]")).toHaveClass(
+      "bg-sidebar-selected",
     );
 
     rerender(<ChatList {...props} activeKey={null} />);
-    expect(highlight).toHaveStyle("opacity: 0");
+    expect(screen.getByTitle("Inactive topic").closest("[data-sidebar-tab]")).not.toHaveClass(
+      "bg-sidebar-selected",
+    );
   });
 
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {

@@ -3115,7 +3115,7 @@ describe("App layout", () => {
       name: "New topic pane actions",
     }), { button: 0, ctrlKey: false });
     fireEvent.click(screen.getByRole("menuitem", {
-      name: "Move New topic to its own topic",
+      name: "Move New topic to a new tab",
     }));
     await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(1));
     expect(within(sidebar).getAllByRole("button", { name: "New topic" })).toHaveLength(2);

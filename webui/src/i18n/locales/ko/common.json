@@ -1395,14 +1395,17 @@
   "workbench": {
     "aria": "대화 워크벤치",
     "panes": "창",
+    "tabAria": "탭: {{title}}",
     "panesInTab": "{{title}}의 창",
+    "collapseTabGroup": "{{title}}의 창 접기",
+    "expandTabGroup": "{{title}}의 창 펼치기",
     "dropPane": "{{pane}}을(를) {{tab}}으로 이동",
     "moveToTab": "탭으로 이동",
     "layout": "창 레이아웃",
     "addPane": "창 추가",
     "promotePane": "{{title}}을(를) 기본 창으로 설정",
     "paneActions": "{{title}} 창 작업",
-    "detachPane": "{{title}}을(를) 별도 주제로 이동",
+    "detachPane": "{{title}}을(를) 새 탭으로 이동",
     "composerAria": "{{title}}에 메시지 보내기",
     "layouts": {
       "columns": "열",

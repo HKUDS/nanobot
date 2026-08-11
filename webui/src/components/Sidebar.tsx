@@ -53,7 +53,11 @@ interface SidebarProps {
   onPromotePane?: (tabKey: string, paneKey: string) => void;
   attachableTabKeys?: string[];
   paneAcceptingTabKeys?: string[];
-  onAttachPane?: (paneKey: string, tabKey: string) => void;
+  onAttachPane?: (
+    paneKey: string,
+    tabKey: string,
+    beforePaneKey?: string | null,
+  ) => void;
   onReorderSessions: (keys: string[]) => void;
   onToggleGroup: (groupId: string) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;

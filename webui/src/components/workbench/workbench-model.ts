@@ -39,6 +39,19 @@ function uniqueKeys(value: unknown): string[] {
   ));
 }
 
+function insertPaneBefore(
+  paneKeys: string[],
+  paneKey: string,
+  beforePaneKey?: string | null,
+): string[] {
+  const next = paneKeys.filter((key) => key !== paneKey);
+  const requestedIndex = beforePaneKey && beforePaneKey !== paneKey
+    ? next.indexOf(beforePaneKey)
+    : -1;
+  next.splice(requestedIndex < 0 ? next.length : requestedIndex, 0, paneKey);
+  return next;
+}
+
 function normalizeTab(value: unknown, tabKey: string): WorkbenchTabState {
   const candidate = value && typeof value === "object"
     ? value as Partial<WorkbenchTabState>
@@ -170,6 +183,7 @@ export function attachWorkbenchPane(
   state: WorkbenchState,
   targetTabKey: string,
   paneKey: string,
+  beforePaneKey?: string | null,
 ): WorkbenchState {
   if (!targetTabKey || !paneKey || targetTabKey === paneKey) return state;
 
@@ -179,7 +193,19 @@ export function attachWorkbenchPane(
   const sourceTabKey = sourceEntry?.[0];
   const sourceTab = sourceEntry?.[1];
   if (sourceTabKey === targetTabKey) {
-    return focusWorkbenchPane(state, targetTabKey, paneKey);
+    if (beforePaneKey === undefined) {
+      return focusWorkbenchPane(state, targetTabKey, paneKey);
+    }
+    if (!sourceTab) return state;
+    const paneKeys = insertPaneBefore(sourceTab.paneKeys, paneKey, beforePaneKey);
+    if (paneKeys.every((key, index) => key === sourceTab.paneKeys[index])) return state;
+    return {
+      version: 2,
+      tabs: {
+        ...state.tabs,
+        [targetTabKey]: { ...sourceTab, paneKeys },
+      },
+    };
   }
   if (sourceTabKey === paneKey && sourceTab && sourceTab.paneKeys.length > 1) {
     return state;
@@ -210,13 +236,12 @@ export function attachWorkbenchPane(
   }
 
   const targetTab = tabs[targetTabKey] ?? defaultWorkbenchTab(targetTabKey);
-  tabs[targetTabKey] = targetTab.paneKeys.includes(paneKey)
-    ? { ...targetTab, activePaneKey: paneKey }
-    : {
-        ...targetTab,
-        paneKeys: [...targetTab.paneKeys, paneKey],
-        activePaneKey: paneKey,
-      };
+  const paneKeys = insertPaneBefore(targetTab.paneKeys, paneKey, beforePaneKey);
+  tabs[targetTabKey] = {
+    ...targetTab,
+    paneKeys,
+    activePaneKey: paneKey,
+  };
   return { version: 2, tabs };
 }
 

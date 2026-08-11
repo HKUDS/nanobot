@@ -1409,14 +1409,17 @@
   "workbench": {
     "aria": "Área de conversas",
     "panes": "Painéis",
+    "tabAria": "Aba: {{title}}",
     "panesInTab": "Painéis em {{title}}",
+    "collapseTabGroup": "Recolher os painéis em {{title}}",
+    "expandTabGroup": "Expandir os painéis em {{title}}",
     "dropPane": "Mover {{pane}} para {{tab}}",
     "moveToTab": "Mover para uma aba",
     "layout": "Layout de painéis",
     "addPane": "Adicionar painel",
     "promotePane": "Tornar {{title}} o painel principal",
     "paneActions": "Ações do painel {{title}}",
-    "detachPane": "Mover {{title}} para seu próprio tópico",
+    "detachPane": "Mover {{title}} para uma nova aba",
     "composerAria": "Mensagem para {{title}}",
     "layouts": {
       "columns": "Colunas",

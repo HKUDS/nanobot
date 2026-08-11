@@ -1395,14 +1395,17 @@
   "workbench": {
     "aria": "会話ワークベンチ",
     "panes": "ペイン",
+    "tabAria": "タブ：{{title}}",
     "panesInTab": "{{title}} のペイン",
+    "collapseTabGroup": "{{title}} のペインを折りたたむ",
+    "expandTabGroup": "{{title}} のペインを展開する",
     "dropPane": "{{pane}} を {{tab}} に移動",
     "moveToTab": "タブへ移動",
     "layout": "ペインレイアウト",
     "addPane": "ペインを追加",
     "promotePane": "{{title}} をメインペインにする",
     "paneActions": "{{title}} ペインの操作",
-    "detachPane": "{{title}} を独立したトピックに移動",
+    "detachPane": "{{title}} を新しいタブに移動",
     "composerAria": "{{title}} へのメッセージ",
     "layouts": {
       "columns": "列",

@@ -1395,14 +1395,17 @@
   "workbench": {
     "aria": "Espace de conversations",
     "panes": "Volets",
+    "tabAria": "Onglet : {{title}}",
     "panesInTab": "Volets dans {{title}}",
+    "collapseTabGroup": "Réduire les volets de {{title}}",
+    "expandTabGroup": "Développer les volets de {{title}}",
     "dropPane": "Déplacer {{pane}} dans {{tab}}",
     "moveToTab": "Déplacer vers un onglet",
     "layout": "Disposition des volets",
     "addPane": "Ajouter un volet",
     "promotePane": "Définir {{title}} comme volet principal",
     "paneActions": "Actions du volet {{title}}",
-    "detachPane": "Déplacer {{title}} vers son propre sujet",
+    "detachPane": "Déplacer {{title}} vers un nouvel onglet",
     "composerAria": "Message à {{title}}",
     "layouts": {
       "columns": "Colonnes",

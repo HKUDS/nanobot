@@ -104,6 +104,34 @@ describe("workbench model", () => {
     ]);
   });
 
+  it("places a moved pane into an exact tab slot", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
+    state = addWorkbenchPane(state, "topic-a", "pane-b");
+    state = addWorkbenchPane(state, "topic-a", "pane-c");
+
+    state = attachWorkbenchPane(state, "topic-a", "pane-c", "pane-a");
+    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
+      "topic-a",
+      "pane-c",
+      "pane-a",
+      "pane-b",
+    ]);
+
+    state = ensureWorkbenchTab(state, "topic-b");
+    state = addWorkbenchPane(state, "topic-b", "pane-d");
+    state = attachWorkbenchPane(state, "topic-b", "pane-a", "pane-d");
+    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
+      "topic-a",
+      "pane-c",
+      "pane-b",
+    ]);
+    expect(workbenchTab(state, "topic-b").paneKeys).toEqual([
+      "topic-b",
+      "pane-a",
+      "pane-d",
+    ]);
+  });
+
   it("does not collapse a multi-pane tab into another tab", () => {
     let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
     state = ensureWorkbenchTab(state, "topic-b");

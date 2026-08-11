@@ -2336,9 +2336,18 @@ function Shell({
     setWorkbenchState((current) => promoteWorkbenchPane(current, tabKey, paneKey));
   }, []);
 
-  const onAttachWorkbenchPane = useCallback((paneKey: string, tabKey: string) => {
+  const onAttachWorkbenchPane = useCallback((
+    paneKey: string,
+    tabKey: string,
+    beforePaneKey?: string | null,
+  ) => {
     if (paneKey === tabKey) return;
-    setWorkbenchState((current) => attachWorkbenchPane(current, tabKey, paneKey));
+    setWorkbenchState((current) => attachWorkbenchPane(
+      current,
+      tabKey,
+      paneKey,
+      beforePaneKey,
+    ));
     if (activeKey === paneKey) {
       navigate({
         view: "chat",

@@ -1395,14 +1395,17 @@
   "workbench": {
     "aria": "Ruang kerja percakapan",
     "panes": "Panel",
+    "tabAria": "Tab: {{title}}",
     "panesInTab": "Panel di {{title}}",
+    "collapseTabGroup": "Ciutkan panel di {{title}}",
+    "expandTabGroup": "Luaskan panel di {{title}}",
     "dropPane": "Pindahkan {{pane}} ke {{tab}}",
     "moveToTab": "Pindahkan ke tab",
     "layout": "Tata letak panel",
     "addPane": "Tambah panel",
     "promotePane": "Jadikan {{title}} panel utama",
     "paneActions": "Tindakan panel {{title}}",
-    "detachPane": "Pindahkan {{title}} ke topik tersendiri",
+    "detachPane": "Pindahkan {{title}} ke tab baru",
     "composerAria": "Pesan untuk {{title}}",
     "layouts": {
       "columns": "Kolom",

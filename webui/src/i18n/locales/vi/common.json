@@ -1395,14 +1395,17 @@
   "workbench": {
     "aria": "Không gian hội thoại",
     "panes": "Khung",
+    "tabAria": "Thẻ: {{title}}",
     "panesInTab": "Các khung trong {{title}}",
+    "collapseTabGroup": "Thu gọn các khung trong {{title}}",
+    "expandTabGroup": "Mở rộng các khung trong {{title}}",
     "dropPane": "Di chuyển {{pane}} vào {{tab}}",
     "moveToTab": "Di chuyển vào thẻ",
     "layout": "Bố cục khung",
     "addPane": "Thêm khung",
     "promotePane": "Đặt {{title}} làm khung chính",
     "paneActions": "Thao tác cho khung {{title}}",
-    "detachPane": "Chuyển {{title}} thành chủ đề riêng",
+    "detachPane": "Chuyển {{title}} sang thẻ mới",
     "composerAria": "Nhắn tin cho {{title}}",
     "layouts": {
       "columns": "Cột",
