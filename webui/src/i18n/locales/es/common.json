@@ -1401,19 +1401,26 @@
     "collapseTabGroup": "Contraer los paneles de {{title}}",
     "expandTabGroup": "Expandir los paneles de {{title}}",
     "dropPane": "Mover {{pane}} a {{tab}}",
-    "moveToTab": "Mover a una pestaña",
+    "createGroup": "Crear grupo",
+    "moveTo": "Mover a",
+    "renameTabTitle": "Renombrar pestaña",
+    "renameTabDescription": "Ponle un nombre a esta pestaña para organizar sus paneles.",
+    "renameTabPlaceholder": "Nombre de la pestaña",
+    "dissolveTab": "Disolver grupo",
     "layout": "Diseño de paneles",
     "addPane": "Añadir panel",
+    "movePane": "Mover panel {{title}}",
+    "movePaneHint": "Arrastra para mover · También puedes usar las flechas",
     "promotePane": "Convertir {{title}} en el panel principal",
     "paneActions": "Acciones del panel {{title}}",
-    "detachPane": "Mover {{title}} a una pestaña nueva",
+    "detachPane": "Quitar",
     "composerAria": "Mensaje para {{title}}",
     "layouts": {
       "columns": "Columnas",
       "rows": "Filas",
       "grid": "Cuadrícula",
-      "main-stack": "Principal y pila",
-      "monocle": "Monóculo"
+      "bsp": "BSP",
+      "main-stack": "Principal y pila"
     }
   },
   "common": {

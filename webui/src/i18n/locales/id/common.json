@@ -1400,19 +1400,26 @@
     "collapseTabGroup": "Ciutkan panel di {{title}}",
     "expandTabGroup": "Luaskan panel di {{title}}",
     "dropPane": "Pindahkan {{pane}} ke {{tab}}",
-    "moveToTab": "Pindahkan ke tab",
+    "createGroup": "Buat grup",
+    "moveTo": "Pindahkan ke",
+    "renameTabTitle": "Ganti nama tab",
+    "renameTabDescription": "Beri nama tab ini untuk mengatur panelnya.",
+    "renameTabPlaceholder": "Nama tab",
+    "dissolveTab": "Bubarkan grup",
     "layout": "Tata letak panel",
     "addPane": "Tambah panel",
+    "movePane": "Pindahkan panel {{title}}",
+    "movePaneHint": "Seret untuk memindahkan · Tombol panah juga dapat digunakan",
     "promotePane": "Jadikan {{title}} panel utama",
     "paneActions": "Tindakan panel {{title}}",
-    "detachPane": "Pindahkan {{title}} ke tab baru",
+    "detachPane": "Keluarkan",
     "composerAria": "Pesan untuk {{title}}",
     "layouts": {
       "columns": "Kolom",
       "rows": "Baris",
       "grid": "Kisi",
-      "main-stack": "Utama dan tumpukan",
-      "monocle": "Panel tunggal"
+      "bsp": "BSP",
+      "main-stack": "Utama dan tumpukan"
     }
   },
   "common": {

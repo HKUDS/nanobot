@@ -1414,19 +1414,26 @@
     "collapseTabGroup": "折叠 {{title}} 中的窗格",
     "expandTabGroup": "展开 {{title}} 中的窗格",
     "dropPane": "将 {{pane}} 移入 {{tab}}",
-    "moveToTab": "移动到标签页",
+    "createGroup": "创建分组",
+    "moveTo": "移动到",
+    "renameTabTitle": "重命名标签页",
+    "renameTabDescription": "为这个标签页命名，以便组织其中的窗格。",
+    "renameTabPlaceholder": "标签页名称",
+    "dissolveTab": "解散分组",
     "layout": "窗格布局",
     "addPane": "添加窗格",
+    "movePane": "移动 {{title}} 窗格",
+    "movePaneHint": "拖动换位 · 也可以使用方向键",
     "promotePane": "将 {{title}} 设为主窗格",
     "paneActions": "{{title}} 窗格操作",
-    "detachPane": "将 {{title}} 移至新标签页",
+    "detachPane": "移出",
     "composerAria": "向 {{title}} 发送消息",
     "layouts": {
       "columns": "列布局",
       "rows": "行布局",
       "grid": "网格",
-      "main-stack": "主窗格与堆栈",
-      "monocle": "单窗格"
+      "bsp": "BSP",
+      "main-stack": "主窗格与堆栈"
     }
   },
   "common": {

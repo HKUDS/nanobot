@@ -323,6 +323,7 @@ interface ThreadShellProps {
   composerPortalTarget?: HTMLElement | null;
   composerActive?: boolean;
   composerInputAriaLabel?: string;
+  emptyComposerVariant?: "hero" | "thread";
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
@@ -618,6 +619,7 @@ export function ThreadShell({
   composerPortalTarget,
   composerActive = true,
   composerInputAriaLabel,
+  emptyComposerVariant = "hero",
   workspaceScope = null,
   workspaceDefaultScope = null,
   workspaceControls = null,
@@ -860,6 +862,7 @@ export function ThreadShell({
   ]);
 
   const showHeroComposer = displayMessages.length === 0 && !loading;
+  const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
@@ -1425,7 +1428,7 @@ export function ThreadShell({
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
           placeholder={
-            showHeroComposer
+            composerVariant === "hero"
               ? t("thread.composer.placeholderHero")
               : t("thread.composer.placeholderThread")
           }
@@ -1439,7 +1442,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
-          variant={showHeroComposer ? "hero" : "thread"}
+          variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}

@@ -1400,19 +1400,26 @@
     "collapseTabGroup": "Thu gọn các khung trong {{title}}",
     "expandTabGroup": "Mở rộng các khung trong {{title}}",
     "dropPane": "Di chuyển {{pane}} vào {{tab}}",
-    "moveToTab": "Di chuyển vào thẻ",
+    "createGroup": "Tạo nhóm",
+    "moveTo": "Di chuyển đến",
+    "renameTabTitle": "Đổi tên thẻ",
+    "renameTabDescription": "Đặt tên cho thẻ này để sắp xếp các khung.",
+    "renameTabPlaceholder": "Tên thẻ",
+    "dissolveTab": "Giải tán nhóm",
     "layout": "Bố cục khung",
     "addPane": "Thêm khung",
+    "movePane": "Di chuyển khung {{title}}",
+    "movePaneHint": "Kéo để di chuyển · Cũng có thể dùng các phím mũi tên",
     "promotePane": "Đặt {{title}} làm khung chính",
     "paneActions": "Thao tác cho khung {{title}}",
-    "detachPane": "Chuyển {{title}} sang thẻ mới",
+    "detachPane": "Gỡ",
     "composerAria": "Nhắn tin cho {{title}}",
     "layouts": {
       "columns": "Cột",
       "rows": "Hàng",
       "grid": "Lưới",
-      "main-stack": "Khung chính và ngăn xếp",
-      "monocle": "Một khung"
+      "bsp": "BSP",
+      "main-stack": "Khung chính và ngăn xếp"
     }
   },
   "common": {

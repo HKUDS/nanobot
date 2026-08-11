@@ -1,15 +1,18 @@
 import { createPortal } from "react-dom";
 import { useState } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   EMPTY_WORKBENCH_STATE,
   addWorkbenchPane,
+  ensureWorkbenchPaneTab,
   focusWorkbenchPane,
   setWorkbenchLayout,
+  setWorkbenchPaneLayoutOrder,
   workbenchTab,
+  workbenchTabForPane,
 } from "@/components/workbench/workbench-model";
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
@@ -26,25 +29,46 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
   };
 }
 
-function WorkbenchHarness() {
-  const [state, setState] = useState(() => (
-    addWorkbenchPane(EMPTY_WORKBENCH_STATE, "alpha", "beta")
-  ));
-  const tab = workbenchTab(state, "alpha");
+function WorkbenchHarness({
+  initialLayout = "columns",
+  onPaneOrderChange = () => {},
+}: {
+  initialLayout?: "columns" | "rows";
+  onPaneOrderChange?: (paneKeys: string[]) => void;
+} = {}) {
+  const [state, setState] = useState(() => {
+    const initial = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "alpha");
+    const tabKey = workbenchTabForPane(initial, "alpha").tabKey;
+    return setWorkbenchLayout(
+      addWorkbenchPane(initial, tabKey, "beta"),
+      tabKey,
+      initialLayout,
+    );
+  });
+  const tabKey = workbenchTabForPane(state, "alpha").tabKey;
+  const tab = workbenchTab(state, tabKey);
+  if (!tab) return null;
   const titles: Record<string, string> = { alpha: "Alpha", beta: "Beta" };
 
   return (
     <PaneWorkbench
-      panes={tab.paneKeys.map((key) => ({ key, title: titles[key] }))}
+      panes={tab.layoutPaneKeys.map((key) => ({ key, title: titles[key] }))}
       activePaneKey={tab.activePaneKey}
       layout={tab.layout}
+      showLayoutControl
       onActivatePane={(key) => setState((current) => (
-        focusWorkbenchPane(current, "alpha", key)
+        focusWorkbenchPane(current, tabKey, key)
       ))}
       onAddPane={vi.fn()}
       onLayoutChange={(layout) => setState((current) => (
-        setWorkbenchLayout(current, "alpha", layout)
+        setWorkbenchLayout(current, tabKey, layout)
       ))}
+      onPaneOrderChange={(paneKeys) => {
+        onPaneOrderChange(paneKeys);
+        setState((current) => (
+          setWorkbenchPaneLayoutOrder(current, tabKey, paneKeys)
+        ));
+      }}
       renderPane={(pane, context) => (
         <>
           <button type="button">Focus {pane.title}</button>
@@ -60,6 +84,26 @@ function WorkbenchHarness() {
           ) : null}
         </>
       )}
+    />
+  );
+}
+
+function BspWorkbenchHarness() {
+  const panes = ["alpha", "beta", "gamma", "delta"].map((key) => ({
+    key,
+    title: key,
+  }));
+  return (
+    <PaneWorkbench
+      panes={panes}
+      activePaneKey="delta"
+      layout="bsp"
+      showLayoutControl
+      onActivatePane={vi.fn()}
+      onAddPane={vi.fn()}
+      onLayoutChange={vi.fn()}
+      onPaneOrderChange={vi.fn()}
+      renderPane={(pane) => <span>{pane.title}</span>}
     />
   );
 }
@@ -123,6 +167,89 @@ describe("PaneWorkbench", () => {
     expect(screen.getByLabelText("Composer Beta")).not.toBeVisible();
   });
 
+  it("moves the focused pane between workspace slots from its bottom handle", () => {
+    const onPaneOrderChange = vi.fn();
+    render(<WorkbenchHarness onPaneOrderChange={onPaneOrderChange} />);
+
+    const grid = screen.getByTestId("pane-grid");
+    const handle = screen.getByRole("button", { name: "Move Beta pane" });
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha", "Beta"]);
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 750, clientY: 990 });
+    fireEvent.pointerMove(window, {
+      buttons: 1,
+      pointerId: 1,
+      clientX: 250,
+      clientY: 500,
+    });
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Beta", "Alpha"]);
+    expect(onPaneOrderChange).toHaveBeenCalledOnce();
+    expect(onPaneOrderChange).toHaveBeenCalledWith(["beta", "alpha"]);
+
+    fireEvent.pointerMove(window, {
+      buttons: 1,
+      pointerId: 1,
+      clientX: 750,
+      clientY: 500,
+    });
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha", "Beta"]);
+    expect(onPaneOrderChange).toHaveBeenLastCalledWith(["alpha", "beta"]);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 750, clientY: 500 });
+
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha", "Beta"]);
+    expect(onPaneOrderChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves panes up and down through stable workspace slots", () => {
+    const onPaneOrderChange = vi.fn();
+    render(
+      <WorkbenchHarness initialLayout="rows" onPaneOrderChange={onPaneOrderChange} />,
+    );
+
+    const grid = screen.getByTestId("pane-grid");
+    const handle = screen.getByRole("button", { name: "Move Beta pane" });
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 500, clientY: 990 });
+    fireEvent.pointerMove(window, {
+      buttons: 1,
+      pointerId: 1,
+      clientX: 500,
+      clientY: 250,
+    });
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Beta", "Alpha"]);
+
+    fireEvent.pointerMove(window, {
+      buttons: 1,
+      pointerId: 1,
+      clientX: 500,
+      clientY: 750,
+    });
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha", "Beta"]);
+    expect(onPaneOrderChange.mock.calls).toEqual([
+      [["beta", "alpha"]],
+      [["alpha", "beta"]],
+    ]);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 500, clientY: 750 });
+  });
+
+  it("moves the focused pane between workspace slots with arrow keys", () => {
+    render(<WorkbenchHarness />);
+
+    const handle = screen.getByRole("button", { name: "Move Beta pane" });
+    act(() => handle.focus());
+    expect(handle).toHaveFocus();
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+
+    expect(Array.from(screen.getByTestId("pane-grid").children)
+      .map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Beta", "Alpha"]);
+  });
+
   it("keeps one shared layout control and animates geometry changes", async () => {
     render(<WorkbenchHarness />);
 
@@ -135,5 +262,26 @@ describe("PaneWorkbench", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Rows" }));
     expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "rows");
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+
+    fireEvent.pointerDown(within(header).getByRole("button", { name: "Pane layout" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "BSP" }));
+    expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "bsp");
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(4));
+  });
+
+  it("fills the workbench through alternating binary splits", () => {
+    render(<BspWorkbenchHarness />);
+
+    const alpha = screen.getByTestId("workbench-pane-alpha");
+    const beta = screen.getByTestId("workbench-pane-beta");
+    const gamma = screen.getByTestId("workbench-pane-gamma");
+    const delta = screen.getByTestId("workbench-pane-delta");
+    expect([alpha.style.gridColumn, alpha.style.gridRow]).toEqual(["1 / 3", "1 / 5"]);
+    expect([beta.style.gridColumn, beta.style.gridRow]).toEqual(["3 / 5", "1 / 3"]);
+    expect([gamma.style.gridColumn, gamma.style.gridRow]).toEqual(["3 / 4", "3 / 5"]);
+    expect([delta.style.gridColumn, delta.style.gridRow]).toEqual(["4 / 5", "3 / 5"]);
   });
 });

@@ -1414,19 +1414,26 @@
     "collapseTabGroup": "Collapse panes in {{title}}",
     "expandTabGroup": "Expand panes in {{title}}",
     "dropPane": "Move {{pane}} into {{tab}}",
-    "moveToTab": "Move to tab",
+    "createGroup": "Create group",
+    "moveTo": "Move to",
+    "renameTabTitle": "Rename tab",
+    "renameTabDescription": "Give this tab a name for organizing its panes.",
+    "renameTabPlaceholder": "Tab name",
+    "dissolveTab": "Dissolve group",
     "layout": "Pane layout",
     "addPane": "Add pane",
+    "movePane": "Move {{title}} pane",
+    "movePaneHint": "Drag to move · Arrow keys also work",
     "promotePane": "Make {{title}} the primary pane",
     "paneActions": "{{title}} pane actions",
-    "detachPane": "Move {{title}} to a new tab",
+    "detachPane": "Remove",
     "composerAria": "Message {{title}}",
     "layouts": {
       "columns": "Columns",
       "rows": "Rows",
       "grid": "Grid",
-      "main-stack": "Main and stack",
-      "monocle": "Monocle"
+      "bsp": "BSP",
+      "main-stack": "Main and stack"
     }
   },
   "common": {

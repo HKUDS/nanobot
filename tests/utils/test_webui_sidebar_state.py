@@ -17,7 +17,7 @@ def test_sidebar_state_defaults_when_file_missing(tmp_path, monkeypatch) -> None
     assert webui_sidebar_state_path() == tmp_path / "webui" / "sidebar-state.json"
 
 
-def test_sidebar_state_normalizes_old_or_partial_payload(tmp_path, monkeypatch) -> None:
+def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     path = webui_sidebar_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +31,24 @@ def test_sidebar_state_normalizes_old_or_partial_payload(tmp_path, monkeypatch) 
                 "project_name_overrides": {"/repo": "  Core  ", "bad": ""},
                 "tags_by_key": {"websocket:a": ["work", "work", ""]},
                 "collapsed_groups": {"Earlier": 1},
+                "workbench": {
+                    "version": 1,
+                    "tabs": {
+                        "tab:websocket:a": {
+                            "explicit": True,
+                            "title": "  Research  ",
+                            "paneKeys": ["websocket:a", "websocket:b", "websocket:a"],
+                            "layoutPaneKeys": ["websocket:b", "missing", "websocket:a"],
+                            "activePaneKey": "missing",
+                            "layout": "invalid-layout",
+                        },
+                        "tab:websocket:b": {
+                            "paneKeys": ["websocket:b", "websocket:c"],
+                            "activePaneKey": "websocket:c",
+                            "layout": "bsp",
+                        },
+                    },
+                },
                 "view": {"density": "tiny", "show_archived": True, "sort": "nope"},
             }
         ),
@@ -47,6 +65,27 @@ def test_sidebar_state_normalizes_old_or_partial_payload(tmp_path, monkeypatch) 
     assert state["project_name_overrides"] == {"/repo": "Core"}
     assert state["tags_by_key"] == {"websocket:a": ["work"]}
     assert state["collapsed_groups"] == {"Earlier": True}
+    assert state["workbench"] == {
+        "version": 1,
+        "tabs": {
+            "tab:websocket:a": {
+                "explicit": True,
+                "title": "Research",
+                "paneKeys": ["websocket:a", "websocket:b"],
+                "layoutPaneKeys": ["websocket:b", "websocket:a"],
+                "activePaneKey": "websocket:a",
+                "layout": "columns",
+            },
+            "tab:websocket:b": {
+                "explicit": False,
+                "title": None,
+                "paneKeys": ["websocket:c"],
+                "layoutPaneKeys": ["websocket:c"],
+                "activePaneKey": "websocket:c",
+                "layout": "bsp",
+            },
+        },
+    }
     assert state["view"] == {
         "density": "comfortable",
         "show_previews": False,

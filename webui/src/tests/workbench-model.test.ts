@@ -5,197 +5,274 @@ import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
   attachWorkbenchPane,
+  createWorkbenchTab,
   detachWorkbenchPane,
-  ensureWorkbenchTab,
+  dissolveWorkbenchTab,
+  ensureWorkbenchPaneTab,
   focusWorkbenchPane,
-  parseWorkbenchState,
-  promoteWorkbenchPane,
+  normalizeWorkbenchState,
+  orderWorkbenchTabs,
   reconcileWorkbench,
+  renameWorkbenchTab,
   setWorkbenchLayout,
-  workbenchChildPaneKeys,
+  setWorkbenchPaneLayoutOrder,
   workbenchTab,
+  workbenchTabForPane,
+  type WorkbenchState,
 } from "@/components/workbench/workbench-model";
 
-describe("workbench model", () => {
-  it("gives every topic its own one-pane tab by default", () => {
-    const state = ensureWorkbenchTab(EMPTY_WORKBENCH_STATE, "topic-a");
+function withPaneTab(
+  state: WorkbenchState,
+  paneKey: string,
+): [WorkbenchState, string] {
+  const next = ensureWorkbenchPaneTab(state, paneKey);
+  return [next, workbenchTabForPane(next, paneKey).tabKey];
+}
 
-    expect(workbenchTab(state, "topic-a")).toEqual({
-      paneKeys: ["topic-a"],
-      activePaneKey: "topic-a",
+describe("workbench model", () => {
+  it("creates a virtual tab whose identity is separate from its pane", () => {
+    const [state, tabKey] = withPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+
+    expect(tabKey).not.toBe("pane-a");
+    expect(workbenchTab(state, tabKey)).toEqual({
+      explicit: false,
+      title: null,
+      paneKeys: ["pane-a"],
+      layoutPaneKeys: ["pane-a"],
+      activePaneKey: "pane-a",
       layout: "columns",
     });
-    expect(state.tabs["topic-b"]).toBeUndefined();
   });
 
-  it("keeps pane membership, focus, and layout scoped to a tab", () => {
-    let state = ensureWorkbenchTab(EMPTY_WORKBENCH_STATE, "topic-a");
-    state = ensureWorkbenchTab(state, "topic-b");
-    state = addWorkbenchPane(state, "topic-a", "topic-c");
-    state = setWorkbenchLayout(state, "topic-a", "main-stack");
+  it("keeps pane membership, focus, title, and layout scoped to a tab", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const alphaTabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = ensureWorkbenchPaneTab(state, "pane-b");
+    const betaTabKey = workbenchTabForPane(state, "pane-b").tabKey;
+    state = addWorkbenchPane(state, alphaTabKey, "pane-c");
+    state = setWorkbenchLayout(state, alphaTabKey, "main-stack");
+    state = renameWorkbenchTab(state, alphaTabKey, "Research");
 
-    expect(workbenchTab(state, "topic-a")).toEqual({
-      paneKeys: ["topic-a", "topic-c"],
-      activePaneKey: "topic-c",
+    expect(workbenchTab(state, alphaTabKey)).toEqual({
+      explicit: false,
+      title: "Research",
+      paneKeys: ["pane-a", "pane-c"],
+      layoutPaneKeys: ["pane-a", "pane-c"],
+      activePaneKey: "pane-c",
       layout: "main-stack",
     });
-    expect(workbenchTab(state, "topic-b")).toEqual({
-      paneKeys: ["topic-b"],
-      activePaneKey: "topic-b",
+    expect(workbenchTab(state, betaTabKey)).toEqual({
+      explicit: false,
+      title: null,
+      paneKeys: ["pane-b"],
+      layoutPaneKeys: ["pane-b"],
+      activePaneKey: "pane-b",
       layout: "columns",
     });
   });
 
-  it("focuses without reordering and promotes only when asked", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "topic-b");
-    state = addWorkbenchPane(state, "topic-a", "topic-c");
-    state = focusWorkbenchPane(state, "topic-a", "topic-b");
+  it("focuses a pane without rewriting membership", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, tabKey, "pane-b");
+    state = addWorkbenchPane(state, tabKey, "pane-c");
+    state = focusWorkbenchPane(state, tabKey, "pane-b");
 
-    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
-      "topic-a",
-      "topic-b",
-      "topic-c",
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual([
+      "pane-a",
+      "pane-b",
+      "pane-c",
     ]);
-
-    state = promoteWorkbenchPane(state, "topic-a", "topic-b");
-    expect(workbenchTab(state, "topic-a")).toMatchObject({
-      paneKeys: ["topic-b", "topic-a", "topic-c"],
-      activePaneKey: "topic-b",
-    });
+    expect(workbenchTab(state, tabKey)?.activePaneKey).toBe("pane-b");
   });
 
-  it("detaches child panes, keeps the root, and chooses the adjacent focus", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "topic-b");
-    state = addWorkbenchPane(state, "topic-a", "topic-c");
-    state = focusWorkbenchPane(state, "topic-a", "topic-b");
-    state = detachWorkbenchPane(state, "topic-a", "topic-b");
+  it("detaches any pane into a new virtual tab", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, tabKey, "pane-b");
+    state = addWorkbenchPane(state, tabKey, "pane-c");
+    state = focusWorkbenchPane(state, tabKey, "pane-a");
+    state = detachWorkbenchPane(state, tabKey, "pane-a");
 
-    expect(workbenchTab(state, "topic-a")).toMatchObject({
-      paneKeys: ["topic-a", "topic-c"],
-      activePaneKey: "topic-c",
+    expect(workbenchTab(state, tabKey)).toMatchObject({
+      paneKeys: ["pane-b", "pane-c"],
+      activePaneKey: "pane-b",
     });
-
-    state = detachWorkbenchPane(state, "topic-a", "topic-c");
-    state = detachWorkbenchPane(state, "topic-a", "topic-a");
-    expect(workbenchTab(state, "topic-a").paneKeys).toEqual(["topic-a"]);
+    const detached = workbenchTabForPane(state, "pane-a");
+    expect(detached.tabKey).not.toBe(tabKey);
+    expect(detached.tab.paneKeys).toEqual(["pane-a"]);
   });
 
-  it("moves a pane between tabs and can reattach a one-pane tab", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
-    state = ensureWorkbenchTab(state, "topic-b");
-    state = attachWorkbenchPane(state, "topic-b", "pane-a");
+  it("dissolves a tab into standalone panes without deleting them", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, tabKey, "pane-b");
+    state = addWorkbenchPane(state, tabKey, "pane-c");
+    state = dissolveWorkbenchTab(state, tabKey);
 
-    expect(workbenchTab(state, "topic-a")).toMatchObject({
-      paneKeys: ["topic-a"],
-      activePaneKey: "topic-a",
+    expect(workbenchTab(state, tabKey)).toEqual({
+      explicit: false,
+      title: null,
+      paneKeys: ["pane-a"],
+      layoutPaneKeys: ["pane-a"],
+      activePaneKey: "pane-a",
+      layout: "columns",
     });
-    expect(workbenchTab(state, "topic-b")).toMatchObject({
-      paneKeys: ["topic-b", "pane-a"],
+    expect(workbenchTabForPane(state, "pane-a").tab.paneKeys).toEqual(["pane-a"]);
+    expect(workbenchTabForPane(state, "pane-b").tab.paneKeys).toEqual(["pane-b"]);
+    expect(workbenchTabForPane(state, "pane-c").tab.paneKeys).toEqual(["pane-c"]);
+    expect(Object.keys(state.tabs)).toHaveLength(3);
+  });
+
+  it("makes a singleton tab visible without changing pane membership", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+
+    state = createWorkbenchTab(state, tabKey);
+    expect(workbenchTab(state, tabKey)).toMatchObject({
+      explicit: true,
+      paneKeys: ["pane-a"],
       activePaneKey: "pane-a",
     });
 
-    state = ensureWorkbenchTab(state, "topic-c");
-    state = attachWorkbenchPane(state, "topic-b", "topic-c");
-    expect(state.tabs["topic-c"]).toBeUndefined();
-    expect(workbenchTab(state, "topic-b").paneKeys).toEqual([
-      "topic-b",
-      "pane-a",
-      "topic-c",
-    ]);
+    state = detachWorkbenchPane(state, tabKey, "pane-a");
+    expect(workbenchTab(state, tabKey)).toEqual({
+      explicit: false,
+      title: null,
+      paneKeys: ["pane-a"],
+      layoutPaneKeys: ["pane-a"],
+      activePaneKey: "pane-a",
+      layout: "columns",
+    });
   });
 
-  it("places a moved pane into an exact tab slot", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
-    state = addWorkbenchPane(state, "topic-a", "pane-b");
-    state = addWorkbenchPane(state, "topic-a", "pane-c");
+  it("moves every pane symmetrically and removes an empty source tab", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const alphaTabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, alphaTabKey, "pane-b");
+    state = ensureWorkbenchPaneTab(state, "pane-c");
+    const targetTabKey = workbenchTabForPane(state, "pane-c").tabKey;
 
-    state = attachWorkbenchPane(state, "topic-a", "pane-c", "pane-a");
-    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
-      "topic-a",
+    state = attachWorkbenchPane(state, targetTabKey, "pane-a");
+    expect(workbenchTab(state, alphaTabKey)?.paneKeys).toEqual(["pane-b"]);
+    expect(workbenchTab(state, targetTabKey)?.paneKeys).toEqual(["pane-c", "pane-a"]);
+
+    state = attachWorkbenchPane(state, targetTabKey, "pane-b");
+    expect(workbenchTab(state, alphaTabKey)).toBeNull();
+    expect(workbenchTab(state, targetTabKey)?.paneKeys).toEqual([
       "pane-c",
       "pane-a",
       "pane-b",
     ]);
+  });
 
-    state = ensureWorkbenchTab(state, "topic-b");
-    state = addWorkbenchPane(state, "topic-b", "pane-d");
-    state = attachWorkbenchPane(state, "topic-b", "pane-a", "pane-d");
-    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
-      "topic-a",
-      "pane-c",
+  it("keeps membership independent from projected display order", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, tabKey, "pane-b");
+    state = addWorkbenchPane(state, tabKey, "pane-c");
+
+    const [ordered] = orderWorkbenchTabs(
+      state,
+      ["pane-c", "pane-a", "pane-b"],
+      new Map(),
+    );
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual(["pane-a", "pane-b", "pane-c"]);
+    expect(ordered.paneKeys).toEqual(["pane-c", "pane-a", "pane-b"]);
+
+    state = setWorkbenchPaneLayoutOrder(state, tabKey, ["pane-b", "pane-c", "pane-a"]);
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual(["pane-a", "pane-b", "pane-c"]);
+    expect(workbenchTab(state, tabKey)?.layoutPaneKeys).toEqual([
       "pane-b",
-    ]);
-    expect(workbenchTab(state, "topic-b").paneKeys).toEqual([
-      "topic-b",
+      "pane-c",
       "pane-a",
-      "pane-d",
+    ]);
+    expect(ordered.paneKeys).toEqual(["pane-c", "pane-a", "pane-b"]);
+  });
+
+  it("keeps each tab contiguous and ranks it by its latest updated pane", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const alphaTabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, alphaTabKey, "pane-c");
+    state = ensureWorkbenchPaneTab(state, "pane-b");
+    const betaTabKey = workbenchTabForPane(state, "pane-b").tabKey;
+    state = addWorkbenchPane(state, betaTabKey, "pane-d");
+
+    const tabs = orderWorkbenchTabs(
+      state,
+      ["pane-d", "pane-c", "pane-b", "pane-a"],
+      new Map([
+        ["pane-a", "2026-08-01T10:00:00Z"],
+        ["pane-b", "2026-08-03T10:00:00Z"],
+        ["pane-c", "2026-08-05T10:00:00Z"],
+        ["pane-d", "2026-08-04T10:00:00Z"],
+      ]),
+    );
+
+    expect(tabs.map(({ tabKey, paneKeys, updatedAt }) => ({
+      tabKey,
+      paneKeys,
+      updatedAt,
+    }))).toEqual([
+      {
+        tabKey: alphaTabKey,
+        paneKeys: ["pane-c", "pane-a"],
+        updatedAt: "2026-08-05T10:00:00Z",
+      },
+      {
+        tabKey: betaTabKey,
+        paneKeys: ["pane-d", "pane-b"],
+        updatedAt: "2026-08-04T10:00:00Z",
+      },
     ]);
   });
 
-  it("does not collapse a multi-pane tab into another tab", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
-    state = ensureWorkbenchTab(state, "topic-b");
-
-    expect(attachWorkbenchPane(state, "topic-b", "topic-a")).toBe(state);
-  });
-
-  it("caps every tab at four panes", () => {
-    let state = EMPTY_WORKBENCH_STATE;
+  it("caps every virtual tab at four panes", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
     for (let index = 1; index <= MAX_WORKBENCH_PANES; index += 1) {
-      state = addWorkbenchPane(state, "topic-a", `pane-${index}`);
+      state = addWorkbenchPane(state, tabKey, `pane-${index}`);
     }
-    expect(workbenchTab(state, "topic-a").paneKeys).toEqual([
-      "topic-a",
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual([
+      "pane-a",
       "pane-1",
       "pane-2",
       "pane-3",
     ]);
-
-    const beforeAttach = state;
-    state = attachWorkbenchPane(state, "topic-a", "standalone");
-    expect(state).toBe(beforeAttach);
   });
 
-  it("identifies only sessions attached beneath another topic", () => {
-    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "topic-a", "pane-a");
-    state = addWorkbenchPane(state, "topic-b", "pane-b");
-
-    expect(workbenchChildPaneKeys(state)).toEqual(new Set(["pane-a", "pane-b"]));
-
-    state = detachWorkbenchPane(state, "topic-a", "pane-a");
-    expect(workbenchChildPaneKeys(state)).toEqual(new Set(["pane-b"]));
-  });
-
-  it("repairs persisted state and removes deleted sessions", () => {
-    const parsed = parseWorkbenchState(JSON.stringify({
-      version: 2,
+  it("repairs duplicates, removes deleted panes, and creates missing tabs", () => {
+    const state = normalizeWorkbenchState({
+      version: 1,
       tabs: {
-        "topic-a": {
-          paneKeys: ["topic-a", "topic-b", "topic-b", 9],
+        alpha: {
+          title: "Alpha",
+          paneKeys: ["pane-a", "pane-b", "pane-b", 9],
           activePaneKey: "missing",
           layout: "unknown",
         },
-        deleted: {
-          paneKeys: ["deleted"],
-          activePaneKey: "deleted",
+        duplicate: {
+          paneKeys: ["pane-b", "deleted"],
+          activePaneKey: "pane-b",
           layout: "grid",
         },
       },
-    }));
-    const reconciled = reconcileWorkbench(parsed, new Set(["topic-a"]));
-
-    expect(reconciled).toEqual({
-      version: 2,
-      tabs: {
-        "topic-a": {
-          paneKeys: ["topic-a"],
-          activePaneKey: "topic-a",
-          layout: "columns",
-        },
-      },
     });
-    expect(parseWorkbenchState(JSON.stringify({ version: 1, tabs: {} })))
-      .toEqual(EMPTY_WORKBENCH_STATE);
-    expect(parseWorkbenchState("not-json")).toEqual(EMPTY_WORKBENCH_STATE);
+    const reconciled = reconcileWorkbench(
+      state,
+      new Set(["pane-a", "pane-b", "pane-c"]),
+    );
+
+    expect(workbenchTab(reconciled, "alpha")).toEqual({
+      explicit: false,
+      title: "Alpha",
+      paneKeys: ["pane-a", "pane-b"],
+      layoutPaneKeys: ["pane-a", "pane-b"],
+      activePaneKey: "pane-a",
+      layout: "columns",
+    });
+    expect(workbenchTab(reconciled, "duplicate")).toBeNull();
+    expect(workbenchTabForPane(reconciled, "pane-c").tab.paneKeys).toEqual(["pane-c"]);
   });
+
 });

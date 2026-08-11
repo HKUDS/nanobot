@@ -17,19 +17,22 @@ import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
-  WORKBENCH_STORAGE_KEY,
+  EMPTY_WORKBENCH_STATE,
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
   attachWorkbenchPane,
+  createWorkbenchTab,
   detachWorkbenchPane,
-  ensureWorkbenchTab,
+  dissolveWorkbenchTab,
+  ensureWorkbenchPaneTab,
   focusWorkbenchPane,
-  parseWorkbenchState,
-  promoteWorkbenchPane,
+  orderWorkbenchTabs,
   reconcileWorkbench,
+  renameWorkbenchTab,
   setWorkbenchLayout,
-  workbenchChildPaneKeys,
+  setWorkbenchPaneLayoutOrder,
   workbenchTab,
+  workbenchTabForPane,
   type WorkbenchState,
 } from "@/components/workbench/workbench-model";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
@@ -53,7 +56,7 @@ import {
   loadSavedSecret,
   saveSecret,
 } from "@/lib/bootstrap";
-import { displayTitle } from "@/lib/chat-groups";
+import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
@@ -137,14 +140,6 @@ const RenameChatDialog = lazy(async () => {
   const module = await import("@/components/RenameChatDialog");
   return { default: module.RenameChatDialog };
 });
-
-function readWorkbenchState(): WorkbenchState {
-  try {
-    return parseWorkbenchState(window.localStorage.getItem(WORKBENCH_STORAGE_KEY));
-  } catch {
-    return parseWorkbenchState(null);
-  }
-}
 
 function SurfaceLoadingFallback() {
   const { t } = useTranslation();
@@ -1043,7 +1038,11 @@ function Shell({
     deleteChat,
     getSessionAutomations,
   } = useSessions();
-  const { state: sidebarState, update: updateSidebarState } =
+  const {
+    state: sidebarState,
+    loading: sidebarStateLoading,
+    update: updateSidebarState,
+  } =
     useSidebarState(sessions, !loading);
   const initialRouteRef = useRef<ShellRoute | null>(null);
   if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
@@ -1060,21 +1059,23 @@ function Shell({
   const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
-  const [workbenchState, setWorkbenchState] = useState(readWorkbenchState);
+  const [workbenchState, setWorkbenchState] = useState<WorkbenchState>(
+    EMPTY_WORKBENCH_STATE,
+  );
+  const workbenchServerHydratedRef = useRef(false);
+  const lastServerWorkbenchRef = useRef("");
+  const skipWorkbenchPersistenceRef = useRef(false);
   const [creatingPane, setCreatingPane] = useState(false);
-  const childPaneKeys = useMemo(
-    () => workbenchChildPaneKeys(workbenchState),
-    [workbenchState],
-  );
-  const topicSessions = useMemo(
-    () => sessions.filter((session) => !childPaneKeys.has(session.key)),
-    [childPaneKeys, sessions],
-  );
+  const topicSessions = sessions;
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
     automations?: SessionAutomationJob[];
   } | null>(null);
   const [pendingRename, setPendingRename] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
+  const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
     label: string;
   } | null>(null);
@@ -1182,6 +1183,19 @@ function Shell({
   }, [getToken]);
 
   useEffect(() => {
+    if (sidebarStateLoading) return;
+    const serialized = JSON.stringify(sidebarState.workbench);
+    if (
+      workbenchServerHydratedRef.current
+      && lastServerWorkbenchRef.current === serialized
+    ) return;
+    workbenchServerHydratedRef.current = true;
+    lastServerWorkbenchRef.current = serialized;
+    skipWorkbenchPersistenceRef.current = true;
+    setWorkbenchState(sidebarState.workbench);
+  }, [sidebarState.workbench, sidebarStateLoading]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
@@ -1193,15 +1207,19 @@ function Shell({
   }, [hostSidebarOpen]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        WORKBENCH_STORAGE_KEY,
-        JSON.stringify(workbenchState),
-      );
-    } catch {
-      // ignore storage errors (private mode, etc.)
+    if (!workbenchServerHydratedRef.current || sidebarStateLoading) return;
+    if (skipWorkbenchPersistenceRef.current) {
+      skipWorkbenchPersistenceRef.current = false;
+      return;
     }
-  }, [workbenchState]);
+    const serialized = JSON.stringify(workbenchState);
+    if (serialized === JSON.stringify(sidebarState.workbench)) return;
+    lastServerWorkbenchRef.current = serialized;
+    void updateSidebarState((current) => ({
+      ...current,
+      workbench: workbenchState,
+    }));
+  }, [sidebarState.workbench, sidebarStateLoading, updateSidebarState, workbenchState]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -1266,11 +1284,13 @@ function Shell({
     if (temporarySessions[activeKey]) return temporarySessions[activeKey];
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey, temporarySessions]);
-  const activeTabState = useMemo(() => (
+  const activeTabMatch = useMemo(() => (
     activeKey && !temporarySessions[activeKey]
-      ? workbenchTab(workbenchState, activeKey)
+      ? workbenchTabForPane(workbenchState, activeKey)
       : null
   ), [activeKey, temporarySessions, workbenchState]);
+  const activeTabKey = activeTabMatch?.tabKey ?? null;
+  const activeTabState = activeTabMatch?.tab ?? null;
   const activePaneSession = useMemo<ChatSummary | null>(() => {
     if (!activeTabState) return activeSession;
     return sessions.find((session) => session.key === activeTabState.activePaneKey)
@@ -1341,16 +1361,23 @@ function Shell({
   }, [loading, sessions]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || sidebarStateLoading) return;
     const validKeys = new Set(sessions.map((session) => session.key));
     setWorkbenchState((current) => {
       const reconciled = reconcileWorkbench(current, validKeys);
       if (!activeKey || temporarySessions[activeKey] || !validKeys.has(activeKey)) {
         return reconciled;
       }
-      return ensureWorkbenchTab(reconciled, activeKey);
+      const match = workbenchTabForPane(reconciled, activeKey);
+      return focusWorkbenchPane(reconciled, match.tabKey, activeKey);
     });
-  }, [activeKey, loading, sessions, temporarySessions]);
+  }, [
+    activeKey,
+    loading,
+    sidebarStateLoading,
+    sessions,
+    temporarySessions,
+  ]);
 
   useEffect(() => {
     if (loading) return;
@@ -1783,6 +1810,18 @@ function Shell({
     [pendingRename, updateSidebarState],
   );
 
+  const onRequestRenameTab = useCallback((key: string, label: string) => {
+    setPendingTabRename({ key, label });
+  }, []);
+
+  const onConfirmTabRename = useCallback((title: string) => {
+    if (!pendingTabRename) return;
+    setWorkbenchState((current) => (
+      renameWorkbenchTab(current, pendingTabRename.key, title)
+    ));
+    setPendingTabRename(null);
+  }, [pendingTabRename]);
+
   const onToggleGroup = useCallback(
     (groupId: string) => {
       void updateSidebarState((current) => {
@@ -1867,17 +1906,6 @@ function Shell({
     [activeKey, navigate, sidebarState.archived_keys, topicSessions, updateSidebarState],
   );
 
-  const onReorderSessions = useCallback(
-    (sessionOrder: string[]) => {
-      void updateSidebarState((current) => ({
-        ...current,
-        session_order: sessionOrder,
-        view: { ...current.view, sort: "manual" },
-      }));
-    },
-    [updateSidebarState],
-  );
-
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
       ...current,
@@ -1894,13 +1922,14 @@ function Shell({
   }, []);
 
   const onAddPane = useCallback(async () => {
-    const tabKey = activeKey;
+    const tabKey = activeTabKey;
     if (
       !tabKey
+      || !activeKey
       || !activeSession
       || creatingPane
       || (activeTabState?.paneKeys.length ?? 0) >= MAX_WORKBENCH_PANES
-      || temporarySessionsRef.current[tabKey]
+      || temporarySessionsRef.current[activeKey]
     ) return;
     setMobileSidebarOpen(false);
     setSessionSearchOpen(false);
@@ -1909,7 +1938,17 @@ function Shell({
       const scope = activeWorkspaceScope;
       const chatId = await createChat(scope);
       const paneKey = `websocket:${chatId}`;
-      setWorkbenchState((current) => addWorkbenchPane(current, tabKey, paneKey));
+      pendingCreatedSessionKeyRef.current = paneKey;
+      setWorkbenchState((current) => {
+        const withTab = ensureWorkbenchPaneTab(current, activeKey);
+        const target = workbenchTabForPane(withTab, activeKey);
+        return addWorkbenchPane(withTab, target.tabKey, paneKey);
+      });
+      navigate({
+        view: "chat",
+        activeKey: paneKey,
+        settingsSection: "overview",
+      });
       if (scope) {
         setWorkspaceOverrides((current) => ({
           ...current,
@@ -1927,10 +1966,12 @@ function Shell({
   }, [
     activeKey,
     activeSession,
+    activeTabKey,
     activeTabState,
     activeWorkspaceScope,
     createChat,
     creatingPane,
+    navigate,
     t,
   ]);
 
@@ -2242,6 +2283,68 @@ function Shell({
     || deriveTitle(session.preview, t("chat.newChat"))
   ), [sidebarState.title_overrides, t]);
 
+  const automaticSidebarSort = sidebarState.view.sort === "manual"
+    ? "updated_desc"
+    : sidebarState.view.sort;
+  const orderedWorkbenchTabs = useMemo(() => {
+    const orderedSessions = sortSessions(
+      sessions,
+      automaticSidebarSort,
+      sidebarState.title_overrides,
+      sidebarState.session_order,
+    );
+    const updatedAtByKey = new Map(sessions.map((session) => [
+      session.key,
+      session.updatedAt ?? session.createdAt,
+    ]));
+    return orderWorkbenchTabs(
+      workbenchState,
+      orderedSessions.map((session) => session.key),
+      updatedAtByKey,
+    );
+  }, [
+    automaticSidebarSort,
+    sessions,
+    sidebarState.session_order,
+    sidebarState.title_overrides,
+    workbenchState,
+  ]);
+  const orderedWorkbenchTabsByKey = useMemo(
+    () => new Map(orderedWorkbenchTabs.map((tab) => [tab.tabKey, tab])),
+    [orderedWorkbenchTabs],
+  );
+  const sidebarTabPresentations = useMemo(() => {
+    const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
+    return orderedWorkbenchTabs.flatMap((tab) => {
+      const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key))
+        ?? tab.paneKeys[0];
+      const anchor = sessionsByKey.get(anchorKey);
+      if (!anchor) return [];
+      const title = tab.tab.title ?? titleForSession(anchor);
+      const visible = tab.tab.explicit || tab.paneKeys.length > 1;
+      const rowKey = visible ? tab.tabKey : tab.paneKeys[0];
+      return [{
+        orderedTab: tab,
+        rowKey,
+        title,
+        session: visible
+          ? {
+              ...anchor,
+              key: tab.tabKey,
+              chatId: `workbench-tab:${tab.tabKey}`,
+              title,
+              preview: "",
+              updatedAt: tab.updatedAt,
+            }
+          : anchor,
+      }];
+    });
+  }, [orderedWorkbenchTabs, sessions, titleForSession]);
+  const sidebarTopicSessions = useMemo(
+    () => sidebarTabPresentations.map((presentation) => presentation.session),
+    [sidebarTabPresentations],
+  );
+
   const headerTitle = temporaryChatActive
     ? deriveTemporaryChatTitle(activeSession?.preview, t("temporaryChat.title"))
     : activeSession
@@ -2250,18 +2353,31 @@ function Shell({
   const workbenchPaneSessions = useMemo(() => {
     if (!activeTabState) return [];
     const byKey = new Map(sessions.map((session) => [session.key, session]));
-    return activeTabState.paneKeys
+    const sortedPaneKeys = activeTabKey
+      ? orderedWorkbenchTabsByKey.get(activeTabKey)?.paneKeys ?? activeTabState.paneKeys
+      : activeTabState.paneKeys;
+    const paneKeys = [
+      ...activeTabState.layoutPaneKeys.filter((key) => byKey.has(key)),
+      ...sortedPaneKeys.filter((key) => !activeTabState.layoutPaneKeys.includes(key)),
+    ];
+    return paneKeys
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
-  }, [activeTabState, sessions]);
+  }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
+  const activeTabVisible = Boolean(
+    activeTabState
+    && (activeTabState.explicit || activeTabState.paneKeys.length > 1),
+  );
   const renderedWorkbenchPanes = useMemo(() => {
-    if (paneChromeEnabled && activeKey) {
+    if (paneChromeEnabled) {
       return workbenchPaneSessions.map((session) => ({
         key: session.key,
-        reactKey: session.key === activeKey ? "tab-root" : `pane:${session.key}`,
+        reactKey: session.key === activeTabState?.paneKeys[0]
+          ? "tab-root"
+          : `pane:${session.key}`,
         title: titleForSession(session),
       }));
     }
@@ -2270,7 +2386,14 @@ function Shell({
       reactKey: "tab-root",
       title: headerTitle,
     }];
-  }, [activeKey, headerTitle, paneChromeEnabled, titleForSession, workbenchPaneSessions]);
+  }, [
+    activeKey,
+    activeTabState?.paneKeys,
+    headerTitle,
+    paneChromeEnabled,
+    titleForSession,
+    workbenchPaneSessions,
+  ]);
   const renderedActivePaneKey = paneChromeEnabled && activeTabState
     ? activeTabState.activePaneKey
     : renderedWorkbenchPanes[0].key;
@@ -2279,9 +2402,9 @@ function Shell({
     : "columns";
   const sidebarPaneGroups = useMemo(() => {
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
-    return Object.fromEntries(topicSessions.map((topic) => {
-      const tab = workbenchTab(workbenchState, topic.key);
-      const panes = tab.paneKeys
+    return Object.fromEntries(sidebarTabPresentations.map((presentation) => {
+      const orderedTab = presentation.orderedTab;
+      const panes = orderedTab.paneKeys
         .map((key) => sessionsByKey.get(key))
         .filter((session): session is ChatSummary => session !== undefined)
         .map((session) => ({
@@ -2289,73 +2412,72 @@ function Shell({
           chatId: session.chatId,
           title: titleForSession(session),
         }));
-      return [topic.key, {
-        topicKey: topic.key,
-        activePaneKey: tab.activePaneKey,
+      return [presentation.rowKey, {
+        tabKey: orderedTab.tabKey,
+        title: presentation.title,
+        activePaneKey: orderedTab.tab.activePaneKey,
+        visible: orderedTab.tab.explicit || orderedTab.paneKeys.length > 1,
         panes,
       }];
     }));
-  }, [sessions, titleForSession, topicSessions, workbenchState]);
-  const attachableTabKeys = useMemo(() => (
-    topicSessions
-      .filter((session) => workbenchTab(workbenchState, session.key).paneKeys.length === 1)
-      .map((session) => session.key)
-  ), [topicSessions, workbenchState]);
-  const paneAcceptingTabKeys = useMemo(() => (
-    topicSessions
-      .filter((session) => (
-        workbenchTab(workbenchState, session.key).paneKeys.length < MAX_WORKBENCH_PANES
-      ))
-      .map((session) => session.key)
-  ), [topicSessions, workbenchState]);
+  }, [
+    sessions,
+    sidebarTabPresentations,
+    titleForSession,
+  ]);
   const activePaneLimitReached = Boolean(
     activeTabState && activeTabState.paneKeys.length >= MAX_WORKBENCH_PANES,
   );
 
   const onActivateWorkbenchPane = useCallback((paneKey: string) => {
-    if (!activeKey) return;
-    setWorkbenchState((current) => focusWorkbenchPane(current, activeKey, paneKey));
-  }, [activeKey]);
+    if (!activeTabKey) return;
+    setWorkbenchState((current) => focusWorkbenchPane(current, activeTabKey, paneKey));
+    onSelectChat(paneKey);
+  }, [activeTabKey, onSelectChat]);
+
+  const onSelectSidebarTab = useCallback((tabKey: string) => {
+    const tab = workbenchTab(workbenchState, tabKey);
+    if (tab) onSelectChat(tab.activePaneKey);
+  }, [onSelectChat, workbenchState]);
+
+  const onSelectSidebarItem = useCallback((key: string) => {
+    if (
+      temporarySessionsRef.current[key]
+      || sessions.some((session) => session.key === key)
+    ) {
+      onSelectChat(key);
+      return;
+    }
+    onSelectSidebarTab(key);
+  }, [onSelectChat, onSelectSidebarTab, sessions]);
 
   const onSelectSidebarPane = useCallback((tabKey: string, paneKey: string) => {
     setWorkbenchState((current) => focusWorkbenchPane(current, tabKey, paneKey));
-    if (activeKey !== tabKey) {
-      navigate({
-        view: "chat",
-        activeKey: tabKey,
-        settingsSection: "overview",
-      });
-    }
-  }, [activeKey, navigate]);
+    onSelectChat(paneKey);
+  }, [onSelectChat]);
 
   const onDetachWorkbenchPane = useCallback((tabKey: string, paneKey: string) => {
     setWorkbenchState((current) => detachWorkbenchPane(current, tabKey, paneKey));
   }, []);
 
-  const onPromoteWorkbenchPane = useCallback((tabKey: string, paneKey: string) => {
-    setWorkbenchState((current) => promoteWorkbenchPane(current, tabKey, paneKey));
+  const onCreateWorkbenchTab = useCallback((tabKey: string) => {
+    setWorkbenchState((current) => createWorkbenchTab(current, tabKey));
+  }, []);
+
+  const onDissolveWorkbenchTab = useCallback((tabKey: string) => {
+    setWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
   }, []);
 
   const onAttachWorkbenchPane = useCallback((
     paneKey: string,
     tabKey: string,
-    beforePaneKey?: string | null,
   ) => {
-    if (paneKey === tabKey) return;
-    setWorkbenchState((current) => attachWorkbenchPane(
-      current,
-      tabKey,
-      paneKey,
-      beforePaneKey,
-    ));
-    if (activeKey === paneKey) {
-      navigate({
-        view: "chat",
-        activeKey: tabKey,
-        settingsSection: "overview",
-      });
-    }
-  }, [activeKey, navigate]);
+    setWorkbenchState((current) => {
+      const target = workbenchTab(current, tabKey);
+      if (!target || (!target.explicit && target.paneKeys.length < 2)) return current;
+      return attachWorkbenchPane(current, tabKey, paneKey);
+    });
+  }, []);
 
   useEffect(() => {
     if (view === "settings") {
@@ -2387,28 +2509,49 @@ function Shell({
       : t("app.documentTitle.base");
   }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
+  const pinnedPaneKeys = useMemo(
+    () => new Set(sidebarState.pinned_keys),
+    [sidebarState.pinned_keys],
+  );
+  const archivedPaneKeys = useMemo(
+    () => new Set(sidebarState.archived_keys),
+    [sidebarState.archived_keys],
+  );
+  const sidebarPinnedTabKeys = useMemo(() => sidebarTabPresentations
+    .filter(({ orderedTab }) => orderedTab.paneKeys.some((key) => pinnedPaneKeys.has(key)))
+    .map(({ rowKey }) => rowKey), [pinnedPaneKeys, sidebarTabPresentations]);
+  const sidebarArchivedTabKeys = useMemo(() => sidebarTabPresentations
+    .filter(({ orderedTab }) => orderedTab.paneKeys.every((key) => archivedPaneKeys.has(key)))
+    .map(({ rowKey }) => rowKey), [archivedPaneKeys, sidebarTabPresentations]);
+  const activeSidebarKey = activeTabKey
+    ? sidebarTabPresentations.find(({ orderedTab }) => (
+        orderedTab.tabKey === activeTabKey
+      ))?.rowKey ?? activeKey
+    : activeKey;
+
   const sidebarProps = {
-    sessions: topicSessions,
+    sessions: sidebarTopicSessions,
     temporarySessions: temporarySessionList,
-    activeKey: view === "chat" ? activeKey : null,
+    activeKey: view === "chat"
+      ? (temporaryChatActive ? activeKey : activeSidebarKey)
+      : null,
     loading,
     newChatActive: view === "chat" && activeKey === null,
     onNewChat,
-    onSelect: onSelectChat,
+    onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
     onRequestDelete,
     onRequestDeleteMany,
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onRequestRenameTab,
     paneGroups: sidebarPaneGroups,
     onSelectPane: onSelectSidebarPane,
+    onCreateTab: onCreateWorkbenchTab,
     onDetachPane: onDetachWorkbenchPane,
-    onPromotePane: onPromoteWorkbenchPane,
-    attachableTabKeys,
-    paneAcceptingTabKeys,
+    onDissolveTab: onDissolveWorkbenchTab,
     onAttachPane: onAttachWorkbenchPane,
-    onReorderSessions,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -2420,19 +2563,19 @@ function Shell({
     onOpenSearch: onOpenSessionSearch,
     activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
     onToggleArchived,
-    pinnedKeys: sidebarState.pinned_keys,
-    archivedKeys: sidebarState.archived_keys,
+    pinnedKeys: sidebarPinnedTabKeys,
+    archivedKeys: sidebarArchivedTabKeys,
+    pinnedPaneKeys: sidebarState.pinned_keys,
+    archivedPaneKeys: sidebarState.archived_keys,
     sessionOrder: sidebarState.session_order,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
     collapsedGroups: sidebarState.collapsed_groups,
     runningChatIds: runningChatIdList,
     updatedChatIds: updatedChatIdList,
-    viewState: sidebarState.view,
+    viewState: { ...sidebarState.view, sort: automaticSidebarSort },
     showArchived: sidebarState.view.show_archived,
-    archivedCount: topicSessions.filter(
-      (session) => sidebarState.archived_keys.includes(session.key),
-    ).length,
+    archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
   const hostSidebarCollapsed = showHostChrome && !hostSidebarOpen;
@@ -2592,13 +2735,20 @@ function Shell({
                 activePaneKey={renderedActivePaneKey}
                 layout={renderedWorkbenchLayout}
                 chrome={paneChromeEnabled}
+                showLayoutControl={activeTabVisible}
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 onActivatePane={onActivateWorkbenchPane}
                 onAddPane={onAddPane}
                 onLayoutChange={(layout) => {
-                  if (!activeKey) return;
+                  if (!activeTabKey) return;
                   setWorkbenchState((current) => (
-                    setWorkbenchLayout(current, activeKey, layout)
+                    setWorkbenchLayout(current, activeTabKey, layout)
+                  ));
+                }}
+                onPaneOrderChange={(paneKeys) => {
+                  if (!activeTabKey) return;
+                  setWorkbenchState((current) => (
+                    setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
                   ));
                 }}
                 renderPane={(pane, context) => {
@@ -2674,6 +2824,7 @@ function Shell({
                         defaultValue: "Message {{title}}",
                         title: pane.title,
                       })}
+                      emptyComposerVariant="thread"
                       workspaceScope={paneScope}
                       workspaceDefaultScope={workspaces?.default_scope ?? null}
                       workspaceControls={workspaces?.controls ?? null}
@@ -2742,6 +2893,19 @@ function Shell({
               title={pendingRename.label}
               onCancel={() => setPendingRename(null)}
               onConfirm={onConfirmRename}
+            />
+          </Suspense>
+        ) : null}
+        {pendingTabRename ? (
+          <Suspense fallback={null}>
+            <RenameChatDialog
+              open
+              title={pendingTabRename.label}
+              dialogTitle={t("workbench.renameTabTitle")}
+              description={t("workbench.renameTabDescription")}
+              placeholder={t("workbench.renameTabPlaceholder")}
+              onCancel={() => setPendingTabRename(null)}
+              onConfirm={onConfirmTabRename}
             />
           </Suspense>
         ) : null}

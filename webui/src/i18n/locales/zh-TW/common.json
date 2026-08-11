@@ -1400,19 +1400,26 @@
     "collapseTabGroup": "收合 {{title}} 中的窗格",
     "expandTabGroup": "展開 {{title}} 中的窗格",
     "dropPane": "將 {{pane}} 移入 {{tab}}",
-    "moveToTab": "移動到分頁",
+    "createGroup": "建立群組",
+    "moveTo": "移動到",
+    "renameTabTitle": "重新命名分頁",
+    "renameTabDescription": "為這個分頁命名，以便整理其中的窗格。",
+    "renameTabPlaceholder": "分頁名稱",
+    "dissolveTab": "解散群組",
     "layout": "窗格佈局",
     "addPane": "新增窗格",
+    "movePane": "移動 {{title}} 窗格",
+    "movePaneHint": "拖曳換位 · 也可以使用方向鍵",
     "promotePane": "將 {{title}} 設為主窗格",
     "paneActions": "{{title}} 窗格操作",
-    "detachPane": "將 {{title}} 移至新標籤頁",
+    "detachPane": "移出",
     "composerAria": "傳送訊息給 {{title}}",
     "layouts": {
       "columns": "欄佈局",
       "rows": "列佈局",
       "grid": "網格",
-      "main-stack": "主窗格與堆疊",
-      "monocle": "單窗格"
+      "bsp": "BSP",
+      "main-stack": "主窗格與堆疊"
     }
   },
   "common": {

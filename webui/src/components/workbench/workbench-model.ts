@@ -1,29 +1,37 @@
-export const WORKBENCH_STORAGE_KEY = "nanobot.webui.workbench.v2";
+import type {
+  WorkbenchLayout,
+  WorkbenchState,
+  WorkbenchTabState,
+} from "@/lib/types";
+
+export type {
+  WorkbenchLayout,
+  WorkbenchState,
+  WorkbenchTabState,
+} from "@/lib/types";
+
 export const MAX_WORKBENCH_PANES = 4;
 
 export const WORKBENCH_LAYOUTS = [
   "columns",
   "rows",
   "grid",
+  "bsp",
   "main-stack",
-  "monocle",
 ] as const;
 
-export type WorkbenchLayout = (typeof WORKBENCH_LAYOUTS)[number];
-
-export interface WorkbenchTabState {
-  paneKeys: string[];
-  activePaneKey: string;
-  layout: WorkbenchLayout;
+export interface WorkbenchTabMatch {
+  tabKey: string;
+  tab: WorkbenchTabState;
 }
 
-export interface WorkbenchState {
-  version: 2;
-  tabs: Record<string, WorkbenchTabState>;
+export interface OrderedWorkbenchTab extends WorkbenchTabMatch {
+  paneKeys: string[];
+  updatedAt: string | null;
 }
 
 export const EMPTY_WORKBENCH_STATE: WorkbenchState = {
-  version: 2,
+  version: 1,
   tabs: {},
 };
 
@@ -39,72 +47,118 @@ function uniqueKeys(value: unknown): string[] {
   ));
 }
 
-function insertPaneBefore(
-  paneKeys: string[],
-  paneKey: string,
-  beforePaneKey?: string | null,
-): string[] {
-  const next = paneKeys.filter((key) => key !== paneKey);
-  const requestedIndex = beforePaneKey && beforePaneKey !== paneKey
-    ? next.indexOf(beforePaneKey)
-    : -1;
-  next.splice(requestedIndex < 0 ? next.length : requestedIndex, 0, paneKey);
-  return next;
+function normalizeTitle(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const title = value.trim();
+  return title || null;
 }
 
-function normalizeTab(value: unknown, tabKey: string): WorkbenchTabState {
+function normalizeTab(value: unknown): WorkbenchTabState {
   const candidate = value && typeof value === "object"
     ? value as Partial<WorkbenchTabState>
     : {};
-  const paneKeys = uniqueKeys(candidate.paneKeys);
-  const normalizedPaneKeys = (paneKeys.includes(tabKey)
-    ? paneKeys
-    : [tabKey, ...paneKeys]).slice(0, MAX_WORKBENCH_PANES);
+  const paneKeys = uniqueKeys(candidate.paneKeys).slice(0, MAX_WORKBENCH_PANES);
+  const requestedLayoutPaneKeys = uniqueKeys(candidate.layoutPaneKeys)
+    .filter((key) => paneKeys.includes(key));
+  const layoutPaneKeys = [
+    ...requestedLayoutPaneKeys,
+    ...paneKeys.filter((key) => !requestedLayoutPaneKeys.includes(key)),
+  ];
   return {
-    paneKeys: normalizedPaneKeys,
+    explicit: candidate.explicit === true,
+    title: normalizeTitle(candidate.title),
+    paneKeys,
+    layoutPaneKeys,
     activePaneKey:
       typeof candidate.activePaneKey === "string"
-      && normalizedPaneKeys.includes(candidate.activePaneKey)
+      && paneKeys.includes(candidate.activePaneKey)
         ? candidate.activePaneKey
-        : normalizedPaneKeys[0],
+        : paneKeys[0] ?? "",
     layout: isLayout(candidate.layout) ? candidate.layout : "columns",
   };
 }
 
-export function parseWorkbenchState(serialized: string | null): WorkbenchState {
-  if (!serialized) return EMPTY_WORKBENCH_STATE;
-  try {
-    const parsed = JSON.parse(serialized) as { version?: unknown; tabs?: unknown };
-    if (
-      parsed.version !== 2
-      || !parsed.tabs
-      || typeof parsed.tabs !== "object"
-      || Array.isArray(parsed.tabs)
-    ) {
-      return EMPTY_WORKBENCH_STATE;
-    }
-    const tabs = Object.fromEntries(
-      Object.entries(parsed.tabs).map(([tabKey, tab]) => [tabKey, normalizeTab(tab, tabKey)]),
-    );
-    return { version: 2, tabs };
-  } catch {
-    return EMPTY_WORKBENCH_STATE;
-  }
+function standaloneTabKeyBase(paneKey: string): string {
+  return `tab:${paneKey}`;
 }
 
-export function defaultWorkbenchTab(tabKey: string): WorkbenchTabState {
+function availableStandaloneTabKey(
+  tabs: Readonly<Record<string, WorkbenchTabState>>,
+  paneKey: string,
+): string {
+  const base = standaloneTabKeyBase(paneKey);
+  if (!tabs[base]) return base;
+  let suffix = 2;
+  while (tabs[`${base}:${suffix}`]) suffix += 1;
+  return `${base}:${suffix}`;
+}
+
+function defaultWorkbenchTab(
+  paneKey: string,
+  title: string | null = null,
+): WorkbenchTabState {
   return {
-    paneKeys: [tabKey],
-    activePaneKey: tabKey,
+    explicit: false,
+    title: normalizeTitle(title),
+    paneKeys: [paneKey],
+    layoutPaneKeys: [paneKey],
+    activePaneKey: paneKey,
     layout: "columns",
+  };
+}
+
+export function normalizeWorkbenchState(raw: unknown): WorkbenchState {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return EMPTY_WORKBENCH_STATE;
+  }
+  const parsed = raw as { version?: unknown; tabs?: unknown };
+  if (parsed.version !== 1 || !parsed.tabs
+    || typeof parsed.tabs !== "object" || Array.isArray(parsed.tabs)) {
+    return EMPTY_WORKBENCH_STATE;
+  }
+  return {
+    version: 1,
+    tabs: Object.fromEntries(
+      Object.entries(parsed.tabs).map(([tabKey, tab]) => [tabKey, normalizeTab(tab)]),
+    ),
   };
 }
 
 export function workbenchTab(
   state: WorkbenchState,
   tabKey: string,
-): WorkbenchTabState {
-  return state.tabs[tabKey] ?? defaultWorkbenchTab(tabKey);
+): WorkbenchTabState | null {
+  return state.tabs[tabKey] ?? null;
+}
+
+export function workbenchTabForPane(
+  state: WorkbenchState,
+  paneKey: string,
+): WorkbenchTabMatch {
+  const match = Object.entries(state.tabs).find(([, tab]) => tab.paneKeys.includes(paneKey));
+  if (match) return { tabKey: match[0], tab: match[1] };
+  return {
+    tabKey: availableStandaloneTabKey(state.tabs, paneKey),
+    tab: defaultWorkbenchTab(paneKey),
+  };
+}
+
+export function ensureWorkbenchPaneTab(
+  state: WorkbenchState,
+  paneKey: string,
+  title: string | null = null,
+): WorkbenchState {
+  if (!paneKey || Object.values(state.tabs).some((tab) => tab.paneKeys.includes(paneKey))) {
+    return state;
+  }
+  const tabKey = availableStandaloneTabKey(state.tabs, paneKey);
+  return {
+    version: 1,
+    tabs: {
+      ...state.tabs,
+      [tabKey]: defaultWorkbenchTab(paneKey, title),
+    },
+  };
 }
 
 function updateTab(
@@ -112,11 +166,12 @@ function updateTab(
   tabKey: string,
   update: (tab: WorkbenchTabState) => WorkbenchTabState,
 ): WorkbenchState {
-  const current = workbenchTab(state, tabKey);
+  const current = state.tabs[tabKey];
+  if (!current) return state;
   const next = update(current);
-  if (state.tabs[tabKey] === next) return state;
+  if (next === current) return state;
   return {
-    version: 2,
+    version: 1,
     tabs: {
       ...state.tabs,
       [tabKey]: next,
@@ -124,31 +179,12 @@ function updateTab(
   };
 }
 
-export function ensureWorkbenchTab(
-  state: WorkbenchState,
-  tabKey: string,
-): WorkbenchState {
-  if (state.tabs[tabKey]) return state;
-  return updateTab(state, tabKey, (tab) => tab);
-}
-
 export function addWorkbenchPane(
   state: WorkbenchState,
   tabKey: string,
   paneKey: string,
 ): WorkbenchState {
-  return updateTab(state, tabKey, (tab) => {
-    if (tab.paneKeys.includes(paneKey)) {
-      if (tab.activePaneKey === paneKey) return tab;
-      return { ...tab, activePaneKey: paneKey };
-    }
-    if (tab.paneKeys.length >= MAX_WORKBENCH_PANES) return tab;
-    return {
-      ...tab,
-      paneKeys: [...tab.paneKeys, paneKey],
-      activePaneKey: paneKey,
-    };
-  });
+  return attachWorkbenchPane(state, tabKey, paneKey);
 }
 
 export function focusWorkbenchPane(
@@ -163,29 +199,88 @@ export function focusWorkbenchPane(
   ));
 }
 
+export function createWorkbenchTab(
+  state: WorkbenchState,
+  tabKey: string,
+): WorkbenchState {
+  return updateTab(state, tabKey, (tab) => (
+    tab.explicit ? tab : { ...tab, explicit: true }
+  ));
+}
+
 export function detachWorkbenchPane(
   state: WorkbenchState,
   tabKey: string,
   paneKey: string,
 ): WorkbenchState {
-  return updateTab(state, tabKey, (tab) => {
-    const index = tab.paneKeys.indexOf(paneKey);
-    if (index < 0 || paneKey === tabKey || tab.paneKeys.length === 1) return tab;
-    const paneKeys = tab.paneKeys.filter((key) => key !== paneKey);
-    const activePaneKey = tab.activePaneKey === paneKey
-      ? paneKeys[Math.min(index, paneKeys.length - 1)]
-      : tab.activePaneKey;
-    return { ...tab, paneKeys, activePaneKey };
-  });
+  const tab = state.tabs[tabKey];
+  if (!tab || !tab.paneKeys.includes(paneKey)) return state;
+  if (tab.paneKeys.length === 1) {
+    return tab.explicit
+      ? updateTab(state, tabKey, (current) => ({
+          ...current,
+          explicit: false,
+          title: null,
+          layout: "columns",
+        }))
+      : state;
+  }
+
+  const index = tab.paneKeys.indexOf(paneKey);
+  const paneKeys = tab.paneKeys.filter((key) => key !== paneKey);
+  const layoutPaneKeys = tab.layoutPaneKeys.filter((key) => key !== paneKey);
+  const nextTabKey = availableStandaloneTabKey(state.tabs, paneKey);
+  return {
+    version: 1,
+    tabs: {
+      ...state.tabs,
+      [tabKey]: {
+        ...tab,
+        paneKeys,
+        layoutPaneKeys,
+        activePaneKey: tab.activePaneKey === paneKey
+          ? paneKeys[Math.min(index, paneKeys.length - 1)]
+          : tab.activePaneKey,
+      },
+      [nextTabKey]: defaultWorkbenchTab(paneKey),
+    },
+  };
+}
+
+export function dissolveWorkbenchTab(
+  state: WorkbenchState,
+  tabKey: string,
+): WorkbenchState {
+  const tab = state.tabs[tabKey];
+  if (!tab) return state;
+  if (tab.paneKeys.length === 1) {
+    return tab.explicit
+      ? updateTab(state, tabKey, (current) => ({
+          ...current,
+          explicit: false,
+          title: null,
+          layout: "columns",
+        }))
+      : state;
+  }
+
+  const tabs = { ...state.tabs };
+  delete tabs[tabKey];
+  for (const paneKey of tab.paneKeys) {
+    const standaloneTabKey = availableStandaloneTabKey(tabs, paneKey);
+    tabs[standaloneTabKey] = defaultWorkbenchTab(paneKey);
+  }
+  return { version: 1, tabs };
 }
 
 export function attachWorkbenchPane(
   state: WorkbenchState,
   targetTabKey: string,
   paneKey: string,
-  beforePaneKey?: string | null,
 ): WorkbenchState {
-  if (!targetTabKey || !paneKey || targetTabKey === paneKey) return state;
+  if (!targetTabKey || !paneKey) return state;
+  const target = state.tabs[targetTabKey];
+  if (!target) return state;
 
   const sourceEntry = Object.entries(state.tabs).find(([, tab]) => (
     tab.paneKeys.includes(paneKey)
@@ -193,71 +288,58 @@ export function attachWorkbenchPane(
   const sourceTabKey = sourceEntry?.[0];
   const sourceTab = sourceEntry?.[1];
   if (sourceTabKey === targetTabKey) {
-    if (beforePaneKey === undefined) {
-      return focusWorkbenchPane(state, targetTabKey, paneKey);
-    }
-    if (!sourceTab) return state;
-    const paneKeys = insertPaneBefore(sourceTab.paneKeys, paneKey, beforePaneKey);
-    if (paneKeys.every((key, index) => key === sourceTab.paneKeys[index])) return state;
-    return {
-      version: 2,
-      tabs: {
-        ...state.tabs,
-        [targetTabKey]: { ...sourceTab, paneKeys },
-      },
-    };
+    return focusWorkbenchPane(state, targetTabKey, paneKey);
   }
-  if (sourceTabKey === paneKey && sourceTab && sourceTab.paneKeys.length > 1) {
-    return state;
-  }
-  const targetBeforeMove = state.tabs[targetTabKey] ?? defaultWorkbenchTab(targetTabKey);
-  if (
-    !targetBeforeMove.paneKeys.includes(paneKey)
-    && targetBeforeMove.paneKeys.length >= MAX_WORKBENCH_PANES
-  ) {
+  if (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES) {
     return state;
   }
 
   const tabs = { ...state.tabs };
   if (sourceTabKey && sourceTab) {
-    if (sourceTabKey === paneKey) {
+    const index = sourceTab.paneKeys.indexOf(paneKey);
+    const sourcePaneKeys = sourceTab.paneKeys.filter((key) => key !== paneKey);
+    const sourceLayoutPaneKeys = sourceTab.layoutPaneKeys.filter((key) => key !== paneKey);
+    if (sourcePaneKeys.length === 0) {
       delete tabs[sourceTabKey];
     } else {
-      const index = sourceTab.paneKeys.indexOf(paneKey);
-      const paneKeys = sourceTab.paneKeys.filter((key) => key !== paneKey);
       tabs[sourceTabKey] = {
         ...sourceTab,
-        paneKeys,
+        paneKeys: sourcePaneKeys,
+        layoutPaneKeys: sourceLayoutPaneKeys,
         activePaneKey: sourceTab.activePaneKey === paneKey
-          ? paneKeys[Math.min(index, paneKeys.length - 1)]
+          ? sourcePaneKeys[Math.min(index, sourcePaneKeys.length - 1)]
           : sourceTab.activePaneKey,
       };
     }
   }
 
-  const targetTab = tabs[targetTabKey] ?? defaultWorkbenchTab(targetTabKey);
-  const paneKeys = insertPaneBefore(targetTab.paneKeys, paneKey, beforePaneKey);
+  const nextTarget = tabs[targetTabKey];
+  if (!nextTarget) return state;
+  const paneKeys = nextTarget.paneKeys.includes(paneKey)
+    ? nextTarget.paneKeys
+    : [...nextTarget.paneKeys, paneKey];
+  const layoutPaneKeys = nextTarget.layoutPaneKeys.includes(paneKey)
+    ? nextTarget.layoutPaneKeys
+    : [...nextTarget.layoutPaneKeys, paneKey];
   tabs[targetTabKey] = {
-    ...targetTab,
+    ...nextTarget,
     paneKeys,
+    layoutPaneKeys,
     activePaneKey: paneKey,
   };
-  return { version: 2, tabs };
+  return { version: 1, tabs };
 }
 
-export function promoteWorkbenchPane(
+export function renameWorkbenchTab(
   state: WorkbenchState,
   tabKey: string,
-  paneKey: string,
+  title: string,
 ): WorkbenchState {
-  return updateTab(state, tabKey, (tab) => {
-    const index = tab.paneKeys.indexOf(paneKey);
-    if (index <= 0) return tab;
-    return {
-      ...tab,
-      paneKeys: [paneKey, ...tab.paneKeys.filter((key) => key !== paneKey)],
-    };
-  });
+  const normalized = normalizeTitle(title);
+  if (!normalized) return state;
+  return updateTab(state, tabKey, (tab) => (
+    tab.title === normalized ? tab : { ...tab, title: normalized }
+  ));
 }
 
 export function setWorkbenchLayout(
@@ -270,36 +352,89 @@ export function setWorkbenchLayout(
   ));
 }
 
+export function setWorkbenchPaneLayoutOrder(
+  state: WorkbenchState,
+  tabKey: string,
+  paneKeys: readonly string[],
+): WorkbenchState {
+  return updateTab(state, tabKey, (tab) => {
+    const requested = uniqueKeys(paneKeys).filter((key) => tab.paneKeys.includes(key));
+    const layoutPaneKeys = [
+      ...requested,
+      ...tab.paneKeys.filter((key) => !requested.includes(key)),
+    ];
+    return layoutPaneKeys.every((key, index) => tab.layoutPaneKeys[index] === key)
+      ? tab
+      : { ...tab, layoutPaneKeys };
+  });
+}
+
 export function reconcileWorkbench(
   state: WorkbenchState,
   validKeys: ReadonlySet<string>,
 ): WorkbenchState {
   const tabs: Record<string, WorkbenchTabState> = {};
+  const claimedPaneKeys = new Set<string>();
+
   for (const [tabKey, tab] of Object.entries(state.tabs)) {
-    if (!validKeys.has(tabKey)) continue;
-    const paneKeys = tab.paneKeys.filter((key) => validKeys.has(key));
-    const normalizedPaneKeys = (paneKeys.includes(tabKey)
-      ? paneKeys
-      : [tabKey, ...paneKeys]).slice(0, MAX_WORKBENCH_PANES);
+    const paneKeys = tab.paneKeys
+      .filter((key) => validKeys.has(key) && !claimedPaneKeys.has(key))
+      .slice(0, MAX_WORKBENCH_PANES);
+    if (paneKeys.length === 0) continue;
+    for (const paneKey of paneKeys) claimedPaneKeys.add(paneKey);
     tabs[tabKey] = {
       ...tab,
-      paneKeys: normalizedPaneKeys,
-      activePaneKey: normalizedPaneKeys.includes(tab.activePaneKey)
+      paneKeys,
+      layoutPaneKeys: [
+        ...tab.layoutPaneKeys.filter((key) => paneKeys.includes(key)),
+        ...paneKeys.filter((key) => !tab.layoutPaneKeys.includes(key)),
+      ],
+      activePaneKey: paneKeys.includes(tab.activePaneKey)
         ? tab.activePaneKey
-        : normalizedPaneKeys[0],
+        : paneKeys[0],
     };
   }
-  const serializedCurrent = JSON.stringify(state.tabs);
-  const serializedNext = JSON.stringify(tabs);
-  return serializedCurrent === serializedNext ? state : { version: 2, tabs };
+
+  for (const paneKey of validKeys) {
+    if (claimedPaneKeys.has(paneKey)) continue;
+    const tabKey = availableStandaloneTabKey(tabs, paneKey);
+    tabs[tabKey] = defaultWorkbenchTab(paneKey);
+  }
+
+  return JSON.stringify(state.tabs) === JSON.stringify(tabs)
+    ? state
+    : { version: 1, tabs };
 }
 
-export function workbenchChildPaneKeys(state: WorkbenchState): Set<string> {
-  const childKeys = new Set<string>();
-  for (const [tabKey, tab] of Object.entries(state.tabs)) {
-    for (const paneKey of tab.paneKeys) {
-      if (paneKey !== tabKey) childKeys.add(paneKey);
-    }
-  }
-  return childKeys;
+export function orderWorkbenchTabs(
+  state: WorkbenchState,
+  orderedSessionKeys: readonly string[],
+  updatedAtByKey: ReadonlyMap<string, string | null | undefined>,
+): OrderedWorkbenchTab[] {
+  const rank = new Map(orderedSessionKeys.map((key, index) => [key, index]));
+  const validKeys = new Set(orderedSessionKeys);
+  const reconciled = reconcileWorkbench(state, validKeys);
+  const tabs = Object.entries(reconciled.tabs).map(([tabKey, tab]) => {
+    const paneKeys = tab.paneKeys
+      .filter((key) => validKeys.has(key))
+      .sort((left, right) => (rank.get(left) ?? Infinity) - (rank.get(right) ?? Infinity));
+    const updatedAt = paneKeys.reduce<string | null>((latest, paneKey) => {
+      const candidate = updatedAtByKey.get(paneKey) ?? null;
+      return dateToTime(candidate) > dateToTime(latest) ? candidate : latest;
+    }, null);
+    return { tabKey, tab, paneKeys, updatedAt };
+  });
+
+  return tabs.sort((left, right) => {
+    const updateOrder = dateToTime(right.updatedAt) - dateToTime(left.updatedAt);
+    if (updateOrder !== 0) return updateOrder;
+    const leftRank = Math.min(...left.paneKeys.map((key) => rank.get(key) ?? Infinity));
+    const rightRank = Math.min(...right.paneKeys.map((key) => rank.get(key) ?? Infinity));
+    return leftRank - rightRank;
+  });
+}
+
+function dateToTime(value: string | null | undefined): number {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }

@@ -1414,19 +1414,26 @@
     "collapseTabGroup": "Recolher os painéis em {{title}}",
     "expandTabGroup": "Expandir os painéis em {{title}}",
     "dropPane": "Mover {{pane}} para {{tab}}",
-    "moveToTab": "Mover para uma aba",
+    "createGroup": "Criar grupo",
+    "moveTo": "Mover para",
+    "renameTabTitle": "Renomear aba",
+    "renameTabDescription": "Dê um nome a esta aba para organizar seus painéis.",
+    "renameTabPlaceholder": "Nome da aba",
+    "dissolveTab": "Desfazer grupo",
     "layout": "Layout de painéis",
     "addPane": "Adicionar painel",
+    "movePane": "Mover painel {{title}}",
+    "movePaneHint": "Arraste para mover · As setas também funcionam",
     "promotePane": "Tornar {{title}} o painel principal",
     "paneActions": "Ações do painel {{title}}",
-    "detachPane": "Mover {{title}} para uma nova aba",
+    "detachPane": "Remover",
     "composerAria": "Mensagem para {{title}}",
     "layouts": {
       "columns": "Colunas",
       "rows": "Linhas",
       "grid": "Grade",
-      "main-stack": "Principal e pilha",
-      "monocle": "Monóculo"
+      "bsp": "BSP",
+      "main-stack": "Principal e pilha"
     }
   },
   "common": {

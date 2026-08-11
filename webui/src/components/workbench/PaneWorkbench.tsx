@@ -2,15 +2,16 @@ import {
   Columns2,
   Grid2X2,
   PanelLeft,
+  PanelsTopLeft,
   Plus,
   Rows2,
-  Square,
   type LucideIcon,
 } from "lucide-react";
 import {
   type CSSProperties,
   type FocusEvent,
-  type PointerEvent,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -59,10 +60,12 @@ interface PaneWorkbenchProps {
   activePaneKey: string;
   layout: WorkbenchLayout;
   chrome?: boolean;
+  showLayoutControl: boolean;
   addPaneDisabled?: boolean;
   onActivatePane: (key: string) => void;
   onAddPane: () => void;
   onLayoutChange: (layout: WorkbenchLayout) => void;
+  onPaneOrderChange: (paneKeys: string[]) => void;
   renderPane: (pane: WorkbenchPane, context: PaneRenderContext) => ReactNode;
 }
 
@@ -77,11 +80,13 @@ const LAYOUT_CONTROLS: Array<{
   { icon: Columns2, layout: "columns", label: "Columns" },
   { icon: Rows2, layout: "rows", label: "Rows" },
   { icon: Grid2X2, layout: "grid", label: "Grid" },
+  { icon: PanelsTopLeft, layout: "bsp", label: "BSP" },
   { icon: PanelLeft, layout: "main-stack", label: "Main and stack" },
-  { icon: Square, layout: "monocle", label: "Monocle" },
 ];
 
-function paneGridStyle(layout: WorkbenchLayout, paneCount: number): CSSProperties {
+type EffectiveWorkbenchLayout = WorkbenchLayout | "compact";
+
+function paneGridStyle(layout: EffectiveWorkbenchLayout, paneCount: number): CSSProperties {
   const count = Math.max(1, paneCount);
   switch (layout) {
     case "columns":
@@ -102,6 +107,11 @@ function paneGridStyle(layout: WorkbenchLayout, paneCount: number): CSSPropertie
         gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
       };
     }
+    case "bsp":
+      return {
+        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+        gridTemplateRows: "repeat(4, minmax(0, 1fr))",
+      };
     case "main-stack":
       return count === 1
         ? {
@@ -112,7 +122,7 @@ function paneGridStyle(layout: WorkbenchLayout, paneCount: number): CSSPropertie
             gridTemplateColumns: "minmax(0, 1.65fr) minmax(0, 1fr)",
             gridTemplateRows: `repeat(${count - 1}, minmax(0, 1fr))`,
           };
-    case "monocle":
+    case "compact":
       return {
         gridTemplateColumns: "minmax(0, 1fr)",
         gridTemplateRows: "minmax(0, 1fr)",
@@ -120,20 +130,125 @@ function paneGridStyle(layout: WorkbenchLayout, paneCount: number): CSSPropertie
   }
 }
 
+interface BspCell {
+  columnStart: number;
+  columnEnd: number;
+  rowStart: number;
+  rowEnd: number;
+}
+
+function bspPaneCells(paneCount: number): BspCell[] {
+  const cells: BspCell[] = [{
+    columnStart: 1,
+    columnEnd: 5,
+    rowStart: 1,
+    rowEnd: 5,
+  }];
+  for (let paneIndex = 1; paneIndex < paneCount; paneIndex += 1) {
+    const leaf = cells.pop();
+    if (!leaf) break;
+    if (paneIndex % 2 === 1) {
+      const midpoint = (leaf.columnStart + leaf.columnEnd) / 2;
+      cells.push(
+        { ...leaf, columnEnd: midpoint },
+        { ...leaf, columnStart: midpoint },
+      );
+    } else {
+      const midpoint = (leaf.rowStart + leaf.rowEnd) / 2;
+      cells.push(
+        { ...leaf, rowEnd: midpoint },
+        { ...leaf, rowStart: midpoint },
+      );
+    }
+  }
+  return cells;
+}
+
 function paneCellStyle(
-  layout: WorkbenchLayout,
+  layout: EffectiveWorkbenchLayout,
   paneCount: number,
   index: number,
 ): CSSProperties | undefined {
-  if (layout !== "main-stack" || paneCount < 2) return undefined;
-  return index === 0
-    ? { gridColumn: 1, gridRow: `1 / span ${paneCount - 1}` }
-    : { gridColumn: 2, gridRow: index };
+  if (layout === "bsp") {
+    const cell = bspPaneCells(paneCount)[index];
+    return cell
+      ? {
+          gridColumn: `${cell.columnStart} / ${cell.columnEnd}`,
+          gridRow: `${cell.rowStart} / ${cell.rowEnd}`,
+        }
+      : undefined;
+  }
+  if (layout === "main-stack" && paneCount >= 2) {
+    return index === 0
+      ? { gridColumn: 1, gridRow: `1 / span ${paneCount - 1}` }
+      : { gridColumn: 2, gridRow: index };
+  }
+  return undefined;
 }
 
 function isPaneAction(target: EventTarget | null): boolean {
   return target instanceof Element
     && target.closest("[data-workbench-pane-action]") !== null;
+}
+
+function movePaneToSlot(
+  paneKeys: readonly string[],
+  paneKey: string,
+  targetKey: string,
+): string[] {
+  const fromIndex = paneKeys.indexOf(paneKey);
+  const targetIndex = paneKeys.indexOf(targetKey);
+  if (fromIndex < 0 || targetIndex < 0 || fromIndex === targetIndex) return [...paneKeys];
+  const next = paneKeys.filter((key) => key !== paneKey);
+  next.splice(targetIndex, 0, paneKey);
+  return next;
+}
+
+function paneSlotAtPoint(
+  rects: readonly DOMRect[],
+  x: number,
+  y: number,
+): number | null {
+  for (const [index, rect] of rects.entries()) {
+    if (
+      x >= rect.left
+      && x <= rect.right
+      && y >= rect.top
+      && y <= rect.bottom
+    ) return index;
+  }
+  return null;
+}
+
+function paneInDirection(
+  rects: ReadonlyMap<string, DOMRect>,
+  paneKey: string,
+  direction: "left" | "right" | "up" | "down",
+): string | null {
+  const source = rects.get(paneKey);
+  if (!source) return null;
+  const sourceX = source.left + source.width / 2;
+  const sourceY = source.top + source.height / 2;
+  let best: { key: string; score: number } | null = null;
+  for (const [key, rect] of rects) {
+    if (key === paneKey) continue;
+    const deltaX = rect.left + rect.width / 2 - sourceX;
+    const deltaY = rect.top + rect.height / 2 - sourceY;
+    const primary = direction === "left"
+      ? -deltaX
+      : direction === "right"
+        ? deltaX
+        : direction === "up"
+          ? -deltaY
+          : deltaY;
+    if (primary <= 1) continue;
+    const cross = direction === "left" || direction === "right"
+      ? Math.abs(deltaY)
+      : Math.abs(deltaX);
+    const score = primary + cross * 0.35;
+    if (!best || score < best.score) best = { key, score };
+  }
+  return best?.key ?? null;
 }
 
 function HeaderIconButton({
@@ -172,22 +287,55 @@ export function PaneWorkbench({
   activePaneKey,
   layout,
   chrome = true,
+  showLayoutControl,
   addPaneDisabled = false,
   onActivatePane,
   onAddPane,
   onLayoutChange,
+  onPaneOrderChange,
   renderPane,
 }: PaneWorkbenchProps) {
   const { t } = useTranslation();
   const compact = useMediaQuery("(max-width: 767px)");
-  const effectiveLayout = compact ? "monocle" : layout;
+  const effectiveLayout: EffectiveWorkbenchLayout = compact ? "compact" : layout;
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLElement | null>(null);
   const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
   const paneRefs = useRef(new Map<string, HTMLElement>());
   const lastRectsRef = useRef(new Map<string, DOMRect>());
   const pendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const animationsRef = useRef(new Map<string, Animation>());
-  const paneOrder = useMemo(() => panes.map((pane) => pane.key).join("\u0000"), [panes]);
+  const sourcePaneOrder = useMemo(
+    () => panes.map((pane) => pane.key),
+    [panes],
+  );
+  const sourcePaneOrderKey = sourcePaneOrder.join("\u0000");
+  const [previewPaneKeys, setPreviewPaneKeys] = useState(sourcePaneOrder);
+  const previewPaneKeysRef = useRef(sourcePaneOrder);
+  const dragGestureRef = useRef<{
+    pointerId: number;
+    paneKey: string;
+    startX: number;
+    startY: number;
+    slotRects: DOMRect[];
+    started: boolean;
+  } | null>(null);
+  const [draggingPaneKey, setDraggingPaneKey] = useState<string | null>(null);
+  const displayedPanes = useMemo(() => {
+    const byKey = new Map(panes.map((pane) => [pane.key, pane]));
+    return [
+      ...previewPaneKeys.map((key) => byKey.get(key)).filter(
+        (pane): pane is WorkbenchPane => pane !== undefined,
+      ),
+      ...panes.filter((pane) => !previewPaneKeys.includes(pane.key)),
+    ];
+  }, [panes, previewPaneKeys]);
+  const paneOrder = displayedPanes.map((pane) => pane.key).join("\u0000");
+
+  useEffect(() => {
+    if (dragGestureRef.current) return;
+    previewPaneKeysRef.current = sourcePaneOrder;
+    setPreviewPaneKeys(sourcePaneOrder);
+  }, [sourcePaneOrder, sourcePaneOrderKey]);
 
   const measurePanes = useCallback(() => {
     const rects = new Map<string, DOMRect>();
@@ -283,7 +431,7 @@ export function PaneWorkbench({
 
   const handlePanePointerDown = useCallback((
     key: string,
-    event: PointerEvent<HTMLElement>,
+    event: ReactPointerEvent<HTMLElement>,
   ) => {
     activatePane(key, event.target);
   }, [activatePane]);
@@ -291,6 +439,114 @@ export function PaneWorkbench({
   const handlePaneFocus = useCallback((key: string, event: FocusEvent<HTMLElement>) => {
     activatePane(key, event.target);
   }, [activatePane]);
+
+  const applyPaneOrder = useCallback((paneKey: string, targetKey: string) => {
+    const next = movePaneToSlot(previewPaneKeysRef.current, paneKey, targetKey);
+    if (next.every((key, index) => previewPaneKeysRef.current[index] === key)) return;
+    captureLayout();
+    previewPaneKeysRef.current = next;
+    setPreviewPaneKeys(next);
+    onPaneOrderChange(next);
+  }, [captureLayout, onPaneOrderChange]);
+
+  const handleMovePointerDown = useCallback((
+    paneKey: string,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (event.button !== 0 || compact || panes.length < 2) return;
+    const paneRects = measurePanes();
+    dragGestureRef.current = {
+      pointerId: event.pointerId,
+      paneKey,
+      startX: event.clientX,
+      startY: event.clientY,
+      slotRects: previewPaneKeysRef.current
+        .map((key) => paneRects.get(key))
+        .filter((rect): rect is DOMRect => rect !== undefined),
+      started: false,
+    };
+    setDraggingPaneKey(paneKey);
+  }, [compact, measurePanes, panes.length]);
+
+  const handleMovePointerMove = useCallback((event: globalThis.PointerEvent) => {
+    const gesture = dragGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(
+      event.clientX - gesture.startX,
+      event.clientY - gesture.startY,
+    );
+    if (!gesture.started) {
+      if (distance < 8) return;
+      gesture.started = true;
+    }
+    event.preventDefault();
+    const targetIndex = paneSlotAtPoint(gesture.slotRects, event.clientX, event.clientY);
+    const targetKey = targetIndex === null
+      ? null
+      : previewPaneKeysRef.current[targetIndex] ?? null;
+    if (targetKey) applyPaneOrder(gesture.paneKey, targetKey);
+  }, [applyPaneOrder]);
+
+  const finishMoveGesture = useCallback(() => {
+    if (!dragGestureRef.current) return;
+    dragGestureRef.current = null;
+    setDraggingPaneKey(null);
+  }, []);
+
+  useEffect(() => {
+    if (!draggingPaneKey) return;
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const gesture = dragGestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+      if ((event.buttons & 1) === 0) {
+        finishMoveGesture();
+        return;
+      }
+      handleMovePointerMove(event);
+    };
+    const handlePointerEnd = (event: globalThis.PointerEvent) => {
+      if (dragGestureRef.current?.pointerId === event.pointerId) finishMoveGesture();
+    };
+    const root = document.documentElement;
+    const previousCursor = root.style.cursor;
+    root.style.cursor = "grabbing";
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+    window.addEventListener("blur", finishMoveGesture);
+    return () => {
+      root.style.cursor = previousCursor;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+      window.removeEventListener("blur", finishMoveGesture);
+    };
+  }, [draggingPaneKey, finishMoveGesture, handleMovePointerMove]);
+
+  const handleMoveKeyDown = useCallback((
+    paneKey: string,
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) => {
+    const direction = (() => {
+      switch (event.key) {
+        case "ArrowLeft": return "left";
+        case "ArrowRight": return "right";
+        case "ArrowUp": return "up";
+        case "ArrowDown": return "down";
+        default: return null;
+      }
+    })();
+    if (!direction) return;
+    const targetKey = paneInDirection(measurePanes(), paneKey, direction);
+    if (!targetKey) return;
+    event.preventDefault();
+    const next = movePaneToSlot(previewPaneKeysRef.current, paneKey, targetKey);
+    captureLayout();
+    previewPaneKeysRef.current = next;
+    setPreviewPaneKeys(next);
+    onPaneOrderChange(next);
+  }, [captureLayout, measurePanes, onPaneOrderChange]);
 
   const gridStyle = paneGridStyle(effectiveLayout, panes.length);
   const currentLayout = LAYOUT_CONTROLS.find((control) => control.layout === layout)
@@ -300,51 +556,53 @@ export function PaneWorkbench({
       data-workbench-pane-action
       className="host-no-drag flex items-center gap-0.5"
     >
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("workbench.layout", {
-              defaultValue: "Pane layout",
-            })}
-            className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+      {showLayoutControl ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={t("workbench.layout", {
+                defaultValue: "Pane layout",
+              })}
+              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+            >
+              <currentLayout.icon className="h-4 w-4" aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <currentLayout.icon className="h-4 w-4" aria-hidden />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
-          <DropdownMenuLabel>
-            {t("workbench.layout", { defaultValue: "Pane layout" })}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup
-            value={layout}
-            onValueChange={(value) => {
-              const next = value as WorkbenchLayout;
-              if (next === layout) return;
-              captureLayout();
-              onLayoutChange(next);
-            }}
-          >
-            {LAYOUT_CONTROLS.map((control) => (
-              <DropdownMenuRadioItem
-                key={control.layout}
-                value={control.layout}
-              >
-                <control.icon aria-hidden />
-                {t(`workbench.layouts.${control.layout}`, {
-                  defaultValue: control.label,
-                })}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <DropdownMenuLabel>
+              {t("workbench.layout", { defaultValue: "Pane layout" })}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup
+              value={layout}
+              onValueChange={(value) => {
+                const next = value as WorkbenchLayout;
+                if (next === layout) return;
+                captureLayout();
+                onLayoutChange(next);
+              }}
+            >
+              {LAYOUT_CONTROLS.map((control) => (
+                <DropdownMenuRadioItem
+                  key={control.layout}
+                  value={control.layout}
+                >
+                  <control.icon aria-hidden />
+                  {t(`workbench.layouts.${control.layout}`, {
+                    defaultValue: control.label,
+                  })}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
       <HeaderIconButton
         disabled={addPaneDisabled}
         icon={Plus}
@@ -381,9 +639,9 @@ export function PaneWorkbench({
             )}
             style={gridStyle}
           >
-            {panes.map((pane, index) => {
+            {displayedPanes.map((pane, index) => {
               const active = pane.key === activePaneKey;
-              const hidden = effectiveLayout === "monocle" && !active;
+              const hidden = effectiveLayout === "compact" && !active;
 
               return (
                 <section
@@ -395,6 +653,7 @@ export function PaneWorkbench({
                   hidden={hidden}
                   aria-label={pane.title}
                   data-active={active ? "true" : "false"}
+                  data-dragging={draggingPaneKey === pane.key ? "true" : undefined}
                   data-testid={`workbench-pane-${pane.key}`}
                   onPointerDownCapture={(event) => handlePanePointerDown(pane.key, event)}
                   onFocusCapture={(event) => handlePaneFocus(pane.key, event)}
@@ -407,6 +666,49 @@ export function PaneWorkbench({
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}
+                  {chrome && panes.length > 1 && !compact ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          tabIndex={active ? 0 : -1}
+                          aria-hidden={active ? undefined : true}
+                          aria-label={active ? t("workbench.movePane", {
+                            defaultValue: "Move {{title}} pane",
+                            title: pane.title,
+                          }) : undefined}
+                          aria-keyshortcuts={active ? "ArrowLeft ArrowRight ArrowUp ArrowDown" : undefined}
+                          data-workbench-pane-action
+                          data-testid={`pane-move-handle-${pane.key}`}
+                          onPointerDown={(event) => handleMovePointerDown(pane.key, event)}
+                          onKeyDown={(event) => handleMoveKeyDown(pane.key, event)}
+                          className={cn(
+                            "group host-no-drag absolute bottom-0 left-1/2 z-30 flex h-6 w-12 -translate-x-1/2 touch-none items-center justify-center rounded-full",
+                            "cursor-grab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background active:cursor-grabbing",
+                            "transition-opacity duration-100 motion-reduce:transition-none",
+                            active ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+                          )}
+                        >
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "h-[3px] w-9 rounded-full bg-foreground/35 transition-colors duration-100 motion-reduce:transition-none",
+                              draggingPaneKey === pane.key
+                                ? "bg-foreground/65"
+                                : "group-hover:bg-foreground/50",
+                            )}
+                          />
+                        </button>
+                      </TooltipTrigger>
+                      {active ? (
+                        <TooltipContent side="top">
+                          {t("workbench.movePaneHint", {
+                            defaultValue: "Drag to move · Arrow keys also work",
+                          })}
+                        </TooltipContent>
+                      ) : null}
+                    </Tooltip>
+                  ) : null}
                 </section>
               );
             })}

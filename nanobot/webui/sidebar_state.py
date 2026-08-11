@@ -24,8 +24,10 @@ _MAX_MAP_ITEMS = 2_000
 _MAX_KEY_LEN = 512
 _MAX_TITLE_LEN = 160
 _MAX_TAG_LEN = 40
+_MAX_WORKBENCH_PANES = 4
 _ALLOWED_DENSITIES = {"comfortable", "compact"}
 _ALLOWED_SORTS = {"updated_desc", "created_desc", "title_asc", "manual"}
+_ALLOWED_WORKBENCH_LAYOUTS = {"columns", "rows", "grid", "bsp", "main-stack"}
 
 
 def webui_sidebar_state_path() -> Path:
@@ -42,6 +44,7 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "project_name_overrides": {},
         "tags_by_key": {},
         "collapsed_groups": {},
+        "workbench": {"version": 1, "tabs": {}},
         "view": {
             "density": "comfortable",
             "show_previews": False,
@@ -131,8 +134,53 @@ def _clean_view(value: Any) -> dict[str, Any]:
     }
 
 
+def _clean_workbench(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"version": 1, "tabs": {}}
+    raw_tabs = cast(dict[str, Any], value).get("tabs")
+    if not isinstance(raw_tabs, dict):
+        return {"version": 1, "tabs": {}}
+
+    tabs: dict[str, dict[str, Any]] = {}
+    claimed_panes: set[str] = set()
+    for raw_tab_key, raw_tab in list(cast(dict[Any, Any], raw_tabs).items())[:_MAX_MAP_ITEMS]:
+        tab_key = _clean_string(raw_tab_key)
+        if tab_key is None or not isinstance(raw_tab, dict):
+            continue
+        tab = cast(dict[str, Any], raw_tab)
+        pane_keys = [
+            key
+            for key in _clean_string_list(tab.get("paneKeys"))
+            if key not in claimed_panes
+        ][:_MAX_WORKBENCH_PANES]
+        if not pane_keys:
+            continue
+        requested_layout_pane_keys = [
+            key for key in _clean_string_list(tab.get("layoutPaneKeys")) if key in pane_keys
+        ]
+        layout_pane_keys = requested_layout_pane_keys + [
+            key for key in pane_keys if key not in requested_layout_pane_keys
+        ]
+        claimed_panes.update(pane_keys)
+        raw_layout = tab.get("layout")
+        layout = raw_layout if raw_layout in _ALLOWED_WORKBENCH_LAYOUTS else "columns"
+        title = _clean_string(tab.get("title"), max_len=_MAX_TITLE_LEN)
+        active_pane_key = _clean_string(tab.get("activePaneKey"))
+        tabs[tab_key] = {
+            "explicit": tab.get("explicit") is True,
+            "title": title,
+            "paneKeys": pane_keys,
+            "layoutPaneKeys": layout_pane_keys,
+            "activePaneKey": (
+                active_pane_key if active_pane_key in pane_keys else pane_keys[0]
+            ),
+            "layout": layout,
+        }
+    return {"version": 1, "tabs": tabs}
+
+
 def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
-    """Return a schema-v1 sidebar state from any older/partial input."""
+    """Return a validated canonical sidebar state."""
     if not isinstance(raw, dict):
         raw = {}
     raw = cast(dict[str, Any], raw)
@@ -146,6 +194,7 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     )
     state["tags_by_key"] = _clean_tags_by_key(raw.get("tags_by_key"))
     state["collapsed_groups"] = _clean_bool_map(raw.get("collapsed_groups"))
+    state["workbench"] = _clean_workbench(raw.get("workbench"))
     state["view"] = _clean_view(raw.get("view"))
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None

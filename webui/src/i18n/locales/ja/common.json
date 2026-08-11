@@ -1400,19 +1400,26 @@
     "collapseTabGroup": "{{title}} のペインを折りたたむ",
     "expandTabGroup": "{{title}} のペインを展開する",
     "dropPane": "{{pane}} を {{tab}} に移動",
-    "moveToTab": "タブへ移動",
+    "createGroup": "グループを作成",
+    "moveTo": "移動先",
+    "renameTabTitle": "タブ名を変更",
+    "renameTabDescription": "ペインを整理するため、このタブに名前を付けます。",
+    "renameTabPlaceholder": "タブ名",
+    "dissolveTab": "グループを解除",
     "layout": "ペインレイアウト",
     "addPane": "ペインを追加",
+    "movePane": "{{title}} ペインを移動",
+    "movePaneHint": "ドラッグで移動 · 矢印キーでも移動できます",
     "promotePane": "{{title}} をメインペインにする",
     "paneActions": "{{title}} ペインの操作",
-    "detachPane": "{{title}} を新しいタブに移動",
+    "detachPane": "外す",
     "composerAria": "{{title}} へのメッセージ",
     "layouts": {
       "columns": "列",
       "rows": "行",
       "grid": "グリッド",
-      "main-stack": "メインとスタック",
-      "monocle": "モノクル"
+      "bsp": "BSP",
+      "main-stack": "メインとスタック"
     }
   },
   "common": {

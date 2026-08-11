@@ -1400,19 +1400,26 @@
     "collapseTabGroup": "Réduire les volets de {{title}}",
     "expandTabGroup": "Développer les volets de {{title}}",
     "dropPane": "Déplacer {{pane}} dans {{tab}}",
-    "moveToTab": "Déplacer vers un onglet",
+    "createGroup": "Créer un groupe",
+    "moveTo": "Déplacer vers",
+    "renameTabTitle": "Renommer l’onglet",
+    "renameTabDescription": "Donnez un nom à cet onglet pour organiser ses volets.",
+    "renameTabPlaceholder": "Nom de l’onglet",
+    "dissolveTab": "Dissoudre le groupe",
     "layout": "Disposition des volets",
     "addPane": "Ajouter un volet",
+    "movePane": "Déplacer le volet {{title}}",
+    "movePaneHint": "Faites glisser pour déplacer · Les flèches fonctionnent aussi",
     "promotePane": "Définir {{title}} comme volet principal",
     "paneActions": "Actions du volet {{title}}",
-    "detachPane": "Déplacer {{title}} vers un nouvel onglet",
+    "detachPane": "Retirer",
     "composerAria": "Message à {{title}}",
     "layouts": {
       "columns": "Colonnes",
       "rows": "Lignes",
       "grid": "Grille",
-      "main-stack": "Principal et pile",
-      "monocle": "Monocle"
+      "bsp": "BSP",
+      "main-stack": "Principal et pile"
     }
   },
   "common": {
