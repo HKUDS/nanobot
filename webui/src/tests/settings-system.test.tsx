@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -20,8 +21,74 @@ const installedAnyGen = {
   skill_installed: true,
 };
 
+const agentPlugin = {
+  name: "plugin-computer-use",
+  display_name: "Computer Use",
+  category: "Plugin",
+  description: "Control the desktop with a live preview.",
+  requires: "screen-recording, accessibility",
+  transport: "stdio",
+  install_supported: false,
+  installed: true,
+  configured: true,
+  enabled: false,
+  available: false,
+  status: "disabled",
+  required_fields: [],
+  source: "agent-plugin",
+};
+
 describe("Settings system domains", () => {
   installSettingsViewTestHooks();
+
+  it("keeps enabled Agent Plugins out of MCP composer attachments", () => {
+    const enabled = { ...agentPlugin, enabled: true, available: true, status: "enabled" };
+    expect(installedMcpPresetsFromPayload({ presets: [enabled], installed_count: 1 })).toEqual([]);
+  });
+
+  it("enables and disables an installed Agent Plugin explicitly", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [agentPlugin], installed_count: 0 });
+      }
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockImplementation(async (action: string) => {
+      const enabled = action.endsWith(".enable");
+      return {
+        presets: [{
+          ...agentPlugin,
+          enabled,
+          available: enabled,
+          status: enabled ? "enabled" : "disabled",
+        }],
+        installed_count: Number(enabled),
+      };
+    });
+
+    renderSettingsView();
+
+    expect(await screen.findByText("Computer Use")).toBeInTheDocument();
+    expect(screen.getByText("Plugins")).toBeInTheDocument();
+    expect(screen.getByText(/Control the desktop.*screen-recording, accessibility/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.enable", { name: "plugin-computer-use" }, 20_000,
+    ));
+    const enabledButton = await screen.findByRole("button", { name: "Computer Use: Enabled" });
+    await waitFor(() => expect(enabledButton).toBeEnabled());
+    fireEvent.pointerDown(enabledButton, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Disable" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.disable", { name: "plugin-computer-use" }, 20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Enable" })).toBeInTheDocument();
+  });
 
 
   it("does not show the Settings kicker on the standalone Automations surface", async () => {

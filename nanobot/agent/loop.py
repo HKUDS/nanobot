@@ -485,6 +485,8 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        from nanobot.agent.plugins import agent_plugin_mcp_servers
+
         return cls(
             bus=bus,
             provider=provider,
@@ -499,7 +501,7 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
+            mcp_servers=agent_plugin_mcp_servers(config.workspace_path, config.tools.mcp_servers),
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,

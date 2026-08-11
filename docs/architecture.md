@@ -202,7 +202,7 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Channel | Export a `ChannelPlugin` descriptor, keep its runtime and optional setup surfaces in one package, and follow [`channel-package-guide.md`](./channel-package-guide.md) |
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
 | MCP | Add `tools.mcpServers` config |
-| Skill | Add workspace skill files under `<workspace>/skills/` or built-in skills under `nanobot/skills/` |
+| Skill | Add workspace skills under `<workspace>/skills/`, Agent Plugins v1 under `<workspace>/plugins/`, or built-in skills under `nanobot/skills/` |
 
 Prefer existing registry/discovery patterns over ad hoc wiring.
 

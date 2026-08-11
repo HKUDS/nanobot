@@ -521,7 +521,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "remove" | "test",
+    action: "enable" | "disable" | "remove" | "test",
     name: string,
     values: Record<string, string> = {},
   ) => {

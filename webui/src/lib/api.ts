@@ -766,7 +766,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "remove" | "test",
+  action: "enable" | "disable" | "remove" | "test",
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {

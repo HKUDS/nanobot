@@ -16,6 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
+from nanobot.agent.plugins import (
+    AgentPlugin,
+    discover_agent_plugins,
+    set_agent_plugin_enabled,
+)
 from nanobot.agent.tools.mcp_oauth import (
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
@@ -55,7 +60,6 @@ _MAX_TEST_TOOLS = 16
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
-
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
 
 
@@ -911,6 +915,30 @@ def _custom_payload(
     }
 
 
+def _agent_plugin_payload(plugin: AgentPlugin) -> dict[str, Any]:
+    return {
+        "name": f"plugin-{plugin.name}",
+        "display_name": plugin.display_name,
+        "category": plugin.category,
+        "description": plugin.description or "Agent Plugin",
+        "docs_url": plugin.repository,
+        "transport": "stdio",
+        "requires": ", ".join(plugin.permissions),
+        "note": "",
+        "install_supported": False,
+        "installed": True,
+        "configured": True,
+        "enabled": plugin.enabled,
+        "available": plugin.enabled,
+        "status": "enabled" if plugin.enabled else "disabled",
+        "logo_url": plugin.logo,
+        "brand_color": plugin.accent_color,
+        "required_fields": [],
+        "connection_summary": ", ".join(plugin.mcp_servers),
+        "source": "agent-plugin",
+    }
+
+
 def mcp_presets_payload(
     *,
     last_action: dict[str, Any] | None = None,
@@ -929,9 +957,16 @@ def mcp_presets_payload(
         for name, cfg in sorted(config.tools.mcp_servers.items())
         if name not in known
     ]
+    existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
+    plugin_rows = [
+        _agent_plugin_payload(plugin)
+        for plugin in discover_agent_plugins(config.workspace_path)
+        if f"plugin-{plugin.name}" not in existing_names
+    ]
     payload: dict[str, Any] = {
-        "presets": [*preset_rows, *custom_rows],
-        "installed_count": len(config.tools.mcp_servers),
+        "presets": [*preset_rows, *custom_rows, *plugin_rows],
+        "installed_count": len(config.tools.mcp_servers)
+        + sum(int(row["enabled"]) for row in plugin_rows),
     }
     if last_action is not None:
         payload["last_action"] = last_action
@@ -1542,6 +1577,29 @@ async def mcp_presets_settings_action(
     config_path = config.path if config is not None else None
     if action is None:
         return mcp_presets_payload(config_path=config_path)
+    name = (_query_first(query, "name") or "").strip()
+    if name.startswith("plugin-"):
+        plugin_config = load_config(config_path) if config_path is not None else load_config()
+        plugin_name = name.removeprefix("plugin-")
+        plugins = discover_agent_plugins(plugin_config.workspace_path)
+        plugin = next((item for item in plugins if item.name == plugin_name), None)
+        if name not in plugin_config.tools.mcp_servers and plugin is not None:
+            if action not in {"enable", "disable"}:
+                raise McpPresetError("Agent Plugins support enable and disable actions only")
+            await asyncio.to_thread(
+                set_agent_plugin_enabled,
+                plugin_config.workspace_path,
+                plugin_name,
+                action == "enable",
+            )
+            verb = "enabled" if action == "enable" else "disabled"
+            payload = mcp_presets_payload(
+                last_action={"ok": True, "message": f"{plugin.display_name} {verb}."},
+                config_path=config_path,
+            )
+            if reload_mcp is not None:
+                payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
+            return payload
     if action == "test":
         return await mcp_presets_test_action(query, config_path=config_path)
     if config is not None:

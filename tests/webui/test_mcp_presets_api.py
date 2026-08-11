@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from functools import partial
+from pathlib import Path
 
 import pytest
 from mcp.shared.auth import OAuthToken
 
+from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.config.loader import load_config
 from nanobot.webui.mcp_presets_api import (
@@ -12,13 +16,48 @@ from nanobot.webui.mcp_presets_api import (
     custom_mcp_action,
     mcp_presets_action,
     mcp_presets_payload,
+    mcp_presets_settings_action,
     mcp_presets_test_action,
     normalize_mcp_preset_mentions,
 )
 
 
 def _use_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"workspace": str(tmp_path / "workspace")}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+
+def _write_agent_plugin(workspace: Path) -> None:
+    root = workspace / "plugins" / "desktop"
+    root.mkdir(parents=True)
+    for filename, payload in (
+        (
+            "plugin.json",
+            {
+                "$schema": AGENT_PLUGIN_SCHEMA,
+                "name": "desktop",
+                "description": "Control the local desktop.",
+                "extensions": {
+                    "dev.nanobot": {
+                        "displayName": "Desktop Control",
+                        "permissions": ["screen-recording"],
+                    }
+                },
+            },
+        ),
+        (
+            "mcp.json",
+            {
+                "$schema": AGENT_PLUGIN_MCP_SCHEMA,
+                "mcpServers": {"desktop": {"type": "stdio", "command": "echo"}},
+            },
+        ),
+    ):
+        (root / filename).write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,6 +97,52 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
     assert manifest["install"]["strategy"] == "config"
     assert manifest["remove"]["verification"] == ["config_absent"]
     assert manifest["trust"]["review_status"] == "builtin_preset"
+
+
+def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    _write_agent_plugin(load_config().workspace_path)
+
+    row = next(item for item in mcp_presets_payload()["presets"] if item["source"] == "agent-plugin")
+    assert (row["name"], row["display_name"], row["requires"]) == (
+        "plugin-desktop", "Desktop Control", "screen-recording"
+    )
+    assert row["installed"] and row["configured"] and not row["enabled"]
+
+    async def reload() -> dict[str, object]:
+        return {"ok": True, "message": "MCP reloaded.", "requires_restart": False}
+
+    plugin_action = partial(
+        mcp_presets_settings_action,
+        query={"name": ["plugin-desktop"]},
+    )
+    enabled = asyncio.run(plugin_action("enable", reload_mcp=reload))
+    enabled_row = next(item for item in enabled["presets"] if item["name"] == "plugin-desktop")
+    assert (enabled_row["enabled"], enabled_row["status"], enabled["requires_restart"]) == (
+        True, "enabled", False
+    )
+
+    disabled = asyncio.run(plugin_action("disable", reload_mcp=reload))
+    disabled_row = next(item for item in disabled["presets"] if item["name"] == "plugin-desktop")
+    assert (disabled_row["installed"], disabled_row["enabled"], disabled_row["status"]) == (
+        True, False, "disabled"
+    )
+
+    with pytest.raises(McpPresetError, match="enable and disable"):
+        asyncio.run(plugin_action("remove"))
+
+    (load_config().workspace_path / "plugins" / "desktop" / "mcp.json").unlink()
+    assert any(item["name"] == "plugin-desktop" for item in mcp_presets_payload()["presets"])
+
+    config_path = tmp_path / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tools"] = {"mcpServers": {"plugin-desktop": {"type": "stdio", "command": "echo"}}}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    rows = [item for item in mcp_presets_payload()["presets"] if item["name"] == "plugin-desktop"]
+    assert len(rows) == 1 and rows[0]["source"] == "custom"
 
 
 @pytest.mark.asyncio

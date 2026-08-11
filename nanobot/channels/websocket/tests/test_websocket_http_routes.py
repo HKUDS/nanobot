@@ -2090,6 +2090,14 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         assert body["hot_reload"]["ok"] is True
         assert body["restart_required_sections"] == []
 
+        disabled = await _webui_mutate(
+            channel,
+            "settings.mcp.disable",
+            {"name": "browserbase"},
+        )
+        assert disabled.status_code == 200
+        assert preset_queries[-1][0] == "disable"
+
         custom = await _webui_mutate(
             channel,
             "settings.mcp.custom",

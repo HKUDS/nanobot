@@ -962,6 +962,7 @@ export interface McpPresetInfo {
   install_supported: boolean;
   installed: boolean;
   configured: boolean;
+  enabled?: boolean;
   available: boolean;
   status: "not_installed" | "configured" | "missing_credentials" | "missing_dependency" | "coming_soon" | string;
   logo_url?: string | null;
