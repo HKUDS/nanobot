@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useSidebarState } from "@/hooks/useSidebarState";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import type { ConnectionStatus, SidebarStatePayload } from "@/lib/types";
+import type { SidebarStatePayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 describe("useSidebarState", () => {
@@ -20,7 +20,7 @@ describe("useSidebarState", () => {
       .mockImplementation(async (state: SidebarStatePayload) => state);
     const client = {
       status: "open" as const,
-      onStatus: (_handler: (status: ConnectionStatus) => void) => () => {},
+      onStatus: () => () => {},
       onSidebarStateUpdate: (handler: (state: SidebarStatePayload) => void) => {
         sidebarStateUpdateHandler = handler;
         return () => {
