@@ -17,6 +17,18 @@ def test_split_message_no_code_blocks_unchanged():
     assert split_message(content, max_len=12) == ["alpha beta", "gamma delta"]
 
 
+def test_split_message_preserves_indentation_after_newline():
+    content = "header\n    indented code"
+
+    assert split_message(content, max_len=18) == ["header", "    indented code"]
+
+
+def test_split_message_preserves_indentation_across_hard_break():
+    content = "head\n    abcdefghij"
+
+    assert split_message(content, max_len=8) == ["head", "    abcd", "efghij"]
+
+
 def test_split_message_nonpositive_maxlen_returns_unsplit():
     content = "alpha beta gamma delta"
 
