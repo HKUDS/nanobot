@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
@@ -431,6 +432,10 @@ class AgentRunner:
         external_lookup_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
+        # Per-turn loop guard: the last few tool-call signatures (name + args),
+        # most recent last. Used to warn the model when it repeats the exact
+        # same call several times in a row instead of making progress.
+        recent_tool_signatures: list[str] = []
         empty_content_retries = 0
         # Segments from one uninterrupted length-recovery chain. Tool work or
         # injected user input starts a new logical answer and clears the chain.
@@ -523,6 +528,13 @@ class AgentRunner:
                     response,
                 )
                 messages.append(assistant_message)
+
+                loop_warning = self._detect_tool_call_loop(
+                    response.tool_calls, recent_tool_signatures
+                )
+                if loop_warning:
+                    messages.append({"role": "system", "content": loop_warning})
+
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -1276,6 +1288,62 @@ class AgentRunner:
             strip=True,
             max_iterations=spec.max_iterations,
         )
+
+    @staticmethod
+    def _tool_call_signature(tool_calls: Iterable[ToolCallRequest]) -> str:
+        """Build a stable signature for one round of tool calls (name + args).
+
+        Order-independent (sorted) since concurrent_tools can execute several
+        calls in one round and their relative order isn't semantically
+        meaningful for loop detection.
+        """
+        parts = []
+        for tc in tool_calls:
+            if isinstance(tc.arguments, str):
+                args_repr = tc.arguments
+            else:
+                try:
+                    args_repr = json.dumps(tc.arguments, sort_keys=True, default=str)
+                except (TypeError, ValueError):
+                    args_repr = str(tc.arguments)
+            parts.append(f"{tc.name}:{args_repr}")
+        return "|".join(sorted(parts))
+
+    @staticmethod
+    def _detect_tool_call_loop(
+        tool_calls: Iterable[ToolCallRequest],
+        recent_tool_signatures: list[str],
+        *,
+        threshold: int = 3,
+    ) -> str | None:
+        """Track recent tool-call signatures and return a warning once the
+        exact same round of calls repeats ``threshold`` times in a row.
+
+        Mutates ``recent_tool_signatures`` in place (bounded to ``threshold``
+        entries) and clears it after a warning fires, so the same loop won't
+        re-trigger the warning every single iteration once it's already been
+        flagged once.
+        """
+        signature = AgentRunner._tool_call_signature(tool_calls)
+        if not signature:
+            return None
+        recent_tool_signatures.append(signature)
+        if len(recent_tool_signatures) > threshold:
+            recent_tool_signatures.pop(0)
+        if (
+            len(recent_tool_signatures) == threshold
+            and len(set(recent_tool_signatures)) == 1
+        ):
+            recent_tool_signatures.clear()
+            return (
+                f"You have just made the exact same tool call(s) {threshold} times "
+                "in a row (identical tool name and arguments). Repeating an "
+                "identical call will not produce a different result. Stop "
+                "repeating this action -- either try a genuinely different "
+                "approach, or report what you have found so far and ask how "
+                "to proceed."
+            )
+        return None
 
     def _usage_or_estimate(
         self,

@@ -239,3 +239,87 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
         "expected at least one escalated workspace_violation event, got: "
         f"{result.tool_events}"
     )
+
+
+@pytest.mark.asyncio
+async def test_runner_warns_on_repeated_identical_tool_call():
+    """Loop guard: 3 identical (name + args) tool-call rounds in a row inject
+    a system warning into the conversation. The warning informs, it does not
+    block -- all four iterations must still run, and the warning must fire
+    exactly once, not once per repeat.
+    """
+    repeated_call = ToolCallRequest(
+        id="call_x", name="read_file", arguments={"path": "/workspace/a.md"},
+    )
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[repeated_call]),
+        LLMResponse(content="", tool_calls=[repeated_call]),
+        LLMResponse(content="", tool_calls=[repeated_call]),
+        LLMResponse(content="giving up on that path", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("not found", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert provider.chat_with_retry.await_count == 4, (
+        "the loop guard must not short-circuit execution -- all four "
+        "iterations (three repeats plus the final differing response) "
+        "should still run"
+    )
+    warnings = [
+        m for m in result.messages
+        if m.get("role") == "system" and "same tool call" in m.get("content", "")
+    ]
+    assert len(warnings) == 1, (
+        f"expected exactly one loop warning, got {len(warnings)}: {warnings}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_warn_on_two_repeats_or_varied_calls():
+    """Two identical calls in a row is not (yet) a loop; varying the
+    arguments between calls must never trigger a false-positive warning.
+    """
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[ToolCallRequest(
+            id="c1", name="read_file", arguments={"path": "/workspace/a.md"},
+        )]),
+        LLMResponse(content="", tool_calls=[ToolCallRequest(
+            id="c2", name="read_file", arguments={"path": "/workspace/a.md"},
+        )]),
+        LLMResponse(content="", tool_calls=[ToolCallRequest(
+            id="c3", name="read_file", arguments={"path": "/workspace/b.md"},
+        )]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("ok", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    warnings = [
+        m for m in result.messages
+        if m.get("role") == "system" and "same tool call" in m.get("content", "")
+    ]
+    assert warnings == [], f"expected no loop warning, got: {warnings}"
