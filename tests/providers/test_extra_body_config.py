@@ -117,6 +117,30 @@ class TestBuildKwargsExtraBody:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
+    def test_extra_body_appends_tools_without_clobbering_functions(self) -> None:
+        function_tool = {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write a local file",
+                "parameters": {"type": "object"},
+            },
+        }
+        server_tool = {"type": "openrouter:web_search"}
+        provider = _make_provider({
+            "tools": [server_tool],
+            "custom_param": "value",
+        })
+
+        kwargs = provider._build_kwargs(
+            messages=_simple_messages(),
+            tools=[function_tool], model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort=None, tool_choice=None,
+        )
+
+        assert kwargs["tools"] == [function_tool, server_tool]
+        assert kwargs["extra_body"] == {"custom_param": "value"}
+
     def test_extra_body_merges_with_thinking(self) -> None:
         """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
