@@ -117,9 +117,11 @@ To opt into OpenRouter server-managed search and fetch, add:
 }
 ```
 
-OpenRouter [server tools](https://openrouter.ai/docs/guides/features/server-tools) configured
-through `extraBody.tools` are appended to nanobot's generated Chat Completions functions. This
-keeps unrelated local tools such as `write_file` available in the same request.
+Chat Completions-compatible OpenRouter
+[server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are
+appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file`
+available in the same request. Responses-only server tools require an API surface that the
+OpenRouter provider does not currently enable.
 
 ### Eden AI Gateway
 

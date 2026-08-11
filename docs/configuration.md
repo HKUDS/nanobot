@@ -330,7 +330,11 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
+ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
+specially and appended after generated function tools. With Responses, configure it in Responses
+API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
+`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
 {
