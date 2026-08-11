@@ -29,6 +29,23 @@ def test_split_message_preserves_indentation_across_hard_break():
     assert split_message(content, max_len=8) == ["head", "    abcd", "efghij"]
 
 
+def test_split_message_preserves_indentation_when_newline_is_at_hard_break():
+    content = "abcdefgh\n    code"
+
+    assert split_message(content, max_len=8) == ["abcdefgh", "    code"]
+    assert split_message(content.replace("\n", "\r\n"), max_len=8) == [
+        "abcdefgh",
+        "    code",
+    ]
+
+
+def test_split_message_drops_whitespace_only_tail_after_hard_break():
+    prefix = "abcdefgh"
+
+    assert split_message(prefix + "\n", max_len=8) == [prefix]
+    assert split_message(prefix + " ", max_len=8) == [prefix]
+
+
 def test_split_message_nonpositive_maxlen_returns_unsplit():
     content = "alpha beta gamma delta"
 

@@ -636,7 +636,8 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
     chunks: list[str] = []
     while content:
         if len(content) <= max_len:
-            chunks.append(content)
+            if content.strip():
+                chunks.append(content)
             break
         cut = content[:max_len]
         # Consume only the newline itself so indentation starts the next chunk.
@@ -656,6 +657,14 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
 
         chunks.append(content[:max_len])
         content = content[max_len:]
+        # A delimiter can sit immediately after the hard-break boundary. Keep
+        # ordinary space trimming, but consume only the newline so indentation
+        # on the following line is preserved.
+        content = content.lstrip(" \t")
+        if content.startswith("\r\n"):
+            content = content[2:]
+        elif content.startswith("\n"):
+            content = content[1:]
     return chunks
 
 
