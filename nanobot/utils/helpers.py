@@ -227,6 +227,21 @@ def strip_reasoning_tags(text: object) -> str:
     return text.strip()
 
 
+_LEAKED_TOOL_CALL_RE = re.compile(
+    r"<tool_calls?\b|</tool_calls?>|<function\s*=|TOOL_CALL:|<\|python_tag\|>",
+    re.IGNORECASE,
+)
+
+
+def contains_leaked_tool_call_markup(text: object) -> bool:
+    """True if text contains tool-call syntax that was never actually
+    executed -- e.g. a model asked to finalize with no tools offered still
+    writing literal `<tool_call><function=...>` instead of a real answer.
+    Used as a content-level safety net anywhere a response might reach a
+    user-facing channel without having gone through normal tool dispatch."""
+    return isinstance(text, str) and bool(_LEAKED_TOOL_CALL_RE.search(text))
+
+
 def extract_think(text: str) -> tuple[str | None, str]:
     """Extract thinking content from inline thinking tags.
 

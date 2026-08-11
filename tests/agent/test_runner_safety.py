@@ -323,3 +323,148 @@ async def test_runner_does_not_warn_on_two_repeats_or_varied_calls():
         if m.get("role") == "system" and "same tool call" in m.get("content", "")
     ]
     assert warnings == [], f"expected no loop warning, got: {warnings}"
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_leaked_tool_call_markup_after_max_iterations():
+    """Reporter scenario 2026-08-11: a model asked to finalize with no tools
+    offered (has_tool_calls is therefore always False) can still emit
+    tool-call-shaped text instead of a real answer. That text must never
+    become the final response the user sees -- it should fall back to the
+    safe max-iterations template instead.
+    """
+    tool_call = ToolCallRequest(
+        id="c1", name="read_file", arguments={"path": "/workspace/a.md"},
+    )
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        # Both real iterations keep calling tools, so max_iterations is hit.
+        LLMResponse(content="", tool_calls=[tool_call]),
+        LLMResponse(content="", tool_calls=[tool_call]),
+        # The finalize-with-no-tools retry: no structured tool_calls (none
+        # were offered), but the content is leaked tool-call markup anyway.
+        LLMResponse(
+            content=(
+                "<tool_call>\n<function=exec>\n<parameter=command>\n"
+                'Remove-Item "C:\\temp\\file.vtt" -Force\n</parameter>\n'
+                "</function>\n</tool_call>"
+            ),
+            tool_calls=[],
+        ),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("ok", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content is not None
+    assert "<tool_call" not in result.final_content, (
+        f"leaked tool-call markup reached final_content: {result.final_content!r}"
+    )
+    assert "maximum number of tool call iterations" in result.final_content
+
+
+@pytest.mark.asyncio
+async def test_runner_still_uses_a_clean_finalize_response_after_max_iterations():
+    """Companion to the leak-rejection test above: a genuinely clean
+    finalize response (no tool calls, no leaked markup) must still be used
+    as-is -- the new check should not reject legitimate answers.
+    """
+    tool_call = ToolCallRequest(
+        id="c1", name="read_file", arguments={"path": "/workspace/a.md"},
+    )
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[tool_call]),
+        LLMResponse(content="", tool_calls=[tool_call]),
+        LLMResponse(content="Here's a summary of what I found so far.", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("ok", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content == "Here's a summary of what I found so far."
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_leaked_tool_call_markup_on_normal_turn():
+    """Dominant-path companion to the max-iterations leak tests above: most
+    turns end via the normal single-response finalize path (no tool calls
+    ever offered/made), not the max-iterations retry -- that path needs its
+    own guard rather than relying on the retry-path check alone.
+    """
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content=(
+                "<tool_call>\n<function=exec>\n<parameter=command>\n"
+                'Remove-Item "C:\\temp\\file.vtt" -Force\n</parameter>\n'
+                "</function>\n</tool_call>"
+            ),
+            tool_calls=[],
+        ),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "leaked_tool_call_markup"
+    assert result.final_content is not None
+    assert "<tool_call" not in result.final_content, (
+        f"leaked tool-call markup reached final_content: {result.final_content!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_still_uses_a_clean_response_on_normal_turn():
+    """Companion negative case: a genuinely clean single-turn response (no
+    tool calls, no leaked markup) must still be used as-is.
+    """
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="Here's the answer you asked for.", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "Here's the answer you asked for."

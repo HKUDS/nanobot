@@ -123,6 +123,51 @@ class TestMessageToolSuppressLogic:
         assert sent[0].content == "Tool reply"
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_injected_followup_with_message_tool_suppresses_leaked_markup_notice(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the empty-fallback case above: once MessageTool has
+        already sent real content this turn, a leaked-tool-call-markup
+        fallback notice is suppressed the same way an empty response is,
+        even when a mid-turn injection occurred."""
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1", name="message",
+            arguments={"content": "Tool reply", "channel": "feishu", "chat_id": "chat123"},
+        )
+        calls = iter([
+            LLMResponse(content="First answer", tool_calls=[]),
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(
+                content=(
+                    "<tool_call>\n<function=exec>\n<parameter=command>\n"
+                    'Remove-Item "C:\\temp\\file.vtt" -Force\n</parameter>\n'
+                    "</function>\n</tool_call>"
+                ),
+                tool_calls=[],
+            ),
+        ])
+        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        sent: list[OutboundMessage] = []
+        mt = loop.tools.get("message")
+        if isinstance(mt, MessageTool):
+            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+
+        pending_queue = asyncio.Queue()
+        await pending_queue.put(
+            InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="follow-up")
+        )
+
+        msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Start")
+        result = await loop._process_message(msg, pending_queue=pending_queue)
+
+        assert len(sent) == 1
+        assert sent[0].content == "Tool reply"
+        assert result is None
+
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})

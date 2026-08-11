@@ -40,6 +40,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
+    contains_leaked_tool_call_markup,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     extract_reasoning,
@@ -50,6 +51,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+    LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE,
     build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
     build_goal_continue_message,
@@ -802,6 +804,35 @@ class AgentRunner:
                     length_recovery_parts.clear()
                     continue
                 break
+            if contains_leaked_tool_call_markup(clean):
+                # Same last-mile safety net as the max-iterations finalize path
+                # (above): a model asked to finalize can still write literal
+                # <tool_call>... text instead of a real answer. This is the
+                # dominant path where most turns actually end, so it needs its
+                # own guard rather than relying on the retry-path check alone.
+                logger.warning(
+                    "Leaked tool-call markup in final response for {}; "
+                    "substituting fallback ({} chars)",
+                    spec.session_key or "default",
+                    len(clean or ""),
+                )
+                final_content = LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE
+                stop_reason = "leaked_tool_call_markup"
+                error = final_content
+                self._append_final_message(messages, final_content)
+                context.final_content = final_content
+                context.error = error
+                context.stop_reason = stop_reason
+                await hook.after_iteration(context)
+                should_continue, injection_cycles = await self._try_drain_injections(
+                    spec, messages, None, injection_cycles,
+                    phase="after leaked tool-call markup",
+                )
+                if should_continue:
+                    had_injections = True
+                    length_recovery_parts.clear()
+                    continue
+                break
 
             messages.append(
                 assistant_message
@@ -1230,12 +1261,14 @@ class AgentRunner:
 
         raw_usage = self._usage_or_estimate(spec, retry_messages, response)
         self._accumulate_usage(usage, raw_usage)
-        if response.finish_reason == "error" or response.has_tool_calls:
+        leaked_tool_call = contains_leaked_tool_call_markup(response.content)
+        if response.finish_reason == "error" or response.has_tool_calls or leaked_tool_call:
             logger.warning(
                 "Budget-exhausted finalization returned finish_reason='{}' "
-                "with {} tool call(s) for {}; using fallback",
+                "with {} tool call(s){} for {}; using fallback",
                 response.finish_reason,
                 len(response.tool_calls),
+                " (leaked tool-call markup in content)" if leaked_tool_call else "",
                 spec.session_key or "default",
             )
             return None
