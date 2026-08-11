@@ -31,6 +31,7 @@ import {
   renameWorkbenchTab,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
+  setWorkbenchSplitRatios,
   workbenchTab,
   workbenchTabForPane,
   type WorkbenchState,
@@ -2400,6 +2401,9 @@ function Shell({
   const renderedWorkbenchLayout = paneChromeEnabled && activeTabState
     ? activeTabState.layout
     : "columns";
+  const renderedWorkbenchSplitRatios = paneChromeEnabled && activeTabState
+    ? activeTabState.splitRatios
+    : [];
   const sidebarPaneGroups = useMemo(() => {
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
     return Object.fromEntries(sidebarTabPresentations.map((presentation) => {
@@ -2734,6 +2738,7 @@ function Shell({
                 panes={renderedWorkbenchPanes}
                 activePaneKey={renderedActivePaneKey}
                 layout={renderedWorkbenchLayout}
+                splitRatios={renderedWorkbenchSplitRatios}
                 chrome={paneChromeEnabled}
                 showLayoutControl={activeTabVisible}
                 addPaneDisabled={creatingPane || activePaneLimitReached}
@@ -2749,6 +2754,12 @@ function Shell({
                   if (!activeTabKey) return;
                   setWorkbenchState((current) => (
                     setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
+                  ));
+                }}
+                onSplitRatiosChange={(splitRatios) => {
+                  if (!activeTabKey) return;
+                  setWorkbenchState((current) => (
+                    setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
                   ));
                 }}
                 renderPane={(pane, context) => {

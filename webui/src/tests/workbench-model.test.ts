@@ -16,6 +16,7 @@ import {
   renameWorkbenchTab,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
+  setWorkbenchSplitRatios,
   workbenchTab,
   workbenchTabForPane,
   type WorkbenchState,
@@ -41,6 +42,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-a"],
       activePaneKey: "pane-a",
       layout: "columns",
+      splitRatios: [],
     });
   });
 
@@ -60,6 +62,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-a", "pane-c"],
       activePaneKey: "pane-c",
       layout: "main-stack",
+      splitRatios: [],
     });
     expect(workbenchTab(state, betaTabKey)).toEqual({
       explicit: false,
@@ -68,6 +71,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-b"],
       activePaneKey: "pane-b",
       layout: "columns",
+      splitRatios: [],
     });
   });
 
@@ -117,6 +121,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-a"],
       activePaneKey: "pane-a",
       layout: "columns",
+      splitRatios: [],
     });
     expect(workbenchTabForPane(state, "pane-a").tab.paneKeys).toEqual(["pane-a"]);
     expect(workbenchTabForPane(state, "pane-b").tab.paneKeys).toEqual(["pane-b"]);
@@ -143,6 +148,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-a"],
       activePaneKey: "pane-a",
       layout: "columns",
+      splitRatios: [],
     });
   });
 
@@ -188,6 +194,21 @@ describe("workbench model", () => {
       "pane-a",
     ]);
     expect(ordered.paneKeys).toEqual(["pane-c", "pane-a", "pane-b"]);
+  });
+
+  it("stores resize ratios in the tab and resets them when its geometry changes", () => {
+    let state = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "pane-a");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = addWorkbenchPane(state, tabKey, "pane-b");
+    state = setWorkbenchSplitRatios(state, tabKey, [0.35]);
+
+    expect(workbenchTab(state, tabKey)?.splitRatios).toEqual([0.35]);
+    state = setWorkbenchLayout(state, tabKey, "rows");
+    expect(workbenchTab(state, tabKey)?.splitRatios).toEqual([]);
+
+    state = setWorkbenchSplitRatios(state, tabKey, [0.4]);
+    state = detachWorkbenchPane(state, tabKey, "pane-b");
+    expect(workbenchTab(state, tabKey)?.splitRatios).toEqual([]);
   });
 
   it("keeps each tab contiguous and ranks it by its latest updated pane", () => {
@@ -270,6 +291,7 @@ describe("workbench model", () => {
       layoutPaneKeys: ["pane-a", "pane-b"],
       activePaneKey: "pane-a",
       layout: "columns",
+      splitRatios: [],
     });
     expect(workbenchTab(reconciled, "duplicate")).toBeNull();
     expect(workbenchTabForPane(reconciled, "pane-c").tab.paneKeys).toEqual(["pane-c"]);

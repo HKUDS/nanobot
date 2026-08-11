@@ -8,7 +8,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -38,6 +37,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  createWorkbenchLayoutGeometry,
+  type EffectiveWorkbenchLayout,
+  resizeHandleRatio,
+  resizeHandleStyle,
+  splitRatioBounds,
+  type WorkbenchResizeHandle,
+} from "@/components/workbench/workbench-layout";
 import type { WorkbenchLayout } from "@/components/workbench/workbench-model";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
@@ -66,11 +73,15 @@ interface PaneWorkbenchProps {
   onAddPane: () => void;
   onLayoutChange: (layout: WorkbenchLayout) => void;
   onPaneOrderChange: (paneKeys: string[]) => void;
+  splitRatios?: number[];
+  onSplitRatiosChange?: (splitRatios: number[]) => void;
   renderPane: (pane: WorkbenchPane, context: PaneRenderContext) => ReactNode;
 }
 
 const LAYOUT_MOTION_DURATION_MS = 260;
 const LAYOUT_MOTION_EASING = "cubic-bezier(0.2, 0, 0, 1)";
+const EMPTY_SPLIT_RATIOS: number[] = [];
+const IGNORE_SPLIT_RATIO_CHANGE = () => {};
 
 const LAYOUT_CONTROLS: Array<{
   icon: LucideIcon;
@@ -83,108 +94,6 @@ const LAYOUT_CONTROLS: Array<{
   { icon: PanelsTopLeft, layout: "bsp", label: "BSP" },
   { icon: PanelLeft, layout: "main-stack", label: "Main and stack" },
 ];
-
-type EffectiveWorkbenchLayout = WorkbenchLayout | "compact";
-
-function paneGridStyle(layout: EffectiveWorkbenchLayout, paneCount: number): CSSProperties {
-  const count = Math.max(1, paneCount);
-  switch (layout) {
-    case "columns":
-      return {
-        gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))`,
-        gridTemplateRows: "minmax(0, 1fr)",
-      };
-    case "rows":
-      return {
-        gridTemplateColumns: "minmax(0, 1fr)",
-        gridTemplateRows: `repeat(${count}, minmax(0, 1fr))`,
-      };
-    case "grid": {
-      const columns = Math.ceil(Math.sqrt(count));
-      const rows = Math.ceil(count / columns);
-      return {
-        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-      };
-    }
-    case "bsp":
-      return {
-        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-        gridTemplateRows: "repeat(4, minmax(0, 1fr))",
-      };
-    case "main-stack":
-      return count === 1
-        ? {
-            gridTemplateColumns: "minmax(0, 1fr)",
-            gridTemplateRows: "minmax(0, 1fr)",
-          }
-        : {
-            gridTemplateColumns: "minmax(0, 1.65fr) minmax(0, 1fr)",
-            gridTemplateRows: `repeat(${count - 1}, minmax(0, 1fr))`,
-          };
-    case "compact":
-      return {
-        gridTemplateColumns: "minmax(0, 1fr)",
-        gridTemplateRows: "minmax(0, 1fr)",
-      };
-  }
-}
-
-interface BspCell {
-  columnStart: number;
-  columnEnd: number;
-  rowStart: number;
-  rowEnd: number;
-}
-
-function bspPaneCells(paneCount: number): BspCell[] {
-  const cells: BspCell[] = [{
-    columnStart: 1,
-    columnEnd: 5,
-    rowStart: 1,
-    rowEnd: 5,
-  }];
-  for (let paneIndex = 1; paneIndex < paneCount; paneIndex += 1) {
-    const leaf = cells.pop();
-    if (!leaf) break;
-    if (paneIndex % 2 === 1) {
-      const midpoint = (leaf.columnStart + leaf.columnEnd) / 2;
-      cells.push(
-        { ...leaf, columnEnd: midpoint },
-        { ...leaf, columnStart: midpoint },
-      );
-    } else {
-      const midpoint = (leaf.rowStart + leaf.rowEnd) / 2;
-      cells.push(
-        { ...leaf, rowEnd: midpoint },
-        { ...leaf, rowStart: midpoint },
-      );
-    }
-  }
-  return cells;
-}
-
-function paneCellStyle(
-  layout: EffectiveWorkbenchLayout,
-  paneCount: number,
-  index: number,
-): CSSProperties | undefined {
-  if (layout === "bsp") {
-    const cell = bspPaneCells(paneCount)[index];
-    return cell
-      ? {
-          gridColumn: `${cell.columnStart} / ${cell.columnEnd}`,
-          gridRow: `${cell.rowStart} / ${cell.rowEnd}`,
-        }
-      : undefined;
-  }
-  if (layout === "main-stack" && paneCount >= 2) {
-    return index === 0
-      ? { gridColumn: 1, gridRow: `1 / span ${paneCount - 1}` }
-      : { gridColumn: 2, gridRow: index };
-  }
-  return undefined;
-}
 
 function isPaneAction(target: EventTarget | null): boolean {
   return target instanceof Element
@@ -293,6 +202,8 @@ export function PaneWorkbench({
   onAddPane,
   onLayoutChange,
   onPaneOrderChange,
+  splitRatios = EMPTY_SPLIT_RATIOS,
+  onSplitRatiosChange = IGNORE_SPLIT_RATIO_CHANGE,
   renderPane,
 }: PaneWorkbenchProps) {
   const { t } = useTranslation();
@@ -300,10 +211,20 @@ export function PaneWorkbench({
   const effectiveLayout: EffectiveWorkbenchLayout = compact ? "compact" : layout;
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLElement | null>(null);
   const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const paneRefs = useRef(new Map<string, HTMLElement>());
   const lastRectsRef = useRef(new Map<string, DOMRect>());
   const pendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const animationsRef = useRef(new Map<string, Animation>());
+  const sourceSplitRatiosKey = splitRatios.join("\u0000");
+  const [previewSplitRatios, setPreviewSplitRatios] = useState(splitRatios);
+  const previewSplitRatiosRef = useRef(splitRatios);
+  const resizeGestureRef = useRef<{
+    pointerId: number;
+    handle: WorkbenchResizeHandle;
+    changed: boolean;
+  } | null>(null);
+  const [resizingRatioIndex, setResizingRatioIndex] = useState<number | null>(null);
   const sourcePaneOrder = useMemo(
     () => panes.map((pane) => pane.key),
     [panes],
@@ -336,6 +257,12 @@ export function PaneWorkbench({
     previewPaneKeysRef.current = sourcePaneOrder;
     setPreviewPaneKeys(sourcePaneOrder);
   }, [sourcePaneOrder, sourcePaneOrderKey]);
+
+  useEffect(() => {
+    if (resizeGestureRef.current) return;
+    previewSplitRatiosRef.current = splitRatios;
+    setPreviewSplitRatios(splitRatios);
+  }, [sourceSplitRatiosKey, splitRatios]);
 
   const measurePanes = useCallback(() => {
     const rects = new Map<string, DOMRect>();
@@ -548,7 +475,119 @@ export function PaneWorkbench({
     onPaneOrderChange(next);
   }, [captureLayout, measurePanes, onPaneOrderChange]);
 
-  const gridStyle = paneGridStyle(effectiveLayout, panes.length);
+  const layoutGeometry = useMemo(() => createWorkbenchLayoutGeometry(
+    effectiveLayout,
+    panes.length,
+    previewSplitRatios,
+  ), [effectiveLayout, panes.length, previewSplitRatios]);
+
+  const handleResizePointerDown = useCallback((
+    handle: WorkbenchResizeHandle,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (event.button !== 0 || compact) return;
+    event.preventDefault();
+    event.stopPropagation();
+    previewSplitRatiosRef.current = layoutGeometry.splitRatios;
+    setPreviewSplitRatios(layoutGeometry.splitRatios);
+    resizeGestureRef.current = {
+      pointerId: event.pointerId,
+      handle,
+      changed: false,
+    };
+    setResizingRatioIndex(handle.ratioIndex);
+  }, [compact, layoutGeometry.splitRatios]);
+
+  const handleResizePointerMove = useCallback((event: globalThis.PointerEvent) => {
+    const gesture = resizeGestureRef.current;
+    const grid = gridRef.current;
+    if (!gesture || !grid || gesture.pointerId !== event.pointerId) return;
+    const rect = grid.getBoundingClientRect();
+    const axisExtent = gesture.handle.axis === "vertical" ? rect.width : rect.height;
+    if (axisExtent <= 0) return;
+    const normalizedPosition = gesture.handle.axis === "vertical"
+      ? (event.clientX - rect.left) / rect.width
+      : (event.clientY - rect.top) / rect.height;
+    const ratio = resizeHandleRatio(gesture.handle, normalizedPosition, axisExtent);
+    const current = previewSplitRatiosRef.current;
+    if (Math.abs((current[gesture.handle.ratioIndex] ?? 0) - ratio) < 0.0001) return;
+    event.preventDefault();
+    const next = [...current];
+    next[gesture.handle.ratioIndex] = ratio;
+    gesture.changed = true;
+    previewSplitRatiosRef.current = next;
+    setPreviewSplitRatios(next);
+  }, []);
+
+  const finishResizeGesture = useCallback(() => {
+    const gesture = resizeGestureRef.current;
+    if (!gesture) return;
+    resizeGestureRef.current = null;
+    setResizingRatioIndex(null);
+    if (gesture.changed) onSplitRatiosChange([...previewSplitRatiosRef.current]);
+  }, [onSplitRatiosChange]);
+
+  useEffect(() => {
+    if (resizingRatioIndex === null) return;
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const gesture = resizeGestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+      if ((event.buttons & 1) === 0) {
+        finishResizeGesture();
+        return;
+      }
+      handleResizePointerMove(event);
+    };
+    const handlePointerEnd = (event: globalThis.PointerEvent) => {
+      if (resizeGestureRef.current?.pointerId === event.pointerId) finishResizeGesture();
+    };
+    const root = document.documentElement;
+    const previousCursor = root.style.cursor;
+    const previousUserSelect = root.style.userSelect;
+    root.style.cursor = resizeGestureRef.current?.handle.axis === "vertical"
+      ? "col-resize"
+      : "row-resize";
+    root.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+    window.addEventListener("blur", finishResizeGesture);
+    return () => {
+      root.style.cursor = previousCursor;
+      root.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+      window.removeEventListener("blur", finishResizeGesture);
+    };
+  }, [finishResizeGesture, handleResizePointerMove, resizingRatioIndex]);
+
+  const handleResizeKeyDown = useCallback((
+    handle: WorkbenchResizeHandle,
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) => {
+    const decreasing = handle.axis === "vertical" ? event.key === "ArrowLeft" : event.key === "ArrowUp";
+    const increasing = handle.axis === "vertical" ? event.key === "ArrowRight" : event.key === "ArrowDown";
+    if (!decreasing && !increasing && event.key !== "Home" && event.key !== "End") return;
+    const rect = gridRef.current?.getBoundingClientRect();
+    const axisExtent = handle.axis === "vertical" ? rect?.width : rect?.height;
+    const bounds = splitRatioBounds(handle, axisExtent && axisExtent > 0 ? axisExtent : 1000);
+    const current = layoutGeometry.splitRatios[handle.ratioIndex] ?? 0.5;
+    const step = event.shiftKey ? 0.1 : 0.03;
+    const nextRatio = event.key === "Home"
+      ? bounds.min
+      : event.key === "End"
+        ? bounds.max
+        : Math.min(bounds.max, Math.max(bounds.min, current + (increasing ? step : -step)));
+    event.preventDefault();
+    const next = [...layoutGeometry.splitRatios];
+    next[handle.ratioIndex] = nextRatio;
+    previewSplitRatiosRef.current = next;
+    setPreviewSplitRatios(next);
+    onSplitRatiosChange(next);
+  }, [layoutGeometry.splitRatios, onSplitRatiosChange]);
+
+  const gridStyle = layoutGeometry.gridStyle;
   const currentLayout = LAYOUT_CONTROLS.find((control) => control.layout === layout)
     ?? LAYOUT_CONTROLS[0];
   const headerActions = chrome ? (
@@ -629,8 +668,9 @@ export function PaneWorkbench({
             />
           </header>
         ) : null}
-        <div className="min-h-0 flex-1 bg-background">
+        <div className="relative min-h-0 flex-1 bg-background">
           <div
+            ref={gridRef}
             data-testid="pane-grid"
             data-layout={effectiveLayout}
             className={cn(
@@ -658,7 +698,7 @@ export function PaneWorkbench({
                   onPointerDownCapture={(event) => handlePanePointerDown(pane.key, event)}
                   onFocusCapture={(event) => handlePaneFocus(pane.key, event)}
                   className="workbench-pane relative flex min-h-0 min-w-0 overflow-hidden bg-background"
-                  style={paneCellStyle(effectiveLayout, panes.length, index)}
+                  style={layoutGeometry.paneStyles[index]}
                 >
                   {renderPane(pane, {
                     active,
@@ -713,6 +753,53 @@ export function PaneWorkbench({
               );
             })}
           </div>
+          {chrome && panes.length > 1 && !compact ? layoutGeometry.resizeHandles.map(
+            (handle, index) => {
+              const ratio = layoutGeometry.splitRatios[handle.ratioIndex] ?? 0.5;
+              const vertical = handle.axis === "vertical";
+              const bounds = splitRatioBounds(handle, 1000);
+              return (
+                <button
+                  key={`${handle.axis}-${handle.ratioIndex}`}
+                  type="button"
+                  role="separator"
+                  aria-orientation={handle.axis}
+                  aria-label={t("workbench.resizePaneBoundary", {
+                    defaultValue: "Resize pane boundary {{index}}",
+                    index: index + 1,
+                  })}
+                  aria-valuemin={Math.round(bounds.min * 100)}
+                  aria-valuemax={Math.round(bounds.max * 100)}
+                  aria-valuenow={Math.round(ratio * 100)}
+                  aria-keyshortcuts={vertical
+                    ? "ArrowLeft ArrowRight Home End"
+                    : "ArrowUp ArrowDown Home End"}
+                  data-workbench-pane-action
+                  data-workbench-resize-handle={handle.ratioIndex}
+                  onPointerDown={(event) => handleResizePointerDown(handle, event)}
+                  onKeyDown={(event) => handleResizeKeyDown(handle, event)}
+                  className={cn(
+                    "group host-no-drag absolute z-20 touch-none border-0 bg-transparent p-0 focus-visible:outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                    vertical ? "w-3 cursor-col-resize" : "h-3 cursor-row-resize",
+                  )}
+                  style={resizeHandleStyle(handle)}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute bg-transparent transition-colors duration-100 motion-reduce:transition-none",
+                      "group-hover:bg-foreground/20 group-focus-visible:bg-foreground/25",
+                      resizingRatioIndex === handle.ratioIndex && "bg-foreground/30",
+                      vertical
+                        ? "inset-y-0 left-1/2 w-px -translate-x-1/2"
+                        : "inset-x-0 top-1/2 h-px -translate-y-1/2",
+                    )}
+                  />
+                </button>
+              );
+            },
+          ) : null}
         </div>
 
         {chrome ? (

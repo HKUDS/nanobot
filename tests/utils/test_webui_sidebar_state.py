@@ -41,6 +41,7 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                             "layoutPaneKeys": ["websocket:b", "missing", "websocket:a"],
                             "activePaneKey": "missing",
                             "layout": "invalid-layout",
+                            "splitRatios": [0.4, 2, "bad", float("nan")],
                         },
                         "tab:websocket:b": {
                             "paneKeys": ["websocket:b", "websocket:c"],
@@ -75,6 +76,7 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                 "layoutPaneKeys": ["websocket:b", "websocket:a"],
                 "activePaneKey": "websocket:a",
                 "layout": "columns",
+                "splitRatios": [0.4, 0.95],
             },
             "tab:websocket:b": {
                 "explicit": False,
@@ -83,6 +85,7 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                 "layoutPaneKeys": ["websocket:c"],
                 "activePaneKey": "websocket:c",
                 "layout": "bsp",
+                "splitRatios": [],
             },
         },
     }

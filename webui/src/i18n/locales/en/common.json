@@ -1424,6 +1424,7 @@
     "addPane": "Add pane",
     "movePane": "Move {{title}} pane",
     "movePaneHint": "Drag to move · Arrow keys also work",
+    "resizePaneBoundary": "Resize pane boundary {{index}}",
     "promotePane": "Make {{title}} the primary pane",
     "paneActions": "{{title}} pane actions",
     "detachPane": "Remove",

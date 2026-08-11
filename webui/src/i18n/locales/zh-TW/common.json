@@ -1410,6 +1410,7 @@
     "addPane": "新增窗格",
     "movePane": "移動 {{title}} 窗格",
     "movePaneHint": "拖曳換位 · 也可以使用方向鍵",
+    "resizePaneBoundary": "調整窗格邊界 {{index}}",
     "promotePane": "將 {{title}} 設為主窗格",
     "paneActions": "{{title}} 窗格操作",
     "detachPane": "移出",

@@ -1410,6 +1410,7 @@
     "addPane": "Tambah panel",
     "movePane": "Pindahkan panel {{title}}",
     "movePaneHint": "Seret untuk memindahkan · Tombol panah juga dapat digunakan",
+    "resizePaneBoundary": "Ubah ukuran batas panel {{index}}",
     "promotePane": "Jadikan {{title}} panel utama",
     "paneActions": "Tindakan panel {{title}}",
     "detachPane": "Keluarkan",

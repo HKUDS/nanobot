@@ -1410,6 +1410,7 @@
     "addPane": "ペインを追加",
     "movePane": "{{title}} ペインを移動",
     "movePaneHint": "ドラッグで移動 · 矢印キーでも移動できます",
+    "resizePaneBoundary": "ペイン境界 {{index}} のサイズを変更",
     "promotePane": "{{title}} をメインペインにする",
     "paneActions": "{{title}} ペインの操作",
     "detachPane": "外す",

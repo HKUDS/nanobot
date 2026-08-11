@@ -32,9 +32,11 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 function WorkbenchHarness({
   initialLayout = "columns",
   onPaneOrderChange = () => {},
+  onSplitRatiosChange = () => {},
 }: {
   initialLayout?: "columns" | "rows";
   onPaneOrderChange?: (paneKeys: string[]) => void;
+  onSplitRatiosChange?: (splitRatios: number[]) => void;
 } = {}) {
   const [state, setState] = useState(() => {
     const initial = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "alpha");
@@ -55,6 +57,7 @@ function WorkbenchHarness({
       panes={tab.layoutPaneKeys.map((key) => ({ key, title: titles[key] }))}
       activePaneKey={tab.activePaneKey}
       layout={tab.layout}
+      splitRatios={tab.splitRatios}
       showLayoutControl
       onActivatePane={(key) => setState((current) => (
         focusWorkbenchPane(current, tabKey, key)
@@ -69,6 +72,7 @@ function WorkbenchHarness({
           setWorkbenchPaneLayoutOrder(current, tabKey, paneKeys)
         ));
       }}
+      onSplitRatiosChange={onSplitRatiosChange}
       renderPane={(pane, context) => (
         <>
           <button type="button">Focus {pane.title}</button>
@@ -98,11 +102,13 @@ function BspWorkbenchHarness() {
       panes={panes}
       activePaneKey="delta"
       layout="bsp"
+      splitRatios={[]}
       showLayoutControl
       onActivatePane={vi.fn()}
       onAddPane={vi.fn()}
       onLayoutChange={vi.fn()}
       onPaneOrderChange={vi.fn()}
+      onSplitRatiosChange={vi.fn()}
       renderPane={(pane) => <span>{pane.title}</span>}
     />
   );
@@ -129,6 +135,7 @@ describe("PaneWorkbench", () => {
     })));
     HTMLElement.prototype.animate = animate;
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.dataset.testid === "pane-grid") return rect(0, 0, 1000, 1000);
       if (!this.classList.contains("workbench-pane")) {
         return originalGetBoundingClientRect.call(this);
       }
@@ -250,6 +257,48 @@ describe("PaneWorkbench", () => {
       .toEqual(["Beta", "Alpha"]);
   });
 
+  it("previews edge resizing locally and commits one ratio when dragging ends", () => {
+    const onSplitRatiosChange = vi.fn();
+    render(<WorkbenchHarness onSplitRatiosChange={onSplitRatiosChange} />);
+
+    const grid = screen.getByTestId("pane-grid");
+    const separator = screen.getByRole("separator", {
+      name: "Resize pane boundary 1",
+    });
+    fireEvent.pointerDown(separator, {
+      button: 0,
+      pointerId: 7,
+      clientX: 500,
+      clientY: 400,
+    });
+    fireEvent.pointerMove(window, {
+      buttons: 1,
+      pointerId: 7,
+      clientX: 700,
+      clientY: 400,
+    });
+
+    expect(grid.style.gridTemplateColumns)
+      .toBe("minmax(0, 700fr) minmax(0, 300fr)");
+    expect(onSplitRatiosChange).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 700, clientY: 400 });
+    expect(onSplitRatiosChange).toHaveBeenCalledOnce();
+    expect(onSplitRatiosChange).toHaveBeenCalledWith([0.7]);
+  });
+
+  it("resizes a pane boundary with the matching arrow keys", () => {
+    const onSplitRatiosChange = vi.fn();
+    render(<WorkbenchHarness onSplitRatiosChange={onSplitRatiosChange} />);
+
+    const separator = screen.getByRole("separator", {
+      name: "Resize pane boundary 1",
+    });
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+
+    expect(onSplitRatiosChange).toHaveBeenCalledWith([0.47]);
+  });
+
   it("keeps one shared layout control and animates geometry changes", async () => {
     render(<WorkbenchHarness />);
 
@@ -279,9 +328,9 @@ describe("PaneWorkbench", () => {
     const beta = screen.getByTestId("workbench-pane-beta");
     const gamma = screen.getByTestId("workbench-pane-gamma");
     const delta = screen.getByTestId("workbench-pane-delta");
-    expect([alpha.style.gridColumn, alpha.style.gridRow]).toEqual(["1 / 3", "1 / 5"]);
-    expect([beta.style.gridColumn, beta.style.gridRow]).toEqual(["3 / 5", "1 / 3"]);
-    expect([gamma.style.gridColumn, gamma.style.gridRow]).toEqual(["3 / 4", "3 / 5"]);
-    expect([delta.style.gridColumn, delta.style.gridRow]).toEqual(["4 / 5", "3 / 5"]);
+    expect([alpha.style.gridColumn, alpha.style.gridRow]).toEqual(["1 / 2", "1 / 3"]);
+    expect([beta.style.gridColumn, beta.style.gridRow]).toEqual(["2 / 4", "1 / 2"]);
+    expect([gamma.style.gridColumn, gamma.style.gridRow]).toEqual(["2 / 3", "2 / 3"]);
+    expect([delta.style.gridColumn, delta.style.gridRow]).toEqual(["3 / 4", "2 / 3"]);
   });
 });

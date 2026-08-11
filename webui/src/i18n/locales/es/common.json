@@ -1411,6 +1411,7 @@
     "addPane": "Añadir panel",
     "movePane": "Mover panel {{title}}",
     "movePaneHint": "Arrastra para mover · También puedes usar las flechas",
+    "resizePaneBoundary": "Redimensionar límite de panel {{index}}",
     "promotePane": "Convertir {{title}} en el panel principal",
     "paneActions": "Acciones del panel {{title}}",
     "detachPane": "Quitar",

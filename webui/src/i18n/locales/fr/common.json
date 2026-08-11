@@ -1410,6 +1410,7 @@
     "addPane": "Ajouter un volet",
     "movePane": "Déplacer le volet {{title}}",
     "movePaneHint": "Faites glisser pour déplacer · Les flèches fonctionnent aussi",
+    "resizePaneBoundary": "Redimensionner la séparation {{index}}",
     "promotePane": "Définir {{title}} comme volet principal",
     "paneActions": "Actions du volet {{title}}",
     "detachPane": "Retirer",

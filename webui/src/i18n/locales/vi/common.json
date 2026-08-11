@@ -1410,6 +1410,7 @@
     "addPane": "Thêm khung",
     "movePane": "Di chuyển khung {{title}}",
     "movePaneHint": "Kéo để di chuyển · Cũng có thể dùng các phím mũi tên",
+    "resizePaneBoundary": "Đổi kích thước ranh giới khung {{index}}",
     "promotePane": "Đặt {{title}} làm khung chính",
     "paneActions": "Thao tác cho khung {{title}}",
     "detachPane": "Gỡ",

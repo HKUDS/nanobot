@@ -1062,6 +1062,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
                                 "layoutPaneKeys": ["websocket:b", "websocket:a"],
                                 "activePaneKey": "websocket:a",
                                 "layout": "columns",
+                                "splitRatios": [0.35],
                             }
                         },
                     }
@@ -1080,6 +1081,9 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     assert event["state"]["workbench"]["tabs"]["tab:websocket:a"]["layoutPaneKeys"] == [
         "websocket:b",
         "websocket:a",
+    ]
+    assert event["state"]["workbench"]["tabs"]["tab:websocket:a"]["splitRatios"] == [
+        0.35
     ]
 
 

@@ -1410,6 +1410,7 @@
     "addPane": "창 추가",
     "movePane": "{{title}} 창 이동",
     "movePaneHint": "드래그하여 이동 · 방향키로도 이동 가능",
+    "resizePaneBoundary": "창 경계 {{index}} 크기 조절",
     "promotePane": "{{title}}을(를) 기본 창으로 설정",
     "paneActions": "{{title}} 창 작업",
     "detachPane": "제거",

@@ -8,6 +8,7 @@ does not modify agent sessions.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -77,6 +78,20 @@ def _clean_string_list(value: Any, *, max_len: int = _MAX_KEY_LEN) -> list[str]:
         seen.add(cleaned)
         out.append(cleaned)
     return out
+
+
+def _clean_split_ratios(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    ratios: list[float] = []
+    for raw_ratio in cast(list[Any], value)[: _MAX_WORKBENCH_PANES - 1]:
+        if isinstance(raw_ratio, bool) or not isinstance(raw_ratio, (int, float)):
+            continue
+        ratio = float(raw_ratio)
+        if not math.isfinite(ratio):
+            continue
+        ratios.append(round(min(0.95, max(0.05, ratio)), 4))
+    return ratios
 
 
 def _clean_bool_map(value: Any) -> dict[str, bool]:
@@ -175,6 +190,7 @@ def _clean_workbench(value: Any) -> dict[str, Any]:
                 active_pane_key if active_pane_key in pane_keys else pane_keys[0]
             ),
             "layout": layout,
+            "splitRatios": _clean_split_ratios(tab.get("splitRatios")),
         }
     return {"version": 1, "tabs": tabs}
 

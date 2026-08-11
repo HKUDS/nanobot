@@ -53,6 +53,14 @@ function normalizeTitle(value: unknown): string | null {
   return title || null;
 }
 
+function normalizeSplitRatios(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((ratio): ratio is number => typeof ratio === "number" && Number.isFinite(ratio))
+    .slice(0, MAX_WORKBENCH_PANES - 1)
+    .map((ratio) => Number(Math.min(0.95, Math.max(0.05, ratio)).toFixed(4)));
+}
+
 function normalizeTab(value: unknown): WorkbenchTabState {
   const candidate = value && typeof value === "object"
     ? value as Partial<WorkbenchTabState>
@@ -75,6 +83,7 @@ function normalizeTab(value: unknown): WorkbenchTabState {
         ? candidate.activePaneKey
         : paneKeys[0] ?? "",
     layout: isLayout(candidate.layout) ? candidate.layout : "columns",
+    splitRatios: normalizeSplitRatios(candidate.splitRatios),
   };
 }
 
@@ -104,6 +113,7 @@ function defaultWorkbenchTab(
     layoutPaneKeys: [paneKey],
     activePaneKey: paneKey,
     layout: "columns",
+    splitRatios: [],
   };
 }
 
@@ -222,6 +232,7 @@ export function detachWorkbenchPane(
           explicit: false,
           title: null,
           layout: "columns",
+          splitRatios: [],
         }))
       : state;
   }
@@ -241,6 +252,7 @@ export function detachWorkbenchPane(
         activePaneKey: tab.activePaneKey === paneKey
           ? paneKeys[Math.min(index, paneKeys.length - 1)]
           : tab.activePaneKey,
+        splitRatios: [],
       },
       [nextTabKey]: defaultWorkbenchTab(paneKey),
     },
@@ -260,6 +272,7 @@ export function dissolveWorkbenchTab(
           explicit: false,
           title: null,
           layout: "columns",
+          splitRatios: [],
         }))
       : state;
   }
@@ -309,6 +322,7 @@ export function attachWorkbenchPane(
         activePaneKey: sourceTab.activePaneKey === paneKey
           ? sourcePaneKeys[Math.min(index, sourcePaneKeys.length - 1)]
           : sourceTab.activePaneKey,
+        splitRatios: [],
       };
     }
   }
@@ -326,6 +340,7 @@ export function attachWorkbenchPane(
     paneKeys,
     layoutPaneKeys,
     activePaneKey: paneKey,
+    splitRatios: [],
   };
   return { version: 1, tabs };
 }
@@ -348,8 +363,22 @@ export function setWorkbenchLayout(
   layout: WorkbenchLayout,
 ): WorkbenchState {
   return updateTab(state, tabKey, (tab) => (
-    tab.layout === layout ? tab : { ...tab, layout }
+    tab.layout === layout ? tab : { ...tab, layout, splitRatios: [] }
   ));
+}
+
+export function setWorkbenchSplitRatios(
+  state: WorkbenchState,
+  tabKey: string,
+  splitRatios: readonly number[],
+): WorkbenchState {
+  return updateTab(state, tabKey, (tab) => {
+    const normalized = normalizeSplitRatios(splitRatios);
+    return normalized.length === tab.splitRatios.length
+      && normalized.every((ratio, index) => ratio === tab.splitRatios[index])
+      ? tab
+      : { ...tab, splitRatios: normalized };
+  });
 }
 
 export function setWorkbenchPaneLayoutOrder(
@@ -392,6 +421,10 @@ export function reconcileWorkbench(
       activePaneKey: paneKeys.includes(tab.activePaneKey)
         ? tab.activePaneKey
         : paneKeys[0],
+      splitRatios: paneKeys.length === tab.paneKeys.length
+        && paneKeys.every((key, index) => key === tab.paneKeys[index])
+        ? tab.splitRatios
+        : [],
     };
   }
 

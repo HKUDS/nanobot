@@ -1424,6 +1424,7 @@
     "addPane": "Adicionar painel",
     "movePane": "Mover painel {{title}}",
     "movePaneHint": "Arraste para mover · As setas também funcionam",
+    "resizePaneBoundary": "Redimensionar limite do painel {{index}}",
     "promotePane": "Tornar {{title}} o painel principal",
     "paneActions": "Ações do painel {{title}}",
     "detachPane": "Remover",

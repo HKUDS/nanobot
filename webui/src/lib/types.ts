@@ -377,6 +377,7 @@ export interface WorkbenchTabState {
   layoutPaneKeys: string[];
   activePaneKey: string;
   layout: WorkbenchLayout;
+  splitRatios: number[];
 }
 
 export interface WorkbenchState {
