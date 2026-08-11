@@ -1256,6 +1256,59 @@ async def test_connect_mcp_servers_propagates_external_cancellation(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slow_started = asyncio.Event()
+    closed: list[str] = []
+    sessions = {"fast": _make_fake_session(["demo"])}
+
+    class _SelectiveClientSession:
+        def __init__(self, read: object, _write: object) -> None:
+            self._session = sessions[str(read)]
+
+        async def __aenter__(self) -> object:
+            return self._session
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _selective_stdio_client(params: object):
+        command = str(params.command)
+        try:
+            if command == "slow":
+                slow_started.set()
+                await asyncio.Event().wait()
+            yield command, object()
+        finally:
+            closed.append(command)
+
+    monkeypatch.setattr(sys.modules["mcp"], "ClientSession", _SelectiveClientSession)
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
+
+    registry = ToolRegistry()
+    task = asyncio.create_task(
+        connect_mcp_servers(
+            {
+                "fast": MCPServerConfig(command="fast"),
+                "slow": MCPServerConfig(command="slow"),
+            },
+            registry,
+        )
+    )
+    await asyncio.wait_for(slow_started.wait(), timeout=1.0)
+    assert registry.tool_names == ["mcp_fast_demo"]
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert registry.tool_names == []
+    assert sorted(closed) == ["fast", "slow"]
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     fake_mcp_runtime: dict[str, object | None],
     monkeypatch: pytest.MonkeyPatch,

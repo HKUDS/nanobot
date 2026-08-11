@@ -63,6 +63,28 @@ class MCPConnection(Protocol):
     async def aclose(self) -> None: ...
 
 
+async def _close_mcp_connection(name: str, connection: MCPConnection) -> None:
+    try:
+        await connection.aclose()
+    except asyncio.CancelledError:
+        if task_is_cancelling():
+            raise
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+    except (RuntimeError, BaseExceptionGroup):
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+
+
+async def _close_mcp_connections(connections: Mapping[str, MCPConnection]) -> None:
+    cancellation: asyncio.CancelledError | None = None
+    for name, connection in connections.items():
+        try:
+            await _close_mcp_connection(name, connection)
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
+    if cancellation is not None:
+        raise cancellation
+
+
 class _OwnedMCPConnection:
     """Close an MCP transport from the task that originally opened it."""
 
@@ -1273,15 +1295,29 @@ async def connect_mcp_servers(
         return name, connection
 
     server_stacks: dict[str, MCPConnection] = {}
+    attempted_names: list[str] = []
 
-    for name, cfg in mcp_servers.items():
+    try:
+        for name, cfg in mcp_servers.items():
+            attempted_names.append(name)
+            try:
+                result = await connect_single_server(name, cfg)
+            except Exception as e:
+                _log_mcp_connection_failure(name, e)
+                continue
+            if result[1] is not None:
+                server_stacks[result[0]] = result[1]
+    except BaseException:
+        # Callers can bound readiness/reload with a timeout. If cancellation
+        # interrupts a later server, ownership of earlier connections has not
+        # transferred yet, so roll the whole batch back before propagating it.
+        for name in attempted_names:
+            _unregister_server_tools(registry, name)
         try:
-            result = await connect_single_server(name, cfg)
-        except Exception as e:
-            _log_mcp_connection_failure(name, e)
-            continue
-        if result[1] is not None:
-            server_stacks[result[0]] = result[1]
+            await _close_mcp_connections(server_stacks)
+        except BaseException as cleanup_exc:
+            logger.debug("MCP batch rollback cleanup error (can be ignored): {}", cleanup_exc)
+        raise
 
     return server_stacks
 
@@ -1373,28 +1409,6 @@ class MCPProvider:
         self._set_runtime_status(connected_names, "connected")
         self._set_runtime_status(attempted_names - connected_names, "failed")
 
-    @staticmethod
-    async def _close_connection(name: str, connection: MCPConnection) -> None:
-        try:
-            await connection.aclose()
-        except asyncio.CancelledError:
-            if task_is_cancelling():
-                raise
-            logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
-        except (RuntimeError, BaseExceptionGroup):
-            logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
-
-    @classmethod
-    async def _close_connections(cls, connections: Mapping[str, MCPConnection]) -> None:
-        cancellation: asyncio.CancelledError | None = None
-        for name, connection in connections.items():
-            try:
-                await cls._close_connection(name, connection)
-            except asyncio.CancelledError as exc:
-                cancellation = cancellation or exc
-        if cancellation is not None:
-            raise cancellation
-
     async def connect(self) -> None:
         """Connect configured servers that are not currently live."""
         async with self._lock:
@@ -1432,7 +1446,7 @@ class MCPProvider:
             try:
                 connected = await connect_mcp_servers(missing_servers, self._registry)
                 if self._closing:
-                    await self._close_connections(connected)
+                    await _close_mcp_connections(connected)
                     return
                 self._connections.update(connected)
                 self._record_connection_result(missing_servers, connected)
@@ -1520,7 +1534,7 @@ class MCPProvider:
                 self._set_runtime_status(to_connect, "connecting")
                 connected = await connect_mcp_servers(to_connect, self._registry)
                 if self._closing:
-                    await self._close_connections(connected)
+                    await _close_mcp_connections(connected)
                     return self._closing_result()
                 self._connections.update(connected)
                 self._record_connection_result(to_connect, connected)
@@ -1632,7 +1646,7 @@ class MCPProvider:
                 self._registry,
             )
             if self._closing:
-                await self._close_connections(connected)
+                await _close_mcp_connections(connected)
                 return None
             self._connections.update(connected)
             self._record_connection_result({server_name}, connected)
@@ -1649,7 +1663,7 @@ class MCPProvider:
         connection = self._connections.pop(server_name, None)
         if connection is None:
             return
-        await self._close_connection(server_name, connection)
+        await _close_mcp_connection(server_name, connection)
 
     async def aclose(self) -> None:
         """Close every connection while excluding reconnect and hot reload."""
@@ -1660,7 +1674,7 @@ class MCPProvider:
             self._runtime_statuses.clear()
             for name in self._servers:
                 _unregister_server_tools(self._registry, name)
-            await self._close_connections(connections)
+            await _close_mcp_connections(connections)
 
 
 def _server_signature(cfg: Any) -> Any:
