@@ -270,6 +270,7 @@ class AgentLoop:
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        per_session_sandbox: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict[str, MCPServerConfig] | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -370,6 +371,7 @@ class AgentLoop:
         self.workspace_scopes = WorkspaceScopeResolver(
             default_workspace=workspace,
             default_restrict_to_workspace=restrict_to_workspace,
+            per_session_sandbox=per_session_sandbox,
         )
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
@@ -499,6 +501,7 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
+            per_session_sandbox=defaults.per_session_sandbox,
             mcp_servers=config.tools.mcp_servers,
             channels_config=config.channels,
             timezone=defaults.timezone,
@@ -721,7 +724,7 @@ class AgentLoop:
     def _build_initial_messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
-        scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata, session_key=ctx.session.key)
         return self.context.build_messages(
             history=ctx.history,
             current_message=ctx.msg.content,
@@ -742,6 +745,7 @@ class AgentLoop:
             channel=ctx.delivery.route.channel,
             message_metadata=ctx.msg.metadata,
             session_metadata=ctx.session.metadata,
+            session_key=ctx.session.key,
         )
         return RequestContext(
             channel=ctx.delivery.route.channel,
@@ -948,6 +952,7 @@ class AgentLoop:
                         channel=pending_msg.channel,
                         message_metadata=metadata,
                         session_metadata=session.metadata if session is not None else None,
+                        session_key=session.key if session is not None else None,
                     )
                     pending_request = RequestContext(
                         channel=pending_msg.channel,
@@ -1022,6 +1027,7 @@ class AgentLoop:
             channel=channel,
             message_metadata=metadata,
             session_metadata=session.metadata if session is not None else None,
+            session_key=active_session_key,
         )
         effective_tools = tools or self.tools
         request_ctx = request_context or RequestContext(

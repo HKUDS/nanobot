@@ -118,6 +118,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
+    per_session_sandbox: bool = False  # give each non-WebUI session its own isolated sandbox dir under <workspace>/workspaces/
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
