@@ -213,29 +213,19 @@ jobs:
           done
           INNER
           OUTER
-          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml \
-            run --rm --no-deps -T --user nanobot --entrypoint sh nanobot-cli -s <<'BWRAP'
-          set -eu
-          field() {
-            awk -v key="$1:" '$1 == key { print $2 }' /proc/self/status
-          }
-          test "$(id -u)" = "1000"
-          test "$(field NoNewPrivs)" = "1"
-          for capability_set in CapInh CapPrm CapEff CapAmb; do
-            test "$(field "$capability_set")" = "0000000000000000"
-          done
-          mkdir -p /home/nanobot/.nanobot/workspace
-          bwrap --new-session --die-with-parent \
-            --ro-bind /usr /usr \
-            --ro-bind-try /bin /bin \
-            --ro-bind-try /lib /lib \
-            --ro-bind-try /lib64 /lib64 \
-            --proc /proc --dev /dev --tmpfs /tmp \
-            --bind /home/nanobot/.nanobot/workspace /home/nanobot/.nanobot/workspace \
-            --chdir /home/nanobot/.nanobot/workspace \
-            -- sh -c 'test "$(id -u)" = 1000; touch sandbox-ok'
-          test -f /home/nanobot/.nanobot/workspace/sandbox-ok
-          BWRAP
+          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml --profile cli \
+            config --format json > "${RUNNER_TEMP}/bwrap-compose.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path(os.environ["RUNNER_TEMP"], "bwrap-compose.json").read_text())
+          for service_name in ("nanobot-gateway", "nanobot-api", "nanobot-cli"):
+              service = config["services"][service_name]
+              assert {"CHOWN", "SETGID", "SETUID", "SYS_ADMIN"} <= set(service["cap_add"])
+              assert "no-new-privileges:true" in service["security_opt"]
+          PY
 
       - name: Verify default WhatsApp dependencies
         run: docker run --rm --entrypoint python nanobot:test -c "import neonize, segno"

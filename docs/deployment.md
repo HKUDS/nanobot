@@ -175,7 +175,9 @@ docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobo
 
 The override adds `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for the
 container so bubblewrap can create its nested namespaces. It preserves
-`no-new-privileges`. Use it only when the bwrap sandbox is enabled.
+`no-new-privileges`. The host must also allow unprivileged user namespaces; the
+override cannot bypass a host-level namespace restriction. Use it only when the
+bwrap sandbox is enabled.
 
 ### Docker
 
