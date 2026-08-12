@@ -22,6 +22,7 @@ from nanobot.agent.plugins import (
     set_agent_plugin_enabled,
 )
 from nanobot.agent.tools.mcp_oauth import (
+    MCPAuthorizationStoreError,
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
 )
@@ -73,6 +74,23 @@ class McpPresetError(Exception):
         super().__init__(message)
         self.message = message
         self.status = status
+
+
+def _delete_oauth_credentials_before_config(name: str) -> None:
+    """Clear credentials before committing a config replacement or removal.
+
+    The config and credential store are separate files, so they cannot share one
+    filesystem transaction. Clearing credentials first gives the safe failure mode:
+    if cleanup fails, the config remains unchanged; if the later config write fails,
+    the old config only loses its credentials and cannot reuse stale tokens.
+    """
+    try:
+        delete_mcp_oauth_credentials(name)
+    except (MCPAuthorizationStoreError, OSError) as exc:
+        raise McpPresetError(
+            f"Could not clear OAuth credentials for '{name}'; MCP config was not changed",
+            status=503,
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -1460,10 +1478,10 @@ def custom_mcp_action(
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
         delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
+        if delete_credentials:
+            _delete_oauth_credentials_before_config(name)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
-        if delete_credentials:
-            delete_mcp_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
@@ -1478,10 +1496,10 @@ def custom_mcp_action(
             for name, cfg in servers.items()
             if _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         ]
+        for name in delete_credentials:
+            _delete_oauth_credentials_before_config(name)
         config.tools.mcp_servers.update(servers)
         save_config(config, config_path)
-        for name in delete_credentials:
-            delete_mcp_oauth_credentials(name)
         payload = mcp_presets_payload(
             last_action={
                 "ok": True,
@@ -1564,13 +1582,13 @@ def mcp_presets_action(
         cleanup_error = ""
         if name in config.tools.mcp_servers:
             existing_cfg = config.tools.mcp_servers[name]
+            _delete_oauth_credentials_before_config(name)
             try:
                 removed_runtime_files = _remove_managed_stdio_cwd(name, existing_cfg)
             except OSError as exc:
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config, config_path)
-            delete_mcp_oauth_credentials(name)
         last_action = (
             _action_message(action, preset)
             if preset is not None

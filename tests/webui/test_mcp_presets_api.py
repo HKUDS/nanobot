@@ -9,7 +9,11 @@ import pytest
 from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
-from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
+from nanobot.agent.tools.mcp_oauth import (
+    MCPAuthorizationStoreError,
+    MCPOAuthStorage,
+    mcp_oauth_has_credentials,
+)
 from nanobot.config.loader import load_config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
@@ -661,6 +665,78 @@ async def test_replacing_oauth_config_removes_its_stored_credentials(
     )
 
     assert not mcp_oauth_has_credentials("company-mcp", server_url)
+
+
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [MCPAuthorizationStoreError("store is unreadable"), OSError("store is busy")],
+)
+def test_replacing_oauth_config_is_not_committed_when_cleanup_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_error: Exception,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+            "auth": ["oauth"],
+        },
+    )
+
+    def fail_cleanup(_name: str) -> None:
+        raise cleanup_error
+
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.delete_mcp_oauth_credentials",
+        fail_cleanup,
+    )
+
+    with pytest.raises(McpPresetError) as exc:
+        custom_mcp_action(
+            "custom",
+            {
+                "name": ["company-mcp"],
+                "transport": ["streamableHttp"],
+                "url": [server_url],
+            },
+        )
+
+    assert exc.value.status == 503
+    config = load_config()
+    assert config.tools.mcp_servers["company-mcp"].auth == "oauth"
+    assert config.tools.mcp_servers["company-mcp"].url == server_url
+
+
+def test_removing_oauth_config_is_not_committed_when_cleanup_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+            "auth": ["oauth"],
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.delete_mcp_oauth_credentials",
+        lambda _name: (_ for _ in ()).throw(OSError("store is busy")),
+    )
+
+    with pytest.raises(McpPresetError) as exc:
+        mcp_presets_action("remove", {"name": ["company-mcp"]})
+
+    assert exc.value.status == 503
+    assert "company-mcp" in load_config().tools.mcp_servers
 
 
 def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(
