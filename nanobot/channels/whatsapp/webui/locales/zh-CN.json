@@ -5,12 +5,12 @@
     "primaryAction": "连接 WhatsApp",
     "docsLabel": "打开 WhatsApp 配置指南",
     "officialLabel": "打开 WhatsApp 帮助",
-    "tryIt": "终端登录完成后，向已连接的账户发送一条 WhatsApp 私信。",
+    "tryIt": "关联完成后，向已连接的账户发送一条 WhatsApp 私信。",
     "summary": "使用要运行机器人的 WhatsApp 账户扫描二维码即可完成连接。",
     "steps": [
-      "运行下方显示的 WhatsApp 登录命令。",
-      "用手机 WhatsApp 扫描终端中的二维码。",
-      "登录后返回这里，启用 WhatsApp，然后发送一条私信测试。"
+      "点击“连接 WhatsApp”，在浏览器中显示二维码。",
+      "在手机 WhatsApp 中打开“已关联的设备”并扫描二维码。",
+      "关联后启用 WhatsApp，然后发送一条私信测试。"
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp 关联二维码",
+    "scanTitle": "关联 WhatsApp",
+    "scanDescription": "在 WhatsApp 中打开“已关联的设备”，选择“关联设备”，然后扫描此二维码。",
+    "waiting": "正在等待 WhatsApp 扫码…",
+    "connected": "WhatsApp 已连接。",
+    "stopped": "WhatsApp 连接已停止。请重新开始以获取新二维码。",
+    "connecting": "正在连接…",
+    "scanAgain": "关联其他账户",
+    "connect": "关联 WhatsApp"
   }
 }

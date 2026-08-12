@@ -5,12 +5,12 @@
     "primaryAction": "Connecter WhatsApp",
     "docsLabel": "Ouvrir le guide WhatsApp",
     "officialLabel": "Ouvrir l’aide WhatsApp",
-    "tryIt": "Après la connexion dans le terminal, envoyez un message privé au compte connecté.",
+    "tryIt": "Après l’association, envoyez un message privé au compte connecté.",
     "summary": "WhatsApp se connecte en scannant un QR code avec le compte qui exécutera le bot.",
     "steps": [
-      "Exécutez la commande de connexion WhatsApp ci-dessous.",
-      "Scannez le QR code du terminal avec WhatsApp sur votre téléphone.",
-      "Revenez ici après la connexion, activez WhatsApp et envoyez un message privé test."
+      "Choisissez Connecter WhatsApp pour afficher un QR code dans le navigateur.",
+      "Ouvrez Appareils connectés dans WhatsApp et scannez le code.",
+      "Après l’association, activez WhatsApp et envoyez un message privé test."
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "QR code d’association WhatsApp",
+    "scanTitle": "Associer WhatsApp",
+    "scanDescription": "Dans WhatsApp, ouvrez Appareils connectés, choisissez Connecter un appareil, puis scannez ce code.",
+    "waiting": "En attente de WhatsApp…",
+    "connected": "WhatsApp est connecté.",
+    "stopped": "La tentative de connexion s’est arrêtée. Recommencez pour obtenir un nouveau code.",
+    "connecting": "Connexion…",
+    "scanAgain": "Associer un autre compte",
+    "connect": "Associer WhatsApp"
   }
 }

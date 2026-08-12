@@ -1002,7 +1002,12 @@ export interface ChannelSetupContractField {
 
 export interface ChannelSetupContract {
   fields: ChannelSetupContractField[];
+  requirements?: ChannelSetupContractRequirement[];
   official_url?: string;
+}
+
+export interface ChannelSetupContractRequirement {
+  alternatives: string[][];
 }
 
 export interface NanobotChannelInstanceInfo {

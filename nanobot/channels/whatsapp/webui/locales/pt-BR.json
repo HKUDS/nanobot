@@ -5,12 +5,12 @@
     "primaryAction": "Conectar WhatsApp",
     "docsLabel": "Abrir guia do WhatsApp",
     "officialLabel": "Abrir ajuda do WhatsApp",
-    "tryIt": "Após o login no terminal, envie uma DM à conta conectada.",
+    "tryIt": "Após vincular, envie uma DM à conta conectada.",
     "summary": "O WhatsApp conecta ao escanear um QR code com a conta que executará o bot.",
     "steps": [
-      "Execute o comando de login do WhatsApp mostrado abaixo.",
-      "Escaneie o QR code do terminal com o WhatsApp no celular.",
-      "Volte aqui após o login, ative o WhatsApp e envie uma mensagem direta de teste."
+      "Escolha Conectar WhatsApp para exibir um QR code no navegador.",
+      "Abra Aparelhos conectados no WhatsApp e escaneie o código.",
+      "Após vincular, ative o WhatsApp e envie uma mensagem direta de teste."
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "QR code para vincular o WhatsApp",
+    "scanTitle": "Vincular WhatsApp",
+    "scanDescription": "No WhatsApp, abra Aparelhos conectados, escolha Conectar um aparelho e escaneie este código.",
+    "waiting": "Aguardando o WhatsApp…",
+    "connected": "O WhatsApp está conectado.",
+    "stopped": "A tentativa de conexão parou. Inicie novamente para obter outro código.",
+    "connecting": "Conectando…",
+    "scanAgain": "Vincular outra conta",
+    "connect": "Vincular WhatsApp"
   }
 }

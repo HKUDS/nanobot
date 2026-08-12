@@ -211,6 +211,15 @@ class ChannelSetupSpec:
             fields.append(public_field)
         payload: dict[str, Any] = {
             "fields": fields,
+            "requirements": [
+                {
+                    "alternatives": [
+                        [f"channels.{channel_name}.{name}" for name in alternative]
+                        for alternative in requirement.alternatives
+                    ]
+                }
+                for requirement in self.required
+            ],
         }
         if self.official_url:
             payload["official_url"] = self.official_url

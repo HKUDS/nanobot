@@ -33,9 +33,13 @@ describe("channel UI contributions", () => {
     expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
-  it("uses the DingTalk Open Platform brand mark", () => {
-    expect(channelUiPresentation("dingtalk")?.logoUrl).toBe(
-      "https://img.alicdn.com/imgextra/i3/O1CN01WMvMRG1ks3Ixc9x1v_!!6000000004738-55-tps-32-32.svg",
+  it("does not make channel setup depend on remote brand assets", () => {
+    expect(registeredChannelUiContributions()).not.toContainEqual(
+      expect.objectContaining({
+        contribution: expect.objectContaining({
+          presentation: expect.objectContaining({ logoUrl: expect.any(String) }),
+        }),
+      }),
     );
   });
 

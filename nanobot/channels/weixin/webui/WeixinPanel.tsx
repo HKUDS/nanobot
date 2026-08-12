@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown, ExternalLink, Loader2, MessageCircle, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelFieldMessageKey, channelTranslator } from "@/channel-plugins/i18n";
@@ -16,10 +16,8 @@ import {
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
 import { Button } from "@/components/ui/button";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
 import { configureChannel } from "@/lib/api";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type {
   ChannelSetupContractField,
   NanobotFeatureInfo,
@@ -41,7 +39,6 @@ export function WeixinPanel({
   feature,
   actionKey,
   chatAppsDocsUrl,
-  showBrandLogos,
   onAction,
   onFeaturesUpdate,
   connectRequestId = 0,
@@ -183,7 +180,7 @@ export function WeixinPanel({
     <aside className="settings-editor rounded-panel bg-settings-surface">
       <div className="flex items-start justify-between gap-4 pr-8">
         <div className="flex min-w-0 items-start gap-3">
-          <WeixinLogo showBrandLogos={showBrandLogos} />
+          <WeixinLogo />
           <div className="min-w-0 flex-1">
             <h3 className="truncate select-none text-[14px] font-semibold leading-5 text-foreground">
               {displayName}
@@ -367,38 +364,19 @@ function fieldLabel(value: string): string {
   return spaced ? spaced[0].toUpperCase() + spaced.slice(1) : value;
 }
 
-function WeixinLogo({ showBrandLogos }: { showBrandLogos: boolean }) {
-  const logoUrls = useMemo(() => logoFallbackUrls("https://weixin.qq.com/favicon.ico"), []);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-  if (showBrandLogos && logoUrl) {
-    return (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-background">
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-5.5 w-5.5 max-h-6 max-w-6 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      </span>
-    );
-  }
+function WeixinLogo() {
   return (
     <span
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-[11px] font-bold"
       style={{ color: "#07C160" }}
       aria-hidden
     >
-      WX
+      <MessageCircle className="h-3.5 w-3.5" />
     </span>
   );
 }
 
 function WeixinGuideLink({ url, label }: { url: string; label: string }) {
-  const logoUrls = useMemo(() => logoFallbackUrls("https://weixin.qq.com/favicon.ico"), []);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   return (
     <a
       href={url}
@@ -411,19 +389,7 @@ function WeixinGuideLink({ url, label }: { url: string; label: string }) {
         style={{ color: "#07C160" }}
         aria-hidden
       >
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            decoding="async"
-            loading="lazy"
-            className="h-3.5 w-3.5 object-contain"
-            onLoad={onLogoLoad}
-            onError={onLogoError}
-          />
-        ) : (
-          "WX"
-        )}
+        WX
       </span>
       <span className="truncate">{label}</span>
       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />

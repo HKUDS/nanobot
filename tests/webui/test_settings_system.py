@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from nanobot.channels.registry import load_channel_plugin
 from nanobot.config.schema import Config
 from nanobot.webui.settings_system import (
     coerce_channel_value,
+    save_channel_config_values,
     system_settings_payload,
     update_agent_system_settings,
 )
@@ -42,3 +44,20 @@ def test_system_domain_validates_channel_field_values() -> None:
     ]
     assert coerce_channel_value("enabled", "yes", "bool") is True
     assert coerce_channel_value("port", "8765", "int") == 8765
+    assert coerce_channel_value("token", None, "secret") == ""
+
+
+def test_channel_secret_is_cleared_only_by_explicit_null() -> None:
+    config = Config.model_validate({
+        "channels": {"matrix": {"password": "saved-password"}},
+    })
+
+    saved = save_channel_config_values(
+        config,
+        "matrix",
+        {"channels.matrix.password": None},
+        load_channel_plugin=load_channel_plugin,
+    )
+
+    assert saved == ["channels.matrix.password"]
+    assert config.channels.matrix["password"] == ""

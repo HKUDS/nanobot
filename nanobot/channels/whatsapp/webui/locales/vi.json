@@ -5,12 +5,12 @@
     "primaryAction": "Kết nối WhatsApp",
     "docsLabel": "Mở hướng dẫn WhatsApp",
     "officialLabel": "Mở trợ giúp WhatsApp",
-    "tryIt": "Sau khi đăng nhập terminal, gửi tin nhắn riêng đến tài khoản đã kết nối.",
+    "tryIt": "Sau khi liên kết, gửi tin nhắn riêng đến tài khoản đã kết nối.",
     "summary": "WhatsApp kết nối bằng cách quét mã QR từ tài khoản sẽ chạy bot.",
     "steps": [
-      "Chạy lệnh đăng nhập WhatsApp hiển thị bên dưới.",
-      "Quét mã QR trong terminal bằng WhatsApp trên điện thoại.",
-      "Sau khi đăng nhập, quay lại đây, bật WhatsApp và gửi tin nhắn riêng thử."
+      "Chọn Kết nối WhatsApp để hiển thị mã QR trong trình duyệt.",
+      "Mở Thiết bị đã liên kết trong WhatsApp và quét mã.",
+      "Sau khi liên kết, bật WhatsApp và gửi tin nhắn riêng thử."
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "Mã QR liên kết WhatsApp",
+    "scanTitle": "Liên kết WhatsApp",
+    "scanDescription": "Trong WhatsApp, mở Thiết bị đã liên kết, chọn Liên kết thiết bị rồi quét mã này.",
+    "waiting": "Đang chờ WhatsApp…",
+    "connected": "WhatsApp đã kết nối.",
+    "stopped": "Kết nối đã dừng. Hãy bắt đầu lại để nhận mã mới.",
+    "connecting": "Đang kết nối…",
+    "scanAgain": "Liên kết tài khoản khác",
+    "connect": "Liên kết WhatsApp"
   }
 }

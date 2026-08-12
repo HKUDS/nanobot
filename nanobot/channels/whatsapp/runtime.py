@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, cast
@@ -325,6 +326,10 @@ class WhatsAppChannel(BaseChannel):
         configured = self.config.database_path.strip()
         return Path(configured).expanduser() if configured else _default_database_path()
 
+    def connect_database_path(self) -> Path:
+        """Return the session database target used by package-owned setup flows."""
+        return self._database_path()
+
     def _load_lid_mappings(self) -> dict[str, str]:
         mapping: dict[str, str] = {}
         for lid, phone in self.config.lid_mappings.items():
@@ -339,19 +344,40 @@ class WhatsAppChannel(BaseChannel):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return api.NewAClient(str(db_path))
 
+    def connect_open_client(
+        self,
+        qr_handler: Callable[[bytes], Awaitable[None]] | None = None,
+    ) -> tuple[Any, asyncio.Future[None]]:
+        """Create a login-only client for CLI or package-owned WebUI setup."""
+        client = self._new_client()
+        result = asyncio.get_running_loop().create_future()
+        self._register_handlers(
+            client,
+            login_result=result,
+            handle_messages=False,
+            qr_handler=qr_handler,
+        )
+        return client, result
+
+    async def connect_start_client(
+        self,
+        client: Any,
+        result: asyncio.Future[None],
+    ) -> None:
+        """Start a login client and watch neonize's optional background task."""
+        connect_task = await client.connect()
+        self._fail_login_on_connect_task_done(connect_task, result)
+
     async def login(self, force: bool = False) -> bool:
         db_path = self._database_path()
         if force:
             self._reset_database(db_path)
 
-        client = self._new_client()
-        login_result = asyncio.get_running_loop().create_future()
-        self._register_handlers(client, login_result=login_result, handle_messages=False)
+        client, login_result = self.connect_open_client()
 
         try:
             self.logger.info("Starting WhatsApp login with neonize...")
-            connect_task = await client.connect()
-            self._fail_login_on_connect_task_done(connect_task, login_result)
+            await self.connect_start_client(client, login_result)
             await login_result
             self.logger.info("WhatsApp login complete")
             return True
@@ -523,11 +549,15 @@ class WhatsAppChannel(BaseChannel):
         *,
         login_result: asyncio.Future[None] | None = None,
         handle_messages: bool,
+        qr_handler: Callable[[bytes], Awaitable[None]] | None = None,
     ) -> None:
         api = _load_neonize()
 
         @client.qr
         async def _on_qr(_: Any, qr_data: bytes) -> None:
+            if qr_handler is not None:
+                await qr_handler(qr_data)
+                return
             import segno
 
             self.logger.info("Scan the WhatsApp QR code with Linked Devices")

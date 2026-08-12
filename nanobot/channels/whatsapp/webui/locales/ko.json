@@ -5,12 +5,12 @@
     "primaryAction": "WhatsApp 연결",
     "docsLabel": "WhatsApp 설정 가이드 열기",
     "officialLabel": "WhatsApp 도움말 열기",
-    "tryIt": "터미널 로그인이 끝나면 연결된 계정으로 WhatsApp DM을 보내세요.",
+    "tryIt": "연결이 끝나면 연결된 계정으로 WhatsApp DM을 보내세요.",
     "summary": "봇을 실행할 WhatsApp 계정으로 QR 코드를 스캔해 연결합니다.",
     "steps": [
-      "아래 표시된 WhatsApp 로그인 명령을 실행하세요.",
-      "휴대폰 WhatsApp으로 터미널의 QR 코드를 스캔하세요.",
-      "로그인 후 여기로 돌아와 WhatsApp을 활성화하고 DM으로 테스트하세요."
+      "WhatsApp 연결을 선택해 브라우저에 QR 코드를 표시하세요.",
+      "휴대폰 WhatsApp에서 연결된 기기를 열고 코드를 스캔하세요.",
+      "연결 후 WhatsApp을 활성화하고 DM으로 테스트하세요."
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp 연결 QR 코드",
+    "scanTitle": "WhatsApp 연결",
+    "scanDescription": "WhatsApp에서 연결된 기기를 열고 기기 연결을 선택한 다음 이 코드를 스캔하세요.",
+    "waiting": "WhatsApp 대기 중…",
+    "connected": "WhatsApp이 연결되었습니다.",
+    "stopped": "연결 시도가 중지되었습니다. 새 코드를 받으려면 다시 시작하세요.",
+    "connecting": "연결 중…",
+    "scanAgain": "다른 계정 연결",
+    "connect": "WhatsApp 연결"
   }
 }
