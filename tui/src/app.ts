@@ -3,6 +3,7 @@ import {
   CliRenderEvents,
   MarkdownRenderable,
   RGBA,
+  ScrollBoxRenderable,
   SyntaxStyle,
   TextareaRenderable,
   TextAttributes,
@@ -11,7 +12,6 @@ import {
   getTreeSitterClient,
   type CliRenderer,
   type KeyEvent,
-  type ScrollbackSurface,
 } from "@opentui/core"
 
 import {
@@ -99,28 +99,52 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
 }
 
 class Transcript {
-  private writeChain = Promise.resolve()
-  private live: { surface: ScrollbackSurface; text: TextRenderable; content: string } | null = null
+  readonly root: ScrollBoxRenderable
+  private live: { row: BoxRenderable; text: TextRenderable; content: string } | null = null
   private wrote = false
+  private nextId = 0
 
   constructor(
     private readonly renderer: CliRenderer,
     private palette: Palette,
-  ) {}
+  ) {
+    this.root = new ScrollBoxRenderable(renderer, {
+      id: "nanobot-tui-transcript",
+      width: "100%",
+      minHeight: 0,
+      flexGrow: 1,
+      scrollX: false,
+      scrollY: true,
+      stickyScroll: true,
+      stickyStart: "bottom",
+      viewportCulling: true,
+      contentOptions: {
+        flexDirection: "column",
+        paddingTop: 1,
+        paddingBottom: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
+      },
+      verticalScrollbarOptions: { visible: false },
+      horizontalScrollbarOptions: { visible: false },
+    })
+    // Constructor options are applied before ScrollBarRenderable starts managing
+    // its own visibility. Assigning through the setters keeps both bars hidden.
+    this.root.verticalScrollBar.visible = false
+    this.root.horizontalScrollBar.visible = false
+  }
 
   setPalette(palette: Palette): void {
     this.palette = palette
   }
 
   header(options: AppOptions): void {
-    this.enqueue(async () => {
-      const lines = [
-        `>_  nanobot  v${options.version}`,
-        `${options.model}  ·  ${options.access}`,
-        options.workspace,
-      ]
-      await this.writeText(lines.join("\n"), this.palette.text, true, true)
-    })
+    const lines = [
+      `>_  nanobot  v${options.version}`,
+      `${options.model}  ·  ${options.access}`,
+      options.workspace,
+    ]
+    this.writeText(lines.join("\n"), this.palette.text, true, true)
   }
 
   async history(messages: HistoryMessage[]): Promise<void> {
@@ -128,90 +152,84 @@ class Transcript {
       if (message.role === "user") this.user(message.content)
       else this.assistant(message.content)
     }
-    await this.writeChain
   }
 
   user(content: string): void {
-    this.enqueue(() => this.writeText(`› ${content}`, this.palette.user, true))
+    this.writeText(`› ${content}`, this.palette.user, true)
   }
 
   assistant(content: string): void {
     if (!content.trim()) return
-    this.enqueue(() => this.writeMarkdown(content))
+    this.writeMarkdown(content)
   }
 
   notice(content: string, error = false): void {
-    this.enqueue(() => this.writeText(content, error ? this.palette.error : this.palette.muted))
+    this.writeText(content, error ? this.palette.error : this.palette.muted)
   }
 
   stream(delta: string): void {
     if (!delta) return
     if (!this.live) {
-      const surface = this.renderer.createScrollbackSurface({ startOnNewLine: this.wrote })
-      const text = new TextRenderable(surface.renderContext, {
-        id: `assistant-stream-${Date.now()}`,
+      const row = this.createRow()
+      const text = new TextRenderable(this.renderer, {
+        id: this.id("assistant-stream"),
         content: "",
         width: "100%",
         wrapMode: "word",
         fg: this.palette.text,
       })
-      surface.root.add(text)
-      this.live = { surface, text, content: "" }
+      row.add(text)
+      this.root.add(row)
+      this.live = { row, text, content: "" }
+      this.wrote = true
     }
     this.live.content += delta
     this.live.text.content = this.live.content
-    this.live.surface.render()
   }
 
   finishStream(fallback = ""): void {
     const content = this.live?.content || fallback
     if (this.live) {
-      this.live.surface.destroy()
+      this.root.remove(this.live.row)
+      this.live.row.destroy()
       this.live = null
     }
     if (content.trim()) this.assistant(content)
   }
 
   destroy(): void {
-    this.live?.surface.destroy()
     this.live = null
   }
 
-  private enqueue(operation: () => Promise<void>): void {
-    this.writeChain = this.writeChain.then(operation).catch((error) => {
-      console.error("transcript render failed", error)
+  private id(prefix: string): string {
+    this.nextId += 1
+    return `${prefix}-${this.nextId}`
+  }
+
+  private createRow(framed = false): BoxRenderable {
+    return new BoxRenderable(this.renderer, {
+      id: this.id(framed ? "text-frame" : "text-row"),
+      width: "100%",
+      marginTop: this.wrote ? 1 : 0,
+      border: framed,
+      borderStyle: "rounded",
+      borderColor: this.palette.border,
+      paddingLeft: 1,
+      paddingRight: 1,
+      flexDirection: "column",
     })
   }
 
-  private async writeText(
+  private writeText(
     content: string,
     color: string,
     bold = false,
     framed = false,
-  ): Promise<void> {
-    this.spacer()
-    const surface = this.renderer.createScrollbackSurface({ startOnNewLine: this.wrote })
-    const root = framed
-      ? new BoxRenderable(surface.renderContext, {
-          id: `text-frame-${Date.now()}`,
-          width: "100%",
-          border: true,
-          borderStyle: "rounded",
-          borderColor: this.palette.border,
-          paddingLeft: 1,
-          paddingRight: 1,
-          flexDirection: "column",
-        })
-      : new BoxRenderable(surface.renderContext, {
-          id: `text-row-${Date.now()}`,
-          width: "100%",
-          paddingLeft: 1,
-          paddingRight: 1,
-          flexDirection: "column",
-        })
-    root.add(
-      new TextRenderable(surface.renderContext, {
-        id: `text-${Date.now()}`,
+  ): void {
+    const row = this.createRow(framed)
+    row.add(
+      new TextRenderable(this.renderer, {
+        id: this.id("text"),
         content,
         width: "100%",
         wrapMode: "word",
@@ -219,18 +237,14 @@ class Transcript {
         attributes: bold ? TextAttributes.BOLD : 0,
       }),
     )
-    surface.root.add(root)
-    surface.render()
-    surface.commitRows(0, surface.height, { trailingNewline: true })
-    surface.destroy()
+    this.root.add(row)
     this.wrote = true
   }
 
-  private async writeMarkdown(content: string): Promise<void> {
-    this.spacer()
-    const surface = this.renderer.createScrollbackSurface({ startOnNewLine: this.wrote })
-    const markdown = new MarkdownRenderable(surface.renderContext, {
-      id: `markdown-${Date.now()}`,
+  private writeMarkdown(content: string): void {
+    const row = this.createRow()
+    const markdown = new MarkdownRenderable(this.renderer, {
+      id: this.id("markdown"),
       content,
       width: "100%",
       syntaxStyle: syntaxStyle(this.palette),
@@ -238,24 +252,9 @@ class Transcript {
       internalBlockMode: "top-level",
       treeSitterClient: getTreeSitterClient(),
     })
-    surface.root.add(markdown)
-    await surface.settle()
-    surface.commitRows(0, surface.height, { trailingNewline: true })
-    surface.destroy()
+    row.add(markdown)
+    this.root.add(row)
     this.wrote = true
-  }
-
-  private spacer(): void {
-    if (!this.wrote) return
-    this.renderer.writeToScrollback((context) => {
-      const root = new TextRenderable(context.renderContext, {
-        id: `spacer-${Date.now()}`,
-        content: "",
-        width: Math.max(1, context.width),
-        height: 1,
-      })
-      return { root, width: Math.max(1, context.width), height: 1, startOnNewLine: true, trailingNewline: true }
-    })
   }
 }
 
@@ -304,13 +303,14 @@ export class NanobotTui {
       id: "nanobot-tui-title",
       content: `nanobot  ·  ${options.model}`,
       height: 1,
+      flexShrink: 0,
       fg: this.palette.muted,
     })
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
       width: "100%",
-      minHeight: 3,
-      flexGrow: 1,
+      height: 3,
+      flexShrink: 0,
       border: true,
       borderStyle: "rounded",
       borderColor: this.palette.border,
@@ -356,12 +356,14 @@ export class NanobotTui {
       id: "nanobot-tui-status-row",
       width: "100%",
       height: 1,
+      flexShrink: 0,
       flexDirection: "row",
       justifyContent: "space-between",
     })
     this.composerFrame.add(this.composer)
     statusRow.add(this.status)
     statusRow.add(this.meta)
+    this.shell.add(this.transcript.root)
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
@@ -374,7 +376,6 @@ export class NanobotTui {
     this.handleResize()
     this.composer.focus()
     this.transcript.header(options)
-    this.client.connect()
   }
 
   static async create(options: AppOptions): Promise<NanobotTui> {
@@ -382,15 +383,19 @@ export class NanobotTui {
       targetFps: 30,
       exitOnCtrlC: false,
       useMouse: true,
-      screenMode: "split-footer",
-      footerHeight: 7,
-      externalOutputMode: "capture-stdout",
+      screenMode: "alternate-screen",
+      externalOutputMode: "passthrough",
       consoleMode: "disabled",
     })
+    return NanobotTui.mount(renderer, options)
+  }
+
+  static mount(renderer: CliRenderer, options: AppOptions): NanobotTui {
     return new NanobotTui(renderer, options)
   }
 
   start(): void {
+    this.client.connect()
     this.renderer.start()
   }
 

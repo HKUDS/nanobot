@@ -11,4 +11,4 @@ bun run --cwd tui build
 
 `nanobot agent` launches this client, attaches to an existing local gateway or leases one for the process lifetime, and passes an authenticated local endpoint through environment variables. Use `nanobot agent --classic` to run the legacy Python prompt.
 
-The renderer uses OpenTUI's split-footer mode: transcript rows are committed to native terminal scrollback while the composer remains fixed at the bottom. This preserves normal terminal selection and scrolling instead of implementing a second scroll model.
+The renderer uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
