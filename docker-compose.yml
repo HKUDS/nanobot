@@ -13,6 +13,10 @@ x-common-config: &common-config
     - CHOWN
     - SETGID
     - SETUID
+  # Prevent the non-root process from regaining capabilities through setuid
+  # binaries or file capabilities left inside the container image.
+  security_opt:
+    - no-new-privileges:true
 
 services:
   nanobot-gateway:

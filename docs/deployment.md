@@ -160,8 +160,11 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
-The default Compose file drops all Linux capabilities and keeps Docker's default
-AppArmor/seccomp profiles enabled. If you explicitly set
+The default Compose file drops all Linux capabilities except `CHOWN`, `SETUID`, and
+`SETGID`, which the root entrypoint needs to fix bind-mount ownership and become UID
+1000. It also enables `no-new-privileges`, so the non-root process cannot regain those
+bootstrap capabilities through setuid binaries or file capabilities. Docker's default
+AppArmor/seccomp profiles remain enabled. If you explicitly set
 `"tools.exec.sandbox": "bwrap"` in `~/.nanobot/config.json`, add the bwrap
 override file when starting containers:
 
@@ -170,9 +173,9 @@ docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-g
 docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobot-cli agent -m "Hello!"
 ```
 
-The override grants `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for
-the container so bubblewrap can create its nested namespaces. Use it only when the
-bwrap sandbox is enabled.
+The override adds `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for the
+container so bubblewrap can create its nested namespaces. It preserves
+`no-new-privileges`. Use it only when the bwrap sandbox is enabled.
 
 ### Docker
 
@@ -197,6 +200,8 @@ vim ~/.nanobot/config.json
 # health endpoint on 18790.
 docker run \
   --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+  --security-opt no-new-privileges:true \
   -v ~/.nanobot:/home/nanobot/.nanobot \
   -p 18790:18790 -p 8765:8765 \
   nanobot gateway
@@ -205,7 +210,9 @@ docker run \
 # bubblewrap needs for nested namespaces. Without them, `bwrap` may exit with
 # `clone3: Operation not permitted`.
 docker run \
-  --cap-drop ALL --cap-add SYS_ADMIN \
+  --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID --cap-add SYS_ADMIN \
+  --security-opt no-new-privileges:true \
   --security-opt apparmor=unconfined \
   --security-opt seccomp=unconfined \
   -v ~/.nanobot:/home/nanobot/.nanobot \
