@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,8 +12,10 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Config
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
@@ -54,6 +57,51 @@ class _Tools:
 
     def prepare_call(self, name: str, arguments: dict):
         return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
+
+
+def test_loop_registers_default_tools_in_injected_registry(tmp_path: Path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    registry = ToolRegistry()
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        tool_registry=registry,
+    )
+
+    assert loop.tools is registry
+    assert registry.has("read_file")
+
+
+def _config_for_loop(tmp_path: Path) -> Config:
+    return Config.model_validate({"agents": {"defaults": {"workspace": str(tmp_path)}}})
+
+
+def _provider_for_loop() -> MagicMock:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return provider
+
+
+def test_loop_from_config_requires_caller_owned_registry(tmp_path: Path) -> None:
+    signature = inspect.signature(AgentLoop.from_config)
+
+    with pytest.raises(TypeError, match="tool_registry"):
+        signature.bind(_config_for_loop(tmp_path))
+
+
+def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    loop = AgentLoop.from_config(
+        _config_for_loop(tmp_path),
+        tool_registry=registry,
+        provider=_provider_for_loop(),
+    )
+
+    assert loop.tools is registry
+    assert loop.tools.has("read_file")
 
 
 @pytest.mark.asyncio

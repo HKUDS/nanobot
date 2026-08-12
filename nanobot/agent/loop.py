@@ -95,11 +95,9 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.mcp import MCPConnection, MCPRuntimeStatus
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        MCPServerConfig,
         ProviderConfig,
         ToolsConfig,
     )
@@ -271,7 +269,7 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        mcp_servers: dict[str, MCPServerConfig] | None = None,
+        tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
@@ -379,7 +377,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
-        self.tools = ToolRegistry()
+        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
@@ -399,15 +397,11 @@ class AgentLoop:
         )
         self._unified_session = unified_session
         self._running = False
-        self._mcp_servers = mcp_servers or {}
-        self._mcp_stacks: dict[str, MCPConnection] = {}
-        self._mcp_runtime_statuses: dict[str, MCPRuntimeStatus] = {}
-        self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._close_mcp_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -464,9 +458,14 @@ class AgentLoop:
         cls,
         config: Config,
         bus: MessageBus | None = None,
+        *,
+        tool_registry: ToolRegistry,
         **extra: Any,
     ) -> AgentLoop:
         """Create an AgentLoop from config with the common parameter set.
+
+        The tool registry is caller-owned so application composition can share
+        it with infrastructure such as an ``MCPProvider``.
 
         Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
         allowing callers to override or extend the standard config-derived
@@ -486,8 +485,6 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
-        from nanobot.agent.plugins import agent_plugin_mcp_servers
-
         return cls(
             bus=bus,
             provider=provider,
@@ -502,7 +499,6 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=agent_plugin_mcp_servers(config.workspace_path, config.tools.mcp_servers),
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
@@ -517,6 +513,7 @@ class AgentLoop:
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            tool_registry=tool_registry,
             **extra,
         )
 
@@ -642,14 +639,6 @@ class AgentLoop:
             registered.append("my")
 
         logger.info("Registered {} tools: {}", len(registered), registered)
-
-    async def _connect_mcp(self) -> None:
-        """Connect configured MCP servers."""
-        await agent_context.connect_mcp(self, self.tools)
-
-    def mcp_runtime_status(self) -> dict[str, MCPRuntimeStatus]:
-        """Return connection state learned from real MCP runtime attempts."""
-        return agent_context.mcp_runtime_status(self)
 
     def register_runtime_context_provider(
         self,
@@ -1162,7 +1151,6 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         try:
-            await self._connect_mcp()
             logger.info("Agent loop started")
 
             while self._running:
@@ -1253,8 +1241,7 @@ class AgentLoop:
                 active_tasks.add(task)
                 task.add_done_callback(active_tasks.discard)
         finally:
-            # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
-            await self.close_mcp()
+            await self.aclose()
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
@@ -1372,24 +1359,24 @@ class AgentLoop:
                 await delivery.idle()
                 await self._publish_next_deferred_automation_turn(session_key)
 
-    async def close_mcp(self) -> None:
-        """Stop active work, then close exec, subagent, and MCP resources.
+    async def aclose(self) -> None:
+        """Stop active work, then close resources owned by the agent loop.
 
         Resource teardown must still run if cancellation interrupts task draining.
         Gateway shutdown deliberately bounds this coroutine, so keeping the cleanup
         phase in ``finally`` prevents a timed-out background task from leaving
         subprocess transports alive after the event loop closes.
         """
-        # The agent loop closes itself from ``run()`` while gateway shutdown also
+        # The loop closes itself from ``run()`` while application shutdown also
         # performs a guaranteed final close. Serialize those owners so they cannot
-        # tear down the same subprocess transports concurrently.
-        close_lock = getattr(self, "_close_mcp_lock", None)
+        # tear down the same resources concurrently.
+        close_lock = getattr(self, "_close_lock", None)
         if close_lock is None:
-            close_lock = self._close_mcp_lock = asyncio.Lock()
+            close_lock = self._close_lock = asyncio.Lock()
         async with close_lock:
-            await self._close_mcp_unlocked()
+            await self._aclose_unlocked()
 
-    async def _close_mcp_unlocked(self) -> None:
+    async def _aclose_unlocked(self) -> None:
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
@@ -1412,7 +1399,6 @@ class AgentLoop:
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,
-            lambda: agent_context.close_mcp(self),
         )
         for cleanup in cleanup_steps:
             try:
@@ -2301,7 +2287,6 @@ class AgentLoop:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
-        await self._connect_mcp()
         metadata: dict[str, Any] = {}
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True

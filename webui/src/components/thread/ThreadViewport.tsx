@@ -37,7 +37,7 @@ interface ThreadViewportProps {
   messages: UIMessage[];
   temporary?: boolean;
   isStreaming: boolean;
-  composer: ReactNode;
+  composer?: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
   activeTurnId?: string | null;
@@ -61,6 +61,7 @@ interface ThreadViewportProps {
 const NEAR_BOTTOM_PX = 48;
 const NEAR_TOP_PX = 96;
 const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
+const EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX = 16;
 const SCROLL_BUTTON_COMPOSER_GAP_PX = 16;
 const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 export const INITIAL_HISTORY_WINDOW = 160;
@@ -266,11 +267,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     forkBoundaryMessageCount !== null && forkBoundaryMessageCount > hiddenMessageCount
       ? forkBoundaryMessageCount - hiddenMessageCount
       : null;
+  const hasComposer = composer !== null && composer !== undefined;
   const scrollButtonBottom =
     keyboardInsetBottom
     + (composerDockHeight > 0
       ? composerDockHeight + SCROLL_BUTTON_COMPOSER_GAP_PX
-      : DEFAULT_SCROLL_BUTTON_BOTTOM_PX);
+      : hasComposer
+        ? DEFAULT_SCROLL_BUTTON_BOTTOM_PX
+        : EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX);
   const scrollViewportStyle =
     keyboardInsetBottom > 0 ? { bottom: keyboardInsetBottom } : undefined;
 
@@ -661,7 +665,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         <div
           ref={contentRef}
           data-testid={!hasMessages ? "thread-welcome-layout" : undefined}
-          data-layout={hasMessages ? "thread" : "hero"}
+          data-layout={hasComposer ? (hasMessages ? "thread" : "hero") : "external"}
           className={cn(
             "thread-layout mx-auto grid min-h-full w-full",
             hasMessages
@@ -699,58 +703,67 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />
             </div>
           ) : (
-            <div className="row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center sm:items-end sm:pb-8">
+            <div
+              className={cn(
+                "row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center",
+                hasComposer && "sm:items-end sm:pb-8",
+              )}
+            >
               {emptyState}
             </div>
           )}
 
-          <div
-            ref={composerDockRef}
-            data-testid="thread-composer-dock"
-            onInputCapture={(event) => {
-              if (event.target instanceof HTMLTextAreaElement) {
-                composerInputScrollTopRef.current = scrollRef.current?.scrollTop ?? null;
-                threadMotionRef.current?.handleComposerInput();
-              }
-            }}
-            onInput={(event) => {
-              if (!(event.target instanceof HTMLTextAreaElement)) return;
-              const previousScrollTop = composerInputScrollTopRef.current;
-              composerInputScrollTopRef.current = null;
-              const scrollEl = scrollRef.current;
-              if (scrollEl && previousScrollTop !== null) {
-                // Textarea autosizing briefly collapses to `height: auto` while
-                // measuring. Chrome can clamp the sibling thread scrollport in
-                // that intermediate layout; restore it before paint, then let
-                // ResizeObserver handle any real final composer height change.
-                scrollEl.scrollTop = previousScrollTop;
-              }
-            }}
-            className={cn(
-              "row-start-2 z-10 w-full",
-              hasMessages ? "relative bg-background" : "relative self-center",
-            )}
-          >
+          {hasComposer ? (
             <div
+              ref={composerDockRef}
+              data-testid="thread-composer-dock"
+              onInputCapture={(event) => {
+                if (event.target instanceof HTMLTextAreaElement) {
+                  composerInputScrollTopRef.current = scrollRef.current?.scrollTop ?? null;
+                  threadMotionRef.current?.handleComposerInput();
+                }
+              }}
+              onInput={(event) => {
+                if (!(event.target instanceof HTMLTextAreaElement)) return;
+                const previousScrollTop = composerInputScrollTopRef.current;
+                composerInputScrollTopRef.current = null;
+                const scrollEl = scrollRef.current;
+                if (scrollEl && previousScrollTop !== null) {
+                  // Textarea autosizing briefly collapses to `height: auto` while
+                  // measuring. Chrome can clamp the sibling thread scrollport in
+                  // that intermediate layout; restore it before paint, then let
+                  // ResizeObserver handle any real final composer height change.
+                  scrollEl.scrollTop = previousScrollTop;
+                }
+              }}
               className={cn(
-                hasMessages
-                  ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4"
-                  : "",
+                "row-start-2 z-10 w-full",
+                hasMessages ? "relative bg-background" : "relative self-center",
               )}
             >
               <div
-                data-testid="thread-composer-motion"
-                className="mx-auto w-full max-w-[58rem]"
+                className={cn(
+                  hasMessages
+                    ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4"
+                    : "",
+                )}
               >
-                {composer}
+                <div
+                  data-testid="thread-composer-motion"
+                  className="mx-auto w-full max-w-[58rem]"
+                >
+                  {composer}
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
 
-          <div
-            aria-hidden
-            className="thread-layout-spacer row-start-3 min-h-0 overflow-hidden"
-          />
+          {hasComposer ? (
+            <div
+              aria-hidden
+              className="thread-layout-spacer row-start-3 min-h-0 overflow-hidden"
+            />
+          ) : null}
         </div>
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
       </div>

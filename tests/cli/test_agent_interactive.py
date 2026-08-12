@@ -64,7 +64,7 @@ def test_interactive_agent_routes_a_complete_user_turn(
         def __init__(self, bus) -> None:
             self.bus = bus
             self.stopped = asyncio.Event()
-            self.close_mcp_calls = 0
+            self.aclose_calls = 0
 
         async def run(self) -> None:
             message = await self.bus.consume_inbound()
@@ -97,8 +97,8 @@ def test_interactive_agent_routes_a_complete_user_turn(
         def stop(self) -> None:
             self.stopped.set()
 
-        async def close_mcp(self) -> None:
-            self.close_mcp_calls += 1
+        async def aclose(self) -> None:
+            self.aclose_calls += 1
 
     read_input = AsyncMock(side_effect=["hello nanobot", "exit"])
     print_response = MagicMock()
@@ -136,7 +136,7 @@ def test_interactive_agent_routes_a_complete_user_turn(
     assert inbound.metadata == {"_wants_stream": True}
     loop = seen["loop"]
     assert isinstance(loop, _AgentLoop)
-    assert loop.close_mcp_calls == 1
+    assert loop.aclose_calls == 1
     assert len(renderers) == 1
     renderer = renderers[0]
     assert isinstance(renderer, _Renderer)

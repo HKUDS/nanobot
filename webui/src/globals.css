@@ -40,6 +40,7 @@
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-selected: 40 1% 89.4%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 40 8% 90.5%;
@@ -77,6 +78,7 @@
     --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
+    --sidebar-selected: 0 0% 29.8%;
     --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: var(--border);
@@ -360,6 +362,9 @@
   .thread-layout[data-layout="thread"] {
     grid-template-rows: minmax(0, 1fr) auto 0fr;
   }
+  .thread-layout[data-layout="external"] {
+    grid-template-rows: minmax(0, 1fr);
+  }
   @media (min-width: 640px) {
     .thread-layout[data-layout="hero"] {
       grid-template-rows: minmax(min-content, 1fr) auto 1fr;
@@ -562,6 +567,10 @@
     .queued-prompt-row {
       animation: none;
     }
+  }
+
+  .workbench-pane {
+    transform-origin: top left;
   }
 
   /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
@@ -856,5 +865,11 @@
     min-width: 2rem;
     height: 2rem;
     min-height: 2rem;
+  }
+}
+@media (forced-colors: active) {
+  [data-workbench-move-handle]:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
   }
 }
