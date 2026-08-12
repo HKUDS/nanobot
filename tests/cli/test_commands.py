@@ -1543,7 +1543,7 @@ def mock_agent_runtime(tmp_path):
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
-        agent_loop.close_mcp = AsyncMock(return_value=None)
+        agent_loop.aclose = AsyncMock(return_value=None)
         mock_from_config.return_value = agent_loop
 
         yield {
@@ -1621,7 +1621,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
@@ -1662,7 +1662,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -1712,7 +1712,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -1768,7 +1768,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -2062,7 +2062,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         async def process_direct(self, *_args, **_kwargs):
             return SimpleNamespace(content="")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
         async def run(self) -> None:
@@ -2738,10 +2738,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         def __init__(self, **kwargs) -> None:
             seen["workspace"] = kwargs["workspace"]
 
-        async def _connect_mcp(self) -> None:
-            return None
-
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
     def _fake_create_app(
@@ -2749,11 +2746,13 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         model_name: str,
         request_timeout: float,
         api_key: str = "",
+        prepare_agent=None,
     ):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
         seen["api_key"] = api_key
+        seen["prepare_agent"] = prepare_agent
         return _FakeApiApp()
 
     def _fake_run_app(api_app, host: str, port: int, print):
@@ -2914,7 +2913,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         async def submit_cron_turn(self, _msg: InboundMessage):
             raise AssertionError("unbound cron job must not run as a bound cron turn")
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
         async def run(self) -> None:
@@ -3033,7 +3032,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
                 content="Checked the repo.",
             )
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
         async def run(self) -> None:
@@ -3253,7 +3252,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
             self.runtime_resolver.invalidate.assert_called_once_with()
             await asyncio.Event().wait()
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
         def stop(self) -> None:
@@ -3499,7 +3498,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def run(self) -> None:
             await asyncio.Event().wait()
 
-        async def close_mcp(self) -> None:
+        async def aclose(self) -> None:
             return None
 
         def stop(self) -> None:
@@ -3668,7 +3667,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         assert timed_out_writer.output == b""
 
 
-def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
+def test_gateway_agent_task_owns_initial_mcp_provider_close(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -3696,16 +3695,40 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
             return None
 
         async def run(self) -> None:
+            seen["agent_task"] = asyncio.current_task()
             try:
                 await asyncio.Event().wait()
             finally:
                 seen["agent_task_cleaned_up"] = True
 
-        async def close_mcp(self) -> None:
-            raise AssertionError("gateway must not close MCP from the outer task")
+        async def aclose(self) -> None:
+            seen["agent_closed"] = True
 
         def stop(self) -> None:
             seen["agent_stopped"] = True
+
+    class _FakeMCPProvider:
+        def __init__(self) -> None:
+            self.connect_task: asyncio.Task | None = None
+            self.close_tasks: list[asyncio.Task | None] = []
+
+        @classmethod
+        def from_config(cls, _config, _registry):
+            provider = cls()
+            seen["mcp_provider"] = provider
+            return provider
+
+        async def connect(self) -> None:
+            self.connect_task = asyncio.current_task()
+
+        async def aclose(self) -> None:
+            self.close_tasks.append(asyncio.current_task())
+
+        def runtime_status(self) -> dict[str, str]:
+            return {}
+
+        async def reload(self) -> dict[str, object]:
+            return {"ok": True}
 
     class _FakeChannelManager:
         def __init__(self, _config, _bus, **_kwargs) -> None:
@@ -3753,6 +3776,7 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
         session_manager=lambda _workspace: object(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.MCPProvider", _FakeMCPProvider)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
@@ -3761,9 +3785,15 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
 
     assert result.exit_code == 0
     assert seen["agent_stopped"] is True
+    assert seen["agent_closed"] is True
     assert seen["agent_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
+    mcp_provider = seen["mcp_provider"]
+    assert isinstance(mcp_provider, _FakeMCPProvider)
+    assert mcp_provider.connect_task is seen["agent_task"]
+    assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
+    assert len(mcp_provider.close_tasks) == 2
 
 
 def test_gateway_shutdown_event_exits_forever_runtime_tasks(
@@ -3800,8 +3830,8 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
             finally:
                 seen["agent_task_cleaned_up"] = True
 
-        async def close_mcp(self) -> None:
-            raise AssertionError("gateway must not close MCP from the outer task")
+        async def aclose(self) -> None:
+            seen["agent_closed"] = True
 
         def stop(self) -> None:
             seen["agent_stopped"] = True
@@ -3881,6 +3911,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
 
     assert result.exit_code == 0
     assert seen["agent_stopped"] is True
+    assert seen["agent_closed"] is True
     assert seen["agent_task_cleaned_up"] is True
     assert seen["channel_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True

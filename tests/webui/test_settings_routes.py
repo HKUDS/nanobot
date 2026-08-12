@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock
@@ -22,6 +23,7 @@ def _router(
     authorized: bool = True,
     config_path: Path | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+    mcp_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
 ) -> WebUISettingsRouter:
     return WebUISettingsRouter(
         settings=WebUISettingsServices.create(config_path or get_config_path()),
@@ -37,6 +39,7 @@ def _router(
         runtime_surface="browser",
         runtime_capabilities={},
         mcp_runtime_status=mcp_runtime_status,
+        mcp_reload=mcp_reload,
         mcp_oauth_redirect_uri=lambda _request: "https://gateway.example/auth/mcp/callback",
     )
 
@@ -87,6 +90,33 @@ async def test_mcp_list_serializes_local_runtime_failure_snapshot(tmp_path) -> N
     assert row["runtime_status"] == "failed"
     assert b'"runtime_status": "failed"' in response.body
     assert snapshot_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_reload_callback_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    async def reload_mcp() -> dict[str, object]:
+        started.set()
+        await asyncio.Event().wait()
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes._MCP_RELOAD_TIMEOUT_SECONDS",
+        0.01,
+    )
+    router = _router(mcp_reload=reload_mcp)
+
+    result = await router._reload_mcp_runtime()
+
+    assert started.is_set()
+    assert result == {
+        "ok": False,
+        "message": "MCP hot reload timed out. Restart nanobot to pick up changes.",
+        "requires_restart": True,
+    }
 
 
 @pytest.mark.asyncio

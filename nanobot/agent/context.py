@@ -42,29 +42,11 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     )
 
 
-async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
-    await mcp_tools.connect_missing_servers(state, tools)
-
-
-def mcp_runtime_status(state: Any) -> dict[str, mcp_tools.MCPRuntimeStatus]:
-    return mcp_tools.runtime_status(state)
-
-
-async def close_mcp(state: Any) -> None:
-    await mcp_tools.close_mcp_servers(state)
-
-
 async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
     if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
         await state.discard_session(msg.session_key)
         return True
-    for handler in (
-        image_generation_tools.handle_runtime_control,
-        mcp_tools.handle_runtime_control,
-    ):
-        if await handler(state, msg, tools):
-            return True
-    return False
+    return await image_generation_tools.handle_runtime_control(state, msg, tools)
 
 
 class ContextBuilder:

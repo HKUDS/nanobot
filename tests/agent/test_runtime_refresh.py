@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.config.errors import ConfigLoadError
@@ -312,7 +313,11 @@ def test_settings_context_window_refreshes_runtime_state(
     def loader(*, preset_name: str | None = None) -> ProviderSnapshot:
         return load_provider_snapshot(config_path, preset_name=preset_name)
 
-    loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
+    loop = AgentLoop.from_config(
+        config,
+        tool_registry=ToolRegistry(),
+        provider_snapshot_loader=loader,
+    )
 
     payload = update_agent_settings({"context_window_tokens": ["262144"]})
     loop.runtime_resolver.invalidate()

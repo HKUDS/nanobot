@@ -368,6 +368,21 @@ export interface WorkspacesPayload {
 
 export type SidebarDensity = "comfortable" | "compact";
 export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc" | "manual";
+export type WorkbenchLayout = "columns" | "rows" | "grid" | "bsp" | "main-stack";
+
+export interface WorkbenchTabState {
+  explicit: boolean;
+  title: string | null;
+  paneKeys: string[];
+  layoutPaneKeys: string[];
+  layout: WorkbenchLayout;
+  splitRatios: number[];
+}
+
+export interface WorkbenchState {
+  version: 1;
+  tabs: Record<string, WorkbenchTabState>;
+}
 
 export interface SidebarViewState {
   density: SidebarDensity;
@@ -386,6 +401,7 @@ export interface SidebarStatePayload {
   project_name_overrides: Record<string, string>;
   tags_by_key: Record<string, string[]>;
   collapsed_groups: Record<string, boolean>;
+  workbench: WorkbenchState;
   view: SidebarViewState;
   updated_at?: string | null;
 }
@@ -1280,6 +1296,10 @@ export type InboundEvent =
       chat_id: string;
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
+    }
+  | {
+      event: "sidebar_state_updated";
+      state: SidebarStatePayload;
     }
   | { event: "transcription_result"; request_id: string; text: string }
   | {

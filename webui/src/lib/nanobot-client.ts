@@ -73,6 +73,7 @@ type SessionUpdateHandler = (
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
+type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
 type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
 
 /** Structured errors surfaced to the UI.
@@ -178,6 +179,7 @@ export class NanobotClient {
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
@@ -272,6 +274,13 @@ export class NanobotClient {
     this.sessionUpdateHandlers.add(handler);
     return () => {
       this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onSidebarStateUpdate(handler: SidebarStateUpdateHandler): Unsubscribe {
+    this.sidebarStateUpdateHandlers.add(handler);
+    return () => {
+      this.sidebarStateUpdateHandlers.delete(handler);
     };
   }
 
@@ -1149,6 +1158,11 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "sidebar_state_updated") {
+      this.emitSidebarStateUpdate(parsed.state);
+      return;
+    }
+
     if (parsed.event === "error" && parsed.detail === "workspace_scope_rejected") {
       this.emitError({
         kind: "workspace_scope_rejected",
@@ -1195,6 +1209,12 @@ export class NanobotClient {
   ): void {
     for (const handler of this.sessionUpdateHandlers) {
       handler(chatId, scope, workspaceScope);
+    }
+  }
+
+  private emitSidebarStateUpdate(state: SidebarStatePayload): void {
+    for (const handler of this.sidebarStateUpdateHandlers) {
+      handler(state);
     }
   }
 

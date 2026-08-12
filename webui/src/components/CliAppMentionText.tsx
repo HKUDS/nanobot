@@ -104,37 +104,6 @@ export function splitCapabilityMentionSegments(
   return segments.length ? segments : [{ kind: "text", text: value }];
 }
 
-export function CliAppMentionText({
-  text,
-  cliApps,
-  mcpPresets = [],
-  sessionMentions = [],
-}: {
-  text: string;
-  cliApps: CliAppInfo[];
-  mcpPresets?: McpPresetInfo[];
-  sessionMentions?: SessionMention[];
-}) {
-  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets, sessionMentions);
-  if (!segments.some((segment) => segment.kind !== "text")) return <>{text}</>;
-  return (
-    <>
-      {segments.map((segment, index) => {
-        if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
-        }
-        return (
-          <CapabilityMentionToken
-            key={`${segment.kind}-${index}`}
-            segment={segment}
-            variant="message"
-          />
-        );
-      })}
-    </>
-  );
-}
-
 export function CapabilityMentionToken({
   segment,
   variant,

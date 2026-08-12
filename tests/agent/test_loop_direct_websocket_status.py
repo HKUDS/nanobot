@@ -93,7 +93,6 @@ async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_process_direct_reuses_existing_session_lock(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    loop._connect_mcp = AsyncMock()
     session_key = "api:fixed"
     lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
     await lock.acquire()
