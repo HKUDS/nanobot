@@ -108,6 +108,38 @@ async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_persistent_session_discard_cancels_without_archiving(tmp_path) -> None:
+    provider_started = asyncio.Event()
+
+    async def block_provider(**_kwargs: object) -> LLMResponse:
+        provider_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("provider blocker unexpectedly released")
+
+    loop = _loop(tmp_path, [])
+    loop.provider.chat_with_retry = AsyncMock(side_effect=block_provider)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    key = "websocket:persistent-cancelled"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "existing history")
+    loop.sessions.save(session)
+
+    active_task = asyncio.create_task(loop._dispatch(_message(key, "discard this turn")))
+    loop._active_tasks[key] = {active_task}
+    await asyncio.wait_for(provider_started.wait(), timeout=2)
+
+    await loop.discard_session(key)
+
+    assert active_task.cancelled()
+    assert loop.sessions.get_cached(key) is None
+    assert loop.context.memory.read_unprocessed_history(since_cursor=0) == []
+
+    assert loop.sessions.delete_session(key) is True
+    await asyncio.sleep(0)
+    assert loop.sessions.read_session_file(key) is None
+
+
+@pytest.mark.asyncio
 async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch) -> None:
     provider_started = asyncio.Event()
 

@@ -673,6 +673,7 @@ def _run_gateway(
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
         webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
+        webui_session_discard=agent.discard_session,
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,

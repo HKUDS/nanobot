@@ -305,6 +305,7 @@ class GatewayHTTPHandler:
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        session_discard: Callable[[str], Awaitable[None]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
@@ -332,6 +333,7 @@ class GatewayHTTPHandler:
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
         self.local_trigger_pending_ids = local_trigger_pending_ids
+        self.session_discard = session_discard
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -652,7 +654,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         return None
 
@@ -814,7 +816,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -839,6 +841,9 @@ class GatewayHTTPHandler:
                     "automations": serialize_automation_jobs(automation_jobs),
                 }
             )
+        if self.session_discard is None:
+            return _http_error(503, "session lifecycle unavailable")
+        await self.session_discard(decoded_key)
         if automation_jobs:
             for job in automation_jobs:
                 if isinstance(job, LocalTrigger):
