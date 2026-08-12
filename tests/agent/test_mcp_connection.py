@@ -415,6 +415,47 @@ async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
 
 
 @pytest.mark.asyncio
+async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    server = _stdio_server("slow-mcp")
+    started = asyncio.Event()
+    attempts = 0
+
+    async def _fake_connect(servers, _registry):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            started.set()
+            await asyncio.Event().wait()
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        return {name: stack for name in servers}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    provider = MCPProvider(
+        {"test": server},
+        ToolRegistry(),
+        server_loader=lambda: {"test": server},
+    )
+
+    reload_task = asyncio.create_task(provider.reload())
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(reload_task, timeout=0.01)
+
+    assert provider.connected_server_names == set()
+    assert provider.runtime_status() == {"test": "failed"}
+
+    result = await provider.reload()
+
+    assert result["ok"] is True
+    assert provider.connected_server_names == {"test"}
+    assert provider.runtime_status() == {"test": "connected"}
+    await provider.aclose()
+
+
+@pytest.mark.asyncio
 async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

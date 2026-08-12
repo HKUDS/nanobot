@@ -176,6 +176,7 @@ async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch
         await task
 
     assert provider.connected_server_names == set()
+    assert provider.runtime_status() == {"test": "failed"}
 
 
 @pytest.mark.asyncio

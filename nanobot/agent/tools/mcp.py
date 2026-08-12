@@ -1459,9 +1459,9 @@ class MCPProvider:
                         "(will retry on the next readiness check)"
                     )
             except asyncio.CancelledError:
+                self._set_runtime_status(missing_servers, "failed")
                 if task_is_cancelling():
                     raise
-                self._set_runtime_status(missing_servers, "failed")
                 logger.warning(
                     "MCP connection cancelled (will retry on the next readiness check)"
                 )
@@ -1532,7 +1532,11 @@ class MCPProvider:
             connected: dict[str, MCPConnection] = {}
             if to_connect:
                 self._set_runtime_status(to_connect, "connecting")
-                connected = await connect_mcp_servers(to_connect, self._registry)
+                try:
+                    connected = await connect_mcp_servers(to_connect, self._registry)
+                except BaseException:
+                    self._set_runtime_status(to_connect, "failed")
+                    raise
                 if self._closing:
                     await _close_mcp_connections(connected)
                     return self._closing_result()
