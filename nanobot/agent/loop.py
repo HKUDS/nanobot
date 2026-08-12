@@ -476,6 +476,12 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
+        if "session_manager" not in extra:
+            data_dir = config.runtime_data_dir
+            extra["session_manager"] = SessionManager(
+                config.workspace_path,
+                sessions_root=data_dir / "sessions" if data_dir is not None else None,
+            )
         provider = extra.pop("provider", None) or make_provider(config)
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model

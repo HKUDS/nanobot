@@ -26,7 +26,8 @@ The default instance lives under `~/.nanobot/`:
 | Path | Meaning |
 |---|---|
 | `~/.nanobot/config.json` | Instance configuration: providers, model defaults, channels, tools, gateway, API, and runtime options |
-| `~/.nanobot/workspace/` | Agent workspace: memory, sessions, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/workspace/` | Agent workspace: memory, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/sessions/<workspace-id>/` | Session history stored outside the agent-accessible workspace; the opaque ID follows workspace moves |
 
 You can override both with command flags:
 
@@ -125,10 +126,16 @@ nanobot uses two related stores:
 
 | Store | Location | Purpose |
 |---|---|---|
-| Sessions | `<workspace>/sessions/*.jsonl` | Recent conversation turns replayed into context |
+| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
 
 Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.
+
+The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
+opaque random identifier—never conversation content or credentials. Keep it with workspace
+backups: it lets nanobot find the same external session namespace after the workspace is
+renamed, moved, or restored. A live copy opened alongside the original receives a new ID so
+the two workspaces do not share conversations accidentally.
 
 See [`memory.md`](./memory.md) for the detailed design.
 

@@ -149,7 +149,7 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<workspace>/sessions/*.jsonl` |
+| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` (default: `~/.nanobot/sessions/...`) |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
@@ -164,7 +164,7 @@ a WebUI chat may select a separate project:
 
 | Concern | Path owner |
 |---|---|
-| Sessions, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
+| Session namespace, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
 | Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
 | Workspace access mode and project metadata | Session workspace scope |
 
@@ -180,7 +180,7 @@ Session history is the near-term conversation replay. Memory is the longer-term 
 
 | Store | File area |
 |---|---|
-| Session JSONL files | `<workspace>/sessions/` |
+| Session JSONL files | `<config-dir>/sessions/<workspace-id>/` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |
