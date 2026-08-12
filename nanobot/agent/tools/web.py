@@ -218,13 +218,14 @@ async def _stream_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
     headers: dict[str, str] | None = None,
-) -> tuple[httpx.Response | None, Any | None, str | None]:
+) -> tuple[httpx.Response | None, Any | None, str | None, bool]:
     """Open a streamed response while validating every redirect target first."""
     current_url = url
+    chain_carries_credentials = _url_carries_credentials(url)
     for _ in range(MAX_REDIRECTS + 1):
         is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
-            return None, None, f"Redirect blocked: {error_msg}"
+            return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
 
         stream = client.stream(
             "GET",
@@ -237,26 +238,39 @@ async def _stream_with_safe_redirects(
         except httpx.RequestError as exc:
             unsafe_error = _unsafe_url_request_error(exc)
             if unsafe_error is not None:
-                return None, None, f"Redirect blocked: {unsafe_error}"
+                return (
+                    None,
+                    None,
+                    f"Redirect blocked: {unsafe_error}",
+                    chain_carries_credentials,
+                )
             raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
-            return response, stream, None
+            return response, stream, None, chain_carries_credentials
 
         location = response.headers.get("location")
         if not location:
-            return response, stream, None
+            return response, stream, None, chain_carries_credentials
 
         next_url = urljoin(str(response.url), location)
+        chain_carries_credentials = (
+            chain_carries_credentials or _url_carries_credentials(next_url)
+        )
         is_valid, error_msg = _validate_url_safe(next_url)
         if not is_valid:
             await stream.__aexit__(None, None, None)
-            return None, None, f"Redirect blocked: {error_msg}"
+            return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
 
         await stream.__aexit__(None, None, None)
         current_url = next_url
 
-    return None, None, f"Too many redirects: exceeded limit of {MAX_REDIRECTS}"
+    return (
+        None,
+        None,
+        f"Too many redirects: exceeded limit of {MAX_REDIRECTS}",
+        chain_carries_credentials,
+    )
 
 
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
@@ -1070,20 +1084,26 @@ class WebFetchTool(Tool):
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
-        # Detect and fetch images directly to avoid Jina's textual image captioning
+        # Detect and fetch images directly to avoid Jina's textual image captioning.
+        # This local preflight also proves that no credential-bearing URL occurs
+        # in the redirect chain before the original URL may be sent to Jina.
+        jina_remote_safe = False
         try:
             async with httpx.AsyncClient(
                 **_fetch_client_kwargs(self.proxy, 15.0),
             ) as client:
-                r, stream, redirect_error = await _stream_with_safe_redirects(
-                    client,
-                    url,
-                    headers={"User-Agent": self.user_agent},
+                r, stream, redirect_error, chain_carries_credentials = (
+                    await _stream_with_safe_redirects(
+                        client,
+                        url,
+                        headers={"User-Agent": self.user_agent},
+                    )
                 )
                 if redirect_error:
                     return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
                 if r is None:
                     return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
+                jina_remote_safe = not chain_carries_credentials
 
                 try:
                     ctype = r.headers.get("content-type", "")
@@ -1101,7 +1121,7 @@ class WebFetchTool(Tool):
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = None
-        if self.config.use_jina_reader:
+        if self.config.use_jina_reader and jina_remote_safe:
             result = await self._fetch_jina(url, max_chars)
         if result is None:
             result = await self._fetch_readability(url, extract_mode, max_chars)

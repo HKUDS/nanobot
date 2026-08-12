@@ -179,3 +179,68 @@ async def test_execute_fetches_credential_urls_locally(monkeypatch) -> None:
     data = json.loads(result)
     assert data["extractor"] == "readability"
     assert all("r.jina.ai" not in url for url in requested)
+
+
+async def test_execute_does_not_send_redirected_credential_url_to_jina(monkeypatch) -> None:
+    """A plain short URL that redirects through a signed URL must stay local."""
+
+    tool = WebFetchTool()
+    requested: list[str] = []
+    short_url = "https://example.com/short"
+    signed_url = "https://cdn.example.com/file?token=secret"
+
+    class FakeStreamResponse:
+        def __init__(self, url: str):
+            self.url = url
+            self.status_code = 302 if url == short_url else 200
+            self.headers = (
+                {"location": signed_url}
+                if url == short_url
+                else {"content-type": "text/html"}
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeResponse:
+        status_code = 200
+        url = signed_url
+        text = "<html><head><title>T</title></head><body><p>ok</p></body></html>"
+        headers = {"content-type": "text/html"}
+        is_redirect = False
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, **kwargs):
+            requested.append(str(url))
+            return FakeStreamResponse(str(url))
+
+        async def get(self, url, headers=None, **kwargs):
+            requested.append(str(url))
+            return FakeResponse()
+
+    monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "ok")
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url=short_url)
+
+    data = json.loads(result)
+    assert data["extractor"] == "readability"
+    assert signed_url in requested
+    assert all("r.jina.ai" not in url for url in requested)
