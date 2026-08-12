@@ -8,6 +8,13 @@ import {
 } from "react";
 import { CircleHelp, Sparkles } from "lucide-react";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -211,22 +218,14 @@ export function ModelPresetBadge({
     if (next?.name !== activeName) onPresetChange?.(next.name);
   }
 
-  const previewIndex = wrapIndex(motion?.index ?? currentIndex, presets.length);
-  const previewPreset = presets[previewIndex];
   const Container = interactive || canSwitch ? "button" : "span";
   const trackOffset = motion ? -pillStride * (2 + motion.remainder) : 0;
 
-  return (
+  const badge = (
     <Container
       data-switching={motion ? "true" : undefined}
       data-settling={motion?.settling ? "true" : undefined}
       aria-label={label}
-      aria-orientation={canSwitch ? "vertical" : undefined}
-      aria-valuemax={canSwitch ? presets.length - 1 : undefined}
-      aria-valuemin={canSwitch ? 0 : undefined}
-      aria-valuenow={canSwitch ? previewIndex : undefined}
-      aria-valuetext={canSwitch ? previewPreset?.label || label : undefined}
-      role={canSwitch ? "spinbutton" : undefined}
       type={interactive || canSwitch ? "button" : undefined}
       onClick={interactive ? onClick : undefined}
       onKeyDown={handleKeyDown}
@@ -303,6 +302,35 @@ export function ModelPresetBadge({
         </span>
       ) : null}
     </Container>
+  );
+
+  if (!canSwitch) return badge;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{badge}</DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={8} className="w-[min(20rem,calc(100vw-2rem))]">
+        <DropdownMenuRadioGroup
+          value={activeName}
+          onValueChange={(name) => {
+            if (name !== activeName) onPresetChange?.(name);
+          }}
+        >
+          {presets.map((preset) => (
+            <DropdownMenuRadioItem key={preset.name} value={preset.name}>
+              <span className="min-w-0">
+                <span className="block truncate text-[13px] font-medium">
+                  {preset.label || preset.name}
+                </span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {[preset.provider, preset.model].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

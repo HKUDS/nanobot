@@ -846,21 +846,45 @@ export function ThreadShell({
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
+  const [modelPresetError, setModelPresetError] = useState<string | null>(null);
+  const modelPresetRequestGenerationRef = useRef(0);
+  const confirmedModelPresetRef = useRef<string | null>(null);
   useEffect(() => {
+    modelPresetRequestGenerationRef.current += 1;
+    confirmedModelPresetRef.current = sessionModelPreset || settings?.agent.model_preset || "default";
     setLocalModelPreset(null);
-  }, [session?.key, sessionModelPreset]);
+    setModelPresetError(null);
+  }, [session?.key, sessionModelPreset, settings?.agent.model_preset]);
   const activeModelPreset = (
     localModelPreset
     || sessionModelPreset
     || settings?.agent.model_preset
     || "default"
   );
-  const handleModelPresetChange = useCallback((name: string) => {
-    setLocalModelPreset(name);
-    if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+  const handleModelPresetChange = useCallback(async (name: string) => {
+    setModelPresetError(null);
+    if (!chatId) {
+      setLocalModelPreset(name);
+      return;
     }
-  }, [chatId, client]);
+    const generation = ++modelPresetRequestGenerationRef.current;
+    const previousPreset = confirmedModelPresetRef.current
+      || localModelPreset
+      || sessionModelPreset
+      || settings?.agent.model_preset
+      || "default";
+    try {
+      await client.sendSystemCommand(chatId, `/model ${name}`);
+      if (generation !== modelPresetRequestGenerationRef.current) return;
+      confirmedModelPresetRef.current = name;
+      setLocalModelPreset(name);
+    } catch (err) {
+      if (generation !== modelPresetRequestGenerationRef.current) return;
+      await client.sendSystemCommand(chatId, `/model ${previousPreset}`).catch(() => {});
+      if (generation !== modelPresetRequestGenerationRef.current) return;
+      setModelPresetError((err as Error).message);
+    }
+  }, [chatId, client, localModelPreset, sessionModelPreset, settings?.agent.model_preset]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -1273,12 +1297,31 @@ export function ThreadShell({
         return false;
       }
       if (localModelPreset) {
-        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
+        try {
+          await client.sendSystemCommand(newId, `/model ${localModelPreset}`);
+        } catch (err) {
+          await client.sendSystemCommand(
+            newId,
+            `/model ${settings?.agent.model_preset || "default"}`,
+          ).catch(() => {});
+          setModelPresetError((err as Error).message);
+          setPendingFirstTargetChatId(null);
+          setBooting(false);
+          return false;
+        }
       }
       setPendingFirstTargetChatId(newId);
       return true;
     },
-    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
+    [
+      booting,
+      client,
+      localModelPreset,
+      onCreateChat,
+      settings?.agent.model_preset,
+      withWorkspaceScope,
+      workspaceScope,
+    ],
   );
 
   const handleThreadSend = useCallback(
@@ -1416,6 +1459,7 @@ export function ThreadShell({
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelPresetError={modelPresetError}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
@@ -1460,6 +1504,7 @@ export function ThreadShell({
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelPresetError={modelPresetError}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}

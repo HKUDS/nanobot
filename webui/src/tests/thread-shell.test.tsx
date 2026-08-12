@@ -588,7 +588,7 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view("default"));
 
-    const badge = await screen.findByRole("spinbutton", { name: "Default" });
+    const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
     fireEvent.keyDown(badge, { key: "ArrowDown" });
 
@@ -598,7 +598,7 @@ describe("ThreadShell", () => {
     );
     expect(await screen.findByText("Fast")).toBeInTheDocument();
     fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
+      screen.getByRole("button", { name: "Fast" }),
       { key: "End" },
     );
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
@@ -609,6 +609,130 @@ describe("ThreadShell", () => {
 
     rerender(view("fast"));
     expect(await screen.findByText("Fast")).toBeInTheDocument();
+  });
+
+  it("keeps the active preset and reports a failed model switch", async () => {
+    const client = makeClient();
+    client.sendSystemCommand.mockRejectedValueOnce(new Error("model switch failed"));
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("preset-error", "default")}
+          title="Preset error"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settingsWithFastPreset()}
+        />,
+      ),
+    );
+
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Default" }), {
+      key: "ArrowDown",
+    });
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("model switch failed"));
+    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.queryByText("Fast")).not.toBeInTheDocument();
+  });
+
+  it("does not let a stale model switch failure undo a newer selection", async () => {
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    settings.model_presets.push({
+      ...settings.model_presets.at(-1)!,
+      name: "extra",
+      label: "Extra",
+      model: "deepseek/extra",
+      active: false,
+      is_default: false,
+    });
+    let rejectFast!: (error: Error) => void;
+    client.sendSystemCommand.mockImplementation((_chatId, command) => {
+      if (command === "/model fast") {
+        return new Promise<void>((_resolve, reject) => {
+          rejectFast = reject;
+        });
+      }
+      return Promise.resolve();
+    });
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("preset-race", "default")}
+          title="Preset race"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />,
+      ),
+    );
+
+    const badge = await screen.findByRole("button", { name: "Default" });
+    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    fireEvent.keyDown(badge, { key: "End" });
+    await waitFor(() => expect(screen.getByText("Extra")).toBeInTheDocument());
+
+    await act(async () => rejectFast(new Error("stale model switch failed")));
+
+    expect(screen.getByText("Extra")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(client.sendSystemCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("reconciles a failed newer switch to the latest confirmed preset", async () => {
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    settings.model_presets.push({
+      ...settings.model_presets.at(-1)!,
+      name: "extra",
+      label: "Extra",
+      model: "deepseek/extra",
+      active: false,
+      is_default: false,
+    });
+    let resolveFast!: () => void;
+    let rejectExtra!: (error: Error) => void;
+    let fastCalls = 0;
+    client.sendSystemCommand.mockImplementation((_chatId, command) => {
+      if (command === "/model fast") {
+        fastCalls += 1;
+        if (fastCalls > 1) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          resolveFast = resolve;
+        });
+      }
+      if (command === "/model extra") {
+        return new Promise<void>((_resolve, reject) => {
+          rejectExtra = reject;
+        });
+      }
+      return Promise.resolve();
+    });
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("preset-rollback", "default")}
+          title="Preset rollback"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />,
+      ),
+    );
+
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Default" }), {
+      key: "ArrowDown",
+    });
+    await act(async () => resolveFast());
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Fast" }), { key: "End" });
+    await act(async () => rejectExtra(new Error("newer model switch failed")));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("newer model switch failed"));
+    expect(screen.getByText("Fast")).toBeInTheDocument();
+    expect(client.sendSystemCommand).toHaveBeenLastCalledWith("preset-rollback", "/model fast");
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -1018,7 +1142,7 @@ describe("ThreadShell", () => {
     const { rerender } = render(view(null));
 
     fireEvent.keyDown(
-      await screen.findByRole("spinbutton", { name: "Default" }),
+      await screen.findByRole("button", { name: "Default" }),
       { key: "ArrowDown" },
     );
     expect(await screen.findByText("Fast")).toBeInTheDocument();
@@ -1043,6 +1167,38 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expectSendMessageWithTurn(client, "chat-new", "use the selected model");
     });
+  });
+
+  it("does not send the first prompt when the landing preset switch fails", async () => {
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    const onCreateChat = vi.fn().mockResolvedValue("chat-new");
+    client.sendSystemCommand.mockRejectedValueOnce(new Error("model switch failed"));
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onCreateChat={onCreateChat}
+          settingsSnapshot={settings}
+        />,
+      ),
+    );
+
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Default" }), {
+      key: "ArrowDown",
+    });
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "do not send with the wrong model" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("model switch failed"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
   it("binds a pending landing message to the chat created for it", async () => {
