@@ -1,0 +1,91 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="group_0" value="上下文治理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="56" y="596" width="278" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_1" value="事件" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="126" y="236" width="278" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_2" value="会话" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="136" y="366" width="258" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_3" value="自动化" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="136" y="6" width="268" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_4" value="输出" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#b85450;fontColor=#b85450;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="176" y="1066" width="298" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_5" value="长期记忆" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="6" y="826" width="288" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="event" value="Inbound / Outbound events&#xa;一次 turn 的消息与工具结果" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="key" value="Session key&#xa;channel + chat + thread" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_2">
+          <mxGeometry x="34" y="24" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="jsonl" value="JSONL history&#xa;逐条追加、原子写入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="134" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="compact" value="Context compaction&#xa;TTL / token budget / idle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="summary" value="压缩摘要&#xa;保留事实与最近消息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="134" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="memory" value="MEMORY.md&#xa;长期事实与用户偏好" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_5">
+          <mxGeometry x="44" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="dream" value="Dream consolidation&#xa;两阶段提取 -&gt; 合并 -&gt; 写回" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_5">
+          <mxGeometry x="24" y="134" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="cron" value="Cron / long task&#xa;后台触发器与持续目标" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="heartbeat" value="HEARTBEAT.md&#xa;周期性任务清单" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="134" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="next" value="下一次 ContextBuilder&#xa;读取历史 + 摘要 + MEMORY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="24" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="resolve" style="html=1;rounded=0;" edge="1" parent="1" source="event" target="key">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="330"/><mxPoint x="270" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="append" style="html=1;rounded=0;" edge="1" parent="1" source="key" target="jsonl">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="460"/><mxPoint x="270" y="480"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="size / idle threshold" style="html=1;rounded=0;" edge="1" parent="1" source="jsonl" target="compact">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="240" y="570"/><mxPoint x="240" y="610"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="compact" style="html=1;rounded=0;" edge="1" parent="1" source="compact" target="summary">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="190" y="690"/><mxPoint x="190" y="720"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="facts candidate" style="html=1;rounded=0;" edge="1" parent="1" source="summary" target="memory">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="170" y="800"/><mxPoint x="170" y="840"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="consolidate" style="html=1;rounded=0;" edge="1" parent="1" source="memory" target="dream">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="160" y="920"/><mxPoint x="160" y="950"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="read tasks" style="html=1;rounded=0;" edge="1" parent="1" source="cron" target="heartbeat">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="100"/><mxPoint x="270" y="130"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="emit message" style="html=1;rounded=0;" edge="1" parent="1" source="heartbeat" target="event">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="210"/><mxPoint x="270" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="persist" style="html=1;rounded=0;" edge="1" parent="1" source="dream" target="next">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="240" y="1030"/><mxPoint x="240" y="1070"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="load" style="html=1;rounded=0;" edge="1" parent="1" source="summary" target="next">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="290" y="800"/><mxPoint x="290" y="1070"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="recent history" style="html=1;rounded=0;" edge="1" parent="1" source="jsonl" target="next">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="340" y="570"/><mxPoint x="340" y="1070"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

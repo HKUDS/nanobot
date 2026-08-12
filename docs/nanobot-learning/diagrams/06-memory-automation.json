@@ -1,0 +1,28 @@
+{
+  "direction": "TB",
+  "nodes": [
+    {"id":"event","label":"Inbound / Outbound events\n一次 turn 的消息与工具结果","group":"事件","width":230,"height":70},
+    {"id":"key","label":"Session key\nchannel + chat + thread","group":"会话","width":200,"height":70},
+    {"id":"jsonl","label":"JSONL history\n逐条追加、原子写入","group":"会话","width":210,"height":70},
+    {"id":"compact","label":"Context compaction\nTTL / token budget / idle","group":"上下文治理","width":230,"height":70},
+    {"id":"summary","label":"压缩摘要\n保留事实与最近消息","group":"上下文治理","width":220,"height":70},
+    {"id":"memory","label":"MEMORY.md\n长期事实与用户偏好","group":"长期记忆","width":210,"height":70},
+    {"id":"dream","label":"Dream consolidation\n两阶段提取 -> 合并 -> 写回","group":"长期记忆","width":240,"height":70},
+    {"id":"cron","label":"Cron / long task\n后台触发器与持续目标","group":"自动化","width":220,"height":70},
+    {"id":"heartbeat","label":"HEARTBEAT.md\n周期性任务清单","group":"自动化","width":220,"height":70},
+    {"id":"next","label":"下一次 ContextBuilder\n读取历史 + 摘要 + MEMORY","group":"输出","width":250,"height":70}
+  ],
+  "edges": [
+    {"source":"event","target":"key","label":"resolve"},
+    {"source":"key","target":"jsonl","label":"append"},
+    {"source":"jsonl","target":"compact","label":"size / idle threshold"},
+    {"source":"compact","target":"summary","label":"compact"},
+    {"source":"summary","target":"memory","label":"facts candidate"},
+    {"source":"memory","target":"dream","label":"consolidate"},
+    {"source":"cron","target":"heartbeat","label":"read tasks"},
+    {"source":"heartbeat","target":"event","label":"emit message"},
+    {"source":"dream","target":"next","label":"persist"},
+    {"source":"summary","target":"next","label":"load"},
+    {"source":"jsonl","target":"next","label":"recent history"}
+  ]
+}

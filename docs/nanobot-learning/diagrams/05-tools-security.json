@@ -1,0 +1,30 @@
+{
+  "direction": "LR",
+  "nodes": [
+    {"id":"model","label":"LLM tool call\nname + JSON arguments","group":"请求方","width":210,"height":70},
+    {"id":"registry","label":"ToolRegistry\n发现 + schema + dispatch","group":"Agent 边界","width":220,"height":70},
+    {"id":"schema","label":"参数校验\n缺失字段 / 类型 / enum","group":"Agent 边界","width":210,"height":70},
+    {"id":"policy","label":"权限策略\nworkspace / allowlist / timeout","group":"安全边界","width":230,"height":70},
+    {"id":"fs","label":"Filesystem tools\nread / write / edit / list","group":"工具实现","width":210,"height":70},
+    {"id":"shell","label":"Shell tool\nsandbox backend + cwd","group":"工具实现","width":210,"height":70},
+    {"id":"web","label":"Web fetch/search\nURL 解析 + SSRF guard","group":"工具实现","width":220,"height":70},
+    {"id":"mcp","label":"MCP client\n外部 server tools","group":"工具实现","width":210,"height":70},
+    {"id":"sideeffect","label":"外部副作用\n文件、进程、网络、第三方 API","group":"外部边界","width":240,"height":70},
+    {"id":"result","label":"ToolResult\n文本化结果回填模型","group":"返回路径","width":220,"height":70}
+  ],
+  "edges": [
+    {"source":"model","target":"registry","label":"dispatch"},
+    {"source":"registry","target":"schema","label":"validate"},
+    {"source":"schema","target":"policy","label":"authorized args"},
+    {"source":"policy","target":"fs","label":"path check"},
+    {"source":"policy","target":"shell","label":"sandbox check"},
+    {"source":"policy","target":"web","label":"SSRF / network check"},
+    {"source":"policy","target":"mcp","label":"server allowlist"},
+    {"source":"fs","target":"sideeffect","label":"I/O"},
+    {"source":"shell","target":"sideeffect","label":"process"},
+    {"source":"web","target":"sideeffect","label":"HTTP"},
+    {"source":"mcp","target":"sideeffect","label":"RPC"},
+    {"source":"sideeffect","target":"result","label":"output / error"},
+    {"source":"result","target":"model","label":"tool message"}
+  ]
+}

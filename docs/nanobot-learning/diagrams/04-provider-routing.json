@@ -1,0 +1,33 @@
+{
+  "direction": "LR",
+  "nodes": [
+    {"id":"config","label":"Config\nproviders + model + base_url","group":"配置入口","width":190,"height":70},
+    {"id":"registry","label":"ProviderRegistry\n名称与能力登记","group":"路由核心","width":190,"height":70},
+    {"id":"factory","label":"ProviderFactory\n解析 model 前缀","group":"路由核心","width":190,"height":70},
+    {"id":"base","label":"BaseProvider\n统一 chat / stream / errors","group":"抽象层","width":200,"height":70},
+    {"id":"openai","label":"OpenAICompatProvider\nOpenAI SDK + 自定义 URL","group":"实现层","width":220,"height":70},
+    {"id":"responses","label":"OpenAI Responses\nresponse.output_text / tool calls","group":"实现层","width":220,"height":70},
+    {"id":"anthropic","label":"Anthropic / Bedrock\n供应商原生适配","group":"实现层","width":210,"height":70},
+    {"id":"http","label":"HTTPS endpoint\nChat Completions / Responses","group":"传输层","width":210,"height":70},
+    {"id":"success","label":"流式事件\ntext delta / tool call / usage","group":"结果","width":210,"height":70},
+    {"id":"transient","label":"429 / 500-599 / timeout\nretryable","group":"错误治理","width":230,"height":70},
+    {"id":"backoff","label":"exponential backoff\n最大尝试次数 + jitter","group":"错误治理","width":220,"height":70},
+    {"id":"fatal","label":"认证 / schema / 4xx\n立即失败并记录上下文","group":"错误治理","width":230,"height":70}
+  ],
+  "edges": [
+    {"source":"config","target":"registry","label":"provider config"},
+    {"source":"registry","target":"factory","label":"lookup"},
+    {"source":"factory","target":"base","label":"instantiate"},
+    {"source":"base","target":"openai","label":"compat path"},
+    {"source":"base","target":"responses","label":"responses path"},
+    {"source":"base","target":"anthropic","label":"native path"},
+    {"source":"openai","target":"http","label":"POST"},
+    {"source":"responses","target":"http","label":"POST"},
+    {"source":"anthropic","target":"http","label":"POST"},
+    {"source":"http","target":"success","label":"2xx"},
+    {"source":"http","target":"transient","label":"retryable"},
+    {"source":"http","target":"fatal","label":"non-retryable"},
+    {"source":"transient","target":"backoff","label":"classify"},
+    {"source":"backoff","target":"http","label":"retry"}
+  ]
+}

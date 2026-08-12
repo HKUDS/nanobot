@@ -1,0 +1,91 @@
+{
+  "title": "nanobot Architecture C4",
+  "levels": [
+    {
+      "name": "System Context",
+      "elements": [
+        {"id": "user", "type": "person", "label": "使用者", "desc": "通过 WebUI 或聊天平台与 nanobot 对话"},
+        {"id": "nanobot", "type": "system", "label": "nanobot AI Agent", "tech": "Python / asyncio", "desc": "接收消息、调用模型与工具、维护会话记忆", "children": "Containers"},
+        {"id": "llm", "type": "external", "label": "LLM Provider", "tech": "OpenAI-compatible / Anthropic / Bedrock", "desc": "生成文本、工具调用与流式事件"},
+        {"id": "chat", "type": "external", "label": "聊天平台", "tech": "Telegram / Discord / Slack / ...", "desc": "外部消息与通知渠道"},
+        {"id": "webbrowser", "type": "external", "label": "Web Browser", "tech": "React / Vite", "desc": "运行 nanobot WebUI"},
+        {"id": "toolsystem", "type": "external", "label": "外部工具与服务", "tech": "HTTP / MCP / Shell", "desc": "搜索、网页、文件系统和可选 MCP 服务"}
+      ],
+      "relations": [
+        {"from": "user", "to": "nanobot", "label": "发送消息 / 查看响应"},
+        {"from": "webbrowser", "to": "nanobot", "label": "WebSocket / HTTP"},
+        {"from": "chat", "to": "nanobot", "label": "Channel 事件"},
+        {"from": "nanobot", "to": "llm", "label": "Chat Completions / Responses"},
+        {"from": "nanobot", "to": "toolsystem", "label": "执行工具并接收结果"}
+      ]
+    },
+    {
+      "name": "Containers",
+      "elements": [
+        {"id": "cli", "type": "container", "label": "CLI Runtime", "tech": "Typer / uv run", "desc": "解析命令、加载配置、启动 gateway 或 webui"},
+        {"id": "gateway", "type": "container", "label": "Gateway Runtime", "tech": "asyncio task supervisor", "desc": "并行运行消息总线、AgentLoop、Channel 与 API"},
+        {"id": "agentcore", "type": "container", "label": "Agent Core", "tech": "AgentLoop + AgentRunner", "desc": "构造上下文，驱动模型-工具循环，发布出站消息", "children": "Agent Components"},
+        {"id": "providers", "type": "container", "label": "Provider Layer", "tech": "ProviderFactory / Registry", "desc": "统一不同模型供应商、流式响应和重试"},
+        {"id": "channels", "type": "container", "label": "Channel Layer", "tech": "pkgutil discovery", "desc": "WebSocket 与聊天平台适配器，统一 Inbound/OutboundMessage"},
+        {"id": "apiserver", "type": "container", "label": "OpenAI-compatible API", "tech": "FastAPI", "desc": "提供 /v1/chat/completions 与 /v1/models"},
+        {"id": "state", "type": "container", "label": "Session & Memory", "tech": "JSONL + atomic writes", "desc": "持久化历史、长期记忆、压缩与目标状态"},
+        {"id": "tooling", "type": "container", "label": "Tool Runtime", "tech": "ToolRegistry / security guards", "desc": "发现工具、生成 schema、执行权限与网络边界检查"}
+      ],
+      "relations": [
+        {"from": "cli", "to": "gateway", "label": "启动并注入 Config"},
+        {"from": "gateway", "to": "channels", "label": "启动 Channel tasks"},
+        {"from": "gateway", "to": "agentcore", "label": "启动 AgentLoop"},
+        {"from": "gateway", "to": "apiserver", "label": "挂载 API"},
+        {"from": "channels", "to": "agentcore", "label": "Inbound / Outbound events"},
+        {"from": "agentcore", "to": "providers", "label": "模型请求与流式事件"},
+        {"from": "agentcore", "to": "tooling", "label": "工具 schema / execute"},
+        {"from": "agentcore", "to": "state", "label": "读取上下文 / 写入历史"},
+        {"from": "apiserver", "to": "agentcore", "label": "复用 Agent service"}
+      ]
+    },
+    {
+      "name": "Agent Components",
+      "elements": [
+        {"id": "bus", "type": "component", "label": "MessageBus", "tech": "asyncio.Queue", "desc": "解耦生产者和消费者"},
+        {"id": "loop", "type": "component", "label": "AgentLoop", "tech": "agent/loop.py", "desc": "消费 inbound，管理 session key 与生命周期"},
+        {"id": "context", "type": "component", "label": "ContextBuilder", "tech": "agent/context.py", "desc": "拼装 system prompt、历史、工具说明和 bootstrap 文件"},
+        {"id": "runner", "type": "component", "label": "AgentRunner", "tech": "agent/runner.py", "desc": "执行模型响应、tool call、结果回填和终止条件"},
+        {"id": "registry", "type": "component", "label": "ToolRegistry", "tech": "agent/tools/registry.py", "desc": "暴露工具定义和 JSON schema"},
+        {"id": "session", "type": "component", "label": "SessionManager", "tech": "session/manager.py", "desc": "历史读取、压缩、TTL 与目标状态"},
+        {"id": "memory", "type": "component", "label": "MemoryStore", "tech": "agent/memory.py", "desc": "长期记忆与 Dream 两阶段 consolidation"},
+        {"id": "providerfactory", "type": "component", "label": "ProviderFactory", "tech": "providers/factory.py", "desc": "根据 model/provider 配置选择实现"},
+        {"id": "openaiadapter", "type": "component", "label": "OpenAICompatProvider", "tech": "providers/openai_compat_provider.py", "desc": "兼容 OpenAI Chat Completions 与自定义 base URL"}
+      ],
+      "relations": [
+        {"from": "loop", "to": "bus", "label": "consume inbound / publish outbound"},
+        {"from": "loop", "to": "context", "label": "build messages"},
+        {"from": "loop", "to": "runner", "label": "run turn"},
+        {"from": "runner", "to": "registry", "label": "tool definitions / calls"},
+        {"from": "runner", "to": "providerfactory", "label": "chat(stream=True)"},
+        {"from": "providerfactory", "to": "openaiadapter", "label": "selected implementation"},
+        {"from": "loop", "to": "session", "label": "load/save session"},
+        {"from": "session", "to": "memory", "label": "compact / consolidate"}
+      ]
+    },
+    {
+      "name": "Runtime Internals",
+      "elements": [
+        {"id": "inbound", "type": "component", "label": "InboundMessage", "tech": "bus/events.py", "desc": "channel、sender、chat_id、content、metadata"},
+        {"id": "outbound", "type": "component", "label": "OutboundMessage", "tech": "bus/events.py", "desc": "channel、chat_id、content、media、metadata"},
+        {"id": "queuein", "type": "component", "label": "inbound_queue", "tech": "asyncio.Queue", "desc": "输入事件队列"},
+        {"id": "queueout", "type": "component", "label": "outbound_queue", "tech": "asyncio.Queue", "desc": "输出事件队列"},
+        {"id": "history", "type": "database", "label": "Session JSONL", "tech": "~/.nanobot/sessions", "desc": "逐条追加消息，原子写入"},
+        {"id": "longterm", "type": "database", "label": "MEMORY.md", "tech": "workspace memory", "desc": "跨会话长期事实与摘要"},
+        {"id": "configfile", "type": "database", "label": "config.json", "tech": "~/.nanobot/config.json", "desc": "Pydantic schema 验证后的运行时配置"}
+      ],
+      "relations": [
+        {"from": "inbound", "to": "queuein", "label": "put"},
+        {"from": "queuein", "to": "outbound", "label": "Agent turn result"},
+        {"from": "outbound", "to": "queueout", "label": "put"},
+        {"from": "queueout", "to": "history", "label": "persist event"},
+        {"from": "history", "to": "longterm", "label": "dream/compaction"},
+        {"from": "configfile", "to": "queuein", "label": "runtime settings"}
+      ]
+    }
+  ]
+}

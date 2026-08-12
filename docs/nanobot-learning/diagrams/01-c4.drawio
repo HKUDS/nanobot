@@ -1,0 +1,212 @@
+<mxfile>
+  <diagram id="system-context" name="System Context">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="user" value="使用者&#xa;[Person]&#xa;通过 WebUI 或聊天平台与 nanobot 对话" style="shape=mxgraph.c4.person2;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#083F75;strokeColor=#06315C;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="200" height="180" as="geometry"/>
+        </mxCell>
+        <UserObject label="nanobot AI Agent&#xa;[Software System: Python / asyncio]&#xa;接收消息、调用模型与工具、维护会话记忆" link="data:page/id,containers" id="nanobot">
+          <mxCell style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#1061B0;strokeColor=#0D5091;" vertex="1" parent="1">
+          <mxGeometry x="240" y="250" width="240" height="120" as="geometry"/>
+        </mxCell>
+        </UserObject>
+        <mxCell id="llm" value="LLM Provider&#xa;[Software System: OpenAI-compatible / Anthropic / Bedrock]&#xa;生成文本、工具调用与流式事件" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#8C8496;strokeColor=#736782;" vertex="1" parent="1">
+          <mxGeometry x="100" y="430" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="chat" value="聊天平台&#xa;[Software System: Telegram / Discord / Slack / ...]&#xa;外部消息与通知渠道" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#8C8496;strokeColor=#736782;" vertex="1" parent="1">
+          <mxGeometry x="240" y="30" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="webbrowser" value="Web Browser&#xa;[Software System: React / Vite]&#xa;运行 nanobot WebUI" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#8C8496;strokeColor=#736782;" vertex="1" parent="1">
+          <mxGeometry x="510" y="30" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="toolsystem" value="外部工具与服务&#xa;[Software System: HTTP / MCP / Shell]&#xa;搜索、网页、文件系统和可选 MCP 服务" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#8C8496;strokeColor=#736782;" vertex="1" parent="1">
+          <mxGeometry x="370" y="430" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="发送消息 / 查看响应" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="user" target="nanobot">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="240"/><mxPoint x="150" y="310"/><mxPoint x="150" y="310"/><mxPoint x="150" y="310"/><mxPoint x="220" y="310"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="WebSocket / HTTP" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="webbrowser" target="nanobot">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="560" y="210"/><mxPoint x="560" y="310"/><mxPoint x="560" y="310"/><mxPoint x="560" y="310"/><mxPoint x="490" y="310"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="Channel 事件" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="chat" target="nanobot">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="150"/><mxPoint x="360" y="230"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="Chat Completions / Responses" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="nanobot" target="llm">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="290" y="370"/><mxPoint x="290" y="420"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="执行工具并接收结果" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="nanobot" target="toolsystem">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="370"/><mxPoint x="430" y="420"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="containers" name="Containers">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="cli" value="CLI Runtime&#xa;[Container: Typer / uv run]&#xa;解析命令、加载配置、启动 gateway 或 webui" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="0" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="gateway" value="Gateway Runtime&#xa;[Container: asyncio task supervisor]&#xa;并行运行消息总线、AgentLoop、Channel 与 API" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <UserObject label="Agent Core&#xa;[Container: AgentLoop + AgentRunner]&#xa;构造上下文，驱动模型-工具循环，发布出站消息" link="data:page/id,agent-components" id="agentcore">
+          <mxCell style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="560" width="240" height="120" as="geometry"/>
+        </mxCell>
+        </UserObject>
+        <mxCell id="providers" value="Provider Layer&#xa;[Container: ProviderFactory / Registry]&#xa;统一不同模型供应商、流式响应和重试" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="0" y="740" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="channels" value="Channel Layer&#xa;[Container: pkgutil discovery]&#xa;WebSocket 与聊天平台适配器，统一 Inbound/OutboundMessage" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="apiserver" value="OpenAI-compatible API&#xa;[Container: FastAPI]&#xa;提供 /v1/chat/completions 与 /v1/models" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="550" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="state" value="Session &amp; Memory&#xa;[Container: JSONL + atomic writes]&#xa;持久化历史、长期记忆、压缩与目标状态" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="740" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="tooling" value="Tool Runtime&#xa;[Container: ToolRegistry / security guards]&#xa;发现工具、生成 schema、执行权限与网络边界检查" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="550" y="740" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="启动并注入 Config" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="cli" target="gateway">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="120"/><mxPoint x="400" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="启动 Channel tasks" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="gateway" target="channels">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="310"/><mxPoint x="400" y="360"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="启动 AgentLoop" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="gateway" target="agentcore">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="250"/><mxPoint x="260" y="250"/><mxPoint x="260" y="250"/><mxPoint x="260" y="250"/><mxPoint x="260" y="600"/><mxPoint x="260" y="600"/><mxPoint x="260" y="600"/><mxPoint x="260" y="600"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="挂载 API" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="gateway" target="apiserver">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="590" y="250"/><mxPoint x="670" y="250"/><mxPoint x="670" y="250"/><mxPoint x="670" y="250"/><mxPoint x="670" y="360"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="Inbound / Outbound events" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="channels" target="agentcore">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="490"/><mxPoint x="400" y="540"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="模型请求与流式事件" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="agentcore" target="providers">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="200" y="640"/><mxPoint x="120" y="640"/><mxPoint x="120" y="640"/><mxPoint x="120" y="640"/><mxPoint x="120" y="730"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="工具 schema / execute" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="agentcore" target="tooling">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="640"/><mxPoint x="710" y="640"/><mxPoint x="710" y="640"/><mxPoint x="710" y="640"/><mxPoint x="710" y="730"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="读取上下文 / 写入历史" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="agentcore" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="680"/><mxPoint x="400" y="730"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="复用 Agent service" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="apiserver" target="agentcore">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="630" y="540"/><mxPoint x="630" y="600"/><mxPoint x="630" y="600"/><mxPoint x="630" y="600"/><mxPoint x="530" y="600"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="agent-components" name="Agent Components">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="bus" value="MessageBus&#xa;[Component: asyncio.Queue]&#xa;解耦生产者和消费者" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="0" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="loop" value="AgentLoop&#xa;[Component: agent/loop.py]&#xa;消费 inbound，管理 session key 与生命周期" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="410" y="0" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="context" value="ContextBuilder&#xa;[Component: agent/context.py]&#xa;拼装 system prompt、历史、工具说明和 bootstrap 文件" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="280" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="runner" value="AgentRunner&#xa;[Component: agent/runner.py]&#xa;执行模型响应、tool call、结果回填和终止条件" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="550" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="registry" value="ToolRegistry&#xa;[Component: agent/tools/registry.py]&#xa;暴露工具定义和 JSON schema" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="280" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="session" value="SessionManager&#xa;[Component: session/manager.py]&#xa;历史读取、压缩、TTL 与目标状态" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="830" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="memory" value="MemoryStore&#xa;[Component: agent/memory.py]&#xa;长期记忆与 Dream 两阶段 consolidation" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="830" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="providerfactory" value="ProviderFactory&#xa;[Component: providers/factory.py]&#xa;根据 model/provider 配置选择实现" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="550" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="openaiadapter" value="OpenAICompatProvider&#xa;[Component: providers/openai_compat_provider.py]&#xa;兼容 OpenAI Chat Completions 与自定义 base URL" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="550" y="560" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="consume inbound / publish outbound" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="loop" target="bus">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="290" y="60"/><mxPoint x="120" y="60"/><mxPoint x="120" y="60"/><mxPoint x="120" y="60"/><mxPoint x="120" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="build messages" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="loop" target="context">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="120"/><mxPoint x="460" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="run turn" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="loop" target="runner">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="600" y="120"/><mxPoint x="600" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="tool definitions / calls" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="runner" target="registry">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="540" y="250"/><mxPoint x="530" y="250"/><mxPoint x="530" y="250"/><mxPoint x="530" y="250"/><mxPoint x="530" y="430"/><mxPoint x="530" y="430"/><mxPoint x="530" y="430"/><mxPoint x="530" y="430"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="chat(stream=True)" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="runner" target="providerfactory">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="670" y="310"/><mxPoint x="670" y="360"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="selected implementation" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="providerfactory" target="openaiadapter">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="670" y="490"/><mxPoint x="670" y="540"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="load/save session" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="loop" target="session">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="780" y="60"/><mxPoint x="950" y="60"/><mxPoint x="950" y="60"/><mxPoint x="950" y="60"/><mxPoint x="950" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="compact / consolidate" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="session" target="memory">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="950" y="310"/><mxPoint x="950" y="360"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="runtime-internals" name="Runtime Internals">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="inbound" value="InboundMessage&#xa;[Component: bus/events.py]&#xa;channel、sender、chat_id、content、metadata" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="outbound" value="OutboundMessage&#xa;[Component: bus/events.py]&#xa;channel、chat_id、content、media、metadata" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="140" y="370" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="queuein" value="inbound_queue&#xa;[Component: asyncio.Queue]&#xa;输入事件队列" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="140" y="190" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="queueout" value="outbound_queue&#xa;[Component: asyncio.Queue]&#xa;输出事件队列" style="rounded=1;arcSize=10;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#63BEF2;strokeColor=#2086C9;" vertex="1" parent="1">
+          <mxGeometry x="140" y="560" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="history" value="Session JSONL&#xa;[Container: ~/.nanobot/sessions]&#xa;逐条追加消息，原子写入" style="shape=cylinder3;size=15;boundedLbl=1;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="140" y="740" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="longterm" value="MEMORY.md&#xa;[Container: workspace memory]&#xa;跨会话长期事实与摘要" style="shape=cylinder3;size=15;boundedLbl=1;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="140" y="930" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="configfile" value="config.json&#xa;[Container: ~/.nanobot/config.json]&#xa;Pydantic schema 验证后的运行时配置" style="shape=cylinder3;size=15;boundedLbl=1;html=1;whiteSpace=wrap;fontSize=12;fontColor=#ffffff;align=center;fillColor=#23A2D9;strokeColor=#0E7DAD;" vertex="1" parent="1">
+          <mxGeometry x="280" y="0" width="240" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="put" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="inbound" target="queuein">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="190" y="120"/><mxPoint x="190" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="Agent turn result" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="queuein" target="outbound">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="310"/><mxPoint x="260" y="360"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="put" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="outbound" target="queueout">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="490"/><mxPoint x="260" y="540"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="persist event" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="queueout" target="history">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="680"/><mxPoint x="260" y="730"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="dream/compaction" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="history" target="longterm">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="860"/><mxPoint x="260" y="910"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="runtime settings" style="endArrow=blockThin;endFill=1;endSize=10;html=1;fontSize=11;fontColor=#404040;strokeColor=#828282;labelBackgroundColor=#ffffff;rounded=0;" edge="1" parent="1" source="configfile" target="queuein">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="330" y="120"/><mxPoint x="330" y="170"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

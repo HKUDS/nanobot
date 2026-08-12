@@ -1,0 +1,33 @@
+{
+  "title": "nanobot 主消息 Turn",
+  "participants": [
+    {"id": "client", "label": "WebUI / Channel", "actor": true},
+    {"id": "bus", "label": "MessageBus"},
+    {"id": "loop", "label": "AgentLoop"},
+    {"id": "context", "label": "ContextBuilder"},
+    {"id": "runner", "label": "AgentRunner"},
+    {"id": "provider", "label": "Provider"},
+    {"id": "tools", "label": "ToolRegistry / Tool"},
+    {"id": "session", "label": "Session + Memory"}
+  ],
+  "messages": [
+    {"from": "client", "to": "bus", "label": "publish InboundMessage"},
+    {"from": "bus", "to": "loop", "label": "get inbound event"},
+    {"from": "loop", "to": "session", "label": "resolve session key + load history"},
+    {"from": "loop", "to": "context", "label": "build system prompt + history + tools"},
+    {"from": "context", "to": "loop", "label": "messages[]", "return": true},
+    {"from": "loop", "to": "runner", "label": "run(messages, tools)"},
+    {"from": "runner", "to": "provider", "label": "chat(stream=True)"},
+    {"from": "provider", "to": "runner", "label": "text delta", "return": true},
+    {"from": "runner", "to": "tools", "label": "tool call: name + args"},
+    {"from": "tools", "to": "runner", "label": "tool result", "return": true},
+    {"from": "runner", "to": "provider", "label": "append tool result; continue"},
+    {"from": "provider", "to": "runner", "label": "final text / finish_reason", "return": true},
+    {"from": "runner", "to": "loop", "label": "response + usage", "return": true},
+    {"from": "loop", "to": "session", "label": "append messages + compact if needed"},
+    {"from": "loop", "to": "bus", "label": "publish OutboundMessage"},
+    {"from": "bus", "to": "client", "label": "deliver response", "return": true},
+    {"note": "Transient 429/5xx/timeout: Provider backoff + retry before surfacing error", "over": "provider"},
+    {"note": "终止条件：无 tool call、finish_reason=stop、达到 max iterations 或不可恢复错误", "over": "runner"}
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "direction": "TB",
+  "nodes": [
+    {"id":"start","label":"InboundMessage\nchannel + chat_id + content","style":"ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;","width":190,"height":70},
+    {"id":"sessionkey","label":"生成 session key\nchannel:chat_id:thread","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;","width":210,"height":70},
+    {"id":"load","label":"读取 Session 历史\n加载 workspace bootstrap","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;","width":220,"height":70},
+    {"id":"prompt","label":"ContextBuilder\n组装 system + history + tools","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;","width":240,"height":70},
+    {"id":"request","label":"Provider.chat(stream=True)\n模型请求","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;","width":230,"height":70},
+    {"id":"decision","label":"有 tool_call?","style":"rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;","width":150,"height":100},
+    {"id":"execute","label":"ToolRegistry.execute\n校验 schema + 安全边界","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;","width":230,"height":70},
+    {"id":"append","label":"追加 assistant/tool 消息\n回到模型继续对话","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;","width":230,"height":70},
+    {"id":"retry","label":"Transient error?\n429 / 5xx / timeout","style":"rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;","width":170,"height":100},
+    {"id":"backoff","label":"指数退避 + jitter\n达到上限则抛错","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;","width":220,"height":70},
+    {"id":"persist","label":"保存响应与 usage\n触发 compact / Dream 条件","style":"rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;","width":250,"height":70},
+    {"id":"out","label":"OutboundMessage\n返回 Channel / WebUI","style":"ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;","width":220,"height":70}
+  ],
+  "edges": [
+    {"source":"start","target":"sessionkey","label":"receive"},
+    {"source":"sessionkey","target":"load","label":"lookup"},
+    {"source":"load","target":"prompt","label":"context inputs"},
+    {"source":"prompt","target":"request","label":"messages + tools"},
+    {"source":"request","target":"retry","label":"response / error"},
+    {"source":"retry","target":"backoff","label":"Yes"},
+    {"source":"backoff","target":"request","label":"retry"},
+    {"source":"retry","target":"decision","label":"No / success"},
+    {"source":"decision","target":"execute","label":"Yes"},
+    {"source":"execute","target":"append","label":"tool result"},
+    {"source":"append","target":"request","label":"next iteration"},
+    {"source":"decision","target":"persist","label":"No"},
+    {"source":"persist","target":"out","label":"publish"}
+  ]
+}

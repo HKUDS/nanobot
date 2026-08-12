@@ -1,0 +1,85 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="start" value="InboundMessage&#xa;channel + chat_id + content" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="340" y="0" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="sessionkey" value="生成 session key&#xa;channel:chat_id:thread" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="330" y="110" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="load" value="读取 Session 历史&#xa;加载 workspace bootstrap" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="330" y="210" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="prompt" value="ContextBuilder&#xa;组装 system + history + tools" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="320" y="320" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="request" value="Provider.chat(stream=True)&#xa;模型请求" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="420" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="decision" value="有 tool_call?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="110" y="670" width="150" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="execute" value="ToolRegistry.execute&#xa;校验 schema + 安全边界" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="270" y="800" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="append" value="追加 assistant/tool 消息&#xa;回到模型继续对话" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="340" y="910" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="retry" value="Transient error?&#xa;429 / 5xx / timeout" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="240" y="530" width="170" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="backoff" value="指数退避 + jitter&#xa;达到上限则抛错" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="280" y="680" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="persist" value="保存响应与 usage&#xa;触发 compact / Dream 条件" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="0" y="800" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="out" value="OutboundMessage&#xa;返回 Channel / WebUI" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="10" y="910" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="receive" style="html=1;rounded=0;" edge="1" parent="1" source="start" target="sessionkey">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="70"/><mxPoint x="440" y="90"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="lookup" style="html=1;rounded=0;" edge="1" parent="1" source="sessionkey" target="load">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="180"/><mxPoint x="440" y="200"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="context inputs" style="html=1;rounded=0;" edge="1" parent="1" source="load" target="prompt">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="280"/><mxPoint x="440" y="310"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="messages + tools" style="html=1;rounded=0;" edge="1" parent="1" source="prompt" target="request">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="390"/><mxPoint x="440" y="410"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="response / error" style="html=1;rounded=0;" edge="1" parent="1" source="request" target="retry">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="370" y="490"/><mxPoint x="370" y="520"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="Yes" style="html=1;rounded=0;" edge="1" parent="1" source="retry" target="backoff">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="340" y="630"/><mxPoint x="340" y="670"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="retry" style="html=1;rounded=0;" edge="1" parent="1" source="backoff" target="request">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="450" y="680"/><mxPoint x="450" y="510"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="No / success" style="html=1;rounded=0;" edge="1" parent="1" source="retry" target="decision">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="250" y="630"/><mxPoint x="250" y="650"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="Yes" style="html=1;rounded=0;" edge="1" parent="1" source="decision" target="execute">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="760"/><mxPoint x="270" y="760"/><mxPoint x="270" y="760"/><mxPoint x="270" y="760"/><mxPoint x="270" y="790"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="tool result" style="html=1;rounded=0;" edge="1" parent="1" source="execute" target="append">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="420" y="870"/><mxPoint x="420" y="900"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="next iteration" style="html=1;rounded=0;" edge="1" parent="1" source="append" target="request">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="530" y="910"/><mxPoint x="530" y="510"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="No" style="html=1;rounded=0;" edge="1" parent="1" source="decision" target="persist">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="180" y="770"/><mxPoint x="180" y="790"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="publish" style="html=1;rounded=0;" edge="1" parent="1" source="persist" target="out">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="120" y="870"/><mxPoint x="120" y="900"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

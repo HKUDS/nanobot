@@ -1,0 +1,27 @@
+{
+  "direction": "TB",
+  "nodes": [
+    {"id":"browser","label":"Browser\nReact WebUI","group":"客户端","width":190,"height":70},
+    {"id":"vite","label":"Vite dev server\n/api /webui /auth /WS proxy","group":"客户端","width":230,"height":70},
+    {"id":"ws","label":"WebSocket Channel\nMultiplex runtime protocol","group":"Gateway","width":230,"height":70},
+    {"id":"gateway","label":"nanobot gateway\nasync task supervisor :8765","group":"Gateway","width":230,"height":70},
+    {"id":"api","label":"FastAPI API\n/v1/chat/completions\n/v1/models","group":"Gateway","width":230,"height":80},
+    {"id":"bus","label":"MessageBus\ninbound/outbound queues","group":"Gateway","width":220,"height":70},
+    {"id":"agent","label":"AgentLoop + Runner\n模型与工具循环","group":"Agent","width":230,"height":70},
+    {"id":"provider","label":"LLM endpoint\nOPENAI_BASE_URL / API key","group":"外部服务","width":230,"height":70},
+    {"id":"storage","label":"~/.nanobot\nconfig + sessions + memory","group":"持久化","width":230,"height":70},
+    {"id":"service","label":"生产部署\n反向代理 / launchd / systemd","group":"运维","width":240,"height":70}
+  ],
+  "edges": [
+    {"source":"browser","target":"vite","label":"dev assets"},
+    {"source":"vite","target":"ws","label":"WebSocket proxy"},
+    {"source":"vite","target":"api","label":"HTTP proxy"},
+    {"source":"ws","target":"gateway","label":"events"},
+    {"source":"api","target":"agent","label":"API request"},
+    {"source":"gateway","target":"bus","label":"start"},
+    {"source":"bus","target":"agent","label":"InboundMessage"},
+    {"source":"agent","target":"provider","label":"HTTPS"},
+    {"source":"agent","target":"storage","label":"read/write"},
+    {"source":"service","target":"gateway","label":"supervise"}
+  ]
+}

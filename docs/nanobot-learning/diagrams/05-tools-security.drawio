@@ -1,0 +1,97 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="group_0" value="Agent 边界" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="576" y="6" width="268" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_1" value="外部边界" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="456" y="496" width="288" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_2" value="安全边界" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="456" y="236" width="278" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_3" value="工具实现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="6" y="366" width="958" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_4" value="请求方" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="646" y="746" width="258" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_5" value="返回路径" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#b85450;fontColor=#b85450;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="526" y="616" width="268" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="model" value="LLM tool call&#xa;name + JSON arguments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="registry" value="ToolRegistry&#xa;发现 + schema + dispatch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="schema" value="参数校验&#xa;缺失字段 / 类型 / enum" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="134" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="policy" value="权限策略&#xa;workspace / allowlist / timeout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="fs" value="Filesystem tools&#xa;read / write / edit / list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="shell" value="Shell tool&#xa;sandbox backend + cwd" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_3">
+          <mxGeometry x="254" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="web" value="Web fetch/search&#xa;URL 解析 + SSRF guard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_3">
+          <mxGeometry x="484" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcp" value="MCP client&#xa;外部 server tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_3">
+          <mxGeometry x="724" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="sideeffect" value="外部副作用&#xa;文件、进程、网络、第三方 API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="result" value="ToolResult&#xa;文本化结果回填模型" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="group_5">
+          <mxGeometry x="24" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="dispatch" style="html=1;rounded=0;" edge="1" parent="1" source="model" target="registry">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="920" y="800"/><mxPoint x="950" y="800"/><mxPoint x="950" y="800"/><mxPoint x="950" y="800"/><mxPoint x="950" y="70"/><mxPoint x="950" y="70"/><mxPoint x="950" y="70"/><mxPoint x="830" y="70"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="validate" style="html=1;rounded=0;" edge="1" parent="1" source="registry" target="schema">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="710" y="100"/><mxPoint x="710" y="130"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="authorized args" style="html=1;rounded=0;" edge="1" parent="1" source="schema" target="policy">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="660" y="210"/><mxPoint x="660" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="path check" style="html=1;rounded=0;" edge="1" parent="1" source="policy" target="fs">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="350" y="290"/><mxPoint x="140" y="290"/><mxPoint x="140" y="290"/><mxPoint x="140" y="290"/><mxPoint x="140" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="sandbox check" style="html=1;rounded=0;" edge="1" parent="1" source="policy" target="shell">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="420" y="310"/><mxPoint x="360" y="310"/><mxPoint x="360" y="310"/><mxPoint x="360" y="310"/><mxPoint x="360" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="SSRF / network check" style="html=1;rounded=0;" edge="1" parent="1" source="policy" target="web">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="600" y="330"/><mxPoint x="600" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="server allowlist" style="html=1;rounded=0;" edge="1" parent="1" source="policy" target="mcp">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="740" y="300"/><mxPoint x="770" y="300"/><mxPoint x="770" y="300"/><mxPoint x="770" y="300"/><mxPoint x="770" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="I/O" style="html=1;rounded=0;" edge="1" parent="1" source="fs" target="sideeffect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="140" y="500"/><mxPoint x="140" y="560"/><mxPoint x="140" y="560"/><mxPoint x="140" y="560"/><mxPoint x="470" y="560"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="process" style="html=1;rounded=0;" edge="1" parent="1" source="shell" target="sideeffect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="490"/><mxPoint x="360" y="540"/><mxPoint x="360" y="540"/><mxPoint x="360" y="540"/><mxPoint x="470" y="540"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="HTTP" style="html=1;rounded=0;" edge="1" parent="1" source="web" target="sideeffect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="600" y="460"/><mxPoint x="600" y="500"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="RPC" style="html=1;rounded=0;" edge="1" parent="1" source="mcp" target="sideeffect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="750" y="500"/><mxPoint x="750" y="550"/><mxPoint x="750" y="550"/><mxPoint x="750" y="550"/><mxPoint x="730" y="550"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="output / error" style="html=1;rounded=0;" edge="1" parent="1" source="sideeffect" target="result">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="630" y="590"/><mxPoint x="630" y="630"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="tool message" style="html=1;rounded=0;" edge="1" parent="1" source="result" target="model">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="720" y="710"/><mxPoint x="720" y="760"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

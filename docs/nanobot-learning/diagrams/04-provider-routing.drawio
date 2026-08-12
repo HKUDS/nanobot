@@ -1,0 +1,109 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="group_0" value="传输层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="296" y="616" width="258" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_1" value="实现层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="56" y="496" width="728" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_2" value="抽象层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="306" y="366" width="248" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_3" value="结果" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#b85450;fontColor=#b85450;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="6" y="746" width="258" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_4" value="路由核心" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="306" y="136" width="238" height="218" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_5" value="配置入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="306" y="6" width="238" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_6" value="错误治理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;fontColor=#666666;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="276" y="746" width="528" height="218" as="geometry"/>
+        </mxCell>
+        <mxCell id="config" value="Config&#xa;providers + model + base_url" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_5">
+          <mxGeometry x="24" y="24" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="registry" value="ProviderRegistry&#xa;名称与能力登记" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="24" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="factory" value="ProviderFactory&#xa;解析 model 前缀" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="124" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="base" value="BaseProvider&#xa;统一 chat / stream / errors" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="24" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="openai" value="OpenAICompatProvider&#xa;OpenAI SDK + 自定义 URL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="responses" value="OpenAI Responses&#xa;response.output_text / tool calls" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_1">
+          <mxGeometry x="264" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="anthropic" value="Anthropic / Bedrock&#xa;供应商原生适配" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_1">
+          <mxGeometry x="494" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="http" value="HTTPS endpoint&#xa;Chat Completions / Responses" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="success" value="流式事件&#xa;text delta / tool call / usage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="transient" value="429 / 500-599 / timeout&#xa;retryable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="group_6">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="backoff" value="exponential backoff&#xa;最大尝试次数 + jitter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="group_6">
+          <mxGeometry x="154" y="124" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="fatal" value="认证 / schema / 4xx&#xa;立即失败并记录上下文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="group_6">
+          <mxGeometry x="274" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="provider config" style="html=1;rounded=0;" edge="1" parent="1" source="config" target="registry">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="100"/><mxPoint x="430" y="150"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="lookup" style="html=1;rounded=0;" edge="1" parent="1" source="registry" target="factory">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="230"/><mxPoint x="430" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="instantiate" style="html=1;rounded=0;" edge="1" parent="1" source="factory" target="base">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="330"/><mxPoint x="430" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="compat path" style="html=1;rounded=0;" edge="1" parent="1" source="base" target="openai">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="420"/><mxPoint x="190" y="420"/><mxPoint x="190" y="420"/><mxPoint x="190" y="420"/><mxPoint x="190" y="500"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="responses path" style="html=1;rounded=0;" edge="1" parent="1" source="base" target="responses">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="460"/><mxPoint x="430" y="500"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="native path" style="html=1;rounded=0;" edge="1" parent="1" source="base" target="anthropic">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="590" y="420"/><mxPoint x="660" y="420"/><mxPoint x="660" y="420"/><mxPoint x="660" y="420"/><mxPoint x="660" y="500"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="POST" style="html=1;rounded=0;" edge="1" parent="1" source="openai" target="http">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="620"/><mxPoint x="270" y="660"/><mxPoint x="270" y="660"/><mxPoint x="270" y="660"/><mxPoint x="310" y="660"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="POST" style="html=1;rounded=0;" edge="1" parent="1" source="responses" target="http">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="590"/><mxPoint x="430" y="630"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="POST" style="html=1;rounded=0;" edge="1" parent="1" source="anthropic" target="http">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="690" y="620"/><mxPoint x="690" y="660"/><mxPoint x="690" y="660"/><mxPoint x="690" y="660"/><mxPoint x="540" y="660"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="2xx" style="html=1;rounded=0;" edge="1" parent="1" source="http" target="success">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="250" y="690"/><mxPoint x="160" y="690"/><mxPoint x="160" y="690"/><mxPoint x="160" y="690"/><mxPoint x="160" y="760"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="retryable" style="html=1;rounded=0;" edge="1" parent="1" source="http" target="transient">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="420" y="710"/><mxPoint x="420" y="760"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="non-retryable" style="html=1;rounded=0;" edge="1" parent="1" source="http" target="fatal">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="580" y="680"/><mxPoint x="620" y="680"/><mxPoint x="620" y="680"/><mxPoint x="620" y="680"/><mxPoint x="620" y="760"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="classify" style="html=1;rounded=0;" edge="1" parent="1" source="transient" target="backoff">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="480" y="840"/><mxPoint x="480" y="860"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="retry" style="html=1;rounded=0;" edge="1" parent="1" source="backoff" target="http">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="540" y="810"/><mxPoint x="540" y="690"/><mxPoint x="540" y="690"/><mxPoint x="540" y="690"/><mxPoint x="540" y="690"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

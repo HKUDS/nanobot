@@ -1,0 +1,103 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="group_0" value="Channel 实现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="6" y="236" width="748" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_1" value="Tool 实现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="536" y="706" width="298" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_2" value="扩展资产" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="846" y="6" width="508" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_3" value="运行时" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="346" y="366" width="278" height="328" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_4" value="配置与发现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="326" y="6" width="508" height="228" as="geometry"/>
+        </mxCell>
+        <mxCell id="config" value="Config&#xa;channels / MCP / skills" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_4">
+          <mxGeometry x="154" y="24" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="channelreg" value="Channel registry&#xa;pkgutil + entry points" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="134" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="toolloader" value="Tool loader&#xa;module scan + plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_4">
+          <mxGeometry x="264" y="134" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="skills" value="Built-in Skills&#xa;cron / github / image-generation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcp" value="MCP servers&#xa;外部工具协议" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_2">
+          <mxGeometry x="274" y="24" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="telegram" value="TelegramChannel&#xa;外部聊天平台" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="websocket" value="WebSocketChannel&#xa;WebUI runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_0">
+          <mxGeometry x="264" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="custom" value="Custom Channel&#xa;BaseChannel contract" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_0">
+          <mxGeometry x="504" y="24" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="tools" value="Tool objects&#xa;name / description / parameters / execute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="manager" value="ChannelManager&#xa;启动、停止、路由事件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="24" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="bus" value="MessageBus&#xa;统一事件契约" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_3">
+          <mxGeometry x="34" y="134" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="agent" value="AgentLoop&#xa;消费事件并调用扩展" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="234" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="enabled channels" style="html=1;rounded=0;" edge="1" parent="1" source="config" target="channelreg">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="530" y="100"/><mxPoint x="530" y="130"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="enabled tools" style="html=1;rounded=0;" edge="1" parent="1" source="config" target="toolloader">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="640" y="100"/><mxPoint x="640" y="130"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="discover" style="html=1;rounded=0;" edge="1" parent="1" source="channelreg" target="telegram">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="170"/><mxPoint x="140" y="170"/><mxPoint x="140" y="170"/><mxPoint x="140" y="170"/><mxPoint x="140" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="discover" style="html=1;rounded=0;" edge="1" parent="1" source="channelreg" target="websocket">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="420" y="210"/><mxPoint x="420" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="discover" style="html=1;rounded=0;" edge="1" parent="1" source="channelreg" target="custom">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="540" y="210"/><mxPoint x="540" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="register" style="html=1;rounded=0;" edge="1" parent="1" source="toolloader" target="tools">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="770" y="210"/><mxPoint x="770" y="720"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="skill metadata" style="html=1;rounded=0;" edge="1" parent="1" source="skills" target="toolloader">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="810" y="70"/><mxPoint x="750" y="70"/><mxPoint x="750" y="70"/><mxPoint x="750" y="70"/><mxPoint x="750" y="130"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="remote tools" style="html=1;rounded=0;" edge="1" parent="1" source="mcp" target="toolloader">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1220" y="130"/><mxPoint x="1220" y="170"/><mxPoint x="1220" y="170"/><mxPoint x="1220" y="170"/><mxPoint x="820" y="170"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="lifecycle" style="html=1;rounded=0;" edge="1" parent="1" source="telegram" target="manager">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="140" y="370"/><mxPoint x="140" y="430"/><mxPoint x="140" y="430"/><mxPoint x="140" y="430"/><mxPoint x="350" y="430"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="lifecycle" style="html=1;rounded=0;" edge="1" parent="1" source="websocket" target="manager">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="330"/><mxPoint x="430" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="lifecycle" style="html=1;rounded=0;" edge="1" parent="1" source="custom" target="manager">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="550" y="330"/><mxPoint x="550" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="publish/consume" style="html=1;rounded=0;" edge="1" parent="1" source="manager" target="bus">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="480" y="460"/><mxPoint x="480" y="480"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="events" style="html=1;rounded=0;" edge="1" parent="1" source="bus" target="agent">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="480" y="570"/><mxPoint x="480" y="590"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="tool calls" style="html=1;rounded=0;" edge="1" parent="1" source="agent" target="tools">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="580" y="670"/><mxPoint x="580" y="720"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

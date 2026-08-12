@@ -1,0 +1,33 @@
+{
+  "direction": "LR",
+  "nodes": [
+    {"id":"config","label":"Config\nchannels / MCP / skills","group":"配置与发现","width":200,"height":70},
+    {"id":"channelreg","label":"Channel registry\npkgutil + entry points","group":"配置与发现","width":220,"height":70},
+    {"id":"toolloader","label":"Tool loader\nmodule scan + plugins","group":"配置与发现","width":220,"height":70},
+    {"id":"skills","label":"Built-in Skills\ncron / github / image-generation","group":"扩展资产","width":230,"height":70},
+    {"id":"mcp","label":"MCP servers\n外部工具协议","group":"扩展资产","width":210,"height":70},
+    {"id":"telegram","label":"TelegramChannel\n外部聊天平台","group":"Channel 实现","width":220,"height":70},
+    {"id":"websocket","label":"WebSocketChannel\nWebUI runtime","group":"Channel 实现","width":220,"height":70},
+    {"id":"custom","label":"Custom Channel\nBaseChannel contract","group":"Channel 实现","width":220,"height":70},
+    {"id":"tools","label":"Tool objects\nname / description / parameters / execute","group":"Tool 实现","width":250,"height":70},
+    {"id":"manager","label":"ChannelManager\n启动、停止、路由事件","group":"运行时","width":230,"height":70},
+    {"id":"bus","label":"MessageBus\n统一事件契约","group":"运行时","width":210,"height":70},
+    {"id":"agent","label":"AgentLoop\n消费事件并调用扩展","group":"运行时","width":220,"height":70}
+  ],
+  "edges": [
+    {"source":"config","target":"channelreg","label":"enabled channels"},
+    {"source":"config","target":"toolloader","label":"enabled tools"},
+    {"source":"channelreg","target":"telegram","label":"discover"},
+    {"source":"channelreg","target":"websocket","label":"discover"},
+    {"source":"channelreg","target":"custom","label":"discover"},
+    {"source":"toolloader","target":"tools","label":"register"},
+    {"source":"skills","target":"toolloader","label":"skill metadata"},
+    {"source":"mcp","target":"toolloader","label":"remote tools"},
+    {"source":"telegram","target":"manager","label":"lifecycle"},
+    {"source":"websocket","target":"manager","label":"lifecycle"},
+    {"source":"custom","target":"manager","label":"lifecycle"},
+    {"source":"manager","target":"bus","label":"publish/consume"},
+    {"source":"bus","target":"agent","label":"events"},
+    {"source":"agent","target":"tools","label":"tool calls"}
+  ]
+}

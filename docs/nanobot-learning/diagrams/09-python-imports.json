@@ -1,0 +1,3641 @@
+{
+  "direction": "TB",
+  "nodes": [
+    {
+      "id": "nanobot.nanobot",
+      "label": "nanobot"
+    },
+    {
+      "id": "nanobot.process_runtime",
+      "label": "process_runtime"
+    },
+    {
+      "id": "nanobot.optional_features",
+      "label": "optional_features"
+    },
+    {
+      "id": "nanobot.runtime_context",
+      "label": "runtime_context"
+    },
+    {
+      "id": "nanobot",
+      "label": "nanobot"
+    },
+    {
+      "id": "nanobot.config_base",
+      "label": "config_base"
+    },
+    {
+      "id": "nanobot.__main__",
+      "label": "__main__"
+    },
+    {
+      "id": "nanobot.pairing.store",
+      "label": "pairing.store",
+      "group": "pairing"
+    },
+    {
+      "id": "nanobot.pairing",
+      "label": "pairing"
+    },
+    {
+      "id": "nanobot.config.paths",
+      "label": "config.paths",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.config",
+      "label": "config"
+    },
+    {
+      "id": "nanobot.config.loader",
+      "label": "config.loader",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.config.errors",
+      "label": "config.errors",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.config.watcher",
+      "label": "config.watcher",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.config.timezone",
+      "label": "config.timezone",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.config.schema",
+      "label": "config.schema",
+      "group": "config"
+    },
+    {
+      "id": "nanobot.security.workspace_access",
+      "label": "security.workspace_access",
+      "group": "security"
+    },
+    {
+      "id": "nanobot.security.workspace_policy",
+      "label": "security.workspace_policy",
+      "group": "security"
+    },
+    {
+      "id": "nanobot.security",
+      "label": "security"
+    },
+    {
+      "id": "nanobot.security.network",
+      "label": "security.network",
+      "group": "security"
+    },
+    {
+      "id": "nanobot.triggers.local_types",
+      "label": "triggers.local_types",
+      "group": "triggers"
+    },
+    {
+      "id": "nanobot.triggers.local_store",
+      "label": "triggers.local_store",
+      "group": "triggers"
+    },
+    {
+      "id": "nanobot.triggers",
+      "label": "triggers"
+    },
+    {
+      "id": "nanobot.triggers.local_runner",
+      "label": "triggers.local_runner",
+      "group": "triggers"
+    },
+    {
+      "id": "nanobot.triggers.local_session_turns",
+      "label": "triggers.local_session_turns",
+      "group": "triggers"
+    },
+    {
+      "id": "nanobot.triggers.local_turns",
+      "label": "triggers.local_turns",
+      "group": "triggers"
+    },
+    {
+      "id": "nanobot.web",
+      "label": "web"
+    },
+    {
+      "id": "nanobot.providers.image_generation",
+      "label": "providers.image_generation",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.transcription",
+      "label": "providers.transcription",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.unconfigured_provider",
+      "label": "providers.unconfigured_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.registry",
+      "label": "providers.registry",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.bedrock_provider",
+      "label": "providers.bedrock_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.openai_codex_oauth",
+      "label": "providers.openai_codex_oauth",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.xai_oauth",
+      "label": "providers.xai_oauth",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers",
+      "label": "providers"
+    },
+    {
+      "id": "nanobot.providers.openai_compat_provider",
+      "label": "providers.openai_compat_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.github_copilot_provider",
+      "label": "providers.github_copilot_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.factory",
+      "label": "providers.factory",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.oauth_guidance",
+      "label": "providers.oauth_guidance",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.xai_grok_provider",
+      "label": "providers.xai_grok_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.conversation_state",
+      "label": "providers.conversation_state",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.azure_openai_provider",
+      "label": "providers.azure_openai_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.openai_codex_provider",
+      "label": "providers.openai_codex_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.fallback_provider",
+      "label": "providers.fallback_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.anthropic_provider",
+      "label": "providers.anthropic_provider",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.base",
+      "label": "providers.base",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.openai_responses.parsing",
+      "label": "providers.openai_responses.parsing",
+      "group": "providers/openai_responses"
+    },
+    {
+      "id": "nanobot.providers.openai_responses",
+      "label": "providers.openai_responses",
+      "group": "providers"
+    },
+    {
+      "id": "nanobot.providers.openai_responses.converters",
+      "label": "providers.openai_responses.converters",
+      "group": "providers/openai_responses"
+    },
+    {
+      "id": "nanobot.providers.openai_responses.state",
+      "label": "providers.openai_responses.state",
+      "group": "providers/openai_responses"
+    },
+    {
+      "id": "nanobot.bus.queue",
+      "label": "bus.queue",
+      "group": "bus"
+    },
+    {
+      "id": "nanobot.bus.outbound_events",
+      "label": "bus.outbound_events",
+      "group": "bus"
+    },
+    {
+      "id": "nanobot.bus.events",
+      "label": "bus.events",
+      "group": "bus"
+    },
+    {
+      "id": "nanobot.bus",
+      "label": "bus"
+    },
+    {
+      "id": "nanobot.bus.runtime_events",
+      "label": "bus.runtime_events",
+      "group": "bus"
+    },
+    {
+      "id": "nanobot.bus.progress",
+      "label": "bus.progress",
+      "group": "bus"
+    },
+    {
+      "id": "nanobot.utils.dict_keys",
+      "label": "utils.dict_keys",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.gitstore",
+      "label": "utils.gitstore",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.media_decode",
+      "label": "utils.media_decode",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.subagent_channel_display",
+      "label": "utils.subagent_channel_display",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.cancellation",
+      "label": "utils.cancellation",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.workspace_prompts",
+      "label": "utils.workspace_prompts",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.run_records",
+      "label": "utils.run_records",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.prompt_templates",
+      "label": "utils.prompt_templates",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.logging_bridge",
+      "label": "utils.logging_bridge",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils",
+      "label": "utils"
+    },
+    {
+      "id": "nanobot.utils.file_edit_events",
+      "label": "utils.file_edit_events",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.runtime",
+      "label": "utils.runtime",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.restart",
+      "label": "utils.restart",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.document",
+      "label": "utils.document",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.searchusage",
+      "label": "utils.searchusage",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.artifacts",
+      "label": "utils.artifacts",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.tool_hints",
+      "label": "utils.tool_hints",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.path",
+      "label": "utils.path",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.helpers",
+      "label": "utils.helpers",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.evaluator",
+      "label": "utils.evaluator",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.llm_runtime",
+      "label": "utils.llm_runtime",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.utils.progress_events",
+      "label": "utils.progress_events",
+      "group": "utils"
+    },
+    {
+      "id": "nanobot.agent.progress_hook",
+      "label": "agent.progress_hook",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.runner",
+      "label": "agent.runner",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.subagent",
+      "label": "agent.subagent",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.skills",
+      "label": "agent.skills",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.memory",
+      "label": "agent.memory",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.goal_permission",
+      "label": "agent.goal_permission",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.hook",
+      "label": "agent.hook",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent",
+      "label": "agent"
+    },
+    {
+      "id": "nanobot.agent.cron_turns",
+      "label": "agent.cron_turns",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.autocompact",
+      "label": "agent.autocompact",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.context",
+      "label": "agent.context",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.turn_delivery",
+      "label": "agent.turn_delivery",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.loop",
+      "label": "agent.loop",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.context_governance",
+      "label": "agent.context_governance",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.automation_turns",
+      "label": "agent.automation_turns",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.turn_hooks",
+      "label": "agent.turn_hooks",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.model_presets",
+      "label": "agent.model_presets",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.model_runtime",
+      "label": "agent.model_runtime",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.tools.image_generation",
+      "label": "agent.tools.image_generation",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.sessions",
+      "label": "agent.tools.sessions",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.web",
+      "label": "agent.tools.web",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.exec_session",
+      "label": "agent.tools.exec_session",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.apply_patch",
+      "label": "agent.tools.apply_patch",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.registry",
+      "label": "agent.tools.registry",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.cron",
+      "label": "agent.tools.cron",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.filesystem",
+      "label": "agent.tools.filesystem",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.shell",
+      "label": "agent.tools.shell",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools",
+      "label": "agent.tools",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.agent.tools.message",
+      "label": "agent.tools.message",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.runtime_state",
+      "label": "agent.tools.runtime_state",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.self",
+      "label": "agent.tools.self",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.sandbox",
+      "label": "agent.tools.sandbox",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.context",
+      "label": "agent.tools.context",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.mcp",
+      "label": "agent.tools.mcp",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.loader",
+      "label": "agent.tools.loader",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.long_task",
+      "label": "agent.tools.long_task",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.spawn",
+      "label": "agent.tools.spawn",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.search",
+      "label": "agent.tools.search",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.cli_apps",
+      "label": "agent.tools.cli_apps",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.file_state",
+      "label": "agent.tools.file_state",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.base",
+      "label": "agent.tools.base",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.path_utils",
+      "label": "agent.tools.path_utils",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.tools.schema",
+      "label": "agent.tools.schema",
+      "group": "agent/tools"
+    },
+    {
+      "id": "nanobot.agent.hooks.file_edit_activity",
+      "label": "agent.hooks.file_edit_activity",
+      "group": "agent/hooks"
+    },
+    {
+      "id": "nanobot.agent.hooks",
+      "label": "agent.hooks",
+      "group": "agent"
+    },
+    {
+      "id": "nanobot.cli.gateway_runtime",
+      "label": "cli.gateway_runtime",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.onboard",
+      "label": "cli.onboard",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.runtime_config",
+      "label": "cli.runtime_config",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.gateway",
+      "label": "cli.gateway",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.models",
+      "label": "cli.models",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.provider",
+      "label": "cli.provider",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.terminal",
+      "label": "cli.terminal",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.webui",
+      "label": "cli.webui",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.webui_support",
+      "label": "cli.webui_support",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli",
+      "label": "cli"
+    },
+    {
+      "id": "nanobot.cli.stream",
+      "label": "cli.stream",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.agent",
+      "label": "cli.agent",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.log_control",
+      "label": "cli.log_control",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.cli.commands",
+      "label": "cli.commands",
+      "group": "cli"
+    },
+    {
+      "id": "nanobot.audio.transcription",
+      "label": "audio.transcription",
+      "group": "audio"
+    },
+    {
+      "id": "nanobot.audio.transcription_registry",
+      "label": "audio.transcription_registry",
+      "group": "audio"
+    },
+    {
+      "id": "nanobot.audio",
+      "label": "audio"
+    },
+    {
+      "id": "nanobot.sdk",
+      "label": "sdk"
+    },
+    {
+      "id": "nanobot.sdk.types",
+      "label": "sdk.types",
+      "group": "sdk"
+    },
+    {
+      "id": "nanobot.sdk.runtime",
+      "label": "sdk.runtime",
+      "group": "sdk"
+    },
+    {
+      "id": "nanobot.sdk.clients",
+      "label": "sdk.clients",
+      "group": "sdk"
+    },
+    {
+      "id": "nanobot.sdk.streaming",
+      "label": "sdk.streaming",
+      "group": "sdk"
+    },
+    {
+      "id": "nanobot.api.server",
+      "label": "api.server",
+      "group": "api"
+    },
+    {
+      "id": "nanobot.api",
+      "label": "api"
+    },
+    {
+      "id": "nanobot.api.runtime",
+      "label": "api.runtime",
+      "group": "api"
+    },
+    {
+      "id": "nanobot.templates",
+      "label": "templates"
+    },
+    {
+      "id": "nanobot.templates.memory",
+      "label": "templates.memory",
+      "group": "templates"
+    },
+    {
+      "id": "nanobot.webui.file_preview",
+      "label": "webui.file_preview",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.build",
+      "label": "webui.build",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.settings_routes",
+      "label": "webui.settings_routes",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.websocket_logging",
+      "label": "webui.websocket_logging",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.gateway_services",
+      "label": "webui.gateway_services",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.ws_http",
+      "label": "webui.ws_http",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.session_list_index",
+      "label": "webui.session_list_index",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.metadata",
+      "label": "webui.metadata",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.gateway_tokens",
+      "label": "webui.gateway_tokens",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.settings_api",
+      "label": "webui.settings_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.transcript",
+      "label": "webui.transcript",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.attachment_ingress",
+      "label": "webui.attachment_ingress",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.transcription_ws",
+      "label": "webui.transcription_ws",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.nanobot_features_api",
+      "label": "webui.nanobot_features_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.mcp_presets_api",
+      "label": "webui.mcp_presets_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.ingress_policy",
+      "label": "webui.ingress_policy",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.session_access",
+      "label": "webui.session_access",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui",
+      "label": "webui"
+    },
+    {
+      "id": "nanobot.webui.forking",
+      "label": "webui.forking",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.mcp_presets_runtime",
+      "label": "webui.mcp_presets_runtime",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.sidebar_state",
+      "label": "webui.sidebar_state",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.thread_disk",
+      "label": "webui.thread_disk",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.http_utils",
+      "label": "webui.http_utils",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.media_api",
+      "label": "webui.media_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.cli_apps_api",
+      "label": "webui.cli_apps_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.token_usage",
+      "label": "webui.token_usage",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.version_check",
+      "label": "webui.version_check",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.skills_api",
+      "label": "webui.skills_api",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.dev",
+      "label": "webui.dev",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.media_gateway",
+      "label": "webui.media_gateway",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.skills_marketplace",
+      "label": "webui.skills_marketplace",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.session_automations",
+      "label": "webui.session_automations",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.webui.workspaces",
+      "label": "webui.workspaces",
+      "group": "webui"
+    },
+    {
+      "id": "nanobot.skills.skill-creator.scripts.init_skill",
+      "label": "skills.skill-creator.scripts.init_skill",
+      "group": "skills/skill-creator/scripts"
+    },
+    {
+      "id": "nanobot.skills.skill-creator.scripts.package_skill",
+      "label": "skills.skill-creator.scripts.package_skill",
+      "group": "skills/skill-creator/scripts"
+    },
+    {
+      "id": "nanobot.skills.skill-creator.scripts.quick_validate",
+      "label": "skills.skill-creator.scripts.quick_validate",
+      "group": "skills/skill-creator/scripts"
+    },
+    {
+      "id": "nanobot.command",
+      "label": "command"
+    },
+    {
+      "id": "nanobot.command.builtin",
+      "label": "command.builtin",
+      "group": "command"
+    },
+    {
+      "id": "nanobot.command.router",
+      "label": "command.router",
+      "group": "command"
+    },
+    {
+      "id": "nanobot.apps.protocol",
+      "label": "apps.protocol",
+      "group": "apps"
+    },
+    {
+      "id": "nanobot.apps",
+      "label": "apps"
+    },
+    {
+      "id": "nanobot.apps.cli.service",
+      "label": "apps.cli.service",
+      "group": "apps/cli"
+    },
+    {
+      "id": "nanobot.apps.cli",
+      "label": "apps.cli",
+      "group": "apps"
+    },
+    {
+      "id": "nanobot.apps.cli.utils",
+      "label": "apps.cli.utils",
+      "group": "apps/cli"
+    },
+    {
+      "id": "nanobot.gateway.service",
+      "label": "gateway.service",
+      "group": "gateway"
+    },
+    {
+      "id": "nanobot.gateway",
+      "label": "gateway"
+    },
+    {
+      "id": "nanobot.gateway.runtime",
+      "label": "gateway.runtime",
+      "group": "gateway"
+    },
+    {
+      "id": "nanobot.cron.service",
+      "label": "cron.service",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.cron.session_turns",
+      "label": "cron.session_turns",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.cron.bound_runner",
+      "label": "cron.bound_runner",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.cron",
+      "label": "cron"
+    },
+    {
+      "id": "nanobot.cron.types",
+      "label": "cron.types",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.cron.webui_metadata",
+      "label": "cron.webui_metadata",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.cron.session_delivery",
+      "label": "cron.session_delivery",
+      "group": "cron"
+    },
+    {
+      "id": "nanobot.channels._manifest",
+      "label": "channels._manifest",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.connect",
+      "label": "channels.connect",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.registry",
+      "label": "channels.registry",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels",
+      "label": "channels"
+    },
+    {
+      "id": "nanobot.channels.contracts",
+      "label": "channels.contracts",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.plugin",
+      "label": "channels.plugin",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.manager",
+      "label": "channels.manager",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.base",
+      "label": "channels.base",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels._setup",
+      "label": "channels._setup",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.validation",
+      "label": "channels.validation",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.dingtalk.manifest",
+      "label": "channels.dingtalk.manifest",
+      "group": "channels/dingtalk"
+    },
+    {
+      "id": "nanobot.channels.dingtalk",
+      "label": "channels.dingtalk",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.dingtalk.runtime",
+      "label": "channels.dingtalk.runtime",
+      "group": "channels/dingtalk"
+    },
+    {
+      "id": "nanobot.channels.dingtalk.tests.test_dingtalk_channel",
+      "label": "channels.dingtalk.tests.test_dingtalk_channel",
+      "group": "channels/dingtalk/tests"
+    },
+    {
+      "id": "nanobot.channels.dingtalk.tests.test_validation",
+      "label": "channels.dingtalk.tests.test_validation",
+      "group": "channels/dingtalk/tests"
+    },
+    {
+      "id": "nanobot.channels.dingtalk.tests",
+      "label": "channels.dingtalk.tests",
+      "group": "channels/dingtalk"
+    },
+    {
+      "id": "nanobot.channels.websocket.manifest",
+      "label": "channels.websocket.manifest",
+      "group": "channels/websocket"
+    },
+    {
+      "id": "nanobot.channels.websocket",
+      "label": "channels.websocket",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.websocket.runtime",
+      "label": "channels.websocket.runtime",
+      "group": "channels/websocket"
+    },
+    {
+      "id": "nanobot.channels.websocket.validation",
+      "label": "channels.websocket.validation",
+      "group": "channels/websocket"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests",
+      "label": "channels.websocket.tests",
+      "group": "channels/websocket"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_envelope_media",
+      "label": "channels.websocket.tests.test_websocket_envelope_media",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_protocol_boundaries",
+      "label": "channels.websocket.tests.test_websocket_protocol_boundaries",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_channel",
+      "label": "channels.websocket.tests.test_websocket_channel",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_http_routes",
+      "label": "channels.websocket.tests.test_websocket_http_routes",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_integration",
+      "label": "channels.websocket.tests.test_websocket_integration",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_media_route",
+      "label": "channels.websocket.tests.test_websocket_media_route",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.ws_test_client",
+      "label": "channels.websocket.tests.ws_test_client",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.websocket.tests.test_websocket_reconnect_idle",
+      "label": "channels.websocket.tests.test_websocket_reconnect_idle",
+      "group": "channels/websocket/tests"
+    },
+    {
+      "id": "nanobot.channels.napcat.manifest",
+      "label": "channels.napcat.manifest",
+      "group": "channels/napcat"
+    },
+    {
+      "id": "nanobot.channels.napcat",
+      "label": "channels.napcat",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.napcat.runtime",
+      "label": "channels.napcat.runtime",
+      "group": "channels/napcat"
+    },
+    {
+      "id": "nanobot.channels.napcat.tests.test_napcat_channel",
+      "label": "channels.napcat.tests.test_napcat_channel",
+      "group": "channels/napcat/tests"
+    },
+    {
+      "id": "nanobot.channels.napcat.tests",
+      "label": "channels.napcat.tests",
+      "group": "channels/napcat"
+    },
+    {
+      "id": "nanobot.channels.discord.manifest",
+      "label": "channels.discord.manifest",
+      "group": "channels/discord"
+    },
+    {
+      "id": "nanobot.channels.discord",
+      "label": "channels.discord",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.discord.runtime",
+      "label": "channels.discord.runtime",
+      "group": "channels/discord"
+    },
+    {
+      "id": "nanobot.channels.discord.validation",
+      "label": "channels.discord.validation",
+      "group": "channels/discord"
+    },
+    {
+      "id": "nanobot.channels.discord.tests.test_discord_channel",
+      "label": "channels.discord.tests.test_discord_channel",
+      "group": "channels/discord/tests"
+    },
+    {
+      "id": "nanobot.channels.discord.tests",
+      "label": "channels.discord.tests",
+      "group": "channels/discord"
+    },
+    {
+      "id": "nanobot.channels.feishu.config",
+      "label": "channels.feishu.config",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.manifest",
+      "label": "channels.feishu.manifest",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.connect",
+      "label": "channels.feishu.connect",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.instances",
+      "label": "channels.feishu.instances",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu",
+      "label": "channels.feishu",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.feishu.runtime",
+      "label": "channels.feishu.runtime",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.websocket",
+      "label": "channels.feishu.websocket",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.validation",
+      "label": "channels.feishu.validation",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_post_content",
+      "label": "channels.feishu.tests.test_feishu_post_content",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_domain",
+      "label": "channels.feishu.tests.test_feishu_domain",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_mention",
+      "label": "channels.feishu.tests.test_feishu_mention",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_connect",
+      "label": "channels.feishu.tests.test_connect",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_table_split",
+      "label": "channels.feishu.tests.test_feishu_table_split",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_reaction",
+      "label": "channels.feishu.tests.test_feishu_reaction",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_card_extraction",
+      "label": "channels.feishu.tests.test_feishu_card_extraction",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_streaming",
+      "label": "channels.feishu.tests.test_feishu_streaming",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests",
+      "label": "channels.feishu.tests",
+      "group": "channels/feishu"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_tool_hint_code_block",
+      "label": "channels.feishu.tests.test_feishu_tool_hint_code_block",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_ws",
+      "label": "channels.feishu.tests.test_feishu_ws",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_mentions",
+      "label": "channels.feishu.tests.test_feishu_mentions",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_lazy_import",
+      "label": "channels.feishu.tests.test_feishu_lazy_import",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_login",
+      "label": "channels.feishu.tests.test_feishu_login",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_reply",
+      "label": "channels.feishu.tests.test_feishu_reply",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_markdown_rendering",
+      "label": "channels.feishu.tests.test_feishu_markdown_rendering",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.feishu.tests.test_feishu_media_filename_security",
+      "label": "channels.feishu.tests.test_feishu_media_filename_security",
+      "group": "channels/feishu/tests"
+    },
+    {
+      "id": "nanobot.channels.wecom.manifest",
+      "label": "channels.wecom.manifest",
+      "group": "channels/wecom"
+    },
+    {
+      "id": "nanobot.channels.wecom",
+      "label": "channels.wecom",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.wecom.runtime",
+      "label": "channels.wecom.runtime",
+      "group": "channels/wecom"
+    },
+    {
+      "id": "nanobot.channels.wecom.tests",
+      "label": "channels.wecom.tests",
+      "group": "channels/wecom"
+    },
+    {
+      "id": "nanobot.channels.wecom.tests.test_wecom_channel",
+      "label": "channels.wecom.tests.test_wecom_channel",
+      "group": "channels/wecom/tests"
+    },
+    {
+      "id": "nanobot.channels.msteams.manifest",
+      "label": "channels.msteams.manifest",
+      "group": "channels/msteams"
+    },
+    {
+      "id": "nanobot.channels.msteams",
+      "label": "channels.msteams",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.msteams.runtime",
+      "label": "channels.msteams.runtime",
+      "group": "channels/msteams"
+    },
+    {
+      "id": "nanobot.channels.msteams.tests",
+      "label": "channels.msteams.tests",
+      "group": "channels/msteams"
+    },
+    {
+      "id": "nanobot.channels.msteams.tests.test_msteams",
+      "label": "channels.msteams.tests.test_msteams",
+      "group": "channels/msteams/tests"
+    },
+    {
+      "id": "nanobot.channels.weixin.manifest",
+      "label": "channels.weixin.manifest",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin.connect",
+      "label": "channels.weixin.connect",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin",
+      "label": "channels.weixin",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.weixin.runtime",
+      "label": "channels.weixin.runtime",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin.state",
+      "label": "channels.weixin.state",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin.validation",
+      "label": "channels.weixin.validation",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin.tests.test_connect",
+      "label": "channels.weixin.tests.test_connect",
+      "group": "channels/weixin/tests"
+    },
+    {
+      "id": "nanobot.channels.weixin.tests",
+      "label": "channels.weixin.tests",
+      "group": "channels/weixin"
+    },
+    {
+      "id": "nanobot.channels.weixin.tests.test_weixin_hardening",
+      "label": "channels.weixin.tests.test_weixin_hardening",
+      "group": "channels/weixin/tests"
+    },
+    {
+      "id": "nanobot.channels.weixin.tests.test_weixin_channel",
+      "label": "channels.weixin.tests.test_weixin_channel",
+      "group": "channels/weixin/tests"
+    },
+    {
+      "id": "nanobot.channels.telegram.manifest",
+      "label": "channels.telegram.manifest",
+      "group": "channels/telegram"
+    },
+    {
+      "id": "nanobot.channels.telegram",
+      "label": "channels.telegram",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.telegram.runtime",
+      "label": "channels.telegram.runtime",
+      "group": "channels/telegram"
+    },
+    {
+      "id": "nanobot.channels.telegram.validation",
+      "label": "channels.telegram.validation",
+      "group": "channels/telegram"
+    },
+    {
+      "id": "nanobot.channels.telegram.tests.test_validation",
+      "label": "channels.telegram.tests.test_validation",
+      "group": "channels/telegram/tests"
+    },
+    {
+      "id": "nanobot.channels.telegram.tests.test_telegram_channel",
+      "label": "channels.telegram.tests.test_telegram_channel",
+      "group": "channels/telegram/tests"
+    },
+    {
+      "id": "nanobot.channels.telegram.tests",
+      "label": "channels.telegram.tests",
+      "group": "channels/telegram"
+    },
+    {
+      "id": "nanobot.channels.mochat.manifest",
+      "label": "channels.mochat.manifest",
+      "group": "channels/mochat"
+    },
+    {
+      "id": "nanobot.channels.mochat",
+      "label": "channels.mochat",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.mochat.runtime",
+      "label": "channels.mochat.runtime",
+      "group": "channels/mochat"
+    },
+    {
+      "id": "nanobot.channels.slack.manifest",
+      "label": "channels.slack.manifest",
+      "group": "channels/slack"
+    },
+    {
+      "id": "nanobot.channels.slack",
+      "label": "channels.slack",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.slack.runtime",
+      "label": "channels.slack.runtime",
+      "group": "channels/slack"
+    },
+    {
+      "id": "nanobot.channels.slack.validation",
+      "label": "channels.slack.validation",
+      "group": "channels/slack"
+    },
+    {
+      "id": "nanobot.channels.slack.tests.test_validation",
+      "label": "channels.slack.tests.test_validation",
+      "group": "channels/slack/tests"
+    },
+    {
+      "id": "nanobot.channels.slack.tests",
+      "label": "channels.slack.tests",
+      "group": "channels/slack"
+    },
+    {
+      "id": "nanobot.channels.slack.tests.test_slack_channel",
+      "label": "channels.slack.tests.test_slack_channel",
+      "group": "channels/slack/tests"
+    },
+    {
+      "id": "nanobot.channels.mattermost.manifest",
+      "label": "channels.mattermost.manifest",
+      "group": "channels/mattermost"
+    },
+    {
+      "id": "nanobot.channels.mattermost",
+      "label": "channels.mattermost",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.mattermost.runtime",
+      "label": "channels.mattermost.runtime",
+      "group": "channels/mattermost"
+    },
+    {
+      "id": "nanobot.channels.mattermost.tests.test_mattermost_channel",
+      "label": "channels.mattermost.tests.test_mattermost_channel",
+      "group": "channels/mattermost/tests"
+    },
+    {
+      "id": "nanobot.channels.mattermost.tests",
+      "label": "channels.mattermost.tests",
+      "group": "channels/mattermost"
+    },
+    {
+      "id": "nanobot.channels.matrix.manifest",
+      "label": "channels.matrix.manifest",
+      "group": "channels/matrix"
+    },
+    {
+      "id": "nanobot.channels.matrix",
+      "label": "channels.matrix",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.matrix.runtime",
+      "label": "channels.matrix.runtime",
+      "group": "channels/matrix"
+    },
+    {
+      "id": "nanobot.channels.matrix.validation",
+      "label": "channels.matrix.validation",
+      "group": "channels/matrix"
+    },
+    {
+      "id": "nanobot.channels.matrix.tests.test_validation",
+      "label": "channels.matrix.tests.test_validation",
+      "group": "channels/matrix/tests"
+    },
+    {
+      "id": "nanobot.channels.matrix.tests",
+      "label": "channels.matrix.tests",
+      "group": "channels/matrix"
+    },
+    {
+      "id": "nanobot.channels.matrix.tests.test_matrix_channel",
+      "label": "channels.matrix.tests.test_matrix_channel",
+      "group": "channels/matrix/tests"
+    },
+    {
+      "id": "nanobot.channels.signal.manifest",
+      "label": "channels.signal.manifest",
+      "group": "channels/signal"
+    },
+    {
+      "id": "nanobot.channels.signal",
+      "label": "channels.signal",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.signal.runtime",
+      "label": "channels.signal.runtime",
+      "group": "channels/signal"
+    },
+    {
+      "id": "nanobot.channels.signal.tests.test_signal_channel",
+      "label": "channels.signal.tests.test_signal_channel",
+      "group": "channels/signal/tests"
+    },
+    {
+      "id": "nanobot.channels.signal.tests",
+      "label": "channels.signal.tests",
+      "group": "channels/signal"
+    },
+    {
+      "id": "nanobot.channels.signal.tests.test_signal_markdown",
+      "label": "channels.signal.tests.test_signal_markdown",
+      "group": "channels/signal/tests"
+    },
+    {
+      "id": "nanobot.channels.email.manifest",
+      "label": "channels.email.manifest",
+      "group": "channels/email"
+    },
+    {
+      "id": "nanobot.channels.email",
+      "label": "channels.email",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.email.runtime",
+      "label": "channels.email.runtime",
+      "group": "channels/email"
+    },
+    {
+      "id": "nanobot.channels.email.validation",
+      "label": "channels.email.validation",
+      "group": "channels/email"
+    },
+    {
+      "id": "nanobot.channels.email.tests.test_validation",
+      "label": "channels.email.tests.test_validation",
+      "group": "channels/email/tests"
+    },
+    {
+      "id": "nanobot.channels.email.tests",
+      "label": "channels.email.tests",
+      "group": "channels/email"
+    },
+    {
+      "id": "nanobot.channels.email.tests.test_email_channel",
+      "label": "channels.email.tests.test_email_channel",
+      "group": "channels/email/tests"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.manifest",
+      "label": "channels.whatsapp.manifest",
+      "group": "channels/whatsapp"
+    },
+    {
+      "id": "nanobot.channels.whatsapp",
+      "label": "channels.whatsapp",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.runtime",
+      "label": "channels.whatsapp.runtime",
+      "group": "channels/whatsapp"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.state",
+      "label": "channels.whatsapp.state",
+      "group": "channels/whatsapp"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.validation",
+      "label": "channels.whatsapp.validation",
+      "group": "channels/whatsapp"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.tests.test_whatsapp_channel",
+      "label": "channels.whatsapp.tests.test_whatsapp_channel",
+      "group": "channels/whatsapp/tests"
+    },
+    {
+      "id": "nanobot.channels.whatsapp.tests",
+      "label": "channels.whatsapp.tests",
+      "group": "channels/whatsapp"
+    },
+    {
+      "id": "nanobot.channels.qq.manifest",
+      "label": "channels.qq.manifest",
+      "group": "channels/qq"
+    },
+    {
+      "id": "nanobot.channels.qq",
+      "label": "channels.qq",
+      "group": "channels"
+    },
+    {
+      "id": "nanobot.channels.qq.runtime",
+      "label": "channels.qq.runtime",
+      "group": "channels/qq"
+    },
+    {
+      "id": "nanobot.channels.qq.tests.test_qq_channel",
+      "label": "channels.qq.tests.test_qq_channel",
+      "group": "channels/qq/tests"
+    },
+    {
+      "id": "nanobot.channels.qq.tests.test_qq_media",
+      "label": "channels.qq.tests.test_qq_media",
+      "group": "channels/qq/tests"
+    },
+    {
+      "id": "nanobot.channels.qq.tests",
+      "label": "channels.qq.tests",
+      "group": "channels/qq"
+    },
+    {
+      "id": "nanobot.channels.qq.tests.test_qq_ack_message",
+      "label": "channels.qq.tests.test_qq_ack_message",
+      "group": "channels/qq/tests"
+    },
+    {
+      "id": "nanobot.session.goal_state",
+      "label": "session.goal_state",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.turn_continuation",
+      "label": "session.turn_continuation",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.model_selection",
+      "label": "session.model_selection",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session",
+      "label": "session"
+    },
+    {
+      "id": "nanobot.session.keys",
+      "label": "session.keys",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.history_visibility",
+      "label": "session.history_visibility",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.webui_turns",
+      "label": "session.webui_turns",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.automation_turns",
+      "label": "session.automation_turns",
+      "group": "session"
+    },
+    {
+      "id": "nanobot.session.manager",
+      "label": "session.manager",
+      "group": "session"
+    }
+  ],
+  "edges": [
+    {
+      "source": "nanobot",
+      "target": "nanobot.nanobot"
+    },
+    {
+      "source": "nanobot.agent.tools.context",
+      "target": "nanobot.bus.runtime_events"
+    },
+    {
+      "source": "nanobot.bus.runtime_events",
+      "target": "nanobot.utils.llm_runtime"
+    },
+    {
+      "source": "nanobot.nanobot",
+      "target": "nanobot.agent.hooks"
+    },
+    {
+      "source": "nanobot.nanobot",
+      "target": "nanobot.sdk.clients"
+    },
+    {
+      "source": "nanobot.nanobot",
+      "target": "nanobot.sdk.runtime"
+    },
+    {
+      "source": "nanobot.nanobot",
+      "target": "nanobot.sdk.streaming"
+    },
+    {
+      "source": "nanobot.runtime_context",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.__main__",
+      "target": "nanobot.cli.commands"
+    },
+    {
+      "source": "nanobot.cli.commands",
+      "target": "nanobot.api.server"
+    },
+    {
+      "source": "nanobot.cli.commands",
+      "target": "nanobot.cli.agent"
+    },
+    {
+      "source": "nanobot.cli.commands",
+      "target": "nanobot.cli.gateway"
+    },
+    {
+      "source": "nanobot.cli.commands",
+      "target": "nanobot.cli.provider"
+    },
+    {
+      "source": "nanobot.cli.commands",
+      "target": "nanobot.cli.webui"
+    },
+    {
+      "source": "nanobot.agent",
+      "target": "nanobot.agent.context"
+    },
+    {
+      "source": "nanobot.agent.context",
+      "target": "nanobot.agent.tools.sessions"
+    },
+    {
+      "source": "nanobot.agent.hook",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.autocompact"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.tools.mcp"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.cron_turns"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.model_runtime"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.tools.message"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.turn_delivery"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.agent.turn_hooks"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.command"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.cron.service"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.session"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.session.turn_continuation"
+    },
+    {
+      "source": "nanobot.agent.loop",
+      "target": "nanobot.triggers.local_turns"
+    },
+    {
+      "source": "nanobot.agent.memory",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.agent.memory",
+      "target": "nanobot.agent.tools.apply_patch"
+    },
+    {
+      "source": "nanobot.agent.subagent",
+      "target": "nanobot.agent.runner"
+    },
+    {
+      "source": "nanobot.agent.subagent",
+      "target": "nanobot.agent.tools.loader"
+    },
+    {
+      "source": "nanobot.agent.autocompact",
+      "target": "nanobot.agent.memory"
+    },
+    {
+      "source": "nanobot.session.manager",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.session.manager",
+      "target": "nanobot.utils.subagent_channel_display"
+    },
+    {
+      "source": "nanobot.utils.llm_runtime",
+      "target": "nanobot.providers.factory"
+    },
+    {
+      "source": "nanobot.agent.automation_turns",
+      "target": "nanobot.bus.events"
+    },
+    {
+      "source": "nanobot.bus.events",
+      "target": "nanobot.bus.outbound_events"
+    },
+    {
+      "source": "nanobot.agent.tools",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.image_generation",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.image_generation",
+      "target": "nanobot.providers.image_generation"
+    },
+    {
+      "source": "nanobot.agent.tools.mcp",
+      "target": "nanobot.agent.tools.registry"
+    },
+    {
+      "source": "nanobot.agent.tools.mcp",
+      "target": "nanobot.utils.cancellation"
+    },
+    {
+      "source": "nanobot.agent.tools.mcp",
+      "target": "nanobot.utils.artifacts"
+    },
+    {
+      "source": "nanobot.agent.tools.registry",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.sessions",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.sessions",
+      "target": "nanobot.webui.session_access"
+    },
+    {
+      "source": "nanobot.apps.cli",
+      "target": "nanobot.apps.cli.service"
+    },
+    {
+      "source": "nanobot.apps.cli.utils",
+      "target": "nanobot.apps.cli"
+    },
+    {
+      "source": "nanobot.utils.helpers",
+      "target": "nanobot.utils.gitstore"
+    },
+    {
+      "source": "nanobot.agent.context_governance",
+      "target": "nanobot.agent.tools.registry"
+    },
+    {
+      "source": "nanobot.providers.base",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.utils.runtime",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.agent.cron_turns",
+      "target": "nanobot.agent.automation_turns"
+    },
+    {
+      "source": "nanobot.agent.cron_turns",
+      "target": "nanobot.cron.session_turns"
+    },
+    {
+      "source": "nanobot.cron.session_turns",
+      "target": "nanobot.session.automation_turns"
+    },
+    {
+      "source": "nanobot.cron.session_turns",
+      "target": "nanobot.cron.types"
+    },
+    {
+      "source": "nanobot.agent.hooks",
+      "target": "nanobot.agent.hooks.file_edit_activity"
+    },
+    {
+      "source": "nanobot.agent.hooks.file_edit_activity",
+      "target": "nanobot.utils.file_edit_events"
+    },
+    {
+      "source": "nanobot.agent.hooks.file_edit_activity",
+      "target": "nanobot.utils.progress_events"
+    },
+    {
+      "source": "nanobot.utils.progress_events",
+      "target": "nanobot.agent.hook"
+    },
+    {
+      "source": "nanobot.agent.model_presets",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.agent.model_runtime",
+      "target": "nanobot.agent"
+    },
+    {
+      "source": "nanobot.agent.model_runtime",
+      "target": "nanobot.agent.model_presets"
+    },
+    {
+      "source": "nanobot.agent.runner",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.agent.runner",
+      "target": "nanobot.agent.context_governance"
+    },
+    {
+      "source": "nanobot.agent.runner",
+      "target": "nanobot.utils.runtime"
+    },
+    {
+      "source": "nanobot.agent.runner",
+      "target": "nanobot.providers.conversation_state"
+    },
+    {
+      "source": "nanobot.agent.tools.exec_session",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.loader",
+      "target": "nanobot.agent.tools"
+    },
+    {
+      "source": "nanobot.agent.tools.message",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.self",
+      "target": "nanobot.agent.tools.runtime_state"
+    },
+    {
+      "source": "nanobot.agent.turn_delivery",
+      "target": "nanobot.bus.runtime_events"
+    },
+    {
+      "source": "nanobot.agent.turn_delivery",
+      "target": "nanobot.bus.progress"
+    },
+    {
+      "source": "nanobot.agent.turn_hooks",
+      "target": "nanobot.agent.progress_hook"
+    },
+    {
+      "source": "nanobot.bus.outbound_events",
+      "target": "nanobot.bus.events"
+    },
+    {
+      "source": "nanobot.bus.queue",
+      "target": "nanobot.bus.events"
+    },
+    {
+      "source": "nanobot.command",
+      "target": "nanobot.command.builtin"
+    },
+    {
+      "source": "nanobot.config.schema",
+      "target": "nanobot.agent.tools.image_generation"
+    },
+    {
+      "source": "nanobot.config.schema",
+      "target": "nanobot.agent.tools.self"
+    },
+    {
+      "source": "nanobot.config.schema",
+      "target": "nanobot.agent.tools.cli_apps"
+    },
+    {
+      "source": "nanobot.config.schema",
+      "target": "nanobot.config.timezone"
+    },
+    {
+      "source": "nanobot.cron.service",
+      "target": "nanobot.cron.session_turns"
+    },
+    {
+      "source": "nanobot.cron.service",
+      "target": "nanobot.utils.run_records"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.fallback_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.github_copilot_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.anthropic_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.azure_openai_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.bedrock_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.openai_codex_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.xai_grok_provider"
+    },
+    {
+      "source": "nanobot.providers.factory",
+      "target": "nanobot.providers.unconfigured_provider"
+    },
+    {
+      "source": "nanobot.session",
+      "target": "nanobot.session.manager"
+    },
+    {
+      "source": "nanobot.session.automation_turns",
+      "target": "nanobot.cron.session_turns"
+    },
+    {
+      "source": "nanobot.session.automation_turns",
+      "target": "nanobot.triggers.local_session_turns"
+    },
+    {
+      "source": "nanobot.session.goal_state",
+      "target": "nanobot.session.manager"
+    },
+    {
+      "source": "nanobot.session.history_visibility",
+      "target": "nanobot.session.automation_turns"
+    },
+    {
+      "source": "nanobot.session.turn_continuation",
+      "target": "nanobot.agent.loop"
+    },
+    {
+      "source": "nanobot.session.turn_continuation",
+      "target": "nanobot.session.goal_state"
+    },
+    {
+      "source": "nanobot.triggers.local_store",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.triggers.local_store",
+      "target": "nanobot.utils.run_records"
+    },
+    {
+      "source": "nanobot.triggers.local_store",
+      "target": "nanobot.triggers.local_types"
+    },
+    {
+      "source": "nanobot.triggers.local_turns",
+      "target": "nanobot.agent.automation_turns"
+    },
+    {
+      "source": "nanobot.triggers.local_turns",
+      "target": "nanobot.triggers.local_session_turns"
+    },
+    {
+      "source": "nanobot.utils.document",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.agent.tools.apply_patch",
+      "target": "nanobot.agent.tools.filesystem"
+    },
+    {
+      "source": "nanobot.agent.tools.filesystem",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.filesystem",
+      "target": "nanobot.agent.skills"
+    },
+    {
+      "source": "nanobot.agent.tools.filesystem",
+      "target": "nanobot.agent.tools.file_state"
+    },
+    {
+      "source": "nanobot.agent.tools.filesystem",
+      "target": "nanobot.utils.document"
+    },
+    {
+      "source": "nanobot.agent.tools.filesystem",
+      "target": "nanobot.agent.tools.path_utils"
+    },
+    {
+      "source": "nanobot.utils.workspace_prompts",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.config.loader",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.config.loader",
+      "target": "nanobot.config.errors"
+    },
+    {
+      "source": "nanobot.agent.progress_hook",
+      "target": "nanobot.utils.progress_events"
+    },
+    {
+      "source": "nanobot.agent.progress_hook",
+      "target": "nanobot.utils.tool_hints"
+    },
+    {
+      "source": "nanobot.utils.tool_hints",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.utils.tool_hints",
+      "target": "nanobot.utils.path"
+    },
+    {
+      "source": "nanobot.providers.conversation_state",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.agent.tools.base",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.schema",
+      "target": "nanobot.agent.tools.base"
+    },
+    {
+      "source": "nanobot.agent.tools.cli_apps",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.cli_apps",
+      "target": "nanobot.apps.cli.utils"
+    },
+    {
+      "source": "nanobot.agent.tools.cron",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.cron.types",
+      "target": "nanobot.utils.dict_keys"
+    },
+    {
+      "source": "nanobot.agent.tools.shell",
+      "target": "nanobot.agent.tools.exec_session"
+    },
+    {
+      "source": "nanobot.agent.tools.shell",
+      "target": "nanobot.agent.tools.sandbox"
+    },
+    {
+      "source": "nanobot.agent.tools.path_utils",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.config.paths",
+      "target": "nanobot.config.loader"
+    },
+    {
+      "source": "nanobot.providers.image_generation",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.utils.artifacts",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.agent.tools.long_task",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.agent.tools.runtime_state",
+      "target": "nanobot.agent.subagent"
+    },
+    {
+      "source": "nanobot.agent.tools.runtime_state",
+      "target": "nanobot.agent.tools.shell"
+    },
+    {
+      "source": "nanobot.agent.tools.runtime_state",
+      "target": "nanobot.agent.tools.web"
+    },
+    {
+      "source": "nanobot.agent.tools.web",
+      "target": "nanobot.agent.tools.schema"
+    },
+    {
+      "source": "nanobot.agent.tools.web",
+      "target": "nanobot.config_base"
+    },
+    {
+      "source": "nanobot.agent.tools.web",
+      "target": "nanobot.security.network"
+    },
+    {
+      "source": "nanobot.agent.tools.sandbox",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.agent.tools.search",
+      "target": "nanobot.agent.tools.filesystem"
+    },
+    {
+      "source": "nanobot.webui.session_access",
+      "target": "nanobot.webui.transcript"
+    },
+    {
+      "source": "nanobot.webui.session_access",
+      "target": "nanobot.webui.session_list_index"
+    },
+    {
+      "source": "nanobot.agent.tools.spawn",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.bus.progress",
+      "target": "nanobot.bus.queue"
+    },
+    {
+      "source": "nanobot.api.runtime",
+      "target": "nanobot.process_runtime"
+    },
+    {
+      "source": "nanobot.api.server",
+      "target": "nanobot.agent.loop"
+    },
+    {
+      "source": "nanobot.api.server",
+      "target": "nanobot.utils.media_decode"
+    },
+    {
+      "source": "nanobot.utils.media_decode",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.apps",
+      "target": "nanobot.apps.protocol"
+    },
+    {
+      "source": "nanobot.apps.cli.service",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.apps.cli.service",
+      "target": "nanobot.security.workspace_policy"
+    },
+    {
+      "source": "nanobot.apps.cli.service",
+      "target": "nanobot.apps.protocol"
+    },
+    {
+      "source": "nanobot.audio.transcription",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.audio.transcription",
+      "target": "nanobot.utils.media_decode"
+    },
+    {
+      "source": "nanobot.audio.transcription",
+      "target": "nanobot.audio.transcription_registry"
+    },
+    {
+      "source": "nanobot.bus",
+      "target": "nanobot.bus.queue"
+    },
+    {
+      "source": "nanobot.channels",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.base",
+      "target": "nanobot.config.loader"
+    },
+    {
+      "source": "nanobot.channels.base",
+      "target": "nanobot.audio.transcription"
+    },
+    {
+      "source": "nanobot.channels._manifest",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels.contracts",
+      "target": "nanobot.channels.plugin"
+    },
+    {
+      "source": "nanobot.channels._setup",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels._setup",
+      "target": "nanobot.channels.registry"
+    },
+    {
+      "source": "nanobot.channels.plugin",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.plugin",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels.registry",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.registry",
+      "target": "nanobot.channels.plugin"
+    },
+    {
+      "source": "nanobot.pairing",
+      "target": "nanobot.pairing.store"
+    },
+    {
+      "source": "nanobot.channels.dingtalk.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.dingtalk.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.dingtalk.tests.test_dingtalk_channel",
+      "target": "nanobot.channels.dingtalk.runtime"
+    },
+    {
+      "source": "nanobot.channels.dingtalk.tests.test_validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.validation",
+      "target": "nanobot.channels._setup"
+    },
+    {
+      "source": "nanobot.channels.discord.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.discord.manifest",
+      "target": "nanobot.channels.discord.validation"
+    },
+    {
+      "source": "nanobot.channels.discord.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.discord.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.session.keys"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.triggers.local_store"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.agent.goal_permission"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.pairing"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.command.router"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.utils.restart"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.utils.evaluator"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.webui.token_usage"
+    },
+    {
+      "source": "nanobot.command.builtin",
+      "target": "nanobot.utils.searchusage"
+    },
+    {
+      "source": "nanobot.channels.discord.tests.test_discord_channel",
+      "target": "nanobot.channels.discord.runtime"
+    },
+    {
+      "source": "nanobot.channels.email.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.email.manifest",
+      "target": "nanobot.channels.email.validation"
+    },
+    {
+      "source": "nanobot.channels.email.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.email.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.email.tests.test_email_channel",
+      "target": "nanobot.channels.email.runtime"
+    },
+    {
+      "source": "nanobot.channels.email.tests.test_validation",
+      "target": "nanobot.channels.email.validation"
+    },
+    {
+      "source": "nanobot.channels.email.tests.test_validation",
+      "target": "nanobot.channels.email"
+    },
+    {
+      "source": "nanobot.channels.feishu.config",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.channels.feishu.connect",
+      "target": "nanobot.channels.connect"
+    },
+    {
+      "source": "nanobot.channels.feishu.connect",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.connect",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.instances",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels.feishu.instances",
+      "target": "nanobot.channels.feishu.config"
+    },
+    {
+      "source": "nanobot.channels.feishu.runtime",
+      "target": "nanobot.channels.feishu.instances"
+    },
+    {
+      "source": "nanobot.channels.feishu.runtime",
+      "target": "nanobot.channels.feishu.websocket"
+    },
+    {
+      "source": "nanobot.channels.feishu.runtime",
+      "target": "nanobot.utils.logging_bridge"
+    },
+    {
+      "source": "nanobot.channels.feishu.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.feishu.manifest",
+      "target": "nanobot.channels.feishu.instances"
+    },
+    {
+      "source": "nanobot.channels.feishu.manifest",
+      "target": "nanobot.channels.feishu.validation"
+    },
+    {
+      "source": "nanobot.channels.feishu.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.command.router",
+      "target": "nanobot.agent.loop"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_connect",
+      "target": "nanobot.channels.feishu.connect"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_card_extraction",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_domain",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_login",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_login",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_login",
+      "target": "nanobot.config"
+    },
+    {
+      "source": "nanobot.config",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.pairing.store",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_markdown_rendering",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_media_filename_security",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_media_filename_security",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_mention",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_mentions",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_post_content",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_post_content",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_reaction",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_reply",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_reply",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_streaming",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_table_split",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_table_split",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_table_split",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_tool_hint_code_block",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_tool_hint_code_block",
+      "target": "nanobot.channels.feishu"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_tool_hint_code_block",
+      "target": "nanobot.channels.feishu.runtime"
+    },
+    {
+      "source": "nanobot.channels.feishu.tests.test_feishu_ws",
+      "target": "nanobot.channels.feishu.websocket"
+    },
+    {
+      "source": "nanobot.channels.manager",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.channels.manager",
+      "target": "nanobot.web"
+    },
+    {
+      "source": "nanobot.channels.websocket.runtime",
+      "target": "nanobot.utils.logging_bridge"
+    },
+    {
+      "source": "nanobot.channels.websocket.runtime",
+      "target": "nanobot.webui.gateway_services"
+    },
+    {
+      "source": "nanobot.channels.websocket.runtime",
+      "target": "nanobot.webui.forking"
+    },
+    {
+      "source": "nanobot.channels.websocket.runtime",
+      "target": "nanobot.webui.transcription_ws"
+    },
+    {
+      "source": "nanobot.channels.websocket.runtime",
+      "target": "nanobot.webui.websocket_logging"
+    },
+    {
+      "source": "nanobot.optional_features",
+      "target": "nanobot.channels._setup"
+    },
+    {
+      "source": "nanobot.utils.restart",
+      "target": "nanobot.webui.metadata"
+    },
+    {
+      "source": "nanobot.webui.gateway_services",
+      "target": "nanobot.webui.ws_http"
+    },
+    {
+      "source": "nanobot.channels.matrix.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.matrix.manifest",
+      "target": "nanobot.channels.matrix.validation"
+    },
+    {
+      "source": "nanobot.channels.matrix.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.matrix.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.matrix.runtime",
+      "target": "nanobot.utils.logging_bridge"
+    },
+    {
+      "source": "nanobot.channels.matrix.tests.test_matrix_channel",
+      "target": "nanobot.channels.matrix.runtime"
+    },
+    {
+      "source": "nanobot.channels.matrix.tests.test_validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.mattermost.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.mattermost.runtime",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.channels.mattermost.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.mattermost.tests.test_mattermost_channel",
+      "target": "nanobot.pairing"
+    },
+    {
+      "source": "nanobot.channels.mattermost.tests.test_mattermost_channel",
+      "target": "nanobot.channels.mattermost.manifest"
+    },
+    {
+      "source": "nanobot.channels.mattermost.tests.test_mattermost_channel",
+      "target": "nanobot.channels.mattermost.runtime"
+    },
+    {
+      "source": "nanobot.channels.mochat.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.mochat.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.msteams.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.msteams.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.msteams.tests.test_msteams",
+      "target": "nanobot.channels.msteams.runtime"
+    },
+    {
+      "source": "nanobot.channels.napcat.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.napcat.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.napcat.tests.test_napcat_channel",
+      "target": "nanobot.channels.napcat.runtime"
+    },
+    {
+      "source": "nanobot.channels.qq.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.qq.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.qq.runtime",
+      "target": "nanobot.utils.logging_bridge"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_ack_message",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_ack_message",
+      "target": "nanobot.channels.qq.runtime"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_ack_message",
+      "target": "nanobot.channels.qq"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_channel",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_channel",
+      "target": "nanobot.channels.qq.runtime"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_channel",
+      "target": "nanobot.channels.qq"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_media",
+      "target": "nanobot.channels"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_media",
+      "target": "nanobot.channels.qq.runtime"
+    },
+    {
+      "source": "nanobot.channels.qq.tests.test_qq_media",
+      "target": "nanobot.channels.qq"
+    },
+    {
+      "source": "nanobot.channels.signal.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.signal.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.signal.tests.test_signal_channel",
+      "target": "nanobot.channels.signal.runtime"
+    },
+    {
+      "source": "nanobot.channels.signal.tests.test_signal_markdown",
+      "target": "nanobot.channels.signal.runtime"
+    },
+    {
+      "source": "nanobot.channels.slack.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.slack.manifest",
+      "target": "nanobot.channels.slack.validation"
+    },
+    {
+      "source": "nanobot.channels.slack.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.slack.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.slack.tests.test_slack_channel",
+      "target": "nanobot.channels.slack.runtime"
+    },
+    {
+      "source": "nanobot.channels.slack.tests.test_validation",
+      "target": "nanobot.channels.slack.validation"
+    },
+    {
+      "source": "nanobot.channels.slack.tests.test_validation",
+      "target": "nanobot.channels.slack"
+    },
+    {
+      "source": "nanobot.channels.telegram.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.telegram.manifest",
+      "target": "nanobot.channels.telegram.validation"
+    },
+    {
+      "source": "nanobot.channels.telegram.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.telegram.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.telegram.tests.test_telegram_channel",
+      "target": "nanobot.channels.telegram.runtime"
+    },
+    {
+      "source": "nanobot.channels.telegram.tests.test_validation",
+      "target": "nanobot.channels.telegram.manifest"
+    },
+    {
+      "source": "nanobot.channels.telegram.tests.test_validation",
+      "target": "nanobot.channels.telegram"
+    },
+    {
+      "source": "nanobot.channels.websocket.manifest",
+      "target": "nanobot.channels.websocket.validation"
+    },
+    {
+      "source": "nanobot.channels.websocket.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.session.webui_turns",
+      "target": "nanobot.agent.tools.context"
+    },
+    {
+      "source": "nanobot.session.webui_turns",
+      "target": "nanobot.bus"
+    },
+    {
+      "source": "nanobot.webui.cli_apps_api",
+      "target": "nanobot.apps.cli"
+    },
+    {
+      "source": "nanobot.webui.forking",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.webui.mcp_presets_api",
+      "target": "nanobot.agent.tools.mcp"
+    },
+    {
+      "source": "nanobot.webui.sidebar_state",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.webui.transcript",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.webui.transcription_ws",
+      "target": "nanobot.config.loader"
+    },
+    {
+      "source": "nanobot.webui.transcription_ws",
+      "target": "nanobot.audio.transcription"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_channel",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_channel",
+      "target": "nanobot.channels.websocket.tests.ws_test_client"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_channel",
+      "target": "nanobot.webui"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.ws_test_client",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.webui.file_preview",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.webui.settings_api",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.webui.settings_api",
+      "target": "nanobot.audio.transcription"
+    },
+    {
+      "source": "nanobot.webui.settings_api",
+      "target": "nanobot.providers.oauth_guidance"
+    },
+    {
+      "source": "nanobot.webui.settings_api",
+      "target": "nanobot.webui.workspaces"
+    },
+    {
+      "source": "nanobot.webui.settings_api",
+      "target": "nanobot.providers.openai_codex_oauth"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.session.webui_turns"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.sidebar_state"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.file_preview"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.gateway_tokens"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.media_gateway"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.session_automations"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.settings_routes"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.skills_api"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.skills_marketplace"
+    },
+    {
+      "source": "nanobot.webui.ws_http",
+      "target": "nanobot.webui.thread_disk"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_envelope_media",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_envelope_media",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_http_routes",
+      "target": "nanobot.channels.feishu.connect"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_http_routes",
+      "target": "nanobot.config"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_http_routes",
+      "target": "nanobot.channels.websocket.tests.ws_test_client"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_integration",
+      "target": "nanobot.channels.websocket.tests.ws_test_client"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_media_route",
+      "target": "nanobot.channels.websocket.tests.ws_test_client"
+    },
+    {
+      "source": "nanobot.webui.media_api",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.webui.media_api",
+      "target": "nanobot.webui.http_utils"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_protocol_boundaries",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.channels.websocket.tests.test_websocket_reconnect_idle",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.channels.wecom.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.wecom.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.wecom.tests.test_wecom_channel",
+      "target": "nanobot.channels.wecom.runtime"
+    },
+    {
+      "source": "nanobot.channels.weixin.connect",
+      "target": "nanobot.channels.connect"
+    },
+    {
+      "source": "nanobot.channels.weixin.connect",
+      "target": "nanobot.channels.weixin.runtime"
+    },
+    {
+      "source": "nanobot.channels.weixin.runtime",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.channels.weixin.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.weixin.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.weixin.manifest",
+      "target": "nanobot.channels.weixin.state"
+    },
+    {
+      "source": "nanobot.channels.weixin.manifest",
+      "target": "nanobot.channels.weixin.validation"
+    },
+    {
+      "source": "nanobot.channels.weixin.state",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.channels.weixin.state",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels.weixin.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_connect",
+      "target": "nanobot.channels.weixin.connect"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_channel",
+      "target": "nanobot.channels.manager"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_channel",
+      "target": "nanobot.channels.weixin.runtime"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_channel",
+      "target": "nanobot.channels.weixin"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_hardening",
+      "target": "nanobot.channels.manager"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_hardening",
+      "target": "nanobot.channels.weixin.runtime"
+    },
+    {
+      "source": "nanobot.channels.weixin.tests.test_weixin_hardening",
+      "target": "nanobot.channels.weixin.manifest"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.manifest",
+      "target": "nanobot.channels._manifest"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.manifest",
+      "target": "nanobot.channels.whatsapp.state"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.manifest",
+      "target": "nanobot.channels.whatsapp.validation"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.state",
+      "target": "nanobot.channels.contracts"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.validation",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.runtime",
+      "target": "nanobot.channels.base"
+    },
+    {
+      "source": "nanobot.channels.whatsapp.tests.test_whatsapp_channel",
+      "target": "nanobot.channels.whatsapp.runtime"
+    },
+    {
+      "source": "nanobot.cli.agent",
+      "target": "nanobot.cli"
+    },
+    {
+      "source": "nanobot.cli.agent",
+      "target": "nanobot.cli.log_control"
+    },
+    {
+      "source": "nanobot.cli.agent",
+      "target": "nanobot.cli.runtime_config"
+    },
+    {
+      "source": "nanobot.cli.agent",
+      "target": "nanobot.cli.terminal"
+    },
+    {
+      "source": "nanobot.cli.runtime_config",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.cli.terminal",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.cli.terminal",
+      "target": "nanobot.cli.stream"
+    },
+    {
+      "source": "nanobot.cli.gateway",
+      "target": "nanobot.config.schema"
+    },
+    {
+      "source": "nanobot.cli.gateway",
+      "target": "nanobot.gateway.service"
+    },
+    {
+      "source": "nanobot.cli.gateway",
+      "target": "nanobot.webui.build"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.channels.manager"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.cli"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.cli.terminal"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.cli.webui_support"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.config.watcher"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.cron.bound_runner"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.triggers.local_runner"
+    },
+    {
+      "source": "nanobot.cli.gateway_runtime",
+      "target": "nanobot.webui.dev"
+    },
+    {
+      "source": "nanobot.cli.onboard",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.cli.onboard",
+      "target": "nanobot.channels.registry"
+    },
+    {
+      "source": "nanobot.cli.onboard",
+      "target": "nanobot.cli.models"
+    },
+    {
+      "source": "nanobot.cli.onboard",
+      "target": "nanobot.providers.oauth_guidance"
+    },
+    {
+      "source": "nanobot.cli.provider",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.cli.provider",
+      "target": "nanobot.providers.oauth_guidance"
+    },
+    {
+      "source": "nanobot.cli.webui",
+      "target": "nanobot.cli.gateway_runtime"
+    },
+    {
+      "source": "nanobot.cli.webui",
+      "target": "nanobot.gateway"
+    },
+    {
+      "source": "nanobot.cli.webui_support",
+      "target": "nanobot.channels.websocket.runtime"
+    },
+    {
+      "source": "nanobot.cli.webui_support",
+      "target": "nanobot.cli.runtime_config"
+    },
+    {
+      "source": "nanobot.cli.webui_support",
+      "target": "nanobot.cli.onboard"
+    },
+    {
+      "source": "nanobot.cli.webui_support",
+      "target": "nanobot.webui.build"
+    },
+    {
+      "source": "nanobot.cli.webui_support",
+      "target": "nanobot.gateway.runtime"
+    },
+    {
+      "source": "nanobot.gateway",
+      "target": "nanobot.gateway.runtime"
+    },
+    {
+      "source": "nanobot.gateway.service",
+      "target": "nanobot.gateway"
+    },
+    {
+      "source": "nanobot.webui.build",
+      "target": "nanobot.web"
+    },
+    {
+      "source": "nanobot.cron.bound_runner",
+      "target": "nanobot.agent.tools.registry"
+    },
+    {
+      "source": "nanobot.cron.bound_runner",
+      "target": "nanobot.agent.tools.cron"
+    },
+    {
+      "source": "nanobot.cron.bound_runner",
+      "target": "nanobot.cron.session_delivery"
+    },
+    {
+      "source": "nanobot.cron.bound_runner",
+      "target": "nanobot.cron.webui_metadata"
+    },
+    {
+      "source": "nanobot.gateway.runtime",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.gateway.runtime",
+      "target": "nanobot.process_runtime"
+    },
+    {
+      "source": "nanobot.providers.fallback_provider",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.triggers.local_runner",
+      "target": "nanobot.agent.automation_turns"
+    },
+    {
+      "source": "nanobot.triggers.local_runner",
+      "target": "nanobot.triggers.local_store"
+    },
+    {
+      "source": "nanobot.triggers.local_runner",
+      "target": "nanobot.webui.metadata"
+    },
+    {
+      "source": "nanobot.triggers.local_runner",
+      "target": "nanobot.triggers.local_session_turns"
+    },
+    {
+      "source": "nanobot.utils.evaluator",
+      "target": "nanobot.utils.prompt_templates"
+    },
+    {
+      "source": "nanobot.utils.evaluator",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.utils.evaluator",
+      "target": "nanobot.utils.workspace_prompts"
+    },
+    {
+      "source": "nanobot.webui.dev",
+      "target": "nanobot.webui.build"
+    },
+    {
+      "source": "nanobot.webui.token_usage",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.providers.github_copilot_provider",
+      "target": "nanobot.providers.openai_compat_provider"
+    },
+    {
+      "source": "nanobot.providers.xai_oauth",
+      "target": "nanobot.config.paths"
+    },
+    {
+      "source": "nanobot.cron",
+      "target": "nanobot.cron.service"
+    },
+    {
+      "source": "nanobot.cron.session_delivery",
+      "target": "nanobot.cron.types"
+    },
+    {
+      "source": "nanobot.cron.webui_metadata",
+      "target": "nanobot.webui.metadata"
+    },
+    {
+      "source": "nanobot.sdk.clients",
+      "target": "nanobot.agent.loop"
+    },
+    {
+      "source": "nanobot.sdk.streaming",
+      "target": "nanobot.sdk.types"
+    },
+    {
+      "source": "nanobot.sdk.types",
+      "target": "nanobot.runtime_context"
+    },
+    {
+      "source": "nanobot.providers",
+      "target": "nanobot.providers.xai_grok_provider"
+    },
+    {
+      "source": "nanobot.providers.anthropic_provider",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.providers.azure_openai_provider",
+      "target": "nanobot.providers.openai_responses"
+    },
+    {
+      "source": "nanobot.providers.bedrock_provider",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.providers.openai_codex_provider",
+      "target": "nanobot.providers.openai_responses"
+    },
+    {
+      "source": "nanobot.providers.openai_compat_provider",
+      "target": "nanobot.providers.registry"
+    },
+    {
+      "source": "nanobot.providers.openai_compat_provider",
+      "target": "nanobot.providers.openai_responses"
+    },
+    {
+      "source": "nanobot.providers.xai_grok_provider",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.providers.xai_grok_provider",
+      "target": "nanobot.providers.xai_oauth"
+    },
+    {
+      "source": "nanobot.providers.openai_responses",
+      "target": "nanobot.providers.openai_responses.parsing"
+    },
+    {
+      "source": "nanobot.providers.unconfigured_provider",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.providers.openai_responses.converters",
+      "target": "nanobot.providers.base"
+    },
+    {
+      "source": "nanobot.providers.openai_responses.parsing",
+      "target": "nanobot.providers.openai_responses.state"
+    },
+    {
+      "source": "nanobot.providers.openai_responses.state",
+      "target": "nanobot.providers.openai_responses.converters"
+    },
+    {
+      "source": "nanobot.triggers.local_session_turns",
+      "target": "nanobot.session.automation_turns"
+    },
+    {
+      "source": "nanobot.triggers",
+      "target": "nanobot.triggers.local_store"
+    },
+    {
+      "source": "nanobot.triggers.local_types",
+      "target": "nanobot.utils.dict_keys"
+    },
+    {
+      "source": "nanobot.utils",
+      "target": "nanobot.utils.helpers"
+    },
+    {
+      "source": "nanobot.utils",
+      "target": "nanobot.utils.path"
+    },
+    {
+      "source": "nanobot.webui.attachment_ingress",
+      "target": "nanobot.utils.media_decode"
+    },
+    {
+      "source": "nanobot.webui.attachment_ingress",
+      "target": "nanobot.webui.ingress_policy"
+    },
+    {
+      "source": "nanobot.webui.gateway_tokens",
+      "target": "nanobot.webui.http_utils"
+    },
+    {
+      "source": "nanobot.webui.media_gateway",
+      "target": "nanobot.webui.media_api"
+    },
+    {
+      "source": "nanobot.webui.media_gateway",
+      "target": "nanobot.webui.attachment_ingress"
+    },
+    {
+      "source": "nanobot.webui.workspaces",
+      "target": "nanobot.session.manager"
+    },
+    {
+      "source": "nanobot.webui.mcp_presets_runtime",
+      "target": "nanobot.agent.tools.mcp"
+    },
+    {
+      "source": "nanobot.webui.nanobot_features_api",
+      "target": "nanobot.optional_features"
+    },
+    {
+      "source": "nanobot.webui.nanobot_features_api",
+      "target": "nanobot.webui.http_utils"
+    },
+    {
+      "source": "nanobot.webui.session_list_index",
+      "target": "nanobot.session.manager"
+    },
+    {
+      "source": "nanobot.webui.session_list_index",
+      "target": "nanobot.security.workspace_access"
+    },
+    {
+      "source": "nanobot.webui.session_list_index",
+      "target": "nanobot.session.history_visibility"
+    },
+    {
+      "source": "nanobot.webui.session_list_index",
+      "target": "nanobot.session.model_selection"
+    },
+    {
+      "source": "nanobot.webui.session_automations",
+      "target": "nanobot.session.manager"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.agent.tools.image_generation"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.api.runtime"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.channels.validation"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.channels.connect"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.webui.cli_apps_api"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.webui.mcp_presets_api"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.webui.settings_api"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.webui.nanobot_features_api"
+    },
+    {
+      "source": "nanobot.webui.settings_routes",
+      "target": "nanobot.webui.version_check"
+    },
+    {
+      "source": "nanobot.webui.version_check",
+      "target": "nanobot"
+    },
+    {
+      "source": "nanobot.webui.skills_api",
+      "target": "nanobot.config.loader"
+    },
+    {
+      "source": "nanobot.webui.skills_marketplace",
+      "target": "nanobot.agent.skills"
+    },
+    {
+      "source": "nanobot.webui.skills_marketplace",
+      "target": "nanobot.security.workspace_policy"
+    },
+    {
+      "source": "nanobot.webui.skills_marketplace",
+      "target": "nanobot.security.network"
+    },
+    {
+      "source": "nanobot.webui.thread_disk",
+      "target": "nanobot.session.manager"
+    }
+  ]
+}
