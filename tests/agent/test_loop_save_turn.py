@@ -459,29 +459,41 @@ async def test_generate_webui_title_skips_when_user_edited_during_await(
 ) -> None:
     """If the user edits the title while LLM generation is in flight, skip the update."""
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="Generated title", finish_reason="stop")
-    )
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+
+    async def generate_title(*args: object, **kwargs: object) -> LLMResponse:
+        generation_started.set()
+        await release_generation.wait()
+        return LLMResponse(content="Generated title", finish_reason="stop")
+
+    loop.provider.chat_with_retry = AsyncMock(side_effect=generate_title)
     session = loop.sessions.get_or_create("websocket:user-edited")
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
     session.add_message("user", "hello")
     session.add_message("assistant", "hi there")
     loop.sessions.save(session)
 
-    # Simulate: the user edits the title via WebUI while the LLM is generating.
-    # The session object is the same — identity check passes — but metadata was
-    # mutated in-place.
-    session.metadata[WEBUI_TITLE_USER_EDITED_METADATA_KEY] = True
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:user-edited",
-        provider=loop.provider,
-        model=loop.model,
+    generation = asyncio.create_task(
+        maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:user-edited",
+            provider=loop.provider,
+            model=loop.model,
+        )
     )
+    await generation_started.wait()
+
+    # The same session object is edited after the provider await starts, so the
+    # initial ownership check has already passed.
+    session.metadata[WEBUI_TITLE_USER_EDITED_METADATA_KEY] = True
+    session.metadata[WEBUI_TITLE_METADATA_KEY] = "User title"
+    release_generation.set()
+
+    generated = await generation
 
     assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "User title"
     assert session.metadata[WEBUI_TITLE_USER_EDITED_METADATA_KEY] is True
 
 
@@ -491,25 +503,37 @@ async def test_generate_webui_title_skips_when_title_already_set_during_await(
 ) -> None:
     """If a title was already set while LLM generation was in flight, skip the update."""
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="Generated title", finish_reason="stop")
-    )
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+
+    async def generate_title(*args: object, **kwargs: object) -> LLMResponse:
+        generation_started.set()
+        await release_generation.wait()
+        return LLMResponse(content="Generated title", finish_reason="stop")
+
+    loop.provider.chat_with_retry = AsyncMock(side_effect=generate_title)
     session = loop.sessions.get_or_create("websocket:already-titled")
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
     session.add_message("user", "hello")
     session.add_message("assistant", "hi there")
     loop.sessions.save(session)
 
-    # Simulate: another title generation ran and already set a title while we
-    # were waiting.  (Same session object, in-place metadata mutation.)
-    session.metadata[WEBUI_TITLE_METADATA_KEY] = "User set title"
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:already-titled",
-        provider=loop.provider,
-        model=loop.model,
+    generation = asyncio.create_task(
+        maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:already-titled",
+            provider=loop.provider,
+            model=loop.model,
+        )
     )
+    await generation_started.wait()
+
+    # Another writer sets a title after the provider await starts, so the
+    # initial empty-title check has already passed.
+    session.metadata[WEBUI_TITLE_METADATA_KEY] = "User set title"
+    release_generation.set()
+
+    generated = await generation
 
     assert generated is False
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "User set title"
