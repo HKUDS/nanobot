@@ -31,3 +31,23 @@ Source of truth for what exists in this fork (`albatrossflyon-coder/nanobot`, tr
 **Also caught tonight:** checked GitHub notifications before pushing and found CI already failing on this same branch from an earlier commit (`6e8e2755`) — a `basedpyright --strict` error in `runner.py` (`append`/`sorted` on a partially-unknown type). A follow-up commit (`7cd2b29f`) already fixed that one but was stuck on GitHub's `action_required` approval gate, unverified. Ran `basedpyright` locally against all files touched tonight and found a **new** instance of the same error class in my own new code (`runner.py:817`, `len(clean)` where `clean: str | None` — the `is_blank_text` guard proves it's non-empty at runtime but basedpyright doesn't narrow through that call). Fixed (`len(clean or "")`). Re-ran clean: 0 errors across all 9 touched files.
 
 **Branch:** `fix/tool-call-loop-detection` in `C:\Repos\nanobot`. Committed (`0ac578b4`) and pushed to `fork` (`albatrossflyon-coder/nanobot`) — remote SHA independently verified via `gh api` to match local HEAD exactly. Not yet merged into `HKUDS/nanobot#5344` upstream; watch that PR for maintainer review.
+
+## 2026-08-12 03:20 CDT — PR #5344 extended: same-turn batched duplicate detection
+
+**Status: pushed to `fork/fix/tool-call-loop-detection` (`9e21f86c`), remote SHA verified, PR comment posted. Still awaiting maintainer review.**
+
+Closed the one gap the PR's own description disclosed as out-of-scope: `_detect_tool_call_loop` tracks one signature per whole round, so it only catches a loop repeating identically *across* separate rounds — it can't see N identical calls batched *into* a single round (e.g. three parallel `read_file` calls with the same path), since that round produces its own distinct joined signature exactly once. Added `_detect_intra_round_duplicate_calls()` in `runner.py`, checked alongside the existing cross-round guard, firing the first time a round contains 3+ identical calls rather than requiring the round to repeat. Two new tests mirroring the existing loop-guard tests' conventions.
+
+**Verified:** `tests/agent/test_runner_safety.py` 13/13 passed, `ruff check` clean, `basedpyright --strict` clean, `vuln-hunter scan_diff` clean. Full suite: 5915 passed, 2 pre-existing failures unrelated (see next entry), 44 skipped.
+
+## 2026-08-12 03:35 CDT — Found and fixed a real test bug: token-usage timezone mismatch
+
+**Status: filed as [HKUDS/nanobot#5348](https://github.com/HKUDS/nanobot/issues/5348), fixed and opened as [HKUDS/nanobot#5349](https://github.com/HKUDS/nanobot/pull/5349), pushed to `fork/fix/token-usage-timezone-test-mismatch` (`ef60cb57`), remote SHA verified.**
+
+While running the full suite to verify the loop-guard extension above, found `test_settings_payload_includes_token_usage_summary` and `test_settings_usage_payload_returns_lightweight_token_usage` failing. Confirmed pre-existing (fails identically on a clean `git stash`d checkout) and unrelated to the loop-guard work before investigating further.
+
+**Root cause:** both tests call `record_token_usage()` with no `timezone_name`, defaulting to UTC, while the read-back path (`settings_payload()`/`settings_usage_payload()`) always reads with `config.agents.defaults.timezone` (`America/Chicago` by default). Reproduced live with a standalone debug script dumping state at each stage: whenever UTC has already rolled to the next calendar day but Chicago hasn't (roughly a 5-hour daily window — reproduced at ~22:00-03:00 CDT), the row written under the UTC date falls outside every windowed field's `today` cutoff (`requests_30d`, `active_days_30d`, `total_tokens_30d`, `current_streak_days` all zero out; `total_tokens`/`peak_day_tokens` still look right only because those two specific fields are unwindowed sums over all stored days).
+
+Checked all three real production call sites before concluding this was test-only: `gateway_runtime.py` (x2) and `command/builtin.py` all correctly thread `config.agents.defaults.timezone` through already. `tests/webui/test_token_usage.py` avoids the bug entirely by always pinning both `timezone_name` and an explicit `now=` — these two tests were the only ones missing `timezone_name` on the write side.
+
+**Fix:** pass `timezone_name=config.agents.defaults.timezone` to both `record_token_usage()` calls, matching the established convention. Verified: both tests pass, full `test_settings_api.py` file 85/85 passed.
