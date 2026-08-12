@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import shlex
+import subprocess
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +13,12 @@ import pytest
 
 from nanobot.agent.tools.exec_session import _ExecSession
 from nanobot.agent.tools.shell import ExecTool, _reap_pid
+
+
+def _python_command(code: str) -> str:
+    if sys.platform == "win32":
+        return f"{subprocess.list2cmdline([sys.executable])} -u -c {subprocess.list2cmdline([code])}"
+    return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(code)}"
 
 
 def test_reap_pid_noops_without_waitpid():
@@ -193,6 +201,25 @@ async def test_execute_exception_during_communicate_kills_live_process():
     kill_tree.assert_awaited_once_with(mock_proc)
 
 
+@pytest.mark.asyncio
+async def test_kill_process_tree_targets_group_after_root_exits():
+    process = AsyncMock()
+    process.pid = 1006
+    process.returncode = 0
+
+    with (
+        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+        patch("nanobot.agent.tools.shell.os.killpg", create=True) as kill_group,
+        patch("nanobot.agent.tools.shell.signal.SIGKILL", 9, create=True),
+        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+    ):
+        await ExecTool._kill_process_tree(process)
+
+    kill_group.assert_called_once_with(1006, 9)
+    process.kill.assert_not_called()
+    reap.assert_called_once_with(1006)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="requires Unix process groups")
 @pytest.mark.asyncio
 async def test_execute_timeout_kills_background_process_tree(tmp_path):
@@ -207,6 +234,40 @@ async def test_execute_timeout_kills_background_process_tree(tmp_path):
 
     assert "timed out" in result.lower()
     await asyncio.sleep(2.5)
+    assert not marker.exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_kills_descendant_after_root_exits(tmp_path):
+    """Tree ownership must outlive a root shell that exits before timeout."""
+    marker = tmp_path / "child-survived-root"
+    child_code = (
+        "import pathlib,time; time.sleep(3.5); "
+        f"pathlib.Path({str(marker)!r}).write_text('alive')"
+    )
+    child_payload = base64.b64encode(child_code.encode()).decode()
+    parent_code = (
+        "import base64,subprocess,sys; "
+        f"child=base64.b64decode('{child_payload}').decode(); "
+        "subprocess.Popen([sys.executable, '-c', child])"
+    )
+    spawned = []
+    original_spawn = ExecTool._spawn
+
+    async def capture_spawn(*args, **kwargs):
+        process = await original_spawn(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    with patch.object(ExecTool, "_spawn", side_effect=capture_spawn):
+        result = await ExecTool(working_dir=str(tmp_path), timeout=2).execute(
+            command=_python_command(parent_code),
+            timeout=2,
+        )
+
+    assert "timed out" in result.lower()
+    assert spawned[0].returncode == 0
+    await asyncio.sleep(2)
     assert not marker.exists()
 
 

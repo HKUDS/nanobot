@@ -21,6 +21,22 @@ _WINDOWS_ENV_KEYS = {
 }
 
 
+class _FakeWindowsJob:
+    creation_flags = 0
+
+    def assign_and_resume(self, pid: int) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def release(self) -> None:
+        pass
+
+    def terminate(self) -> None:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # _build_env
 # ---------------------------------------------------------------------------
@@ -661,6 +677,7 @@ class TestWindowsMultilineExec:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -682,6 +699,7 @@ class TestWindowsMultilineExec:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -745,6 +763,7 @@ class TestResolveShellWindows:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -766,6 +785,7 @@ class TestResolveShellWindows:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_shell.return_value = mock_proc
