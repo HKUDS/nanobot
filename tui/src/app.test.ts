@@ -137,6 +137,30 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual(["你好"])
   })
 
+  test("clears the placeholder on the first typed character", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Ask nanobot anything")
+
+    setup.mockInput.typeText("bu")
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+
+    expect(composer.plainText).toBe("bu")
+    expect(composer.placeholder).toBeNull()
+    expect(frame).toContain("bu")
+    expect(frame).not.toContain("Ask nanobot anything")
+    expect(frame).not.toContain("buAsk nanobot anything")
+
+    setup.mockInput.pressBackspace()
+    setup.mockInput.pressBackspace()
+    await setup.flush()
+    expect(composer.placeholder).toBe("Ask nanobot anything")
+    expect(setup.captureCharFrame()).toContain("Ask nanobot anything")
+  })
+
   test("recalls submitted prompts without stealing multiline cursor movement", async () => {
     const sent: string[] = []
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })

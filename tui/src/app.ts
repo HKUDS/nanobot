@@ -82,6 +82,8 @@ const LIGHT: Palette = {
   cool: "#0F766E",
 }
 
+const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
+
 function syntaxStyle(palette: Palette): SyntaxStyle {
   const color = (value: string) => {
     const parsed = RGBA.fromHex(value)
@@ -231,7 +233,7 @@ export class NanobotTui {
       minHeight: 1,
       maxHeight: 8,
       wrapMode: "word",
-      placeholder: "Ask nanobot anything",
+      placeholder: COMPOSER_PLACEHOLDER,
       placeholderColor: this.palette.faint,
       textColor: this.palette.text,
       focusedTextColor: this.palette.text,
@@ -243,7 +245,10 @@ export class NanobotTui {
         { name: "return", action: "submit" },
         { name: "return", meta: true, action: "newline" },
       ],
-      onContentChange: () => this.resizeComposer(),
+      onContentChange: () => {
+        this.syncComposerPlaceholder()
+        this.resizeComposer()
+      },
       // IMEs may commit their final composed glyph after Enter. Matching the
       // OpenCode/OpenTUI integration, defer twice before reading plainText.
       onSubmit: () => this.deferSubmit(),
@@ -671,6 +676,14 @@ export class NanobotTui {
     const maxHeight = Math.max(1, Math.min(12, Math.floor(this.renderer.height / 3)))
     this.composer.maxHeight = maxHeight
     this.composerFrame.maxHeight = maxHeight + 2
+  }
+
+  private syncComposerPlaceholder(): void {
+    // OpenTUI normally suppresses placeholder glyphs while the editor is not
+    // empty. Explicitly removing them also invalidates their old cells, which
+    // prevents stale placeholder text in differential/embedded terminals.
+    const placeholder = this.composer.plainText ? null : COMPOSER_PLACEHOLDER
+    if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 
   private async copySelection(text: string): Promise<void> {
