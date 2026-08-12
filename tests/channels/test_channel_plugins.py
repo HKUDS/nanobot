@@ -293,7 +293,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "weixin"])
+@pytest.mark.parametrize("name", ["feishu", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 
@@ -583,6 +583,9 @@ def test_plugin_setup_contract_drives_feature_payload(monkeypatch: pytest.Monkey
                 "required": False,
             },
         ],
+        "requirements": [
+            {"alternatives": [["channels.setupplugin.token"]]},
+        ],
         "official_url": "https://plugin.example/setup",
     }
     assert feature["configured_fields"] == [
@@ -631,7 +634,7 @@ def test_plugin_contract_error_is_isolated_in_feature_payload(monkeypatch):
         "type": "channel",
         "capabilities": [],
         "settings_visible": True,
-        "setup": {"fields": []},
+        "setup": {"fields": [], "requirements": []},
         "enabled": False,
         "configured": False,
         "installed": True,

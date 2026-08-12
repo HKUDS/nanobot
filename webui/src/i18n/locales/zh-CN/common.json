@@ -728,6 +728,23 @@
       "toggleInstance": "{{name}} 实例",
       "tryIt": "试一试",
       "validationFailed": "启用前请检查必需配置。",
+      "completeSetupToEnable": "请先完成下方必需配置，然后即可启用此渠道。",
+      "chooseCredentialMethod": "选择一种凭据方式",
+      "or": "或",
+      "fieldRequired": "完成配置需要此字段。",
+      "secretWillBeRemoved": "将被删除",
+      "keepSavedSecret": "保留已保存的凭据",
+      "removeSavedSecret": "删除已保存的凭据",
+      "sections": {
+        "account": "账户",
+        "credentials": "凭据",
+        "connection": "连接",
+        "receiving": "接收邮件",
+        "sending": "发送邮件",
+        "access": "访问权限",
+        "behavior": "行为",
+        "security": "安全"
+      },
       "validation": {
         "connected": "已连接",
         "configured": "手动配置",

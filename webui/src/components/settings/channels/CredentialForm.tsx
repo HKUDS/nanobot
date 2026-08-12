@@ -39,9 +39,14 @@ export function channelValuesForSubmit(
   fields: ChannelConfigField[],
   values: Record<string, string>,
   touchedFields: Set<string>,
-): Record<string, string> {
-  const payload: Record<string, string> = {};
+  clearedSecrets: Set<string> = new Set(),
+): Record<string, string | null> {
+  const payload: Record<string, string | null> = {};
   for (const field of fields) {
+    if (field.secret && clearedSecrets.has(field.key)) {
+      payload[field.key] = null;
+      continue;
+    }
     const touched = touchedFields.has(field.key);
     const value = channelFieldValue(field, values);
     if (field.secret && !value.trim()) continue;
@@ -112,6 +117,9 @@ export function CredentialForm({
   visibleSecrets,
   onChange,
   onToggleSecret,
+  errors = {},
+  clearedSecrets = new Set(),
+  onClearSecret,
   compact = false,
 }: {
   fields: ChannelConfigField[];
@@ -120,6 +128,9 @@ export function CredentialForm({
   visibleSecrets: Record<string, boolean>;
   onChange: (key: string, value: string) => void;
   onToggleSecret: (key: string) => void;
+  errors?: Record<string, string>;
+  clearedSecrets?: Set<string>;
+  onClearSecret?: (key: string, clear: boolean) => void;
   compact?: boolean;
 }) {
   const { t } = useTranslation();
@@ -127,9 +138,17 @@ export function CredentialForm({
   return (
     <div className={cn(compact ? "space-y-2.5" : "mt-3 space-y-2.5")}>
       {fields.map((field) => {
+        const inputId = `channel-field-${field.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        const helpId = field.help ? `${inputId}-help` : undefined;
+        const error = errors[field.key];
+        const errorId = error ? `${inputId}-error` : undefined;
+        const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
         const visible = Boolean(visibleSecrets[field.key]);
         const value = values[field.key] ?? "";
-        const savedSecret = Boolean(field.secret && configuredFields?.has(field.key) && !value.trim());
+        const clearSecret = clearedSecrets.has(field.key);
+        const savedSecret = Boolean(
+          field.secret && configuredFields?.has(field.key) && !value.trim() && !clearSecret,
+        );
         const showSecretToggle = Boolean(field.secret && value.trim());
         const inputType = field.secret && !visible ? "password" : field.inputType ?? "text";
         const selectedOption = channelFieldValue(field, values);
@@ -140,6 +159,10 @@ export function CredentialForm({
               <span className="font-normal text-muted-foreground">
                 {tx("settings.channels.savedSecret", "Saved")}
               </span>
+            ) : clearSecret ? (
+              <span className="font-normal text-destructive">
+                {tx("settings.channels.secretWillBeRemoved", "Will be removed")}
+              </span>
             ) : field.optional && !compact ? (
               <span className="font-normal text-muted-foreground">
                 {tx("settings.channels.optional", "Optional")}
@@ -148,47 +171,53 @@ export function CredentialForm({
           </span>
         );
         const help = field.help ? (
-          <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+          <span id={helpId} className="mt-1 block text-[11px] leading-4 text-muted-foreground">
             {field.help}
+          </span>
+        ) : null;
+        const errorMessage = error ? (
+          <span id={errorId} className="mt-1 block text-[11px] leading-4 text-destructive">
+            {error}
           </span>
         ) : null;
         if (field.options?.length) {
           return (
-            <div key={field.key} className="block">
-              {header}
+            <fieldset key={field.key} className="block">
+              <legend className="w-full">{header}</legend>
               <span
-                role="radiogroup"
-                aria-label={field.label}
                 className="mt-1 grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
                 style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
               >
                 {field.options.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selectedOption === option.value}
-                    onClick={() => onChange(field.key, option.value)}
-                    className={cn(
-                      "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
-                      selectedOption === option.value
-                        && "bg-background text-foreground ring-1 ring-inset ring-border/45",
-                    )}
-                  >
-                    {option.label}
-                  </button>
+                  <label key={option.value} className="relative block">
+                    <input
+                      type="radio"
+                      name={inputId}
+                      value={option.value}
+                      checked={selectedOption === option.value}
+                      onChange={() => onChange(field.key, option.value)}
+                      className="peer sr-only"
+                    />
+                    <span className="grid min-h-11 cursor-pointer place-items-center rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground peer-checked:bg-background peer-checked:text-foreground peer-checked:ring-1 peer-checked:ring-inset peer-checked:ring-border/45 peer-focus-visible:ring-2 peer-focus-visible:ring-ring sm:min-h-9">
+                      {option.label}
+                    </span>
+                  </label>
                 ))}
               </span>
               {help}
-            </div>
+              {errorMessage}
+            </fieldset>
           );
         }
         return (
-          <label key={field.key} className="block">
-            {header}
+          <div key={field.key} className="block">
+            <label htmlFor={inputId} className="block">{header}</label>
             <span className="relative mt-1 block">
               <Input
+                id={inputId}
                 aria-label={field.label}
+                aria-invalid={Boolean(error)}
+                aria-describedby={describedBy}
                 type={inputType}
                 autoComplete={field.secret ? "off" : undefined}
                 inputMode={field.inputType === "number" ? "numeric" : undefined}
@@ -200,7 +229,8 @@ export function CredentialForm({
                 value={values[field.key] ?? ""}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={cn(
-                  "h-9 rounded-[10px] border-border/60 bg-muted/35 text-[13px]",
+                  "h-10 rounded-[10px] border-border/60 bg-muted/35 text-base sm:h-9 sm:text-[13px]",
+                  error && "border-destructive focus-visible:ring-destructive/30",
                   showSecretToggle && "pr-9",
                 )}
               />
@@ -213,7 +243,7 @@ export function CredentialForm({
                       : tx("settings.channels.showSecret", "Show secret")
                   }
                   onClick={() => onToggleSecret(field.key)}
-                  className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
                 >
                   {visible ? (
                     <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -224,7 +254,19 @@ export function CredentialForm({
               ) : null}
               </span>
             {help}
-          </label>
+            {errorMessage}
+            {field.secret && configuredFields?.has(field.key) && !value.trim() && onClearSecret ? (
+              <button
+                type="button"
+                className="mt-1 min-h-8 text-[11px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                onClick={() => onClearSecret(field.key, !clearSecret)}
+              >
+                {clearSecret
+                  ? tx("settings.channels.keepSavedSecret", "Keep saved credential")
+                  : tx("settings.channels.removeSavedSecret", "Remove saved credential")}
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>

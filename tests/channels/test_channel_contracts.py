@@ -585,4 +585,7 @@ def test_channel_setup_contract_owns_fields_and_validation() -> None:
             "choices": [],
             "required": True,
         }],
+        "requirements": [
+            {"alternatives": [["channels.setup_contract.token"]]},
+        ],
     }

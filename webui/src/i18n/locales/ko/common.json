@@ -714,6 +714,23 @@
       "toggleInstance": "{{name}} 인스턴스",
       "tryIt": "사용해 보기",
       "validationFailed": "활성화하기 전에 필수 설정을 확인하세요.",
+      "completeSetupToEnable": "아래 필수 설정을 완료하면 이 채널을 활성화할 수 있습니다.",
+      "chooseCredentialMethod": "인증 방식 하나 선택",
+      "or": "또는",
+      "fieldRequired": "설정을 완료하려면 필요합니다.",
+      "secretWillBeRemoved": "삭제 예정",
+      "keepSavedSecret": "저장된 인증 정보 유지",
+      "removeSavedSecret": "저장된 인증 정보 삭제",
+      "sections": {
+        "account": "계정",
+        "credentials": "인증 정보",
+        "connection": "연결",
+        "receiving": "메일 수신",
+        "sending": "메일 발신",
+        "access": "접근",
+        "behavior": "동작",
+        "security": "보안"
+      },
       "validation": {
         "connected": "연결됨",
         "configured": "수동 구성됨",

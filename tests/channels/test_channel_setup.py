@@ -207,6 +207,14 @@ def test_weixin_package_manifest_owns_runtime_and_webui_metadata() -> None:
     assert plugin.webui == "webui/index.tsx"
 
 
+def test_whatsapp_package_manifest_owns_browser_connector() -> None:
+    plugin = load_channel_package("whatsapp")
+
+    assert plugin is not None
+    assert plugin.connector == "nanobot.channels.whatsapp.connect:WhatsAppConnectStore"
+    assert plugin.webui == "webui/index.tsx"
+
+
 def test_package_manifests_do_not_import_runtimes() -> None:
     code = f"""
 import sys

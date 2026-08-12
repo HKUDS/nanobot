@@ -15,14 +15,12 @@ export default {
     lark: {
       displayName: "Lark",
       initials: "LK",
-      logoUrl: "https://www.larksuite.com/favicon.ico",
     },
   },
   presentation: {
     displayName: "Feishu",
     initials: "FS",
     color: "#3370FF",
-    logoUrl: "https://www.feishu.cn/favicon.ico",
     setup: {
       mode: "connect",
       command: "nanobot channels login feishu",

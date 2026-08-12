@@ -262,6 +262,8 @@ def coerce_channel_value(
         allowed = None
 
     if kind in {"string", "secret"}:
+        if kind == "secret" and raw_value is None:
+            return ""
         value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
         if kind == "secret" and not value:
             return _SKIP_FIELD

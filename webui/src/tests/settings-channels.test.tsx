@@ -46,6 +46,9 @@ function channelSetupContract(
             defaultValue: "mention",
           }),
         ],
+        requirements: [
+          { alternatives: [["channels.discord.token"]] },
+        ],
       };
     case "email":
       return {
@@ -66,6 +69,15 @@ function channelSetupContract(
           field("verifyDkim", "bool", { defaultValue: "true" }),
           field("verifySpf", "bool", { defaultValue: "true" }),
         ],
+        requirements: [
+          { alternatives: [["channels.email.consentGranted"]] },
+          { alternatives: [["channels.email.imapHost"]] },
+          { alternatives: [["channels.email.imapUsername"]] },
+          { alternatives: [["channels.email.imapPassword"]] },
+          { alternatives: [["channels.email.smtpHost"]] },
+          { alternatives: [["channels.email.smtpUsername"]] },
+          { alternatives: [["channels.email.smtpPassword"]] },
+        ],
       };
     case "feishu":
       return {
@@ -84,6 +96,10 @@ function channelSetupContract(
           field("allowFrom", "list"),
           field("topicIsolation", "bool"),
         ],
+        requirements: [
+          { alternatives: [["channels.feishu.appId"]] },
+          { alternatives: [["channels.feishu.appSecret"]] },
+        ],
       };
     case "matrix":
       return {
@@ -99,6 +115,16 @@ function channelSetupContract(
             defaultValue: "open",
           }),
         ],
+        requirements: [
+          { alternatives: [["channels.matrix.homeserver"]] },
+          { alternatives: [["channels.matrix.userId"]] },
+          {
+            alternatives: [
+              ["channels.matrix.password"],
+              ["channels.matrix.accessToken", "channels.matrix.deviceId"],
+            ],
+          },
+        ],
       };
     case "qq":
       return {
@@ -111,6 +137,10 @@ function channelSetupContract(
             choices: ["markdown", "plain"],
             defaultValue: "plain",
           }),
+        ],
+        requirements: [
+          { alternatives: [["channels.qq.appId"]] },
+          { alternatives: [["channels.qq.secret"]] },
         ],
       };
   }
@@ -612,7 +642,7 @@ describe("Settings channels", () => {
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Product worker" }));
-    expect(screen.getByRole("radio", { name: "Eu" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Eu" })).toBeChecked();
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
@@ -779,22 +809,15 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Advanced"));
 
-    const behavior = screen.getByRole("radiogroup", { name: "Group behavior" });
-    expect(within(behavior).getByRole("radio", { name: "Mention only" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const behavior = screen.getByRole("group", { name: "Group behavior" });
+    expect(within(behavior).getByRole("radio", { name: "Mention only" })).toBeChecked();
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("mention")).not.toBeInTheDocument();
 
     fireEvent.click(within(behavior).getByRole("radio", { name: "All messages" }));
 
-    expect(within(behavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
   });
 
   it("uses a list-to-detail navigation stack on compact screens", async () => {
@@ -934,15 +957,14 @@ describe("Settings channels", () => {
       "href",
       "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#discord",
     );
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeEnabled();
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
-    fireEvent.click(screen.getByText("Advanced"));
     fireEvent.change(screen.getByLabelText("Allowed channels"), {
       target: { value: "123, 456" },
     });
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+    fireEvent.click(within(screen.getByRole("group", { name: "Group behavior" })).getByRole(
       "radio",
       { name: "All messages" },
     ));
@@ -1047,12 +1069,11 @@ describe("Settings channels", () => {
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Advanced"));
     expect(screen.getByLabelText("Allowed channels")).toHaveValue("123, 456");
-    expect(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+    expect(within(screen.getByRole("group", { name: "Group behavior" })).getByRole(
       "radio",
       { name: "All messages" },
-    )).toHaveAttribute("aria-checked", "true");
+    )).toBeChecked();
 
     fireEvent.click(screen.getByRole("switch", { name: "Discord channel" }));
     await waitFor(() =>
@@ -1102,7 +1123,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("shows branded setup guide links for supported WebUI channels", async () => {
+  it("shows setup guide links with local channel identity", async () => {
     const channels = [
       ["websocket", "WebSocket", "Open WebSocket setup"],
       ["telegram", "Telegram", "Open Telegram setup"],
@@ -1134,7 +1155,7 @@ describe("Settings channels", () => {
             features: channels.map(([name, displayName]) => ({
               name,
               display_name: displayName,
-              webui: ["feishu", "weixin"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
+              webui: ["feishu", "weixin", "whatsapp"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
               type: "channel",
               enabled: name === "websocket",
               installed: true,
@@ -1174,7 +1195,8 @@ describe("Settings channels", () => {
       }
       const guide = await screen.findByRole("link", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
-      expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
+      expect(guide.querySelector("span[aria-hidden]")).not.toBeNull();
+      expect(guide.querySelector('img[src^="http"]')).toBeNull();
     }
     expect(screen.queryByRole("button", { name: "View MoChat settings" })).not.toBeInTheDocument();
   });
@@ -1212,40 +1234,27 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
-    const consent = screen.getByRole("radiogroup", { name: "Consent granted" });
-    expect(within(consent).getByRole("radio", { name: "Not granted" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const consent = screen.getByRole("group", { name: "Consent granted" });
+    expect(within(consent).getByRole("radio", { name: "Not granted" })).toBeChecked();
     expect(within(consent).getByRole("radio", { name: "Granted" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("true")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
     fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
     fireEvent.click(screen.getByText("Advanced"));
-    const region = screen.getByRole("radiogroup", { name: "Region" });
-    expect(within(region).getByRole("radio", { name: "Feishu" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const region = screen.getByRole("group", { name: "Region" });
+    expect(within(region).getByRole("radio", { name: "Feishu" })).toBeChecked();
     expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
-    const matrixBehavior = screen.getByRole("radiogroup", { name: "Group behavior" });
-    expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(screen.getByText("Choose one credential method")).toBeInTheDocument();
+    const matrixBehavior = screen.getByRole("group", { name: "Group behavior" });
+    expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toBeChecked();
     expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
-    const format = screen.getByRole("radiogroup", { name: "Message format" });
-    expect(within(format).getByRole("radio", { name: "Plain text" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const format = screen.getByRole("group", { name: "Message format" });
+    expect(within(format).getByRole("radio", { name: "Plain text" })).toBeChecked();
     expect(within(format).getByRole("radio", { name: "Markdown" })).toBeInTheDocument();
   });
 

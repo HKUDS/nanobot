@@ -714,6 +714,23 @@
       "toggleInstance": "{{name}} 執行個體",
       "tryIt": "試試看",
       "validationFailed": "啟用前請檢查必要設定。",
+      "completeSetupToEnable": "請先完成下方必要設定，然後即可啟用此頻道。",
+      "chooseCredentialMethod": "選擇一種憑證方式",
+      "or": "或",
+      "fieldRequired": "完成設定需要此欄位。",
+      "secretWillBeRemoved": "將被移除",
+      "keepSavedSecret": "保留已儲存的憑證",
+      "removeSavedSecret": "移除已儲存的憑證",
+      "sections": {
+        "account": "帳戶",
+        "credentials": "憑證",
+        "connection": "連線",
+        "receiving": "接收郵件",
+        "sending": "傳送郵件",
+        "access": "存取權限",
+        "behavior": "行為",
+        "security": "安全性"
+      },
       "validation": {
         "connected": "已連線",
         "configured": "手動設定",

@@ -715,6 +715,23 @@
       "toggleInstance": "Instancia {{name}}",
       "tryIt": "Pruébalo",
       "validationFailed": "Comprueba la configuración requerida antes de activar.",
+      "completeSetupToEnable": "Completa la configuración requerida para activar este canal.",
+      "chooseCredentialMethod": "Elige un método de credenciales",
+      "or": "o",
+      "fieldRequired": "Obligatorio para completar la configuración.",
+      "secretWillBeRemoved": "Se eliminará",
+      "keepSavedSecret": "Conservar credencial guardada",
+      "removeSavedSecret": "Eliminar credencial guardada",
+      "sections": {
+        "account": "Cuenta",
+        "credentials": "Credenciales",
+        "connection": "Conexión",
+        "receiving": "Recepción de correo",
+        "sending": "Envío de correo",
+        "access": "Acceso",
+        "behavior": "Comportamiento",
+        "security": "Seguridad"
+      },
       "validation": {
         "connected": "Conectado",
         "configured": "Configurado manualmente",

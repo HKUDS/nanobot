@@ -25,7 +25,7 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
         )
     else:
         if not password and not access_token:
-            missing.append("password_or_accessToken")
+            missing.append("password")
             message = "Add a password, or an access token with its device ID."
         else:
             missing.append("deviceId")

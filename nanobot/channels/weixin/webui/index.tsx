@@ -28,7 +28,6 @@ export default {
     displayName: "WeChat",
     initials: "WX",
     color: "#07C160",
-    logoUrl: "https://weixin.qq.com/favicon.ico",
     setup: {
       mode: "connect",
       command: "nanobot channels login weixin",

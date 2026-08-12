@@ -23,6 +23,7 @@ export type ChannelSetupPresentation = {
   steps: string[];
   fields?: ChannelConfigField[];
   manualFields?: ChannelConfigField[];
+  requirements?: ChannelSetupRequirement[];
   actions?: ChannelSetupAction[];
   presets?: ChannelProviderPreset[];
 };
@@ -40,6 +41,22 @@ export type ChannelCatalogSetupPresentation = {
 
 export type ChannelFieldPresentation = {
   key: string;
+  section?: ChannelFieldSection;
+};
+
+export type ChannelFieldSection =
+  | "account"
+  | "credentials"
+  | "connection"
+  | "receiving"
+  | "sending"
+  | "access"
+  | "behavior"
+  | "security"
+  | "advanced";
+
+export type ChannelSetupRequirement = {
+  alternatives: string[][];
 };
 
 export type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
@@ -67,7 +84,9 @@ export type ChannelConfigField = {
   secret?: boolean;
   optional?: boolean;
   help?: string;
-  inputType?: "text" | "number";
+  inputType?: "text" | "number" | "url" | "email" | "tel";
+  kind?: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
+  section?: ChannelFieldSection;
   defaultValue?: string;
   options?: ChannelConfigOption[];
 };
