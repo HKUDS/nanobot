@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { NanobotClient, type InboundEvent } from "./protocol"
+import { NanobotClient, fetchHistory, type InboundEvent } from "./protocol"
 
 class FakeSocket {
   static readonly OPEN = 1
@@ -92,17 +92,113 @@ describe("gateway protocol", () => {
 
     try {
       const statuses: string[] = []
+      const events: InboundEvent[] = []
       const client = new NanobotClient({
         url: "ws://nanobot.test/ws",
-        onEvent: () => undefined,
+        onEvent: (event) => events.push(event),
         onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
       })
       client.connect()
       if (!socket) throw new Error("socket was not created")
       socket.emit("message", { data: "[]" })
+      socket.emit("message", { data: JSON.stringify({ event: "delta", chat_id: "one" }) })
+      socket.emit("message", {
+        data: JSON.stringify({
+          event: "message",
+          chat_id: "one",
+          text: "bad tool",
+          tool_events: [{ call_id: 42 }],
+        }),
+      })
+      socket.emit("message", {
+        data: JSON.stringify({ event: "stream_end", chat_id: "one", resuming: "yes" }),
+      })
+      socket.emit("message", { data: JSON.stringify({ event: "future_gateway_event" }) })
+      socket.emit("message", { data: JSON.stringify({ event: "error", detail: "global failure" }) })
       expect(statuses).toContain("error:gateway sent an invalid event")
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(4)
+      expect(events).toContainEqual({ event: "error", detail: "global failure" })
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("reattaches the same generated chat after a transient disconnect", async () => {
+    const original = globalThis.WebSocket
+    const sockets: FakeSocket[] = []
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          sockets.push(this)
+        }
+      },
+    })
+
+    try {
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        reconnectDelayMs: 1,
+        onEvent: () => undefined,
+        onStatus: () => undefined,
+      })
+      client.connect()
+      sockets[0]?.emit("message", {
+        data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
+      })
+      sockets[0]?.emit("message", {
+        data: JSON.stringify({ event: "attached", chat_id: "generated-chat" }),
+      })
+      sockets[0]?.emit("close")
+      await Bun.sleep(5)
+
+      expect(sockets).toHaveLength(2)
+      sockets[1]?.emit("message", {
+        data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client-2" }),
+      })
+      const outbound = sockets[1]?.sent.map((value) => JSON.parse(value)) || []
+      expect(outbound).toEqual([{ type: "attach", chat_id: "generated-chat" }])
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("reports when the bounded history snapshot omits earlier turns", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "tool",
+          kind: "trace",
+          content: "read_file",
+          traces: ["read_file"],
+          toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
+        },
+        { role: "assistant", kind: "reasoning", content: "private thought" },
+        { role: "assistant", content: "hi" },
+      ],
+      page: { has_more_before: true },
+    })))) as unknown as typeof fetch
+
+    try {
+      const history = await fetchHistory("http://nanobot.test", "token", "chat")
+      expect(history).toEqual({
+        messages: [
+          { role: "user", content: "hello" },
+          {
+            role: "activity",
+            content: "read_file",
+            toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
+          },
+          { role: "assistant", content: "hi" },
+        ],
+        truncated: true,
+      })
+    } finally {
+      globalThis.fetch = original
     }
   })
 })

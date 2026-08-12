@@ -18,4 +18,23 @@ const options: AppOptions = {
 }
 
 const app = await NanobotTui.create(options)
+
+const shutdown = (code = 0) => {
+  app.stop()
+  process.exitCode = code
+}
+
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => shutdown())
+}
+process.once("exit", () => app.stop())
+process.once("uncaughtException", (error) => {
+  shutdown(1)
+  process.stderr.write(`${error instanceof Error ? error.stack || error.message : String(error)}\n`)
+})
+process.once("unhandledRejection", (error) => {
+  shutdown(1)
+  process.stderr.write(`${error instanceof Error ? error.stack || error.message : String(error)}\n`)
+})
+
 app.start()

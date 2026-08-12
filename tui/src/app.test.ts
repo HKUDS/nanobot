@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
+import { TextareaRenderable } from "@opentui/core"
+import {
+  MockTreeSitterClient,
+  createTestRenderer,
+  type TestRendererSetup,
+} from "@opentui/core/testing"
 
 import { NanobotTui, type AppOptions } from "./app"
 
@@ -17,19 +22,43 @@ function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
 }
 
+function client(sent: string[] = []) {
+  return {
+    activeChatId: "chat",
+    connect() {},
+    close() {},
+    send(content: string) {
+      sent.push(content)
+      return "turn"
+    },
+  }
+}
+
+const mount = (setup: TestRendererSetup, sent: string[] = []) => NanobotTui.mount(
+  setup.renderer,
+  options,
+  client(sent),
+  new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+)
+
 describe("NanobotTui layout", () => {
   let setup: TestRendererSetup | undefined
 
-  afterEach(() => setup?.renderer.destroy())
+  afterEach(() => {
+    if (setup && !setup.renderer.isDestroyed) setup.renderer.destroy()
+    setup = undefined
+  })
+
+  const createRenderer = (options: Parameters<typeof createTestRenderer>[0]) => createTestRenderer(options)
 
   test("reflows a single retained layout across terminal resizes", async () => {
-    setup = await createTestRenderer({
+    setup = await createRenderer({
       width: 100,
       height: 30,
       screenMode: "alternate-screen",
       consoleMode: "disabled",
     })
-    NanobotTui.mount(setup.renderer, options)
+    const app = mount(setup)
 
     for (const [width, height] of [[100, 30], [56, 18], [118, 36]] as const) {
       setup.resize(width, height)
@@ -43,5 +72,463 @@ describe("NanobotTui layout", () => {
       expect(occurrences(frame, "Connecting…")).toBe(1)
       expect(occurrences(frame, "nanobot  ·  test/model")).toBe(1)
     }
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: "First **answer**." })
+    app.accept({ event: "stream_end", chat_id: "chat", resuming: true })
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "read_file(config.json)",
+      kind: "tool_hint",
+      tool_events: [
+        { phase: "start", call_id: "read-1", name: "read_file", arguments: { path: "config.json" } },
+        { phase: "end", call_id: "read-1", name: "read_file" },
+      ],
+    })
+    app.accept({ event: "reasoning_delta", chat_id: "chat", text: "private chain of thought" })
+    app.accept({ event: "reasoning_end", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: "Second answer." })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat", latency_ms: 1200 })
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+
+    expect(occurrences(frame, "First **answer**.")).toBe(1)
+    expect(occurrences(frame, "Second answer.")).toBe(1)
+    expect(frame).toContain("✓ read_file")
+    expect(frame).not.toContain("› read_file")
+    expect(frame).not.toContain("private chain of thought")
+    expect(frame).toContain("Ready · 1.2s")
+  })
+
+  test("waits for an IME commit before reading the submitted text", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    composer.setText("你")
+    composer.submit()
+    setTimeout(() => composer.setText("你好"), 0)
+    await Bun.sleep(10)
+
+    expect(sent).toEqual(["你好"])
+  })
+
+  test("recalls submitted prompts without stealing multiline cursor movement", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+    for (const value of ["first prompt", "second prompt"]) {
+      composer.setText(value)
+      composer.submit()
+      await Bun.sleep(5)
+      app.accept({ event: "turn_end", chat_id: "chat" })
+    }
+
+    setup.mockInput.pressArrow("up")
+    expect(composer.plainText).toBe("second prompt")
+    setup.mockInput.pressArrow("up")
+    expect(composer.plainText).toBe("first prompt")
+    setup.mockInput.pressArrow("down")
+    expect(composer.plainText).toBe("first prompt")
+    setup.mockInput.pressArrow("down")
+    expect(composer.plainText).toBe("second prompt")
+    setup.mockInput.pressArrow("down")
+    expect(composer.plainText).toBe("")
+
+    setup.resize(36, 20)
+    const wrapped = "这是一段会在狭窄输入框中自动换行而不是显式换行的中文内容"
+    composer.setText(wrapped)
+    composer.cursorOffset = wrapped.length
+    await setup.renderOnce()
+    expect(composer.virtualLineCount).toBeGreaterThan(1)
+
+    setup.mockInput.pressArrow("up")
+    expect(composer.plainText).toBe(wrapped)
+  })
+
+  test("survives rapid narrow resizes with long CJK and code", async () => {
+    setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({
+      event: "delta",
+      chat_id: "chat",
+      text: "中文会随着终端宽度重新排版。\n\n```ts\nconst greeting = '你好，nanobot'\n```",
+    })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+
+    for (const [width, height] of [[42, 12], [30, 9], [84, 24], [48, 14], [110, 32]] as const) {
+      setup.resize(width, height)
+      await setup.renderOnce()
+      const frame = setup.captureCharFrame()
+      expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
+      expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 12 ? 1 : 0)
+    }
+  })
+
+  test("replaces streamed drafts with canonical stream-end text", async () => {
+    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "delta", chat_id: "chat", text: "draft signed://expired" })
+    app.accept({
+      event: "stream_end",
+      chat_id: "chat",
+      text: "canonical https://nanobot.test/signed/current",
+      resuming: true,
+      merge_next: true,
+    })
+    app.accept({ event: "delta", chat_id: "chat", text: " tail" })
+    app.accept({
+      event: "stream_end",
+      chat_id: "chat",
+      text: "final https://nanobot.test/signed/current tail",
+    })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("final https://nanobot.test/signed/current tail")
+    expect(frame).not.toContain("canonical https://nanobot.test/signed/current")
+    expect(frame).not.toContain("draft signed://expired")
+  })
+
+  test("copies full-screen selections through OSC 52", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    let copied = ""
+    setup.renderer.copyToClipboardOSC52 = (text: string) => {
+      copied = text
+      return true
+    }
+
+    await setup.renderOnce()
+    app.accept({ event: "delta", chat_id: "chat", text: "selected answer" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    await setup.flush()
+    const rows = setup.captureCharFrame().split("\n")
+    const y = rows.findIndex((row) => row.includes("selected answer"))
+    const x = rows[y]?.indexOf("selected answer") ?? -1
+    expect(x).toBeGreaterThanOrEqual(0)
+    expect(y).toBeGreaterThanOrEqual(0)
+
+    await setup.mockMouse.drag(x, y, x + "selected answer".length, y)
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe("selected answer")
+    setup.mockInput.pressCtrlC()
+    await Bun.sleep(10)
+    await setup.flush()
+
+    expect(copied).toBe("selected answer")
+    expect(setup.renderer.getSelection()).toBeNull()
+  })
+
+  test("animates one stable status line while the agent works", async () => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden reasoning" })
+    await Bun.sleep(130)
+    await setup.renderOnce()
+    let frame = setup.captureCharFrame()
+
+    expect(frame).toMatch(/[◐◓◑◒] Thinking\s+0s/u)
+    expect(frame).not.toContain("hidden reasoning")
+
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "running shell",
+      kind: "tool_hint",
+      tool_events: [{ phase: "start", name: "exec", arguments: { cmd: "pwd" } }],
+    })
+    await Bun.sleep(130)
+    await setup.renderOnce()
+    frame = setup.captureCharFrame()
+
+    expect(frame).toMatch(/[◐◓◑◒] Working\s+0s/u)
+    expect(frame).toContain("› exec")
+    app.accept({ event: "turn_end", chat_id: "chat" })
+  })
+
+  test("folds long tool traces without discarding their details", async () => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "tool progress",
+      kind: "tool_hint",
+      tool_events: Array.from({ length: 10 }, (_, index) => ({
+        phase: "end",
+        call_id: `call-${index}`,
+        name: `tool_${index}`,
+      })),
+    })
+    await setup.renderOnce()
+    let frame = setup.captureCharFrame()
+
+    expect(frame).toContain("5 earlier steps · Ctrl+O expand")
+    expect(frame).not.toContain("tool_0")
+    expect(frame).toContain("tool_9")
+
+    setup.mockInput.pressKey("O", { ctrl: true })
+    await setup.renderOnce()
+    frame = setup.captureCharFrame()
+
+    expect(frame).not.toContain("earlier steps")
+    expect(frame).toContain("tool_0")
+    expect(frame).toContain("tool_9")
+
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "second tool group",
+      kind: "tool_hint",
+      tool_events: Array.from({ length: 8 }, (_, index) => ({
+        phase: "end",
+        call_id: `later-${index}`,
+        name: `later_${index}`,
+      })),
+    })
+    setup.mockInput.pressKey("O", { ctrl: true })
+    await setup.renderOnce()
+    const activities = [...(app as unknown as {
+      transcript: { activities: Set<{ expanded: boolean }> }
+    }).transcript.activities]
+
+    expect(activities.map((activity) => activity.expanded)).toEqual([true, true])
+    setup.mockInput.pressKey("O", { ctrl: true })
+    await setup.renderOnce()
+    expect(activities.map((activity) => activity.expanded)).toEqual([true, false])
+    app.accept({ event: "turn_end", chat_id: "chat" })
+  })
+
+  test("supports keyboard transcript navigation without rebuilding the layout", async () => {
+    setup = await createRenderer({ width: 64, height: 16, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    for (let index = 0; index < 24; index += 1) {
+      app.accept({ event: "delta", chat_id: "chat", text: `answer ${index}` })
+      app.accept({ event: "stream_end", chat_id: "chat" })
+    }
+    await setup.flush()
+    const scroll = (app as unknown as {
+      transcript: { root: { scrollTop: number; scrollHeight: number; height: number } }
+    }).transcript.root
+
+    setup.mockInput.pressKey("HOME", { ctrl: true })
+    await setup.renderOnce()
+    expect(scroll.scrollTop).toBe(0)
+
+    app.accept({ event: "delta", chat_id: "chat", text: "new answer while reading above" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    await setup.renderOnce()
+    expect(scroll.scrollTop).toBe(0)
+
+    setup.mockInput.pressKey("\u001B[6~")
+    await setup.renderOnce()
+    expect(scroll.scrollTop).toBeGreaterThan(0)
+
+    setup.mockInput.pressKey("END", { ctrl: true })
+    await setup.renderOnce()
+    expect(scroll.scrollTop).toBeGreaterThanOrEqual(scroll.scrollHeight - scroll.height)
+  })
+
+  test("reconciles active state from attach hydration after reconnect", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const state = () => (app as unknown as { activeTurn: boolean }).activeTurn
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: "stale partial response" })
+    expect(state()).toBe(true)
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    await setup.flush()
+    expect(state()).toBe(false)
+    const restored = setup.captureCharFrame()
+    expect(restored).not.toContain("stale partial response")
+    expect(occurrences(restored, ">_  nanobot")).toBe(1)
+    app.accept({
+      event: "goal_status",
+      chat_id: "chat",
+      status: "running",
+      started_at: Date.now() / 1000 - 2,
+    })
+    expect(state()).toBe(true)
+    app.accept({ event: "goal_status", chat_id: "chat", status: "idle" })
+    expect(state()).toBe(false)
+  })
+
+  test("replays events after asynchronous history hydration", async () => {
+    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let resolveFetch: (value: Response) => void = () => undefined
+    globalThis.fetch = (() => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })) as unknown as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "token", chatId: "chat" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    try {
+      app.accept({ event: "attached", chat_id: "chat" })
+      app.accept({ event: "delta", chat_id: "chat", text: "live after reconnect" })
+      expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(false)
+      resolveFetch(new Response(JSON.stringify({
+        messages: [{ role: "assistant", content: "persisted before reconnect" }],
+        page: { has_more_before: false },
+      })))
+      await Bun.sleep(5)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+
+      expect(frame.indexOf("persisted before reconnect")).toBeLessThan(
+        frame.indexOf("live after reconnect"),
+      )
+      expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
+      app.accept({ event: "turn_end", chat_id: "chat" })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("blocks submission until reconnect history is hydrated", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let request = 0
+    let resolveReconnect: (value: Response) => void = () => undefined
+    globalThis.fetch = (() => {
+      request += 1
+      if (request === 1) {
+        return Promise.resolve(new Response(JSON.stringify({
+          messages: [{ role: "assistant", content: "initial history" }],
+          page: { has_more_before: false },
+        })))
+      }
+      return new Promise<Response>((resolve) => {
+        resolveReconnect = resolve
+      })
+    }) as unknown as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "token", chatId: "chat" },
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    try {
+      app.accept({ event: "attached", chat_id: "chat" })
+      await Bun.sleep(5)
+      app.accept({ event: "attached", chat_id: "chat" })
+      composer.setText("sent during reconnect")
+      composer.submit()
+      await Bun.sleep(5)
+
+      expect(sent).toEqual([])
+      expect(composer.plainText).toBe("sent during reconnect")
+
+      resolveReconnect(new Response(JSON.stringify({
+        messages: [{ role: "assistant", content: "restored history" }],
+        page: { has_more_before: false },
+      })))
+      await Bun.sleep(5)
+      composer.submit()
+      await Bun.sleep(5)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+
+      expect(sent).toEqual(["sent during reconnect"])
+      expect(frame.indexOf("restored history")).toBeLessThan(frame.indexOf("sent during reconnect"))
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("preserves drafts while a reconnected socket waits to attach", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+    const connection = app as unknown as {
+      handleStatus(status: "connecting" | "connected", detail?: string): void
+    }
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    connection.handleStatus("connecting", "reconnecting")
+    connection.handleStatus("connected")
+    composer.setText("draft before attach")
+    composer.submit()
+    await Bun.sleep(5)
+
+    expect(sent).toEqual([])
+    expect(composer.plainText).toBe("draft before attach")
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(5)
+    composer.submit()
+    await Bun.sleep(5)
+
+    expect(sent).toEqual(["draft before attach"])
+  })
+
+  test("destroys the renderer and transport together", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let closed = false
+    const transport = client()
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    app.stop()
+
+    expect(closed).toBe(true)
+    expect(setup.renderer.isDestroyed).toBe(true)
   })
 })
+
+if (process.platform !== "win32") {
+  test("restores the terminal after SIGTERM", async () => {
+    const child = Bun.spawn(["bun", "src/index.ts"], {
+      cwd: import.meta.dir.replace(/\/src$/u, ""),
+      env: {
+        ...process.env,
+        NANOBOT_TUI_WS_URL: "ws://127.0.0.1:9/ws",
+        NANOBOT_TUI_API_URL: "",
+        NANOBOT_TUI_API_TOKEN: "",
+        NANOBOT_TUI_MODEL: "test/model",
+        NANOBOT_TUI_WORKSPACE: "/tmp/nanobot-test",
+        NANOBOT_TUI_VERSION: "test",
+        NANOBOT_TUI_ACCESS: "workspace access",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await Bun.sleep(250)
+    child.kill("SIGTERM")
+    const exitCode = await child.exited
+    const output = await new Response(child.stdout).text()
+    const error = await new Response(child.stderr).text()
+
+    expect(exitCode).toBe(0)
+    expect(error).toBe("")
+    expect(output).toContain("\x1b[?1049h")
+    expect(output).toContain("\x1b[?1049l")
+  })
+}

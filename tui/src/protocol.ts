@@ -1,5 +1,29 @@
 export type ConnectionStatus = "connecting" | "connected" | "closed" | "error"
 
+export interface ToolProgressEvent {
+  version?: number
+  phase?: "start" | "end" | "error" | string
+  call_id?: string
+  name?: string
+  arguments?: unknown
+  result?: unknown
+  error?: unknown
+  files?: unknown[]
+  embeds?: unknown[]
+}
+
+export interface FileEditEvent {
+  version?: number
+  call_id?: string
+  tool?: string
+  path?: string
+  phase?: "start" | "end" | "error" | string
+  added?: number
+  deleted?: number
+  status?: "editing" | "done" | "error" | string
+  error?: string
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
@@ -9,8 +33,10 @@ export type InboundEvent =
       chat_id: string
       text: string
       kind?: "tool_hint" | "progress" | "reasoning"
+      tool_events?: ToolProgressEvent[]
       turn_id?: string
     }
+  | { event: "file_edit"; chat_id: string; edits: FileEditEvent[]; turn_id?: string }
   | { event: "delta"; chat_id: string; text: string; stream_id?: string; turn_id?: string }
   | {
       event: "stream_end"
@@ -24,6 +50,14 @@ export type InboundEvent =
   | { event: "reasoning_delta"; chat_id: string; text: string; turn_id?: string }
   | { event: "reasoning_end"; chat_id: string; turn_id?: string }
   | { event: "turn_end"; chat_id: string; latency_ms?: number; turn_id?: string }
+  | {
+      event: "goal_status"
+      chat_id: string
+      status: "running" | "idle"
+      started_at?: number
+      turn_id?: string
+    }
+  | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
   | { event: "runtime_model_updated"; model_name: string; model_preset?: string | null }
   | { event: "turn_model_updated"; chat_id: string; model_name: string }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; turn_id?: string }
@@ -36,41 +70,170 @@ type OutboundEvent =
 export interface ClientOptions {
   url: string
   chatId?: string
+  reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
   onStatus: (status: ConnectionStatus, detail?: string) => void
 }
 
 export interface HistoryMessage {
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "activity"
   content: string
+  toolEvents?: ToolProgressEvent[]
+  fileEdits?: FileEditEvent[]
+}
+
+export interface HistorySnapshot {
+  messages: HistoryMessage[]
+  truncated: boolean
+}
+
+const CHAT_EVENTS = new Set([
+  "attached",
+  "message_accepted",
+  "message",
+  "file_edit",
+  "delta",
+  "stream_end",
+  "reasoning_delta",
+  "reasoning_end",
+  "turn_end",
+  "goal_status",
+  "goal_state",
+  "turn_model_updated",
+  "error",
+])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function optional(value: unknown, type: "boolean" | "number" | "string"): boolean {
+  return value === undefined || typeof value === type
+}
+
+function isToolEvent(value: unknown): value is ToolProgressEvent {
+  if (!isRecord(value)) return false
+  return optional(value.version, "number")
+    && optional(value.phase, "string")
+    && optional(value.call_id, "string")
+    && optional(value.name, "string")
+    && (value.files === undefined || Array.isArray(value.files))
+    && (value.embeds === undefined || Array.isArray(value.embeds))
+}
+
+function isFileEdit(value: unknown): value is FileEditEvent {
+  if (!isRecord(value)) return false
+  return optional(value.version, "number")
+    && optional(value.call_id, "string")
+    && optional(value.tool, "string")
+    && optional(value.path, "string")
+    && optional(value.phase, "string")
+    && optional(value.status, "string")
+    && optional(value.added, "number")
+    && optional(value.deleted, "number")
+    && optional(value.error, "string")
+}
+
+function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
+  if (!isRecord(value)) return null
+  const record = value
+  const name = record.event
+  if (typeof name !== "string") return null
+  if (name === "ready") {
+    return typeof record.chat_id === "string" && typeof record.client_id === "string"
+      ? value as InboundEvent
+      : null
+  }
+  if (name === "runtime_model_updated") {
+    return typeof record.model_name === "string"
+      && (record.model_preset === undefined
+        || record.model_preset === null
+        || typeof record.model_preset === "string")
+      ? value as InboundEvent
+      : null
+  }
+  if (name === "error" && (record.chat_id === undefined || typeof record.chat_id === "string")) {
+    return optional(record.detail, "string") && optional(record.reason, "string")
+      ? value as InboundEvent
+      : null
+  }
+  if (!CHAT_EVENTS.has(name)) return undefined // Forward-compatible additive event.
+  if (typeof record.chat_id !== "string") return null
+  if (["message", "delta", "reasoning_delta"].includes(name) && typeof record.text !== "string") {
+    return null
+  }
+  if (
+    name === "message"
+    && record.tool_events !== undefined
+    && (!Array.isArray(record.tool_events) || !record.tool_events.every(isToolEvent))
+  ) return null
+  if (name === "file_edit" && (!Array.isArray(record.edits) || !record.edits.every(isFileEdit))) {
+    return null
+  }
+  if (
+    name === "stream_end"
+    && (!optional(record.text, "string")
+      || !optional(record.resuming, "boolean")
+      || !optional(record.merge_next, "boolean"))
+  ) return null
+  if (name === "turn_end" && !optional(record.latency_ms, "number")) return null
+  if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
+  if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
+  if (name === "turn_model_updated" && typeof record.model_name !== "string") return null
+  return value as InboundEvent
 }
 
 export async function fetchHistory(
   apiUrl: string,
   apiToken: string,
   chatId: string,
-): Promise<HistoryMessage[]> {
-  if (!apiUrl || !apiToken) return []
+): Promise<HistorySnapshot> {
+  if (!apiUrl || !apiToken) return { messages: [], truncated: false }
   const key = encodeURIComponent(`websocket:${chatId}`)
   const response = await fetch(`${apiUrl}/api/sessions/${key}/webui-thread?limit=120&direction=latest`, {
     headers: { Authorization: `Bearer ${apiToken}` },
   })
-  if (response.status === 404) return []
+  if (response.status === 404) return { messages: [], truncated: false }
   if (!response.ok) throw new Error(`history request failed: HTTP ${response.status}`)
-  const payload = (await response.json()) as { messages?: Array<Record<string, unknown>> }
-  return (payload.messages || []).flatMap((message) => {
+  const payload = (await response.json()) as {
+    messages?: Array<Record<string, unknown>>
+    page?: { has_more_before?: boolean }
+  }
+  const messages: HistoryMessage[] = (payload.messages || []).flatMap((message) => {
     const role = message.role
     const content = message.content
-    if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) {
+    if (role === "tool" && message.kind === "trace") {
+      const traces = Array.isArray(message.traces)
+        ? message.traces.filter((value): value is string => typeof value === "string")
+        : []
+      const toolEvents = Array.isArray(message.toolEvents)
+        ? message.toolEvents as ToolProgressEvent[]
+        : undefined
+      const fileEdits = Array.isArray(message.fileEdits)
+        ? message.fileEdits as FileEditEvent[]
+        : undefined
+      const activity = traces.join("\n") || (typeof content === "string" ? content : "")
+      return [{ role: "activity", content: activity, toolEvents, fileEdits }]
+    }
+    if (
+      (role !== "user" && role !== "assistant")
+      || message.kind === "reasoning"
+      || typeof content !== "string"
+      || !content.trim()
+    ) {
       return []
     }
-    return [{ role, content }]
+    return [{ role: role as HistoryMessage["role"], content }]
   })
+  return { messages, truncated: payload.page?.has_more_before === true }
 }
 
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt = 0
+  private closedByClient = false
 
   constructor(private readonly options: ClientOptions) {}
 
@@ -79,18 +242,44 @@ export class NanobotClient {
   }
 
   connect(): void {
+    this.closedByClient = false
+    this.open()
+  }
+
+  private open(): void {
+    if (this.socket) return
     this.options.onStatus("connecting")
     const socket = new WebSocket(this.options.url)
     this.socket = socket
-    socket.addEventListener("open", () => this.options.onStatus("connected"))
-    socket.addEventListener("message", (message) => this.handleMessage(String(message.data)))
-    socket.addEventListener("error", () => this.options.onStatus("error", "connection failed"))
-    socket.addEventListener("close", () => this.options.onStatus("closed"))
+    socket.addEventListener("open", () => {
+      if (this.socket !== socket) return
+      this.reconnectAttempt = 0
+      this.options.onStatus("connected")
+    })
+    socket.addEventListener("message", (message) => {
+      if (this.socket === socket) this.handleMessage(String(message.data))
+    })
+    socket.addEventListener("error", () => {
+      if (this.socket === socket) this.options.onStatus("error", "connection failed")
+    })
+    socket.addEventListener("close", () => {
+      if (this.socket !== socket) return
+      this.socket = null
+      if (this.closedByClient) {
+        this.options.onStatus("closed")
+        return
+      }
+      this.scheduleReconnect()
+    })
   }
 
   close(): void {
-    this.socket?.close()
+    this.closedByClient = true
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    const socket = this.socket
     this.socket = null
+    socket?.close()
   }
 
   send(content: string): string {
@@ -114,15 +303,17 @@ export class NanobotClient {
       this.options.onStatus("error", "gateway sent invalid JSON")
       return
     }
-    if (!value || typeof value !== "object" || !("event" in value)) {
+    const event = decodeInboundEvent(value)
+    if (event === undefined) return
+    if (event === null) {
       this.options.onStatus("error", "gateway sent an invalid event")
       return
     }
-    const event = value as InboundEvent
 
     if (event.event === "ready") {
-      if (this.options.chatId) {
-        this.chatId = this.options.chatId
+      const requestedChatId = this.chatId || this.options.chatId
+      if (requestedChatId) {
+        this.chatId = requestedChatId
         this.write({ type: "attach", chat_id: this.chatId })
       } else {
         this.write({ type: "new_chat" })
@@ -131,6 +322,17 @@ export class NanobotClient {
       this.chatId = event.chat_id
     }
     this.options.onEvent(event)
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.closedByClient) return
+    const base = this.options.reconnectDelayMs ?? 500
+    const delay = Math.min(8_000, base * 2 ** Math.min(this.reconnectAttempt++, 4))
+    this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.open()
+    }, delay)
   }
 
   private write(event: OutboundEvent): void {

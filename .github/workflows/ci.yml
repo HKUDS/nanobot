@@ -180,9 +180,19 @@ jobs:
         run: bun run build
 
   tui:
-    name: Terminal UI
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Terminal UI
+            os: ubuntu-latest
+          - name: Terminal UI (macOS)
+            os: macos-latest
+          - name: Terminal UI (Windows)
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@v4

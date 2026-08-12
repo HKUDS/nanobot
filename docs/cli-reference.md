@@ -115,7 +115,7 @@ workspace file. Back up both the config directory and workspace before changing 
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, the command starts one for the lifetime of the terminal UI and stops it on exit.
 
-`Enter` sends the current message. Press `Alt+Enter` to add a newline. `Ctrl+C` stops a running turn, clears a non-empty composer, or exits when idle. The transcript scrolls inside the TUI and reflows when the terminal is resized; exiting restores the previous terminal screen.
+`Enter` sends the current message. Press `Alt+Enter` to add a newline and use `Up`/`Down` at the composer edge to recall recent prompts. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
 
 Packaged releases fetch a version-matched, checksummed terminal binary for macOS, Linux, or Windows on first use and cache it under the nanobot data directory. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A source checkout can run the client with Bun after `bun install --cwd tui`.
 
