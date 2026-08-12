@@ -639,6 +639,101 @@ def _combined_channel_runtime_state(
     return "stopped"
 
 
+def _install_feature_dependencies(
+    name: str,
+    dependencies: list[str] | None,
+    *,
+    allow_install: bool,
+    runner: Any,
+) -> bool:
+    """Ensure one feature's declared dependencies are present.
+
+    Returns ``True`` only when this call ran an installer. Package-install
+    authorization belongs here so every WebUI action gets the same policy.
+    """
+    if not dependencies or extra_installed(name, dependencies):
+        return False
+    if not allow_install:
+        raise OptionalFeatureError(
+            "Installing optional features from a remote WebUI is disabled. "
+            "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
+            status=403,
+        )
+    result = install_extra(
+        name,
+        dependencies,
+        runner=runner,
+    )
+    if not result.ok:
+        failed = command_text(result.failed_cmd or result.pip_cmd)
+        detail = f": {result.output}" if result.output else ""
+        raise OptionalFeatureError(f"Failed: {failed}{detail}", status=500)
+    return True
+
+
+def install_optional_feature_support(
+    name: str,
+    *,
+    config_path: Path | None = None,
+    allow_install: bool = True,
+    runner: Any = run_install_command,
+) -> dict[str, Any]:
+    """Install channel dependencies without enabling or changing configuration."""
+    from nanobot.channels.registry import discover_plugins
+    from nanobot.config.loader import get_config_path, load_config
+
+    config_path = config_path or get_config_path()
+    extras = optional_dependency_groups()
+    channel_plugins = discover_plugins()
+    known = set(channel_plugins) | set(extras)
+    if name not in known:
+        available = ", ".join(sorted(known))
+        raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
+
+    channel_plugin = channel_plugins.get(name)
+    if channel_plugin is None:
+        raise OptionalFeatureError(
+            "Install-only actions are supported for channel features only.",
+            status=400,
+        )
+    dependencies = _feature_dependencies(name, channel_plugin, extras)
+    installed_now = _install_feature_dependencies(
+        name,
+        dependencies,
+        allow_install=allow_install,
+        runner=runner,
+    )
+    if dependencies and not extra_installed(name, dependencies):
+        raise OptionalFeatureError(
+            f"Installed support for channel '{name}', but its dependencies are still unavailable.",
+            status=500,
+        )
+
+    payload = optional_features_payload(config=load_config(config_path))
+    feature = next(
+        (item for item in payload["features"] if item.get("name") == name),
+        None,
+    )
+    if feature is None or not feature.get("installed"):
+        raise OptionalFeatureError(
+            f"Channel '{name}' dependencies are still unavailable after installation.",
+            status=500,
+        )
+    message = (
+        f"Installed support for channel '{name}'"
+        if installed_now
+        else f"Support for channel '{name}' is already installed"
+    )
+    payload["last_action"] = {
+        "ok": True,
+        "message": message,
+        "enabled": bool(feature.get("enabled")),
+        "installed": True,
+    }
+    payload["requires_restart"] = False
+    return payload
+
+
 def enable_optional_feature(
     name: str,
     *,
@@ -671,22 +766,12 @@ def enable_optional_feature(
 
     channel_plugin = channel_plugins.get(name)
     dependencies = _feature_dependencies(name, channel_plugin, extras)
-    if dependencies and not extra_installed(name, dependencies):
-        if not allow_install:
-            raise OptionalFeatureError(
-                "Installing optional features from a remote WebUI is disabled. "
-                "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
-                status=403,
-            )
-        result = install_extra(
-            name,
-            dependencies,
-            runner=runner,
-        )
-        if not result.ok:
-            failed = command_text(result.failed_cmd or result.pip_cmd)
-            detail = f": {result.output}" if result.output else ""
-            raise OptionalFeatureError(f"Failed: {failed}{detail}", status=500)
+    _install_feature_dependencies(
+        name,
+        dependencies,
+        allow_install=allow_install,
+        runner=runner,
+    )
 
     channel_cls: Any | None = None
     target_instance_id: str | None = None

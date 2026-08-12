@@ -748,7 +748,9 @@
       "installSupport": "Instal dukungan",
       "installConfirmTitle": "Instal dukungan untuk {{name}}?",
       "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installOnlyConfirmDescription": "nanobot akan menginstal dukungan yang dibutuhkan {{name}}. Anda dapat menghubungkannya setelah instalasi.",
       "installConfirmAction": "Instal dan aktifkan",
+      "installOnlyConfirmAction": "Instal dukungan",
       "websocketRequired": "Wajib untuk WebUI",
       "channelDisabled": "Kanal dinonaktifkan",
       "notEnabled": "Belum aktif"

@@ -748,7 +748,9 @@
       "installSupport": "Cài gói hỗ trợ",
       "installConfirmTitle": "Cài hỗ trợ cho {{name}}?",
       "installConfirmDescription": "nanobot sẽ thêm những gì {{name}} cần, rồi bật tính năng này. Tiếp tục?",
+      "installOnlyConfirmDescription": "nanobot sẽ cài đặt gói hỗ trợ mà {{name}} cần. Bạn có thể kết nối sau khi cài đặt.",
       "installConfirmAction": "Cài và bật",
+      "installOnlyConfirmAction": "Cài gói hỗ trợ",
       "websocketRequired": "Bắt buộc cho WebUI",
       "channelDisabled": "Kênh đang tắt",
       "notEnabled": "Chưa bật"

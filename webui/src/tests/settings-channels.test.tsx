@@ -1,6 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { ChannelSetupContract, ChannelSetupContractField } from "@/lib/types";
+import type {
+  ChannelSetupContract,
+  ChannelSetupContractField,
+  NanobotFeatureInfo,
+} from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -146,9 +150,220 @@ function channelSetupContract(
   }
 }
 
+function uninstalledConnectFeature(
+  name: "feishu" | "weixin" | "whatsapp",
+): NanobotFeatureInfo {
+  const displayNames = {
+    feishu: "Feishu",
+    weixin: "WeChat",
+    whatsapp: "WhatsApp",
+  };
+  return {
+    name,
+    display_name: displayNames[name],
+    webui: "webui/index.tsx",
+    type: "channel",
+    enabled: false,
+    configured: false,
+    installed: false,
+    ready: false,
+    runtime_status: "stopped",
+    status: "not_enabled",
+    install_supported: true,
+    requires_restart: true,
+    ...(name === "feishu"
+      ? {
+          instances: [{
+            id: "default",
+            name: "nanobot",
+            enabled: false,
+            runtime_status: "stopped",
+            configured: false,
+            config_values: {},
+            configured_fields: [],
+          }],
+        }
+      : {}),
+  };
+}
+
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
+  it("installs WhatsApp support before exposing the connect flow", async () => {
+    const whatsappFeature = {
+      name: "whatsapp",
+      display_name: "WhatsApp",
+      webui: "webui/index.tsx",
+      type: "channel",
+      enabled: false,
+      configured: false,
+      installed: false,
+      ready: false,
+      status: "not_enabled",
+      install_supported: true,
+      requires_restart: false,
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({ features: [whatsappFeature], enabled_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockResolvedValueOnce({
+      features: [{ ...whatsappFeature, installed: true }],
+      enabled_count: 0,
+      requires_restart: false,
+      last_action: {
+        ok: true,
+        message: "Installed support for channel 'whatsapp'",
+        enabled: false,
+      },
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View WhatsApp settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect WhatsApp" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(
+      "nanobot will install what WhatsApp needs. You can connect it after installation.",
+    )).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Install support" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "whatsapp", install_only: true },
+        150_000,
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Connect WhatsApp" })).toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.some(([action]) => (
+      action.startsWith("settings.channel.connect")
+    ))).toBe(false);
+  });
+
+  it.each([
+    ["feishu", "Feishu", "Create assistant"],
+    ["weixin", "WeChat", "Connect WeChat"],
+  ] as const)(
+    "installs %s support before mounting its custom connect panel",
+    async (name, displayName, connectActionLabel) => {
+      const feature = uninstalledConnectFeature(name);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === "/api/settings") return jsonResponse(settingsPayload());
+          if (url === "/api/settings/cli-apps") {
+            return jsonResponse({ apps: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/mcp-presets") {
+            return jsonResponse({ presets: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/nanobot-features") {
+            return jsonResponse({ features: [feature], enabled_count: 0 });
+          }
+          return { ok: false, status: 404, json: async () => ({}) } as Response;
+        }),
+      );
+      requestMutationMock.mockResolvedValueOnce({
+        features: [{ ...feature, installed: true }],
+        enabled_count: 0,
+        requires_restart: false,
+        last_action: {
+          ok: true,
+          message: `Installed support for channel '${name}'`,
+          enabled: false,
+        },
+      });
+
+      renderSettingsView({ initialSection: "channels" });
+
+      expect(
+        await screen.findByRole("button", { name: `View ${displayName} settings` }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Install support" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: connectActionLabel })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Install support" }));
+
+      await waitFor(() =>
+        expect(requestMutationMock).toHaveBeenCalledWith(
+          "settings.feature.enable",
+          { name, install_only: true },
+          150_000,
+        ),
+      );
+      expect(
+        await screen.findByRole("button", { name: connectActionLabel }, { timeout: 3_000 }),
+      ).toBeInTheDocument();
+      expect(requestMutationMock.mock.calls.some(([action]) => (
+        action.startsWith("settings.channel.connect")
+      ))).toBe(false);
+    },
+  );
+
+  it("announces an install-only failure and logs action context", async () => {
+    const feature = uninstalledConnectFeature("whatsapp");
+    const installError = new Error("Package install failed");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === "/api/settings") return jsonResponse(settingsPayload());
+          if (url === "/api/settings/cli-apps") {
+            return jsonResponse({ apps: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/mcp-presets") {
+            return jsonResponse({ presets: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/nanobot-features") {
+            return jsonResponse({ features: [feature], enabled_count: 0 });
+          }
+          return { ok: false, status: 404, json: async () => ({}) } as Response;
+        }),
+      );
+      requestMutationMock.mockRejectedValueOnce(installError);
+
+      renderSettingsView({ initialSection: "channels" });
+
+      expect(
+        await screen.findByRole("button", { name: "View WhatsApp settings" }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Install support" }),
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Package install failed");
+      expect(consoleError).toHaveBeenCalledWith(
+        "nanobot feature action failed",
+        expect.objectContaining({
+          action: "enable",
+          name: "whatsapp",
+          installOnly: true,
+          error: installError,
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 
   it("shows an enabled channel with missing support as failed", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -994,6 +1209,120 @@ describe("Settings channels", () => {
     expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
       "aria-checked",
       "true",
+    );
+  });
+
+  it("requires Email consent to be granted before validating or enabling", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "email",
+              display_name: "Email",
+              webui: "webui/index.ts",
+              type: "channel",
+              enabled: false,
+              configured: false,
+              installed: true,
+              ready: false,
+              status: "not_enabled",
+              install_supported: true,
+              requires_restart: false,
+              setup: channelSetupContract("email"),
+            }],
+            enabled_count: 0,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.channel.validate") {
+        return {
+          name: "email",
+          status: "ready",
+          checks: [],
+          missing_fields: [],
+          can_enable: true,
+          requires_restart: false,
+        };
+      }
+      if (action === "settings.channel.configure") {
+        return {
+          name: "email",
+          saved: true,
+          saved_keys: [
+            "channels.email.consentGranted",
+            "channels.email.imapHost",
+            "channels.email.imapUsername",
+            "channels.email.imapPassword",
+            "channels.email.smtpHost",
+            "channels.email.smtpUsername",
+            "channels.email.smtpPassword",
+          ],
+        };
+      }
+      return settingsPayload();
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Email settings" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.example.com" } });
+    fireEvent.change(screen.getByLabelText("IMAP username"), { target: { value: "bot@example.com" } });
+    fireEvent.change(screen.getByLabelText("IMAP password"), { target: { value: "imap-secret" } });
+    fireEvent.change(screen.getByLabelText("SMTP host"), { target: { value: "smtp.example.com" } });
+    fireEvent.change(screen.getByLabelText("SMTP username"), { target: { value: "bot@example.com" } });
+    fireEvent.change(screen.getByLabelText("SMTP password"), { target: { value: "smtp-secret" } });
+
+    const consentGroup = screen.getByRole("group", { name: "Consent granted" });
+    const notGranted = within(consentGroup).getByRole("radio", { name: "Not granted" });
+    const granted = within(consentGroup).getByRole("radio", { name: "Granted" });
+    expect(notGranted).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check and enable" }));
+
+    await waitFor(() => expect(granted).toHaveFocus());
+    expect(consentGroup).toHaveAttribute("aria-invalid", "true");
+    expect(notGranted).toHaveAttribute("aria-invalid", "true");
+    expect(granted).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Required to complete setup.")).toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.some(([action]) => (
+      action === "settings.channel.validate" || action === "settings.channel.configure"
+    ))).toBe(false);
+
+    fireEvent.click(granted);
+
+    expect(consentGroup).toHaveAttribute("aria-invalid", "false");
+    expect(notGranted).toHaveAttribute("aria-invalid", "false");
+    expect(granted).toHaveAttribute("aria-invalid", "false");
+    expect(screen.queryByText("Required to complete setup.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check and enable" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.validate",
+        expect.objectContaining({
+          name: "email",
+          values: expect.objectContaining({
+            "channels.email.consentGranted": "true",
+          }),
+        }),
+        20_000,
+      ),
+    );
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.configure",
+        expect.objectContaining({ name: "email", enable: true }),
+        150_000,
+      ),
     );
   });
 

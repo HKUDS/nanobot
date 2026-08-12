@@ -545,12 +545,16 @@ export async function stopApiService(
 export async function enableNanobotFeature(
   transport: WebUIMutationTransport,
   name: string,
-  options: { instanceId?: string } = {},
+  options: { instanceId?: string; installOnly?: boolean } = {},
 ): Promise<NanobotFeaturesPayload> {
   return mutation<NanobotFeaturesPayload>(
     transport,
     "settings.feature.enable",
-    { name, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
+    {
+      name,
+      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
+      ...(options.installOnly ? { install_only: true } : {}),
+    },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }

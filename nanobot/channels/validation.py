@@ -173,7 +173,10 @@ def _composite_requirement_checks(
     checks: list[dict[str, Any]] = []
     missing: list[str] = []
     for index, requirement in enumerate(setup_spec.required):
-        if requirement.simple_field is not None or requirement.is_satisfied(values):
+        if requirement.simple_field is not None or requirement.is_satisfied(
+            values,
+            setup_spec.fields,
+        ):
             continue
 
         alternatives = [

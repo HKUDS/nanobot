@@ -748,7 +748,9 @@
       "installSupport": "サポートをインストール",
       "installConfirmTitle": "{{name}} のサポートをインストールしますか？",
       "installConfirmDescription": "nanobot が {{name}} に必要なものを追加し、その後有効化します。続けますか？",
+      "installOnlyConfirmDescription": "nanobot が {{name}} に必要なサポートをインストールします。インストール後に接続できます。",
       "installConfirmAction": "インストールして有効化",
+      "installOnlyConfirmAction": "サポートをインストール",
       "websocketRequired": "WebUI に必須",
       "channelDisabled": "チャンネルは無効",
       "notEnabled": "未有効"

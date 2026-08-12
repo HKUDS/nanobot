@@ -10,6 +10,10 @@ export function channelFieldValue(field: ChannelConfigField, values: Record<stri
   return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
 }
 
+export function channelFieldInputId(key: string): string {
+  return `channel-field-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 export function defaultChannelFieldValues(
   fields: ChannelConfigField[],
   configValues: Record<string, string> | undefined = undefined,
@@ -138,7 +142,7 @@ export function CredentialForm({
   return (
     <div className={cn(compact ? "space-y-2.5" : "mt-3 space-y-2.5")}>
       {fields.map((field) => {
-        const inputId = `channel-field-${field.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        const inputId = channelFieldInputId(field.key);
         const helpId = field.help ? `${inputId}-help` : undefined;
         const error = errors[field.key];
         const errorId = error ? `${inputId}-error` : undefined;
@@ -182,19 +186,28 @@ export function CredentialForm({
         ) : null;
         if (field.options?.length) {
           return (
-            <fieldset key={field.key} className="block">
+            <fieldset
+              key={field.key}
+              id={`${inputId}-group`}
+              aria-invalid={Boolean(error)}
+              aria-describedby={describedBy}
+              className="block"
+            >
               <legend className="w-full">{header}</legend>
               <span
                 className="mt-1 grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
                 style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
               >
-                {field.options.map((option) => (
+                {field.options.map((option, index) => (
                   <label key={option.value} className="relative block">
                     <input
+                      id={index === 0 ? inputId : `${inputId}-${index}`}
                       type="radio"
                       name={inputId}
                       value={option.value}
                       checked={selectedOption === option.value}
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={describedBy}
                       onChange={() => onChange(field.key, option.value)}
                       className="peer sr-only"
                     />

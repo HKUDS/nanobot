@@ -748,7 +748,9 @@
       "installSupport": "安裝支援套件",
       "installConfirmTitle": "安裝 {{name}} 的支援套件？",
       "installConfirmDescription": "nanobot 將安裝 {{name}} 所需的元件並啟用支援。要繼續嗎？",
+      "installOnlyConfirmDescription": "將安裝 {{name}} 所需的支援套件。安裝完成後即可連線。",
       "installConfirmAction": "安裝並啟用",
+      "installOnlyConfirmAction": "安裝支援套件",
       "websocketRequired": "WebUI 需要此功能",
       "channelDisabled": "通訊管道已停用",
       "notEnabled": "未啟用"

@@ -42,6 +42,38 @@ describe("CredentialForm", () => {
     expect(onChange).toHaveBeenCalledWith("channels.matrix.groupPolicy", "open");
   });
 
+  it("associates option errors and exposes a stable focus target", () => {
+    render(
+      <CredentialForm
+        fields={[{ ...fields[1]!, help: "Controls which room messages are handled." }]}
+        values={{ "channels.matrix.groupPolicy": "mention" }}
+        visibleSecrets={{}}
+        onChange={vi.fn()}
+        onToggleSecret={vi.fn()}
+        errors={{ "channels.matrix.groupPolicy": "Required to complete setup." }}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Group behavior" });
+    const firstRadio = within(group).getByRole("radio", { name: "Mention only" });
+    const secondRadio = within(group).getByRole("radio", { name: "All messages" });
+
+    expect(group).toHaveAttribute("id", "channel-field-channels-matrix-groupPolicy-group");
+    expect(group).toHaveAttribute("aria-invalid", "true");
+    expect(group).toHaveAccessibleDescription(
+      "Controls which room messages are handled. Required to complete setup.",
+    );
+    expect(firstRadio).toHaveAttribute("id", "channel-field-channels-matrix-groupPolicy");
+    expect(secondRadio).toHaveAttribute("id", "channel-field-channels-matrix-groupPolicy-1");
+    expect(firstRadio).toHaveAttribute("aria-invalid", "true");
+    expect(firstRadio).toHaveAccessibleDescription(
+      "Controls which room messages are handled. Required to complete setup.",
+    );
+
+    document.getElementById("channel-field-channels-matrix-groupPolicy")?.focus();
+    expect(firstRadio).toHaveFocus();
+  });
+
   it("associates field errors and saved-secret removal actions", () => {
     const onClearSecret = vi.fn();
     render(

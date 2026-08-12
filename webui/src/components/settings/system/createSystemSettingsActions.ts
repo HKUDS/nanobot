@@ -204,12 +204,18 @@ export function createSystemSettingsActions({
   const handleNanobotFeatureAction = async (
     action: "enable" | "disable",
     name: string,
-    confirmed = false,
+    options: { confirmed?: boolean; installOnly?: boolean } = {},
   ) => {
     const feature = featureCatalog.find((item) => item.name === name);
-    if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
+    if (
+      action === "enable"
+      && !options.confirmed
+      && feature
+      && !feature.installed
+      && feature.install_supported
+    ) {
       setNanobotFeaturesError(null);
-      setNanobotFeatureConfirm(feature);
+      setNanobotFeatureConfirm({ feature, installOnly: Boolean(options.installOnly) });
       return;
     }
     const key = `${action}:${name}`;
@@ -218,14 +224,20 @@ export function createSystemSettingsActions({
     setNanobotFeaturesError(null);
     try {
       const payload = action === "enable"
-        ? await enableNanobotFeature(client, name)
+        ? await enableNanobotFeature(client, name, { installOnly: options.installOnly })
         : await disableNanobotFeature(client, name);
       setNanobotFeatures(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
     } catch (err) {
-      setNanobotFeaturesError((err as Error).message);
+      console.error("nanobot feature action failed", {
+        action,
+        name,
+        installOnly: Boolean(options.installOnly),
+        error: err,
+      });
+      setNanobotFeaturesError(err instanceof Error ? err.message : String(err));
     } finally {
       setNanobotFeatureAction(null);
     }

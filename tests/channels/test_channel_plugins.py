@@ -1884,6 +1884,190 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     assert not config_path.exists()
 
 
+def test_install_only_adds_channel_support_without_changing_config(monkeypatch, tmp_path):
+    from nanobot.optional_features import InstallResult
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": False, "marker": "keep"}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    plugin = _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",))
+    _stub_channel_registry(monkeypatch, plugin)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    installed = False
+    install_calls: list[tuple[str, list[str]]] = []
+
+    def _extra_installed(_name: str, _dependencies: list[str] | None) -> bool:
+        return installed
+
+    def _install_extra(name: str, dependencies: list[str], *, runner) -> InstallResult:
+        nonlocal installed
+        install_calls.append((name, dependencies))
+        installed = True
+        return InstallResult(True, f"{name} support", ["pip"])
+
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", _extra_installed)
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+
+    payload = nanobot_features_action(
+        "enable",
+        {"name": ["fakeplugin"], "install_only": ["true"]},
+        config_path=config_path,
+        allow_install=True,
+    )
+
+    feature = payload["features"][0]
+    assert install_calls == [("fakeplugin", ["fake-sdk>=1"])]
+    assert config_path.read_bytes() == before
+    assert feature["installed"] is True
+    assert feature["enabled"] is False
+    assert feature["ready"] is False
+    assert feature["status"] == "not_enabled"
+    assert payload["requires_restart"] is False
+    assert payload["last_action"] == {
+        "ok": True,
+        "message": "Installed support for channel 'fakeplugin'",
+        "enabled": False,
+        "installed": True,
+    }
+
+
+def test_install_only_blocks_missing_support_when_install_is_disallowed(monkeypatch, tmp_path):
+    from nanobot.optional_features import OptionalFeatureError
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": False}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    plugin = _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",))
+    _stub_channel_registry(monkeypatch, plugin)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.install_extra",
+        lambda *_args, **_kwargs: pytest.fail("disallowed install must not invoke the installer"),
+    )
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        nanobot_features_action(
+            "enable",
+            {"name": ["fakeplugin"], "install_only": ["1"]},
+            config_path=config_path,
+            allow_install=False,
+        )
+
+    assert exc.value.status == 403
+    assert "remote WebUI is disabled" in exc.value.message
+    assert config_path.read_bytes() == before
+
+
+def test_install_only_allows_existing_support_without_install_permission(monkeypatch, tmp_path):
+    from nanobot.optional_features import InstallResult
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": True, "marker": "keep"}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    plugin = _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",))
+    _stub_channel_registry(monkeypatch, plugin)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
+
+    def _unexpected_install(
+        _name: str,
+        _dependencies: list[str] | None,
+        *,
+        runner,
+    ) -> InstallResult:
+        pytest.fail("already-installed support must not invoke the installer")
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _unexpected_install)
+
+    payload = nanobot_features_action(
+        "enable",
+        {"name": ["fakeplugin"], "install_only": ["yes"]},
+        config_path=config_path,
+        allow_install=False,
+    )
+
+    feature = payload["features"][0]
+    assert config_path.read_bytes() == before
+    assert feature["installed"] is True
+    assert feature["enabled"] is True
+    assert payload["requires_restart"] is False
+    assert payload["last_action"] == {
+        "ok": True,
+        "message": "Support for channel 'fakeplugin' is already installed",
+        "enabled": True,
+        "installed": True,
+    }
+
+
+def test_install_only_reports_install_failure_without_changing_config(monkeypatch, tmp_path):
+    from nanobot.optional_features import InstallResult, OptionalFeatureError
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": False}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    plugin = _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",))
+    _stub_channel_registry(monkeypatch, plugin)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.install_extra",
+        lambda _name, _dependencies, *, runner: InstallResult(
+            False,
+            "fakeplugin support",
+            ["python", "-m", "pip", "install", "fake-sdk>=1"],
+            output="network unavailable",
+        ),
+    )
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        nanobot_features_action(
+            "enable",
+            {"name": ["fakeplugin"], "install_only": ["true"]},
+            config_path=config_path,
+        )
+
+    assert exc.value.status == 500
+    assert "network unavailable" in exc.value.message
+    assert config_path.read_bytes() == before
+
+
+def test_install_only_query_is_rejected_for_non_enable_actions(monkeypatch, tmp_path):
+    from nanobot.optional_features import OptionalFeatureError
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    _stub_channel_registry(monkeypatch, _channel_plugin(_FakePlugin))
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        nanobot_features_action(
+            "disable",
+            {"name": ["fakeplugin"], "install_only": ["true"]},
+            config_path=config_path,
+        )
+
+    assert exc.value.status == 400
+    assert exc.value.message == "install_only is only supported for enable actions"
+    assert not config_path.exists()
+
+
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
     monkeypatch,
     tmp_path,

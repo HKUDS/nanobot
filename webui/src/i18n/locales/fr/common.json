@@ -748,7 +748,9 @@
       "installSupport": "Installer le support",
       "installConfirmTitle": "Installer le support pour {{name}} ?",
       "installConfirmDescription": "nanobot ajoutera ce dont {{name}} a besoin, puis l'activera. Continuer ?",
+      "installOnlyConfirmDescription": "nanobot installera les composants requis par {{name}}. Vous pourrez vous connecter après l’installation.",
       "installConfirmAction": "Installer et activer",
+      "installOnlyConfirmAction": "Installer le support",
       "websocketRequired": "Requis pour la WebUI",
       "channelDisabled": "Canal désactivé",
       "notEnabled": "Non activé"

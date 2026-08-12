@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import type { ChannelFeatureAction } from "@/channel-plugins/types";
 import {
   channelIsRunning,
   channelMatchesFilter,
@@ -9,7 +10,10 @@ import {
   localizedChannelDisplayName,
   type ChannelFilter,
 } from "@/components/settings/channels/ChannelIdentity";
-import { ChannelCatalogRow, ChannelSetupPanel } from "@/components/settings/channels/ChannelSetupPanel";
+import {
+  ChannelCatalogRow,
+  ChannelSetupPanel,
+} from "@/components/settings/channels/ChannelSetupPanel";
 import {
   DismissibleStatusMessage,
   RestartRequiredNotice,
@@ -47,7 +51,7 @@ export function ChannelsSettings({
   error: string | null;
   requiresRestartPending: boolean;
   onQueryChange: (value: string) => void;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   onDismissStatus: () => void;
   onRestart?: () => void;

@@ -749,7 +749,9 @@
       "installSupport": "Instalar soporte",
       "installConfirmTitle": "¿Instalar soporte para {{name}}?",
       "installConfirmDescription": "nanobot añadirá lo que {{name}} necesita y luego lo activará. ¿Continuar?",
+      "installOnlyConfirmDescription": "nanobot instalará lo que {{name}} necesita. Podrás conectarlo después de la instalación.",
       "installConfirmAction": "Instalar y activar",
+      "installOnlyConfirmAction": "Instalar soporte",
       "websocketRequired": "Requerido para WebUI",
       "channelDisabled": "El canal está desactivado",
       "notEnabled": "No activado"

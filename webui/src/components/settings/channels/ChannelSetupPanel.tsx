@@ -16,7 +16,10 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { channelUiContribution } from "@/channel-plugins/registry";
-import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
+import type {
+  ChannelFeatureAction,
+  ChannelPluginConnectFlowProps,
+} from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   type ChannelConfigField,
@@ -133,7 +136,7 @@ export function ChannelSetupPanel({
   actionKey: string | null;
   chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -142,7 +145,10 @@ export function ChannelSetupPanel({
   const [connectRequestId, setConnectRequestId] = useState(0);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
-  if (PluginPanel) {
+  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
+  const installOnly = !feature.enabled && setup.mode === "connect";
+  const missingSupport = !feature.installed && (feature.enabled || installOnly);
+  if (PluginPanel && !missingSupport) {
     return (
       <Suspense fallback={<ChannelPluginLoading />}>
         <PluginPanel
@@ -157,7 +163,7 @@ export function ChannelSetupPanel({
       </Suspense>
     );
   }
-  if (feature.instances !== undefined) {
+  if (feature.instances !== undefined && !missingSupport) {
     return (
       <ChannelInstancesPanel
         feature={feature}
@@ -169,11 +175,9 @@ export function ChannelSetupPanel({
   }
   const enableBusy = actionKey === `enable:${feature.name}`;
   const disableBusy = actionKey === `disable:${feature.name}`;
-  const missingSupport = feature.enabled && !feature.installed;
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
   const channelChecked = alwaysEnabled || channelToggleChecked(feature);
   const channelBusy = enableBusy || disableBusy;
-  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
   const needsSetupBeforeEnable =
     !channelChecked
     && feature.configured === false
@@ -206,7 +210,7 @@ export function ChannelSetupPanel({
                 size="sm"
                 variant="secondary"
                 disabled={enableBusy}
-                onClick={() => onAction("enable", feature.name)}
+                onClick={() => onAction("enable", feature.name, { installOnly })}
                 className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
               >
                 {enableBusy ? (
@@ -232,6 +236,10 @@ export function ChannelSetupPanel({
             ariaLabel={toggleAriaLabel}
             label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             onChange={(checked) => {
+              if (checked && missingSupport) {
+                onAction("enable", feature.name, { installOnly });
+                return;
+              }
               if (checked && !channelChecked && feature.configured === false) {
                 if (uiContribution?.canConnectBeforeConfigured && setup.mode === "connect") {
                   setConnectRequestId((current) => current + 1);
@@ -265,7 +273,7 @@ export function ChannelSetupPanel({
         setup={setup}
         chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
-        ConnectFlow={uiContribution?.ConnectFlow}
+        ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     </aside>
@@ -503,7 +511,7 @@ function ChannelSetupSurface({
         <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && ConnectFlow ? (
+        {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
           <Suspense fallback={<ChannelPluginLoading compact />}>
             <ConnectFlow
               token={token}
@@ -759,7 +767,9 @@ function channelRequirementErrors(
   const present = (key: string) => {
     const field = fieldByKey.get(key);
     if (!field || clearedSecrets.has(key)) return false;
-    if ((values[key] ?? "").trim()) return true;
+    const value = (values[key] ?? "").trim();
+    if (field.kind === "bool") return value === "true";
+    if (value) return true;
     return Boolean(field.secret && configuredFields.has(key));
   };
   const errors: Record<string, string> = {};

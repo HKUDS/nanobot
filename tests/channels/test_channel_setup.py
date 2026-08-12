@@ -67,6 +67,24 @@ def test_matrix_setup_requires_one_complete_login_method() -> None:
     assert not matrix.is_configured(base | {"accessToken": "token"})
 
 
+def test_required_boolean_must_be_true_to_complete_setup() -> None:
+    email = channel_setup_spec("email")
+
+    assert email is not None
+    base = {
+        "imapHost": "imap.example.com",
+        "imapUsername": "bot@example.com",
+        "imapPassword": "imap-secret",
+        "smtpHost": "smtp.example.com",
+        "smtpUsername": "bot@example.com",
+        "smtpPassword": "smtp-secret",
+        "fromAddress": "bot@example.com",
+    }
+    assert not email.is_configured(base | {"consentGranted": False})
+    assert not email.is_configured(base | {"consentGranted": "false"})
+    assert email.is_configured(base | {"consentGranted": True})
+
+
 def test_channel_setup_spec_separates_writable_and_snapshot_fields() -> None:
     matrix = channel_setup_spec("matrix")
     discord = channel_setup_spec("discord")
