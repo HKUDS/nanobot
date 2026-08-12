@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
@@ -193,7 +194,11 @@ class TestIdleScanThrottling:
         })
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop.from_config(config, provider=provider)
+        loop = AgentLoop.from_config(
+            config,
+            tool_registry=ToolRegistry(),
+            provider=provider,
+        )
         loop.auto_compact.check_expired = MagicMock()
 
         loop._check_expired_sessions_if_due()

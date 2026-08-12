@@ -422,7 +422,6 @@ def _run_gateway(
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
-        mcp_runtime_owned_externally=True,
         provider=provider_snapshot.provider,
         model=provider_snapshot.model,
         context_window_tokens=provider_snapshot.context_window_tokens,

@@ -95,7 +95,6 @@ def agent(
         agent_loop = AgentLoop.from_config(
             runtime_config,
             bus,
-            mcp_runtime_owned_externally=True,
             provider=provider,
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),

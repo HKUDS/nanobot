@@ -133,7 +133,6 @@ class Nanobot:
         mcp_provider = MCPProvider.from_config(config, tools)
         loop = AgentLoop.from_config(
             config,
-            mcp_runtime_owned_externally=True,
             image_generation_provider_configs=image_gen_provider_configs(config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,

@@ -358,7 +358,6 @@ def serve(
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
-            mcp_runtime_owned_externally=True,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
