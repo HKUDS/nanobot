@@ -1,3 +1,4 @@
+from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
@@ -163,3 +164,35 @@ def test_save_discards_invalidated_reference_even_if_cache_is_empty(tmp_path) ->
 
     store.save.assert_not_called()
     assert manager.get_cached("test:orphan") is None
+
+
+def test_save_discards_rejected_competing_reference_after_invalidate(tmp_path) -> None:
+    """A rejected alternate object must not become valid after cache invalidation."""
+    store = MagicMock(spec=SessionStore)
+    store.load.return_value = None
+    manager = SessionManager(tmp_path, store=store)
+
+    current = manager.get_or_create("test:competing")
+    competing = Session(key=current.key)
+    competing.add_message("user", "stale alternate data")
+
+    manager.save(competing)
+    manager.invalidate(current.key)
+    manager.save(competing)
+
+    store.save.assert_not_called()
+
+
+def test_invalidate_revokes_runtime_copy_of_cached_session(tmp_path) -> None:
+    """Copying a managed object must not create an invalidation escape hatch."""
+    store = MagicMock(spec=SessionStore)
+    store.load.return_value = None
+    manager = SessionManager(tmp_path, store=store)
+
+    current = manager.get_or_create("test:copied")
+    copied = deepcopy(current)
+    copied.add_message("user", "stale copied data")
+    manager.invalidate(current.key)
+    manager.save(copied)
+
+    store.save.assert_not_called()
