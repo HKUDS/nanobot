@@ -1158,7 +1158,8 @@ class OpenAICompatProvider(LLMProvider):
                     self._sanitize_empty_content(sanitized_state.pending_messages)
                 )
             )
-        preserve_reasoning = bool(self._spec and self._spec.name == "deepseek")
+        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
+        preserve_reasoning = is_deepseek
         instructions, input_items, replayed = prepare_responses_input(
             sanitized_messages,
             state=sanitized_state,
@@ -1194,7 +1195,7 @@ class OpenAICompatProvider(LLMProvider):
 
         if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
             body["include"] = ["reasoning.encrypted_content"]
-        if reasoning_effort and reasoning_effort.lower() != "none":
+        if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
             body["reasoning"] = {"effort": reasoning_effort}
         if replayed and "gpt-5.6" in model_name.lower():
             body.setdefault("reasoning", {})["context"] = "all_turns"

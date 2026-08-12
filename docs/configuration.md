@@ -360,7 +360,7 @@ request, while other tools such as `web_fetch` remain available.
 <details>
 <summary><b>DeepSeek native web search</b></summary>
 
-DeepSeek V4 Flash uses DeepSeek's native Responses API. Its provider-hosted web search is
+DeepSeek V4 Flash and Pro use DeepSeek's native Responses API. Their provider-hosted web search is
 enabled by default because it does not require a separate paid add-on. Turn it off from the
 WebUI provider settings, or with:
 
@@ -377,9 +377,9 @@ WebUI provider settings, or with:
 }
 ```
 
-The switch applies to `deepseek-v4-flash`; DeepSeek models that remain on Chat Completions
-cannot use this Responses tool. Native search calls appear in the WebUI activity stream, and
-their opaque output items are preserved for multi-turn Responses state replay.
+The switch applies to `deepseek-v4-flash` and `deepseek-v4-pro`; DeepSeek models that remain on
+Chat Completions cannot use this Responses tool. Native search calls appear in the WebUI activity
+stream, and their opaque output items are preserved for multi-turn Responses state replay.
 
 </details>
 
@@ -391,7 +391,7 @@ Providers that use the Responses API can keep reasoning context across a
 conversation, which helps with multi-step tasks. Supported providers can also
 compact long conversations automatically.
 
-nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4 Flash, and compatible GitHub Copilot models.
+nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4, and compatible GitHub Copilot models.
 Native compaction is also automatic when the provider supports it. The
 threshold is derived from the active model's context window and reserved output
 headroom; no provider configuration is required.

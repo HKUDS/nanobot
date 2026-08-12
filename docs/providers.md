@@ -287,7 +287,7 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 
 `providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it. The WebUI exposes provider-native switches for OpenAI web search, Codex Fast mode, DeepSeek web search, and Grok X Search. These switches write the corresponding raw provider request fields under `extraBody`.
 
-DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` automatically uses DeepSeek's native Responses API, while `deepseek-v4-pro` remains on Chat Completions. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it.
+DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` and `deepseek-v4-pro` automatically use DeepSeek's native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it.
 
 ### Custom OpenAI-Compatible Endpoint
 
