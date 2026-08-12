@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -13,6 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, Protocol, cast
+from urllib.parse import unquote
 
 from loguru import logger
 from pydantic import Field
@@ -1010,18 +1012,113 @@ class ExecTool(Tool):
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
-        posix_paths = [
-            p.rstrip(");},")
-            for p in re.findall(
-                r"(?:^|[\s|><='\"({,]|:(?!//))(/[^\"'>;|<()\s]+)",
-                command,
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&")
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            tokens = list(lexer)
+        except ValueError:
+            # Keep malformed quoting fail-closed. The shell will normally reject
+            # it too, but a conservative raw scan must not turn it into a bypass.
+            tokens = [command]
+
+        paths = [*win_paths]
+        seen = set(win_paths)
+        for index, token in enumerate(tokens):
+            for path in ExecTool._extract_posix_paths_from_token(token):
+                if path not in seen:
+                    paths.append(path)
+                    seen.add(path)
+            if index > 0 and tokens[index - 1] in {"-c", "-lc", "--command"}:
+                for path in ExecTool._extract_absolute_paths(token):
+                    if path not in seen:
+                        paths.append(path)
+                        seen.add(path)
+        return paths
+
+    @staticmethod
+    def _extract_posix_paths_from_token(token: str) -> list[str]:
+        """Extract local POSIX/home paths from one shell-decoded token.
+
+        ``shlex`` separates real grouping/redirection operators while preserving
+        parentheses and spaces that were quoted or escaped as part of a path.
+        Embedded scripts (for example ``sh -c \"cat /tmp/x\"``) still need a
+        small boundary scan. Colons are deliberately not boundaries: treating
+        them as such misclassifies URLs, ``host:/remote`` and ``C:/Windows``.
+        """
+        paths: list[str] = []
+        for match in re.finditer(
+            r"file://(?:[^/\s\"']+)?(/[^\s\"'<>|;&]*)",
+            token,
+            flags=re.IGNORECASE,
+        ):
+            uri_prefix = token[: match.start()]
+            raw_path = match.group(1)
+            if uri_prefix.count("(") > uri_prefix.count(")"):
+                raw_path = raw_path.split(")", 1)[0]
+            if uri_prefix.count("{") > uri_prefix.count("}"):
+                raw_path = raw_path.split(",", 1)[0].split("}", 1)[0]
+            raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
+            if raw_path:
+                paths.append(unquote(raw_path))
+        boundary_chars = frozenset(" \t\r\n=({,<>|;&\"'")
+        i = 0
+        while i < len(token):
+            is_posix = token[i] == "/"
+            is_home = token.startswith("~/", i) or token.startswith("~+/", i)
+            if not is_posix and not is_home:
+                i += 1
+                continue
+
+            prefix = token[:i]
+            at_boundary = i == 0 or token[i - 1] in boundary_chars
+            parameter_default = (
+                i >= 2 and token[i - 2] == ":" and token[i - 1] in "-+?="
             )
-        ]
-        home_paths = [
-            p.rstrip(");},")
-            for p in re.findall(r"(?:^|[\s|><='\"({,:])(~[/+][^\"'>;|<()\s]+)", command)
-        ]
-        return win_paths + posix_paths + home_paths
+            if not at_boundary and not parameter_default:
+                i += 1
+                continue
+
+            word_start = max(
+                (prefix.rfind(char) for char in " \t\r\n<>|;&"),
+                default=-1,
+            ) + 1
+            word_prefix = prefix[word_start:]
+            if re.search(r"[A-Za-z][A-Za-z0-9+.-]*://", word_prefix) or re.match(
+                r"(?:[^/:=\s]+@)?[^/:=\s]+:$",
+                word_prefix,
+            ):
+                # HTTP-style URL path/query fragments and scp-style remote paths
+                # are not local filesystem references. ``file://`` paths were
+                # decoded above. Windows drive paths are already captured by the
+                # platform-specific expression above.
+                i += 1
+                continue
+
+            assignment_value = i > 0 and token[i - 1] == "=" and not any(
+                char.isspace() for char in prefix
+            )
+            if i == 0 or assignment_value:
+                end = len(token)
+            elif token[i - 1] in {"'", '"'}:
+                quote = token[i - 1]
+                closing = token.find(quote, i)
+                end = len(token) if closing < 0 else closing
+            else:
+                end_chars = set(" \t\r\n\"'<>|;&")
+                if prefix.count("(") > prefix.count(")"):
+                    end_chars.add(")")
+                if prefix.count("{") > prefix.count("}"):
+                    end_chars.update({",", "}"})
+                end = i
+                while end < len(token) and token[end] not in end_chars:
+                    end += 1
+
+            candidate = token[i:end]
+            if candidate:
+                paths.append(candidate)
+            i = max(end, i + 1)
+        return paths
 
     @staticmethod
     def _normalize_bind_roots(paths: list[str] | None) -> list[Path]:
