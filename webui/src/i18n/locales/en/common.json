@@ -241,7 +241,7 @@
       "activityMode": "Choose how much agent activity chrome to show by default.",
       "fileEditDisplay": "Choose whether file edit activity opens as line counts or a diff.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
-      "brandLogos": "Show third-party provider and CLI logos in Settings.",
+      "brandLogos": "Load third-party brand logos from external icon services. Turn this off to use local initials.",
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
@@ -557,9 +557,6 @@
       "capabilityOpenAISearch": "OpenAI web search",
       "capabilityOpenAISearchHelp": "Allow compatible Responses API models to search the web. Search activity appears in chat."
     },
-    "legal": {
-      "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."
-    },
     "image": {
       "selectProvider": "Select provider",
       "selectAspect": "Select aspect",
@@ -606,6 +603,14 @@
     },
     "apps": {
       "description": "Add tools to nanobot, then @ them in chat.",
+      "discover": "Discover",
+      "installed": "Installed",
+      "allApps": "All apps",
+      "addCustom": "Add custom",
+      "emptyInstalled": "No apps installed yet.",
+      "searchResults": "Search results",
+      "browseAll": "Browse all",
+      "nextFeatured": "Show another",
       "cliLabel": "App",
       "mcpLabel": "MCP",
       "channelLabel": "Channel",
@@ -617,7 +622,7 @@
       "enabledSummary": "{{count}} ready",
       "caption": "{{cli}} apps · {{mcp}} MCP tools",
       "searchPlaceholder": "Search tools",
-      "featured": "Tools",
+      "featured": "Featured",
       "mcpTools": "MCP tools",
       "loading": "Loading Apps...",
       "empty": "No tools match your search.",

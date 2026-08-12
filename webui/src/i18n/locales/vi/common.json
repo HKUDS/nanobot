@@ -203,7 +203,7 @@
       "currentModel": "Dùng cho các phản hồi mới.",
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
-      "brandLogos": "Hiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
+      "brandLogos": "Tải logo thương hiệu của bên thứ ba từ dịch vụ biểu tượng bên ngoài. Tắt để dùng chữ cái đại diện cục bộ.",
       "cliAppsCatalog": "Chỉ cài đặt các bộ chuyển đổi CLI ứng dụng mà nanobot có thể chạy cục bộ; ứng dụng gốc không bị thay đổi.",
       "cliAppsFilter": "Tìm theo ứng dụng, danh mục hoặc khả năng.",
       "logs": "Mở thư mục nhật ký của bộ máy gốc.",
@@ -587,11 +587,16 @@
       "title": "Khả năng quan sát", "configured": "Thông tin xác thực tracing đã sẵn sàng cho nanobot.",
       "environment": "Đặt LANGFUSE_SECRET_KEY và LANGFUSE_PUBLIC_KEY rồi khởi động lại nanobot.", "enable": "Bật hỗ trợ tracing"
     },
-    "legal": {
-      "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
-    },
     "apps": {
       "description": "Thêm công cụ vào nanobot, sau đó dùng @ trong cuộc trò chuyện.",
+      "discover": "Khám phá",
+      "installed": "Đã cài đặt",
+      "allApps": "Tất cả ứng dụng",
+      "addCustom": "Thêm tùy chỉnh",
+      "emptyInstalled": "Chưa có ứng dụng nào được cài đặt.",
+      "searchResults": "Kết quả tìm kiếm",
+      "browseAll": "Xem tất cả",
+      "nextFeatured": "Xem nhóm khác",
       "cliLabel": "Ứng dụng",
       "mcpLabel": "MCP",
       "channelLabel": "Kênh",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}} sẵn sàng",
       "caption": "{{cli}} ứng dụng · {{mcp}} công cụ MCP",
       "searchPlaceholder": "Tìm ứng dụng",
-      "featured": "Công cụ",
+      "featured": "Nổi bật",
       "mcpTools": "Công cụ MCP",
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có công cụ phù hợp với tìm kiếm của bạn.",

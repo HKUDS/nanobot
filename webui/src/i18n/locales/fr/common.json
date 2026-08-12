@@ -203,7 +203,7 @@
       "currentModel": "Utilisée pour les nouvelles réponses.",
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
-      "brandLogos": "Affiche les logos de fournisseurs tiers et CLI dans les Réglages.",
+      "brandLogos": "Charge les logos de marques tierces depuis des services d’icônes externes. Désactivez cette option pour utiliser des initiales locales.",
       "cliAppsCatalog": "Installe uniquement les adaptateurs CLI d’applications que nanobot peut exécuter localement ; les applications natives restent inchangées.",
       "cliAppsFilter": "Recherchez par application, catégorie ou capacité.",
       "logs": "Ouvre le dossier des journaux du moteur natif.",
@@ -587,11 +587,16 @@
       "title": "Observabilité", "configured": "Les identifiants de traçage sont disponibles pour nanobot.",
       "environment": "Définissez LANGFUSE_SECRET_KEY et LANGFUSE_PUBLIC_KEY, puis redémarrez nanobot.", "enable": "Activer le traçage"
     },
-    "legal": {
-      "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
-    },
     "apps": {
       "description": "Ajoutez des outils à nanobot, puis utilisez-les avec @ dans le chat.",
+      "discover": "Découvrir",
+      "installed": "Installées",
+      "allApps": "Toutes les apps",
+      "addCustom": "Ajouter une app",
+      "emptyInstalled": "Aucune app installée pour le moment.",
+      "searchResults": "Résultats de recherche",
+      "browseAll": "Tout afficher",
+      "nextFeatured": "Voir d’autres",
       "cliLabel": "Application",
       "mcpLabel": "MCP",
       "channelLabel": "Canal",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}} prêts",
       "caption": "{{cli}} applications · {{mcp}} outils MCP",
       "searchPlaceholder": "Rechercher des applications",
-      "featured": "Outils",
+      "featured": "À la une",
       "mcpTools": "Outils MCP",
       "loading": "Chargement des applications...",
       "empty": "Aucun outil ne correspond à votre recherche.",

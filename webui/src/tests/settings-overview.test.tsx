@@ -3,8 +3,8 @@ import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
-  const thirdPartyBrandNotice =
-    "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.";
+const brandLogoHelp =
+  "Load third-party brand logos from external icon services. Turn this off to use local initials.";
 
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
@@ -26,7 +26,7 @@ describe("Settings overview and appearance", () => {
     });
   });
 
-  it("shows the third-party brand notice only with the brand logo preference", () => {
+  it("explains the external request behind the brand logo preference", () => {
     renderSettingsView({
       initialSection: "appearance",
       initialSettings: settingsPayload(),
@@ -38,19 +38,9 @@ describe("Settings overview and appearance", () => {
 
     expect(brandLogosRow).not.toBeNull();
     expect(
-      within(brandLogosRow as HTMLElement).getByText(thirdPartyBrandNotice),
+      within(brandLogosRow as HTMLElement).getByText(brandLogoHelp),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(thirdPartyBrandNotice)).toHaveLength(1);
   });
-
-  it.each(["apps", "channels"] as const)(
-    "does not repeat the third-party brand notice in %s",
-    (initialSection) => {
-      renderSettingsView({ initialSection, initialSettings: settingsPayload() });
-
-      expect(screen.queryByText(thirdPartyBrandNotice)).not.toBeInTheDocument();
-    },
-  );
 
   it("publishes the latest settings payload to the shell", async () => {
     const payload = settingsPayload();
@@ -100,7 +90,7 @@ describe("Settings overview and appearance", () => {
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
     expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add custom" }));
     expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
   });
 

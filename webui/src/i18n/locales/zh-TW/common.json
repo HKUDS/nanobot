@@ -203,7 +203,7 @@
       "currentModel": "用於新的回覆。",
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
-      "brandLogos": "在設定中顯示第三方供應商與 CLI 圖示。",
+      "brandLogos": "從外部圖示服務載入第三方品牌 Logo；關閉後使用本機首字母圖示。",
       "cliAppsCatalog": "只安裝 nanobot 可在本機執行的應用程式專用 CLI 轉接器；不會改動原生應用程式。",
       "cliAppsFilter": "依應用程式、類別或功能搜尋。",
       "logs": "開啟原生引擎日誌資料夾。",
@@ -587,11 +587,16 @@
       "title": "可觀測性", "configured": "nanobot 已偵測到追蹤憑證。",
       "environment": "設定 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 後重新啟動 nanobot。", "enable": "啟用追蹤支援"
     },
-    "legal": {
-      "thirdPartyBrands": "產品名稱、Logo 與品牌均為各自擁有者的財產。僅供識別之用，不代表任何形式的背書。"
-    },
     "apps": {
       "description": "將工具新增至 nanobot，再於聊天中使用 @ 指定工具。",
+      "discover": "探索",
+      "installed": "已安裝",
+      "allApps": "全部應用",
+      "addCustom": "自訂接入",
+      "emptyInstalled": "尚未安裝應用。",
+      "searchResults": "搜尋結果",
+      "browseAll": "瀏覽全部",
+      "nextFeatured": "換一批",
       "cliLabel": "應用程式",
       "mcpLabel": "MCP",
       "channelLabel": "通訊管道",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}} 個就緒",
       "caption": "{{cli}} 個應用程式 · {{mcp}} 個 MCP 工具",
       "searchPlaceholder": "搜尋工具",
-      "featured": "工具",
+      "featured": "精選",
       "mcpTools": "MCP 工具",
       "loading": "正在載入應用程式…",
       "empty": "沒有符合搜尋條件的工具。",

@@ -49,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
 import type {
+  AppsDiscoveryPayload,
   CliAppInfo,
   CliAppsPayload,
   McpOAuthFlowPayload,
@@ -57,7 +58,7 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type AppsKindFilter = "ready" | "cli" | "mcp";
+export type AppsKindFilter = "discover" | "installed" | "all" | "custom";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
@@ -65,6 +66,21 @@ type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 type CustomMcpAuth = "none" | "oauth" | "headers";
 export const CLI_APPS_REFRESH_RETRY_MS = 2_000;
 export const CLI_APPS_REFRESH_MAX_RETRIES = 30;
+const FEATURED_BATCH_SIZE = 6;
+const DEFAULT_FEATURED_IDS = [
+  "mcp:github",
+  "mcp:playwright",
+  "mcp:notion",
+  "mcp:figma",
+  "mcp:context7",
+  "cli:obsidian",
+  "mcp:linear",
+  "cli:browser",
+  "cli:1password-cli",
+  "cli:blender",
+  "cli:libreoffice",
+  "cli:zotero",
+];
 
 export interface CustomMcpForm {
   name: string;
@@ -91,6 +107,7 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 };
 
 export function AppsCatalogSettings({
+  discovery,
   cliApps,
   mcpPresets,
   cliAppsLoading,
@@ -134,6 +151,7 @@ export function AppsCatalogSettings({
   onRestart,
   isRestarting,
 }: {
+  discovery: AppsDiscoveryPayload | null;
   cliApps: CliAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
@@ -178,33 +196,41 @@ export function AppsCatalogSettings({
   isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
+  const [featuredBatch, setFeaturedBatch] = useState(0);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
-    { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
-    { value: "cli", label: tx("settings.apps.filterCli", "Apps") },
-    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP") },
+    { value: "discover", label: tx("settings.apps.discover", "Discover") },
+    { value: "installed", label: tx("settings.apps.installed", "Installed") },
+    { value: "all", label: tx("settings.apps.allApps", "All apps") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
-  const items: AppsCatalogItem[] = [
+  const allItems: AppsCatalogItem[] = [
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
     ...(mcpPresets?.presets ?? []).map((preset) => ({
       id: `mcp:${preset.name}`,
       kind: "mcp" as const,
       preset,
     })),
-  ]
-    .filter((item) => {
-      if (normalizedQuery) return appsSearchText(item).includes(normalizedQuery);
-      if (filter === "ready") return appsReady(item);
-      if (filter === "cli") {
-        return item.kind === "cli" || item.preset.source === "agent-plugin";
-      }
-      return item.kind === "mcp" && item.preset.source !== "agent-plugin";
-    })
-    .sort((left, right) => {
-      const rank = Number(!appsReady(left)) - Number(!appsReady(right));
-      return rank || appsTitle(left).localeCompare(appsTitle(right));
-    });
+  ].sort((left, right) => appsTitle(left).localeCompare(appsTitle(right)));
+  const installedItems = allItems.filter(appsInstalled);
+  const featuredIds = discovery?.featured ?? DEFAULT_FEATURED_IDS;
+  const selectedFeatured = selectFeaturedApps(allItems, featuredIds);
+  const featuredCandidates = selectedFeatured.length
+    ? selectedFeatured
+    : selectFeaturedApps(allItems, DEFAULT_FEATURED_IDS);
+  const featuredBatchCount = Math.max(1, Math.ceil(featuredCandidates.length / FEATURED_BATCH_SIZE));
+  const featuredBatchIndex = featuredBatch % featuredBatchCount;
+  const featuredItems = featuredCandidates.slice(
+    featuredBatchIndex * FEATURED_BATCH_SIZE,
+    (featuredBatchIndex + 1) * FEATURED_BATCH_SIZE,
+  );
+  const visibleItems = normalizedQuery
+    ? allItems.filter((item) => appsSearchText(item).includes(normalizedQuery))
+    : filter === "installed"
+      ? installedItems
+      : filter === "all"
+        ? allItems
+        : [];
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
@@ -212,23 +238,11 @@ export function AppsCatalogSettings({
     (cliAppsLoading || mcpPresetsLoading) &&
     !cliApps &&
     !mcpPresets;
-  const cliAppCount = cliApps?.apps.length ?? 0;
   const emptyTitle = normalizedQuery
     ? tx("settings.apps.empty", "No tools match your search.")
-    : filter === "cli"
-      ? tx("settings.apps.emptyApps", "No apps available.")
-      : filter === "mcp"
-        ? tx("settings.apps.emptyIntegrations", "No MCP tools available.")
-        : tx("settings.apps.emptyReady", "No tools are ready yet.");
-  const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery
-    ? null
-    : filter === "cli"
-      ? "mcp"
-      : filter === "mcp"
-        ? (cliAppCount ? "cli" : null)
-        : cliAppCount
-          ? "cli"
-          : "mcp";
+    : filter === "installed"
+      ? tx("settings.apps.emptyInstalled", "No apps installed yet.")
+      : tx("settings.apps.emptyApps", "No apps available.");
   const statusMessage =
     cliError ||
     mcpError ||
@@ -242,11 +256,58 @@ export function AppsCatalogSettings({
       mcpOAuthFlow.completion_input,
     )
     : "";
+  const selectFilter = (value: AppsKindFilter) => {
+    if (query) onQueryChange("");
+    onFilterChange(value);
+  };
+  const renderItem = (item: AppsCatalogItem) => item.kind === "cli" ? (
+    <CliAppsCatalogRow
+      key={item.id}
+      app={item.app}
+      actionKey={cliActionKey}
+      showBrandLogos={showBrandLogos}
+      onAction={onCliAction}
+    />
+  ) : (
+    <McpAppsCatalogRow
+      key={item.id}
+      preset={item.preset}
+      values={mcpFieldValues[item.preset.name] ?? {}}
+      actionKey={mcpActionKey}
+      oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
+      oauthPopupBlocked={mcpOAuthPopupBlocked}
+      oauthCallbackUrl={mcpOAuthCallbackUrl}
+      oauthCompleting={mcpOAuthCompleting}
+      oauthCallbackError={mcpOAuthCallbackError}
+      showBrandLogos={showBrandLogos}
+      showTypeBadge
+      onFieldChange={onMcpFieldChange}
+      onAction={onMcpAction}
+      onOAuthConnect={onMcpOAuthConnect}
+      onOAuthCancel={onMcpOAuthCancel}
+      onOAuthOpen={onMcpOAuthOpen}
+      onOAuthCallbackUrlChange={onMcpOAuthCallbackUrlChange}
+      onOAuthComplete={onMcpOAuthComplete}
+      onToolsChange={onMcpToolsChange}
+    />
+  );
+  const catalogGrid = (items: AppsCatalogItem[]) => (
+    <div className="grid grid-cols-1 border-t border-border/45 xl:grid-cols-2">
+      {items.map((item) => (
+        <div key={item.id} className="min-w-0 border-b border-border/45 xl:odd:border-r">
+          {renderItem(item)}
+        </div>
+      ))}
+    </div>
+  );
   return (
     <div className="space-y-7">
       <div role="status" className="sr-only">{oauthStatusAnnouncement}</div>
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <section className="space-y-5">
+        <p className="text-[14px] leading-6 text-muted-foreground">
+          {tx("settings.apps.description", "Add tools to nanobot, then @ them in chat.")}
+        </p>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
@@ -262,8 +323,17 @@ export function AppsCatalogSettings({
           <SegmentedControl
             value={filter}
             options={filterOptions}
-            onChange={(value) => onFilterChange(value as AppsKindFilter)}
+            onChange={(value) => selectFilter(value as AppsKindFilter)}
           />
+          <Button
+            type="button"
+            variant={filter === "custom" ? "secondary" : "outline"}
+            className="h-10 shrink-0 rounded-full px-4"
+            onClick={() => selectFilter("custom")}
+          >
+            <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+            {tx("settings.apps.addCustom", "Add custom")}
+          </Button>
         </div>
       </section>
 
@@ -287,62 +357,22 @@ export function AppsCatalogSettings({
         />
       ) : null}
 
-      <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
-        <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>
-            {filter === "mcp"
-              ? tx("settings.apps.mcpTools", "MCP tools")
-              : tx("settings.apps.featured", "Tools")}
-          </SettingsSectionTitle>
-          <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
-            {items.length}
-          </span>
-        </div>
-        {loading ? (
+      {loading ? (
+        <section className="rounded-[22px] bg-settings-surface">
           <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
             {tx("settings.apps.loading", "Loading Apps...")}
           </div>
-        ) : items.length ? (
-          <div className="grid grid-cols-1 gap-x-10 gap-y-1 py-3 xl:grid-cols-2">
-            {items.map((item) =>
-              item.kind === "cli" ? (
-                <CliAppsCatalogRow
-                  key={item.id}
-                  app={item.app}
-                  actionKey={cliActionKey}
-                  showBrandLogos={showBrandLogos}
-                  onAction={onCliAction}
-                />
-              ) : (
-                <McpAppsCatalogRow
-                  key={item.id}
-                  preset={item.preset}
-                  values={mcpFieldValues[item.preset.name] ?? {}}
-                  actionKey={mcpActionKey}
-                  oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
-                  oauthPopupBlocked={mcpOAuthPopupBlocked}
-                  oauthCallbackUrl={mcpOAuthCallbackUrl}
-                  oauthCompleting={mcpOAuthCompleting}
-                  oauthCallbackError={mcpOAuthCallbackError}
-                  showBrandLogos={showBrandLogos}
-                  showTypeBadge={filter !== "mcp"}
-                  onFieldChange={onMcpFieldChange}
-                  onAction={onMcpAction}
-                  onOAuthConnect={onMcpOAuthConnect}
-                  onOAuthCancel={onMcpOAuthCancel}
-                  onOAuthOpen={onMcpOAuthOpen}
-                  onOAuthCallbackUrlChange={onMcpOAuthCallbackUrlChange}
-                  onOAuthComplete={onMcpOAuthComplete}
-                  onToolsChange={onMcpToolsChange}
-                />
-              ),
-            )}
+        </section>
+      ) : normalizedQuery ? (
+        <section>
+          <div className="mb-3 flex items-baseline gap-2 px-1">
+            <SettingsSectionTitle>{tx("settings.apps.searchResults", "Search results")}</SettingsSectionTitle>
+            <span className="text-[12px] text-muted-foreground">{visibleItems.length}</span>
           </div>
-        ) : (
-          <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            <p>{emptyTitle}</p>
-            {normalizedQuery ? (
+          {visibleItems.length ? catalogGrid(visibleItems) : (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              <p>{emptyTitle}</p>
               <Button
                 type="button"
                 variant="outline"
@@ -351,30 +381,46 @@ export function AppsCatalogSettings({
               >
                 {tx("settings.apps.clearSearch", "Clear search")}
               </Button>
-            ) : emptyBrowseTarget ? (
+            </div>
+          )}
+        </section>
+      ) : filter === "discover" ? (
+        <section>
+          <div className="mb-3 flex items-center justify-between gap-3 px-1">
+            <div className="flex items-baseline gap-2">
+              <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
+              <span className="text-[12px] text-muted-foreground">{featuredItems.length}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {featuredBatchCount > 1 ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-8 rounded-full px-3 text-[12px] text-muted-foreground"
+                  onClick={() => setFeaturedBatch((batch) => (batch + 1) % featuredBatchCount)}
+                >
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.apps.nextFeatured", "Show another")}
+                </Button>
+              ) : null}
               <Button
                 type="button"
-                variant="outline"
-                className="mt-4 rounded-full"
-                onClick={() => onFilterChange(emptyBrowseTarget)}
+                variant="ghost"
+                className="h-8 rounded-full px-3 text-[12px] text-muted-foreground"
+                onClick={() => selectFilter("all")}
               >
-                {emptyBrowseTarget === "cli"
-                  ? tx("settings.apps.browseApps", "Browse apps")
-                  : tx("settings.apps.browseIntegrations", "Browse MCP tools")}
+                {tx("settings.apps.browseAll", "Browse all")}
+                <ChevronRight className="ml-1 h-3.5 w-3.5" aria-hidden />
               </Button>
-            ) : (
-              <p className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
-                {tx(
-                  "settings.apps.emptyIntegrationsHint",
-                  "Add a custom MCP server below.",
-                )}
-              </p>
-            )}
+            </div>
           </div>
-        )}
-      </section>
-
-      {filter === "mcp" ? (
+          {featuredItems.length ? catalogGrid(featuredItems) : (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              {tx("settings.apps.emptyApps", "No apps available.")}
+            </div>
+          )}
+        </section>
+      ) : filter === "custom" ? (
         <McpCustomServerPanel
           form={customMcpForm}
           configImport={mcpConfigImport}
@@ -384,7 +430,33 @@ export function AppsCatalogSettings({
           onSave={onSaveCustomMcp}
           onImportConfig={onImportMcpConfig}
         />
-      ) : null}
+      ) : (
+        <section>
+          <div className="mb-3 flex items-baseline gap-2 px-1">
+            <SettingsSectionTitle>
+              {filter === "installed"
+                ? tx("settings.apps.installed", "Installed")
+                : tx("settings.apps.allApps", "All apps")}
+            </SettingsSectionTitle>
+            <span className="text-[12px] text-muted-foreground">{visibleItems.length}</span>
+          </div>
+          {visibleItems.length ? catalogGrid(visibleItems) : (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              <p>{emptyTitle}</p>
+              {filter === "installed" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-4 rounded-full"
+                  onClick={() => selectFilter("discover")}
+                >
+                  {tx("settings.apps.discover", "Discover")}
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -1110,12 +1182,20 @@ function appsTitle(item: AppsCatalogItem): string {
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
 }
 
-function appsReady(item: AppsCatalogItem): boolean {
+function appsInstalled(item: AppsCatalogItem): boolean {
   if (item.kind === "cli") return item.app.installed;
-  if (item.preset.enabled !== undefined) return item.preset.enabled;
-  return item.preset.installed &&
-    item.preset.configured &&
-    item.preset.runtime_status === "connected";
+  return item.preset.installed;
+}
+
+function selectFeaturedApps(
+  items: AppsCatalogItem[],
+  preferredIds: string[],
+): AppsCatalogItem[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return preferredIds.flatMap((id) => {
+    const item = byId.get(id);
+    return item ? [item] : [];
+  });
 }
 
 function appsSearchText(item: AppsCatalogItem): string {

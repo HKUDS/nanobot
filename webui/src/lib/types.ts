@@ -817,6 +817,13 @@ export interface CliAppsPayload {
   };
 }
 
+export interface AppsDiscoveryPayload {
+  schema_version: number;
+  updated_at: string;
+  featured: string[];
+  refresh_pending?: boolean;
+}
+
 export interface NanobotFeatureInfo {
   name: string;
   display_name: string;

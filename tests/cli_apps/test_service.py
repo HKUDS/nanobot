@@ -204,6 +204,76 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
 
 
+def test_payload_uses_calibre_official_domain_for_logo(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-04-16"},
+            "clis": [
+                {
+                    "name": "calibre",
+                    "display_name": "Calibre",
+                    "entry_point": "cli-anything-calibre",
+                },
+            ],
+        },
+    )
+
+    app = next(app for app in manager.payload()["apps"] if app["name"] == "calibre")
+
+    assert app["logo_url"] == (
+        "https://www.google.com/s2/favicons?domain=calibre-ebook.com&sz=64"
+    )
+
+
+def test_payload_prefers_colored_official_homepage_logo(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-04-16"},
+            "clis": [
+                {
+                    "name": "blender",
+                    "display_name": "Blender",
+                    "homepage": "https://www.blender.org/features/",
+                    "entry_point": "cli-anything-blender",
+                },
+            ],
+        },
+    )
+
+    app = next(app for app in manager.payload()["apps"] if app["name"] == "blender")
+
+    assert app["logo_url"] == (
+        "https://www.google.com/s2/favicons?domain=blender.org&sz=64"
+    )
+    assert app["brand_color"] == "#E87D0D"
+
+
+def test_payload_does_not_use_repository_host_as_the_app_logo(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-04-16"},
+            "clis": [
+                {
+                    "name": "gimp",
+                    "display_name": "GIMP",
+                    "homepage": "https://github.com/example/gimp-wrapper",
+                    "entry_point": "cli-anything-gimp",
+                },
+            ],
+        },
+    )
+
+    app = next(app for app in manager.payload()["apps"] if app["name"] == "gimp")
+
+    assert app["logo_url"] == "https://cdn.simpleicons.org/gimp/5C5543"
+
+
 def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _write_cache(

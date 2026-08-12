@@ -90,6 +90,25 @@ async def test_mcp_list_serializes_local_runtime_failure_snapshot(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_apps_discovery_route_returns_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "schema_version": 1,
+        "updated_at": "2026-08-12T00:00:00Z",
+        "featured": ["mcp:github"],
+    }
+    discover = AsyncMock(return_value=payload)
+    monkeypatch.setattr("nanobot.webui.settings_routes.discovery_payload", discover)
+    request = SimpleNamespace(path="/api/settings/apps-discovery", headers=Headers())
+
+    response = await _router().dispatch(None, request, request.path)
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body) == payload
+    discover.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monkeypatch) -> None:
     config = SimpleNamespace(
         type="streamableHttp",

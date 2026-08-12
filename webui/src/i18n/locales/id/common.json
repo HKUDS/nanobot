@@ -203,7 +203,7 @@
       "currentModel": "Digunakan untuk balasan baru.",
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
-      "brandLogos": "Tampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
+      "brandLogos": "Muat logo merek pihak ketiga dari layanan ikon eksternal. Nonaktifkan untuk menggunakan inisial lokal.",
       "cliAppsCatalog": "Instal hanya adaptor CLI aplikasi yang dapat dijalankan nanobot secara lokal; aplikasi asli tidak diubah.",
       "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan.",
       "logs": "Buka folder log mesin asli.",
@@ -587,11 +587,16 @@
       "title": "Observabilitas", "configured": "Kredensial tracing tersedia untuk nanobot.",
       "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "enable": "Aktifkan dukungan tracing"
     },
-    "legal": {
-      "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
-    },
     "apps": {
       "description": "Tambahkan alat ke nanobot, lalu gunakan dengan @ di chat.",
+      "discover": "Temukan",
+      "installed": "Terpasang",
+      "allApps": "Semua aplikasi",
+      "addCustom": "Tambah kustom",
+      "emptyInstalled": "Belum ada aplikasi yang terpasang.",
+      "searchResults": "Hasil pencarian",
+      "browseAll": "Lihat semua",
+      "nextFeatured": "Tampilkan lainnya",
       "cliLabel": "Aplikasi",
       "mcpLabel": "MCP",
       "channelLabel": "Kanal",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}} siap",
       "caption": "{{cli}} aplikasi · {{mcp}} alat MCP",
       "searchPlaceholder": "Cari aplikasi",
-      "featured": "Alat",
+      "featured": "Unggulan",
       "mcpTools": "Alat MCP",
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada alat yang cocok dengan pencarian Anda.",

@@ -62,6 +62,7 @@ export function SettingsPage({
     apiServiceAction,
     apiServiceError,
     apiServiceLoading,
+    appsDiscovery,
     appsKindFilter,
     appsQuery,
     automationAction,
@@ -387,6 +388,7 @@ export function SettingsPage({
       case "apps":
         return (
           <AppsCatalogSettings
+            discovery={appsDiscovery}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             cliAppsLoading={cliAppsLoading}

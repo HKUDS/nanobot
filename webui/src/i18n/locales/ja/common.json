@@ -203,7 +203,7 @@
       "currentModel": "新しい返信に使用します。",
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
-      "brandLogos": "設定で第三者プロバイダーと CLI のロゴを表示します。",
+      "brandLogos": "外部のアイコンサービスからサードパーティのブランドロゴを読み込みます。オフにするとローカルのイニシャルアイコンを使用します。",
       "cliAppsCatalog": "nanobot がローカルで実行できるアプリ CLI アダプターだけをインストールします。ネイティブアプリは変更しません。",
       "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
       "logs": "ネイティブエンジンのログフォルダーを開きます。",
@@ -587,11 +587,16 @@
       "title": "可観測性", "configured": "nanobot がトレース認証情報を利用できます。",
       "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "enable": "トレースサポートを有効化"
     },
-    "legal": {
-      "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
-    },
     "apps": {
       "description": "nanobot にツールを追加し、チャットで @ を付けて使用できます。",
+      "discover": "見つける",
+      "installed": "インストール済み",
+      "allApps": "すべてのアプリ",
+      "addCustom": "カスタム追加",
+      "emptyInstalled": "インストール済みのアプリはありません。",
+      "searchResults": "検索結果",
+      "browseAll": "すべて見る",
+      "nextFeatured": "ほかを見る",
       "cliLabel": "アプリ",
       "mcpLabel": "MCP",
       "channelLabel": "チャンネル",
@@ -603,7 +608,7 @@
       "enabledSummary": "{{count}} 件使用可能",
       "caption": "アプリ {{cli}} 件 · MCP ツール {{mcp}} 件",
       "searchPlaceholder": "アプリを検索",
-      "featured": "ツール",
+      "featured": "おすすめ",
       "mcpTools": "MCP ツール",
       "loading": "アプリを読み込み中...",
       "empty": "検索条件に一致するツールはありません。",
