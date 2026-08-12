@@ -214,12 +214,18 @@ jobs:
           INNER
           OUTER
           docker compose -f docker-compose.yml -f docker-compose.bwrap.yml \
-            run --rm --no-deps -T --entrypoint sh nanobot-cli -s <<'BWRAP'
+            run --rm --no-deps -T --user nanobot --entrypoint sh nanobot-cli -s <<'BWRAP'
           set -eu
+          field() {
+            awk -v key="$1:" '$1 == key { print $2 }' /proc/self/status
+          }
+          test "$(id -u)" = "1000"
+          test "$(field NoNewPrivs)" = "1"
+          for capability_set in CapInh CapPrm CapEff CapAmb; do
+            test "$(field "$capability_set")" = "0000000000000000"
+          done
           mkdir -p /home/nanobot/.nanobot/workspace
-          chown -R nanobot:nanobot /home/nanobot/.nanobot
-          setpriv --reuid=nanobot --regid=nanobot --init-groups \
-            bwrap --new-session --die-with-parent \
+          bwrap --new-session --die-with-parent \
             --ro-bind /usr /usr \
             --ro-bind-try /bin /bin \
             --ro-bind-try /lib /lib \
