@@ -120,7 +120,7 @@ The default `--theme auto` mode probes the terminal's real foreground and backgr
 
 `Enter` sends the current message. Press `Alt+Enter` to add a newline and use `Up`/`Down` at the composer edge to recall recent prompts. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
 
-Packaged releases fetch a version-matched, checksummed terminal binary for macOS, Linux, or Windows on first use and cache it under the nanobot data directory. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A source checkout can run the client with Bun after `bun install --cwd tui`.
+Packaged releases fetch a version-matched, checksummed terminal binary for macOS (Apple Silicon and Intel), Linux (x64 and ARM64), or Windows x64 on first use and cache it under the nanobot data directory. Windows ARM64 currently falls back to the classic prompt because the Bun runtime disables the FFI required by OpenTUI on that platform. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A source checkout can run the client with Bun after `bun install --cwd tui`.
 
 Non-interactive input/output, `--logs`, and `--no-markdown` automatically retain the classic prompt so existing scripts and diagnostic workflows do not acquire terminal control sequences or silently ignore their options.
 

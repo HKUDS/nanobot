@@ -3,8 +3,15 @@ import { basename, join } from "node:path"
 
 const target = process.argv[2] || `${process.platform}-${process.arch}`
 const [platform, arch] = target.split("-")
+const supportedTargets = new Set([
+  "darwin-arm64",
+  "darwin-x64",
+  "linux-arm64",
+  "linux-x64",
+  "win32-x64",
+])
 
-if (!platform || !arch || !["darwin", "linux", "win32"].includes(platform)) {
+if (!platform || !arch || !supportedTargets.has(target)) {
   throw new Error(`unsupported target: ${target}`)
 }
 

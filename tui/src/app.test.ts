@@ -637,6 +637,7 @@ if (process.platform !== "win32") {
         NANOBOT_TUI_WORKSPACE: "/tmp/nanobot-test",
         NANOBOT_TUI_VERSION: "test",
         NANOBOT_TUI_ACCESS: "workspace access",
+        NANOBOT_TUI_THEME: "dark",
       },
       stdout: "pipe",
       stderr: "pipe",

@@ -46,6 +46,17 @@ def test_explicit_tui_binary_must_exist(
         _resolve_tui_command()
 
 
+def test_windows_arm64_uses_the_classic_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NANOBOT_TUI_BIN", raising=False)
+    monkeypatch.setattr("nanobot.cli.tui_launcher.platform.system", lambda: "Windows")
+    monkeypatch.setattr("nanobot.cli.tui_launcher.platform.machine", lambda: "ARM64")
+
+    with pytest.raises(TuiUnavailableError, match="Windows ARM64"):
+        _resolve_tui_command()
+
+
 def test_interactive_agent_uses_native_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

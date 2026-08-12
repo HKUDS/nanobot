@@ -108,6 +108,11 @@ def _resolve_tui_command() -> list[str]:
         platform.machine(),
         platform.machine().lower(),
     )
+    if system == "win32" and machine == "arm64":
+        raise TuiUnavailableError(
+            "the native TUI is not available on Windows ARM64 because Bun FFI is disabled "
+            "on that platform; use the classic prompt until the upstream runtime supports it"
+        )
     asset = f"nanobot-tui-{system}-{machine}{suffix}"
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
     if packaged.is_file():
