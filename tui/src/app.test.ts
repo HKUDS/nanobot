@@ -215,6 +215,35 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("inherits the host background after long output fills the viewport", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "delta",
+      chat_id: "chat",
+      text: Array.from({ length: 80 }, (_, index) => (
+        `### Section ${index + 1}\n中文长回答、**bold** and [link](https://nanobot.test/${index + 1})`
+      )).join("\n\n"),
+    })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+
+    const internals = app as unknown as {
+      shell: { backgroundColor: { intent: string } }
+      composerFrame: { backgroundColor: { intent: string } }
+      composer: { backgroundColor: { intent: string } }
+    }
+    const spans = setup.captureSpans().lines.flatMap((line) => line.spans)
+
+    expect(internals.shell.backgroundColor.intent).toBe("default")
+    expect(internals.composerFrame.backgroundColor.intent).toBe("default")
+    expect(internals.composer.backgroundColor.intent).toBe("default")
+    expect(spans.length).toBeGreaterThan(0)
+    expect(spans.every((span) => span.bg.intent === "default")).toBe(true)
+  })
+
   test("rethemes the complete retained interface when the terminal appearance changes", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -225,9 +254,9 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
 
     const internals = app as unknown as {
-      palette: { background: string; text: string; border: string }
-      shell: { backgroundColor: { toInts(): number[] } }
-      composer: { backgroundColor: { toInts(): number[] }; textColor: { toInts(): number[] } }
+      palette: { referenceBackground: string; text: string; border: string }
+      shell: { backgroundColor: { intent: string } }
+      composer: { backgroundColor: { intent: string }; textColor: { toInts(): number[] } }
       transcript: {
         frames: Set<{ borderColor: { toInts(): number[] } }>
         markdown: Set<{ syntaxStyle: object }>
@@ -240,12 +269,12 @@ describe("NanobotTui layout", () => {
     await setup.flush()
 
     expect(internals.palette).toMatchObject({
-      background: "#FAFAFA",
+      referenceBackground: "#FAFAFA",
       text: "#18181B",
       border: "#D4D4D8",
     })
-    expect(internals.shell.backgroundColor.toInts().slice(0, 3)).toEqual([250, 250, 250])
-    expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([244, 244, 245])
+    expect(internals.shell.backgroundColor.intent).toBe("default")
+    expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect([...internals.transcript.frames][0]?.borderColor.toInts().slice(0, 3)).toEqual([
       212, 212, 216,
@@ -261,7 +290,7 @@ describe("NanobotTui layout", () => {
       client(),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
-    const internals = app as unknown as { palette: { background: string } }
+    const internals = app as unknown as { palette: { referenceBackground: string } }
     Object.defineProperty(setup.renderer, "themeMode", { configurable: true, value: "dark" })
 
     await app.start()
@@ -269,7 +298,7 @@ describe("NanobotTui layout", () => {
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "dark")
     await setup.renderOnce()
 
-    expect(internals.palette.background).toBe("#FAFAFA")
+    expect(internals.palette.referenceBackground).toBe("#FAFAFA")
   })
 
   test("waits for automatic terminal detection before connecting or painting", async () => {
@@ -296,7 +325,7 @@ describe("NanobotTui layout", () => {
     resolveMode("light")
     await starting
     expect(connected).toBe(true)
-    expect((app as unknown as { palette: { background: string } }).palette.background).toBe("#FAFAFA")
+    expect((app as unknown as { palette: { referenceBackground: string } }).palette.referenceBackground).toBe("#FAFAFA")
   })
 
   test("falls back to the dark palette when terminal theme probing has no answer", async () => {
@@ -316,20 +345,20 @@ describe("NanobotTui layout", () => {
     await app.start()
 
     expect(connected).toBe(true)
-    expect((app as unknown as { palette: { background: string } }).palette.background).toBe("#0E0F11")
+    expect((app as unknown as { palette: { referenceBackground: string } }).palette.referenceBackground).toBe("#0E0F11")
   })
 
   test("keeps semantic colors legible in both terminal appearances", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)
     const internals = app as unknown as {
-      palette: Record<string, string> & { background: string; panel: string; faint: string }
+      palette: Record<string, string> & { referenceBackground: string; faint: string }
     }
     const assertContrast = () => {
       for (const tone of ["text", "muted", "accent", "success", "error", "user", "warm", "cool"]) {
-        expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.panel)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.referenceBackground)).toBeGreaterThanOrEqual(4.5)
       }
-      expect(contrastRatio(internals.palette.faint, internals.palette.panel)).toBeGreaterThanOrEqual(3)
+      expect(contrastRatio(internals.palette.faint, internals.palette.referenceBackground)).toBeGreaterThanOrEqual(3)
     }
 
     assertContrast()

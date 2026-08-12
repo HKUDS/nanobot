@@ -41,8 +41,7 @@ interface ChatClient {
 }
 
 interface Palette {
-  background: string
-  panel: string
+  referenceBackground: string
   text: string
   muted: string
   faint: string
@@ -56,8 +55,7 @@ interface Palette {
 }
 
 const DARK: Palette = {
-  background: "#0E0F11",
-  panel: "#17181B",
+  referenceBackground: "#0E0F11",
   text: "#ECEDEE",
   muted: "#A1A1AA",
   faint: "#71717A",
@@ -71,8 +69,7 @@ const DARK: Palette = {
 }
 
 const LIGHT: Palette = {
-  background: "#FAFAFA",
-  panel: "#F4F4F5",
+  referenceBackground: "#FAFAFA",
   text: "#18181B",
   muted: "#6F6F78",
   faint: "#8A8A94",
@@ -196,7 +193,10 @@ export class NanobotTui {
       onStatus: (status, detail) => this.handleStatus(status, detail),
     })
 
-    this.renderer.setBackgroundColor(this.palette.background)
+    // The terminal owns its canvas. Keeping the default-background intent is
+    // essential in embedded terminals, where painting our own near-black RGB
+    // only colors occupied cells and turns long output into dark strips.
+    this.renderer.setBackgroundColor(RGBA.defaultBackground())
     this.shell = new BoxRenderable(renderer, {
       id: "nanobot-tui-footer",
       width: "100%",
@@ -204,7 +204,7 @@ export class NanobotTui {
       paddingLeft: 1,
       paddingRight: 1,
       flexDirection: "column",
-      backgroundColor: this.palette.background,
+      backgroundColor: RGBA.defaultBackground(),
     })
     this.title = new TextRenderable(renderer, {
       id: "nanobot-tui-title",
@@ -223,7 +223,7 @@ export class NanobotTui {
       borderColor: this.palette.border,
       paddingLeft: 1,
       paddingRight: 1,
-      backgroundColor: this.palette.panel,
+      backgroundColor: RGBA.defaultBackground(),
     })
     this.composer = new TextareaRenderable(renderer, {
       id: "nanobot-tui-composer",
@@ -235,8 +235,8 @@ export class NanobotTui {
       placeholderColor: this.palette.faint,
       textColor: this.palette.text,
       focusedTextColor: this.palette.text,
-      backgroundColor: this.palette.panel,
-      focusedBackgroundColor: this.palette.panel,
+      backgroundColor: RGBA.defaultBackground(),
+      focusedBackgroundColor: RGBA.defaultBackground(),
       cursorColor: this.palette.accent,
       showCursor: true,
       keyBindings: [
@@ -648,12 +648,7 @@ export class NanobotTui {
     this.activeThemeMode = mode
     this.palette = mode === "light" ? LIGHT : DARK
     this.transcript.setTheme(transcriptTheme(this.palette))
-    this.renderer.setBackgroundColor(this.palette.background)
-    this.shell.backgroundColor = this.palette.background
-    this.composerFrame.backgroundColor = this.palette.panel
     this.composerFrame.borderColor = this.palette.border
-    this.composer.backgroundColor = this.palette.panel
-    this.composer.focusedBackgroundColor = this.palette.panel
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent

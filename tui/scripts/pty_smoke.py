@@ -144,6 +144,16 @@ def main() -> int:
             raise AssertionError(f"TUI did not render committed input {glyph!r}")
     if "Traceback" in text or "Task exception was never retrieved" in text:
         raise AssertionError("TUI emitted an exception during shutdown")
+    # The UI must inherit the host terminal background. Fixed RGB/indexed
+    # surfaces become black strips in embedded terminals after long output.
+    for escape in (
+        b"\x1b[48;2;14;15;17m",
+        b"\x1b[48;2;23;24;27m",
+        b"\x1b[48;5;233m",
+        b"\x1b[48;5;234m",
+    ):
+        if escape in output:
+            raise AssertionError(f"TUI painted a fixed background: {escape!r}")
     print("PTY smoke test passed: Unicode input, resize, and terminal restoration")
     return 0
 
