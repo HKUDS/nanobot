@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Eye, EyeOff, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { Eye, EyeOff, MessageCirclePlus, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -1050,6 +1050,9 @@ function Shell({
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
+  const [sidePane, setSidePane] = useState<{ sourceKey: string; sideKey: string } | null>(null);
+  const [sidePaneActive, setSidePaneActive] = useState(false);
+  const [sidePaneSplitRatios, setSidePaneSplitRatios] = useState([0.5]);
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
@@ -1122,14 +1125,16 @@ function Shell({
   const temporaryChatActive = view === "chat" && temporaryChatId !== null;
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
-    () => Object.values(temporarySessions).sort((a, b) => (
+    () => Object.values(temporarySessions)
+      .filter((session) => session.key !== sidePane?.sideKey)
+      .sort((a, b) => (
       Date.parse(b.createdAt ?? "") - Date.parse(a.createdAt ?? "")
     )),
-    [temporarySessions],
+    [sidePane?.sideKey, temporarySessions],
   );
   const temporaryChatIds = useMemo(
-    () => temporarySessionList.map((session) => session.chatId),
-    [temporarySessionList],
+    () => Object.values(temporarySessions).map((session) => session.chatId),
+    [temporarySessions],
   );
 
   const navigate = useCallback(
@@ -1619,6 +1624,50 @@ function Shell({
     [client, navigate],
   );
 
+  const closeSidePane = useCallback(() => {
+    if (!sidePane) return;
+    const session = temporarySessionsRef.current[sidePane.sideKey];
+    if (session) client.discardTemporaryChat(session.chatId);
+    setTemporarySessions((current) => {
+      if (!current[sidePane.sideKey]) return current;
+      const next = { ...current };
+      delete next[sidePane.sideKey];
+      return next;
+    });
+    setSidePane(null);
+    setSidePaneActive(false);
+    setSidePaneSplitRatios([0.5]);
+  }, [client, sidePane]);
+
+  const onCreateSideChat = useCallback(async (sourceChatId: string) => {
+    if (!activeKey || temporarySessionsRef.current[activeKey] || sidePane) return null;
+    try {
+      const chatId = await client.newSideChat(sourceChatId);
+      const session: ChatSummary = {
+        ...createTemporaryChatSession(chatId),
+        preview: t("temporaryChat.sideTitle"),
+        ...(activeWorkspaceScope ? {
+          workspaceScope: normalizeWorkspaceScope(
+            scopeWithAccessMode(activeWorkspaceScope, "restricted"),
+          ),
+        } : {}),
+      };
+      setTemporarySessions((current) => ({ ...current, [session.key]: session }));
+      setSidePane({ sourceKey: activeKey, sideKey: session.key });
+      setSidePaneActive(true);
+      setSidePaneSplitRatios([0.5]);
+      setWorkspaceError(null);
+      return chatId;
+    } catch (error) {
+      console.error("Failed to create side conversation", error);
+      return null;
+    }
+  }, [activeKey, activeWorkspaceScope, client, sidePane, t]);
+
+  useEffect(() => {
+    if (sidePane && activeKey !== sidePane.sourceKey) closeSidePane();
+  }, [activeKey, closeSidePane, sidePane]);
+
   const onForkChat = useCallback(async (
     sourceChatId: string,
     beforeUserIndex: number,
@@ -2099,6 +2148,9 @@ function Shell({
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
       temporarySessionsRef.current = {};
       setTemporarySessions({});
+      setSidePane(null);
+      setSidePaneActive(false);
+      setSidePaneSplitRatios([0.5]);
       if (readShellRoute().temporary) {
         navigate(defaultShellRoute(), { replace: true });
       }
@@ -2331,6 +2383,7 @@ function Shell({
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
   }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
+  const sidePaneSession = sidePane ? temporarySessions[sidePane.sideKey] ?? null : null;
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
@@ -2339,6 +2392,12 @@ function Shell({
     && (activeTabState.explicit || activeTabState.paneKeys.length > 1),
   );
   const renderedWorkbenchPanes = useMemo(() => {
+    if (sidePaneSession && activeSession) {
+      return [
+        { key: activeSession.key, reactKey: "tab-root", title: headerTitle },
+        { key: sidePaneSession.key, reactKey: `side:${sidePaneSession.key}`, title: t("temporaryChat.sideTitle") },
+      ];
+    }
     if (paneChromeEnabled) {
       return workbenchPaneSessions.map((session) => ({
         key: session.key,
@@ -2358,14 +2417,23 @@ function Shell({
     activeTabState?.paneKeys,
     headerTitle,
     paneChromeEnabled,
+    sidePaneSession,
+    activeSession,
+    t,
     titleForSession,
     workbenchPaneSessions,
   ]);
-  const renderedActivePaneKey = activeKey ?? renderedWorkbenchPanes[0].key;
-  const renderedWorkbenchLayout = paneChromeEnabled && activeTabState
+  const renderedActivePaneKey = sidePaneSession && sidePaneActive
+    ? sidePaneSession.key
+    : activeKey ?? renderedWorkbenchPanes[0].key;
+  const renderedWorkbenchLayout = sidePaneSession
+    ? "columns"
+    : paneChromeEnabled && activeTabState
     ? activeTabState.layout
     : "columns";
-  const renderedWorkbenchSplitRatios = paneChromeEnabled && activeTabState
+  const renderedWorkbenchSplitRatios = sidePaneSession
+    ? sidePaneSplitRatios
+    : paneChromeEnabled && activeTabState
     ? activeTabState.splitRatios
     : [];
   const sidebarPaneGroups = useMemo(() => {
@@ -2713,8 +2781,9 @@ function Shell({
                 activePaneKey={renderedActivePaneKey}
                 layout={renderedWorkbenchLayout}
                 splitRatios={renderedWorkbenchSplitRatios}
-                chrome={paneChromeEnabled}
-                showLayoutControl={activeTabVisible}
+                chrome={paneChromeEnabled || Boolean(sidePaneSession)}
+                showLayoutControl={!sidePaneSession && activeTabVisible}
+                allowPaneReorder={!sidePaneSession}
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 addPaneDisabledLabel={activePaneLimitReached
                   ? t("workbench.paneLimit", {
@@ -2722,27 +2791,111 @@ function Shell({
                       count: MAX_WORKBENCH_PANES,
                     })
                   : undefined}
-                onActivatePane={onActivateWorkbenchPane}
+                onActivatePane={(paneKey) => {
+                  if (sidePaneSession) {
+                    setSidePaneActive(paneKey === sidePaneSession.key);
+                    return;
+                  }
+                  onActivateWorkbenchPane(paneKey);
+                }}
                 onAddPane={onAddPane}
                 onLayoutChange={(layout) => {
+                  if (sidePaneSession) return;
                   if (!activeTabKey) return;
                   updateWorkbenchState((current) => (
                     setWorkbenchLayout(current, activeTabKey, layout)
                   ));
                 }}
                 onPaneOrderChange={(paneKeys) => {
+                  if (sidePaneSession) return;
                   if (!activeTabKey) return;
                   updateWorkbenchState((current) => (
                     setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
                   ));
                 }}
                 onSplitRatiosChange={(splitRatios) => {
+                  if (sidePaneSession) {
+                    setSidePaneSplitRatios(splitRatios);
+                    return;
+                  }
                   if (!activeTabKey) return;
                   updateWorkbenchState((current) => (
                     setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
                   ));
                 }}
                 renderPane={(pane, context) => {
+                  if (sidePaneSession) {
+                    const isSide = pane.key === sidePaneSession.key;
+                    const paneSession = isSide ? sidePaneSession : activeSession;
+                    if (!paneSession) return null;
+                    const paneScope = isSide
+                      ? sidePaneSession.workspaceScope ?? null
+                      : activeWorkspaceScope;
+                    return (
+                      <ThreadShell
+                        session={paneSession}
+                        sessions={sessions}
+                        title={pane.title}
+                        temporary={isSide}
+                        temporaryChatIds={temporaryChatIds}
+                        onToggleSidebar={toggleSidebar}
+                        onForkChat={isSide ? undefined : onForkChat}
+                        onCreateSideChat={undefined}
+                        onTurnEnd={isSide ? () => void 0 : onTurnEnd}
+                        theme={theme}
+                        onToggleTheme={toggle}
+                        hideSidebarToggle={!context.active}
+                        hideSidebarToggleForHostChrome={context.active}
+                        hostChromeTitleInset={hostSidebarCollapsed}
+                        hideThemeButton={!context.active}
+                        hideHeaderTitle
+                        headerActions={(
+                          <button
+                            type="button"
+                            aria-label={t("temporaryChat.closeSide")}
+                            onClick={closeSidePane}
+                            className="host-no-drag inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/45 hover:text-foreground"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                        headerPortalTarget={context.headerPortalTarget}
+                        headerActive={context.active}
+                        composerActive={context.active}
+                        composerInputAriaLabel={t("workbench.composerAria", {
+                          defaultValue: "Message {{title}}",
+                          title: pane.title,
+                        })}
+                        emptyComposerVariant="thread"
+                        dockEmptyComposer
+                        emptyStateOverride={isSide ? (
+                          <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
+                            <MessageCirclePlus
+                              aria-hidden
+                              className="mb-3 h-7 w-7 text-muted-foreground"
+                              strokeWidth={1.7}
+                            />
+                            <h2 className="text-base font-medium text-foreground">
+                              {t("temporaryChat.sideTitle")}
+                            </h2>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {t("temporaryChat.sideDescription")}
+                            </p>
+                          </div>
+                        ) : undefined}
+                        composerPortalTarget={undefined}
+                        workspaceScope={paneScope}
+                        workspaceDefaultScope={workspaces?.default_scope ?? null}
+                        workspaceControls={workspaces?.controls ?? null}
+                        workspaceScopeDisabled={runningChatIds.has(paneSession.chatId)}
+                        workspaceError={!isSide && context.active ? workspaceError : null}
+                        onWorkspaceScopeChange={isSide ? undefined : applyWorkspaceScope}
+                        settingsSnapshot={settingsSnapshot}
+                        onOpenModelSettings={onOpenModelSettings}
+                        skills={skills}
+                      />
+                    );
+                  }
                   if (!paneChromeEnabled) {
                     return (
                       <ThreadShell
@@ -2761,6 +2914,7 @@ function Shell({
                           temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                         }
                         onForkChat={temporaryChatActive ? undefined : onForkChat}
+                        onCreateSideChat={temporaryChatActive ? undefined : onCreateSideChat}
                         onTurnEnd={onTurnEnd}
                         theme={theme}
                         onToggleTheme={toggle}
@@ -2798,6 +2952,7 @@ function Shell({
                       onNewChat={onNewChat}
                       onCreateChat={onCreateChat}
                       onForkChat={onForkChat}
+                      onCreateSideChat={onCreateSideChat}
                       onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
                       theme={theme}
                       onToggleTheme={toggle}

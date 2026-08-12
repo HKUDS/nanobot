@@ -247,6 +247,29 @@ describe("NanobotClient", () => {
     await expect(creation).resolves.toBe("server-temporary-chat");
   });
 
+  it("creates side conversations as temporary chats", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const creation = client.newSideChat("main-chat");
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "new_side_chat",
+      source_chat_id: "main-chat",
+    });
+    lastSocket().fakeMessage({
+      event: "attached",
+      chat_id: "side-chat",
+      temporary: true,
+    });
+
+    await expect(creation).resolves.toBe("side-chat");
+  });
+
   it("forgets every temporary chat when the socket drops", async () => {
     const client = new NanobotClient({
       url: "ws://test",

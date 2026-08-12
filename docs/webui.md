@@ -116,6 +116,10 @@ topic history or long-term memory:
 2. Select the **Temporary chat** control in the page header.
 3. Send the first message.
 
+From an existing topic, enter `/side` to open a temporary conversation beside
+the topic. The right-hand pane inherits the topic's current context without
+adding the side conversation back to the original topic.
+
 You can keep more than one temporary chat open and switch between them under
 **Temporary chats** in the sidebar while the current WebUI connection remains
 open. Reloading or closing the page, restarting the gateway, or losing the

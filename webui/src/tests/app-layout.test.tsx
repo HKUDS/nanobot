@@ -23,6 +23,7 @@ const setSidebarStateSpy = vi.fn();
 const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
+const newSideChatSpy = vi.fn<(sourceChatId: string) => Promise<string>>();
 const sendMessageSpy = vi.fn();
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
@@ -260,10 +261,14 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => runStatusHandlers.delete(handler);
     };
     getRunStartedAt = () => null;
+    getRunGeneration = () => 0;
+    canReconcileCanonicalCompletion = () => false;
+    reconcileCanonicalCompletion = vi.fn();
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
     newChat = vi.fn();
     newTemporaryChat = newTemporaryChatSpy;
+    newSideChat = newSideChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
     requestMutation = requestMutationSpy;
@@ -304,6 +309,7 @@ describe("App layout", () => {
     newTemporaryChatSpy.mockImplementation(async () => (
       `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
     ));
+    newSideChatSpy.mockResolvedValue("00000000-0000-4000-8000-000000000099");
     sendMessageSpy.mockReset();
     statusHandlers.clear();
     runStatusHandlers.clear();
@@ -610,6 +616,88 @@ describe("App layout", () => {
       "00000000-0000-4000-8000-000000000001",
       "00000000-0000-4000-8000-000000000002",
     ]);
+  });
+
+  it("opens /side beside the source chat and discards it on close", async () => {
+    mockSessions = [{
+      key: "websocket:main-chat",
+      channel: "websocket",
+      chatId: "main-chat",
+      createdAt: "2026-08-12T08:00:00Z",
+      updatedAt: "2026-08-12T08:00:00Z",
+      title: "Main chat",
+      preview: "Existing context",
+    }];
+    mockFetchRoutes({
+      "/api/commands": {
+        commands: [{
+          command: "/side",
+          title: "Side conversation",
+          description: "Start a temporary conversation with the current chat context.",
+          icon: "messages-square",
+          lifecycle: "side_channel",
+          accepts_args: false,
+        }],
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByText("Main chat"));
+    const input = await screen.findByRole("textbox");
+    fireEvent.change(input, { target: { value: "/side" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledWith("main-chat"));
+    expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "columns");
+    expect(screen.getByTestId("workbench-pane-websocket:main-chat")).toBeInTheDocument();
+    expect(screen.getByLabelText("Side conversation")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Side conversation" })).toBeInTheDocument();
+    expect(screen.getByText(
+      "Side conversations are temporary and disappear when you close the app.",
+    )).toBeInTheDocument();
+    expect(window.location.hash).toContain("websocket%3Amain-chat");
+
+    act(() => statusHandlers.forEach((handler) => handler("reconnecting")));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Side conversation")).not.toBeInTheDocument();
+    });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/side" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(2));
+
+    const sourceComposer = screen.getByRole("textbox", { name: "Message Main chat" });
+    const sideComposer = screen.getByRole("textbox", { name: "Message Side conversation" });
+    expect(within(screen.getByLabelText("Side conversation"))
+      .getByTestId("thread-welcome-layout"))
+      .toHaveAttribute("data-layout", "thread");
+    fireEvent.change(sourceComposer, { target: { value: "continue main" } });
+    fireEvent.submit(sourceComposer.closest("form")!);
+    fireEvent.change(sideComposer, { target: { value: "explore in side" } });
+    fireEvent.submit(sideComposer.closest("form")!);
+    await waitFor(() => {
+      expect(sendMessageSpy).toHaveBeenCalledWith(
+        "main-chat",
+        "continue main",
+        undefined,
+        expect.any(Object),
+      );
+      expect(sendMessageSpy).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000099",
+        "explore in side",
+        undefined,
+        expect.any(Object),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close side conversation" }));
+    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000099",
+    ));
+    expect(screen.queryByLabelText("Side conversation")).not.toBeInTheDocument();
   });
 
   it("shows the temporary-chat control only on the new-topic hero", async () => {

@@ -67,6 +67,7 @@ interface PaneWorkbenchProps {
   layout: WorkbenchLayout;
   chrome?: boolean;
   showLayoutControl: boolean;
+  allowPaneReorder?: boolean;
   addPaneDisabled?: boolean;
   addPaneDisabledLabel?: string;
   onActivatePane: (key: string) => void;
@@ -202,6 +203,7 @@ export function PaneWorkbench({
   layout,
   chrome = true,
   showLayoutControl,
+  allowPaneReorder = true,
   addPaneDisabled = false,
   addPaneDisabledLabel,
   onActivatePane,
@@ -717,7 +719,7 @@ export function PaneWorkbench({
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}
-                  {chrome && panes.length > 1 && !compact ? (
+                  {chrome && allowPaneReorder && panes.length > 1 && !compact ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button

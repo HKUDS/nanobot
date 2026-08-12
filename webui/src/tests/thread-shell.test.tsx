@@ -3414,6 +3414,50 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
   });
 
+  it("opens a side conversation without sending to the current chat", async () => {
+    const client = makeClient();
+    const onCreateSideChat = vi.fn().mockResolvedValue("side-chat");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/api/commands")) {
+          return httpJson({
+            commands: [{
+              command: "/side",
+              title: "Side conversation",
+              description: "Start a temporary conversation with the current chat context.",
+              icon: "messages-square",
+              lifecycle: "side_channel",
+              accepts_args: false,
+            }],
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("main-chat")}
+        title="Main chat"
+        onToggleSidebar={() => {}}
+        onCreateSideChat={onCreateSideChat}
+      />,
+    ));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/commands",
+      expect.anything(),
+    ));
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/side" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateSideChat).toHaveBeenCalledWith("main-chat"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("does not bring back welcome cards when image mode is enabled", async () => {
     const client = makeClient();
     const settings = modelSettings("deepseek-v4-pro", "deepseek");

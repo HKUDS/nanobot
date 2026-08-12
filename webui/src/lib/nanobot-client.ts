@@ -806,6 +806,21 @@ export class NanobotClient {
     });
   }
 
+  /** Create a connection-owned temporary fork of an existing chat. */
+  newSideChat(sourceChatId: string, timeoutMs: number = 5_000): Promise<string> {
+    if (this.pendingNewChat) {
+      return Promise.reject(new Error("newChat already in flight"));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNewChat = null;
+        reject(new Error("newSideChat timed out"));
+      }, timeoutMs);
+      this.pendingNewChat = { resolve, reject, timer, temporary: true };
+      this.queueSend({ type: "new_side_chat", source_chat_id: sourceChatId });
+    });
+  }
+
   transcribeAudio(
     dataUrl: string,
     options?: { durationMs?: number; timeoutMs?: number },

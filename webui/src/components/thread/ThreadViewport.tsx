@@ -39,6 +39,7 @@ interface ThreadViewportProps {
   isStreaming: boolean;
   composer?: ReactNode;
   emptyState?: ReactNode;
+  dockEmptyComposer?: boolean;
   scrollToBottomSignal?: number;
   activeTurnId?: string | null;
   activeTurnStartedHere?: boolean;
@@ -163,6 +164,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   isStreaming,
   composer,
   emptyState,
+  dockEmptyComposer = false,
   scrollToBottomSignal = 0,
   activeTurnId = null,
   activeTurnStartedHere = false,
@@ -665,7 +667,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         <div
           ref={contentRef}
           data-testid={!hasMessages ? "thread-welcome-layout" : undefined}
-          data-layout={hasComposer ? (hasMessages ? "thread" : "hero") : "external"}
+          data-layout={hasComposer
+            ? (hasMessages || dockEmptyComposer ? "thread" : "hero")
+            : "external"}
           className={cn(
             "thread-layout mx-auto grid min-h-full w-full",
             hasMessages
@@ -706,7 +710,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             <div
               className={cn(
                 "row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center",
-                hasComposer && "sm:items-end sm:pb-8",
+                hasComposer && !dockEmptyComposer && "sm:items-end sm:pb-8",
               )}
             >
               {emptyState}
