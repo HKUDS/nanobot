@@ -12,7 +12,7 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast
 
 from loguru import logger
 from pydantic import Field
@@ -45,13 +45,10 @@ _IS_WINDOWS = sys.platform == "win32"
 _PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
 
 
-@runtime_checkable
 class _ProcessTreeOwner(Protocol):
     creation_flags: int
 
     def assign_and_resume(self, pid: int) -> None: ...
-
-    def close(self) -> None: ...
 
     def release(self) -> None: ...
 
@@ -554,6 +551,7 @@ class ExecTool(Tool):
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
             windows_job = None
+            process = None
             creation_flags = 0
             if process_tree and sys.platform == "win32":
                 windows_job = ExecTool._create_windows_job()
@@ -601,6 +599,8 @@ class ExecTool(Tool):
             except BaseException:
                 if windows_job is not None:
                     windows_job.terminate()
+                if process is not None:
+                    await ExecTool._kill_process(process)
                 raise
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
         args: list[str] = [shell_program]
@@ -757,11 +757,8 @@ class ExecTool(Tool):
     def _process_tree_owner(
         process: asyncio.subprocess.Process,
     ) -> _ProcessTreeOwner | None:
-        attributes = getattr(process, "__dict__", None)
-        if not isinstance(attributes, dict):
-            return None
-        owner = cast(dict[str, object], attributes).get(_PROCESS_TREE_OWNER_ATTR)
-        return owner if isinstance(owner, _ProcessTreeOwner) else None
+        # _spawn is the only writer for this private ownership marker.
+        return cast(_ProcessTreeOwner | None, vars(process).get(_PROCESS_TREE_OWNER_ATTR))
 
     @staticmethod
     def _create_windows_job() -> _ProcessTreeOwner:

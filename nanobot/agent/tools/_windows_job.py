@@ -181,18 +181,17 @@ class WindowsJob:
             self.close()
             raise error
 
-        assigned = False
+        if not _kernel32.AssignProcessToJobObject(self._handle, process):
+            error = _win_error("AssignProcessToJobObject")
+            _kernel32.TerminateProcess(process, 1)
+            _close_handle(process)
+            self.close()
+            raise error
+
         try:
-            if not _kernel32.AssignProcessToJobObject(self._handle, process):
-                raise _win_error("AssignProcessToJobObject")
-            assigned = True
             _resume_primary_thread(pid)
         except Exception:
-            if assigned:
-                self.terminate()
-            else:
-                _kernel32.TerminateProcess(process, 1)
-                self.close()
+            self.terminate()
             raise
         finally:
             _close_handle(process)
