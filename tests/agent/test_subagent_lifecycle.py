@@ -445,6 +445,7 @@ class TestAnnounceResult:
         sibling.done.return_value = False
         sm._session_tasks["s1"] = {"t1", "t2"}
         sm._running_tasks["t2"] = sibling
+        sm._pending_announcements.update({"t1", "t2"})
 
         await sm._announce_result(
             "t1",
@@ -470,6 +471,7 @@ class TestAnnounceResult:
         current.done.return_value = False
         sm._session_tasks["s1"] = {"t1"}
         sm._running_tasks["t1"] = current
+        sm._pending_announcements.add("t1")
 
         await sm._announce_result(
             "t1",
@@ -483,6 +485,80 @@ class TestAnnounceResult:
         msg = published[0]
         assert msg.metadata["subagent_remaining_count"] == 0
         assert "other background task" not in msg.content
+
+    @pytest.mark.asyncio
+    async def test_inline_session_task_is_not_counted_as_pending_announcement(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        background = MagicMock()
+        background.done.return_value = False
+        inline = MagicMock()
+        inline.done.return_value = False
+        sm._session_tasks["s1"] = {"background", "inline"}
+        sm._running_tasks.update({"background": background, "inline": inline})
+        sm._pending_announcements.add("background")
+
+        await sm._announce_result(
+            "background",
+            "last background",
+            "task",
+            "result",
+            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+            "ok",
+        )
+
+        assert published[0].metadata["subagent_remaining_count"] == 0
+        assert "other background task" not in published[0].content
+
+    @pytest.mark.asyncio
+    async def test_concurrent_completions_publish_decreasing_pending_counts(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        first_publish_started = asyncio.Event()
+        release_first_publish = asyncio.Event()
+
+        async def publish(msg):
+            published.append(msg)
+            if len(published) == 1:
+                first_publish_started.set()
+                await release_first_publish.wait()
+
+        sm.bus.publish_inbound = AsyncMock(side_effect=publish)
+        first = MagicMock()
+        first.done.return_value = False
+        second = MagicMock()
+        second.done.return_value = False
+        sm._session_tasks["s1"] = {"t1", "t2"}
+        sm._running_tasks.update({"t1": first, "t2": second})
+        sm._pending_announcements.update({"t1", "t2"})
+
+        first_announcement = asyncio.create_task(
+            sm._announce_result(
+                "t1",
+                "first",
+                "task one",
+                "result one",
+                {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                "ok",
+            )
+        )
+        await first_publish_started.wait()
+        second_announcement = asyncio.create_task(
+            sm._announce_result(
+                "t2",
+                "second",
+                "task two",
+                "result two",
+                {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                "ok",
+            )
+        )
+        await second_announcement
+        release_first_publish.set()
+        await first_announcement
+
+        assert [msg.metadata["subagent_remaining_count"] for msg in published] == [1, 0]
 
     @pytest.mark.asyncio
     async def test_session_key_override_fallback(self, tmp_path):

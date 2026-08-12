@@ -153,6 +153,10 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        # Background tasks that still owe the parent session a completion message.
+        # Inline subagents are deliberately excluded because their result returns
+        # directly to the caller and no later announcement will arrive.
+        self._pending_announcements: set[str] = set()
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return the observable task statuses used by runtime-control snapshots."""
@@ -272,12 +276,14 @@ class SubagentManager:
             )
         )
         self._running_tasks[task_id] = bg_task
+        self._pending_announcements.add(task_id)
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
         def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
+            self._pending_announcements.discard(task_id)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -475,6 +481,10 @@ class SubagentManager:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
         session_key = origin.get("session_key")
+        # Retire this task before counting. There is no await before the count,
+        # so concurrently completing tasks observe a stable 1 -> 0 progression
+        # instead of both claiming that the other task is still pending.
+        self._pending_announcements.discard(task_id)
         remaining_count = self._running_sibling_count(session_key, task_id)
         pending_notice = ""
         if remaining_count:
@@ -527,6 +537,7 @@ class SubagentManager:
             1
             for sibling_id in self._session_tasks.get(session_key, set())
             if sibling_id != task_id
+            and sibling_id in self._pending_announcements
             and sibling_id in self._running_tasks
             and not self._running_tasks[sibling_id].done()
         )
