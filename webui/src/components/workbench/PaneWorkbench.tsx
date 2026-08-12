@@ -39,7 +39,6 @@ import {
 } from "@/components/ui/tooltip";
 import {
   createWorkbenchLayoutGeometry,
-  type EffectiveWorkbenchLayout,
   resizeHandleRatio,
   resizeHandleStyle,
   splitRatioBounds,
@@ -69,6 +68,7 @@ interface PaneWorkbenchProps {
   chrome?: boolean;
   showLayoutControl: boolean;
   addPaneDisabled?: boolean;
+  addPaneDisabledLabel?: string;
   onActivatePane: (key: string) => void;
   onAddPane: () => void;
   onLayoutChange: (layout: WorkbenchLayout) => void;
@@ -162,11 +162,13 @@ function paneInDirection(
 
 function HeaderIconButton({
   disabled,
+  disabledLabel,
   icon: Icon,
   label,
   onClick,
 }: {
   disabled?: boolean;
+  disabledLabel?: string;
   icon: LucideIcon;
   label: string;
   onClick: () => void;
@@ -174,19 +176,22 @@ function HeaderIconButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          aria-label={label}
-          onClick={onClick}
-          className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          <Icon className="h-4 w-4" aria-hidden />
-        </Button>
+        <span className="inline-flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            aria-label={label}
+            title={disabled ? disabledLabel : undefined}
+            onClick={onClick}
+            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+          >
+            <Icon className="h-4 w-4" aria-hidden />
+          </Button>
+        </span>
       </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
+      <TooltipContent side="bottom">{disabled ? disabledLabel ?? label : label}</TooltipContent>
     </Tooltip>
   );
 }
@@ -198,6 +203,7 @@ export function PaneWorkbench({
   chrome = true,
   showLayoutControl,
   addPaneDisabled = false,
+  addPaneDisabledLabel,
   onActivatePane,
   onAddPane,
   onLayoutChange,
@@ -208,7 +214,7 @@ export function PaneWorkbench({
 }: PaneWorkbenchProps) {
   const { t } = useTranslation();
   const compact = useMediaQuery("(max-width: 767px)");
-  const effectiveLayout: EffectiveWorkbenchLayout = compact ? "compact" : layout;
+  const effectiveLayout = layout;
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLElement | null>(null);
   const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -241,7 +247,7 @@ export function PaneWorkbench({
     started: boolean;
   } | null>(null);
   const [draggingPaneKey, setDraggingPaneKey] = useState<string | null>(null);
-  const displayedPanes = useMemo(() => {
+  const orderedPanes = useMemo(() => {
     const byKey = new Map(panes.map((pane) => [pane.key, pane]));
     return [
       ...previewPaneKeys.map((key) => byKey.get(key)).filter(
@@ -250,6 +256,12 @@ export function PaneWorkbench({
       ...panes.filter((pane) => !previewPaneKeys.includes(pane.key)),
     ];
   }, [panes, previewPaneKeys]);
+  const displayedPanes = useMemo(() => {
+    if (!compact) return orderedPanes;
+    const activePane = orderedPanes.find((pane) => pane.key === activePaneKey)
+      ?? orderedPanes[0];
+    return activePane ? [activePane] : [];
+  }, [activePaneKey, compact, orderedPanes]);
   const paneOrder = displayedPanes.map((pane) => pane.key).join("\u0000");
 
   useEffect(() => {
@@ -477,9 +489,9 @@ export function PaneWorkbench({
 
   const layoutGeometry = useMemo(() => createWorkbenchLayoutGeometry(
     effectiveLayout,
-    panes.length,
+    displayedPanes.length,
     previewSplitRatios,
-  ), [effectiveLayout, panes.length, previewSplitRatios]);
+  ), [displayedPanes.length, effectiveLayout, previewSplitRatios]);
 
   const handleResizePointerDown = useCallback((
     handle: WorkbenchResizeHandle,
@@ -590,7 +602,7 @@ export function PaneWorkbench({
   const gridStyle = layoutGeometry.gridStyle;
   const currentLayout = LAYOUT_CONTROLS.find((control) => control.layout === layout)
     ?? LAYOUT_CONTROLS[0];
-  const headerActions = chrome ? (
+  const headerActions = chrome && !compact ? (
     <div
       data-workbench-pane-action
       className="host-no-drag flex items-center gap-0.5"
@@ -644,6 +656,7 @@ export function PaneWorkbench({
       ) : null}
       <HeaderIconButton
         disabled={addPaneDisabled}
+        disabledLabel={addPaneDisabledLabel}
         icon={Plus}
         label={t("workbench.addPane", { defaultValue: "Add pane" })}
         onClick={() => {
@@ -675,13 +688,12 @@ export function PaneWorkbench({
             data-layout={effectiveLayout}
             className={cn(
               "grid h-full min-h-0 min-w-0 overflow-hidden",
-              chrome && panes.length > 1 && "gap-px bg-border/55",
+              chrome && displayedPanes.length > 1 && "gap-px bg-border/55",
             )}
             style={gridStyle}
           >
             {displayedPanes.map((pane, index) => {
               const active = pane.key === activePaneKey;
-              const hidden = effectiveLayout === "compact" && !active;
 
               return (
                 <section
@@ -690,7 +702,6 @@ export function PaneWorkbench({
                     if (element) paneRefs.current.set(pane.key, element);
                     else paneRefs.current.delete(pane.key);
                   }}
-                  hidden={hidden}
                   aria-label={pane.title}
                   data-active={active ? "true" : "false"}
                   data-dragging={draggingPaneKey === pane.key ? "true" : undefined}

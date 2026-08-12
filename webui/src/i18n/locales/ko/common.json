@@ -990,7 +990,7 @@
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",
-    "titleMany": "채팅과 창 {{count}}개를 삭제할까요?",
+    "titleMany": "대화 {{count}}개를 삭제할까요?",
     "description": "이 작업은 되돌릴 수 없습니다.",
     "descriptionMany": "이 작업은 되돌릴 수 없습니다.",
     "cancel": "취소",
@@ -1408,6 +1408,8 @@
     "dissolveTab": "그룹 해제",
     "layout": "창 레이아웃",
     "addPane": "창 추가",
+    "paneLimit": "최대 {{count}}개 창",
+    "deleteConversations": "모두 삭제",
     "movePane": "{{title}} 창 이동",
     "movePaneHint": "드래그하여 이동 · 방향키로도 이동 가능",
     "resizePaneBoundary": "창 경계 {{index}} 크기 조절",

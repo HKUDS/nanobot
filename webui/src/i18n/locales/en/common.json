@@ -1004,7 +1004,7 @@
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
-    "titleMany": "Delete {{count}} topics and panes?",
+    "titleMany": "Delete {{count}} conversations?",
     "description": "This action cannot be undone.",
     "descriptionMany": "This action cannot be undone.",
     "cancel": "Cancel",
@@ -1422,6 +1422,8 @@
     "dissolveTab": "Dissolve group",
     "layout": "Pane layout",
     "addPane": "Add pane",
+    "paneLimit": "Maximum {{count}} panes",
+    "deleteConversations": "Delete all chats",
     "movePane": "Move {{title}} pane",
     "movePaneHint": "Drag to move · Arrow keys also work",
     "resizePaneBoundary": "Resize pane boundary {{index}}",

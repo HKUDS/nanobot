@@ -61,6 +61,31 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[11rem] min-w-[11rem] whitespace-nowrap";
+const COLLAPSED_PANE_GROUPS_STORAGE_KEY = "nanobot-webui.collapsed-pane-groups.v1";
+
+function readCollapsedPaneGroups(): Set<string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(
+      COLLAPSED_PANE_GROUPS_STORAGE_KEY,
+    ) ?? "[]") as unknown;
+    return new Set(Array.isArray(value)
+      ? value.filter((key): key is string => typeof key === "string")
+      : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsedPaneGroups(groups: ReadonlySet<string>): void {
+  try {
+    window.localStorage.setItem(
+      COLLAPSED_PANE_GROUPS_STORAGE_KEY,
+      JSON.stringify(Array.from(groups)),
+    );
+  } catch {
+    // Local UI preferences should not block the sidebar.
+  }
+}
 
 interface PaneGroupTarget {
   key: string;
@@ -178,7 +203,7 @@ export const ChatList = memo(function ChatList({
   const pendingTabRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const tabLayoutAnimationsRef = useRef(new Map<string, Animation>());
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
-    () => new Set(),
+    readCollapsedPaneGroups,
   );
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
   const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
@@ -282,16 +307,21 @@ export const ChatList = memo(function ChatList({
   }, [deleteSelectionMode]);
 
   useEffect(() => {
+    writeCollapsedPaneGroups(collapsedPaneGroups);
+  }, [collapsedPaneGroups]);
+
+  useEffect(() => {
+    if (loading) return;
     setCollapsedPaneGroups((current) => {
       const next = new Set(Array.from(current).filter((key) => (
-        (paneGroups[key]?.panes.length ?? 0) > 1
+        paneGroups[key]?.visible ?? ((paneGroups[key]?.panes.length ?? 0) > 1)
       )));
       if (next.size === current.size && Array.from(next).every((key) => current.has(key))) {
         return current;
       }
       return next;
     });
-  }, [paneGroups]);
+  }, [loading, paneGroups]);
 
   const measureTabRows = useCallback(() => {
     const rects = new Map<string, DOMRect>();
@@ -907,9 +937,12 @@ function WorkbenchTabHeader({
               <DropdownMenuItem
                 tone="destructive"
                 onSelect={() => window.setTimeout(onRequestDelete, 0)}
+                className="whitespace-nowrap"
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
-                {t("chat.delete")}
+                {t("workbench.deleteConversations", {
+                  defaultValue: "Delete all chats",
+                })}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

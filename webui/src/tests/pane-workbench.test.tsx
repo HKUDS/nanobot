@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -312,6 +312,69 @@ describe("PaneWorkbench", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "BSP" }));
     expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "bsp");
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(4));
+  });
+
+  it("renders only the active pane and hides workbench controls on mobile", () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 767px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const panes = ["alpha", "beta", "gamma", "delta"].map((key) => ({
+      key,
+      title: key,
+    }));
+    const props = {
+      panes,
+      layout: "bsp" as const,
+      showLayoutControl: true,
+      onActivatePane: vi.fn(),
+      onAddPane: vi.fn(),
+      onLayoutChange: vi.fn(),
+      onPaneOrderChange: vi.fn(),
+      renderPane: (pane: { key: string; title: string }, context: {
+        headerActions: ReactNode;
+      }) => <>{context.headerActions}<span>{pane.title}</span></>,
+    };
+
+    const { rerender } = render(<PaneWorkbench {...props} activePaneKey="gamma" />);
+
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(screen.getByTestId("workbench-pane-gamma")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+
+    rerender(<PaneWorkbench {...props} activePaneKey="delta" />);
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(screen.getByTestId("workbench-pane-delta")).toBeInTheDocument();
+    expect(screen.queryByTestId("workbench-pane-gamma")).not.toBeInTheDocument();
+  });
+
+  it("explains why the desktop add-pane control is disabled", () => {
+    render(
+      <PaneWorkbench
+        panes={[{ key: "alpha", title: "Alpha" }]}
+        activePaneKey="alpha"
+        layout="columns"
+        showLayoutControl={false}
+        addPaneDisabled
+        addPaneDisabledLabel="Maximum 4 panes"
+        onActivatePane={vi.fn()}
+        onAddPane={vi.fn()}
+        onLayoutChange={vi.fn()}
+        onPaneOrderChange={vi.fn()}
+        renderPane={(_pane, context) => context.headerActions}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Add pane" }))
+      .toHaveAttribute("title", "Maximum 4 panes");
   });
 
   it("fills the workbench through alternating binary splits", () => {

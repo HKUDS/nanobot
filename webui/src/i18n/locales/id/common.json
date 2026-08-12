@@ -990,7 +990,7 @@
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
-    "titleMany": "Hapus {{count}} obrolan dan panel?",
+    "titleMany": "Hapus {{count}} percakapan?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
     "descriptionMany": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
@@ -1408,6 +1408,8 @@
     "dissolveTab": "Bubarkan grup",
     "layout": "Tata letak panel",
     "addPane": "Tambah panel",
+    "paneLimit": "Maksimal {{count}} panel",
+    "deleteConversations": "Hapus semua",
     "movePane": "Pindahkan panel {{title}}",
     "movePaneHint": "Seret untuk memindahkan · Tombol panah juga dapat digunakan",
     "resizePaneBoundary": "Ubah ukuran batas panel {{index}}",

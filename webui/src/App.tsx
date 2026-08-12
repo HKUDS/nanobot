@@ -42,6 +42,7 @@ import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -1057,6 +1058,7 @@ function Shell({
   const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
   const updateWorkbenchState = useCallback((
     updater: (current: WorkbenchState) => WorkbenchState,
@@ -2446,7 +2448,11 @@ function Shell({
   ) => {
     updateWorkbenchState((current) => {
       const target = workbenchTab(current, tabKey);
-      if (!target || (!target.explicit && target.paneKeys.length < 2)) return current;
+      if (
+        !target
+        || (!target.explicit && target.paneKeys.length < 2)
+        || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
+      ) return current;
       return attachWorkbenchPane(current, tabKey, paneKey);
     });
   }, [updateWorkbenchState]);
@@ -2520,10 +2526,10 @@ function Shell({
     onRequestRenameTab,
     paneGroups: sidebarPaneGroups,
     onSelectPane: onSelectSidebarPane,
-    onCreateTab: onCreateWorkbenchTab,
-    onDetachPane: onDetachWorkbenchPane,
-    onDissolveTab: onDissolveWorkbenchTab,
-    onAttachPane: onAttachWorkbenchPane,
+    onCreateTab: mobileWorkbench ? undefined : onCreateWorkbenchTab,
+    onDetachPane: mobileWorkbench ? undefined : onDetachWorkbenchPane,
+    onDissolveTab: mobileWorkbench ? undefined : onDissolveWorkbenchTab,
+    onAttachPane: mobileWorkbench ? undefined : onAttachWorkbenchPane,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -2710,6 +2716,12 @@ function Shell({
                 chrome={paneChromeEnabled}
                 showLayoutControl={activeTabVisible}
                 addPaneDisabled={creatingPane || activePaneLimitReached}
+                addPaneDisabledLabel={activePaneLimitReached
+                  ? t("workbench.paneLimit", {
+                      defaultValue: "Maximum {{count}} panes",
+                      count: MAX_WORKBENCH_PANES,
+                    })
+                  : undefined}
                 onActivatePane={onActivateWorkbenchPane}
                 onAddPane={onAddPane}
                 onLayoutChange={(layout) => {

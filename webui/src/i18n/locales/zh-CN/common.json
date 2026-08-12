@@ -1004,7 +1004,7 @@
   },
   "deleteConfirm": {
     "title": "删除这个话题？",
-    "titleMany": "删除这 {{count}} 个话题和窗格？",
+    "titleMany": "删除这 {{count}} 个对话？",
     "description": "此操作无法撤销。",
     "descriptionMany": "此操作无法撤销。",
     "cancel": "取消",
@@ -1422,6 +1422,8 @@
     "dissolveTab": "解散分组",
     "layout": "窗格布局",
     "addPane": "添加窗格",
+    "paneLimit": "最多 {{count}} 个窗格",
+    "deleteConversations": "删除所有对话",
     "movePane": "移动 {{title}} 窗格",
     "movePaneHint": "拖动换位 · 也可以使用方向键",
     "resizePaneBoundary": "调整窗格边界 {{index}}",

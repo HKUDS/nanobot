@@ -52,7 +52,7 @@ export function DeleteConfirm({
           <AlertDialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
             {multiple
               ? t("deleteConfirm.titleMany", {
-                  defaultValue: "Delete {{count}} topics and panes?",
+                  defaultValue: "Delete {{count}} conversations?",
                   count,
                 })
               : t("deleteConfirm.title", { title })}

@@ -19,6 +19,7 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
 
 describe("ChatList", () => {
   afterEach(() => {
+    localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -229,6 +230,8 @@ describe("ChatList", () => {
       name: "Topic actions for Root topic",
     }), { button: 0, ctrlKey: false });
     expect(await screen.findByRole("menuitem", { name: "Dissolve group" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete all chats" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Select" }))
       .not.toBeInTheDocument();
@@ -651,6 +654,39 @@ describe("ChatList", () => {
     expect(screen.getByTitle("Inactive topic").closest("[data-sidebar-tab]")).toHaveClass(
       "bg-sidebar-selected",
     );
+  });
+
+  it("restores collapsed tabs from the local UI preference", () => {
+    const props = {
+      sessions: [session({ chatId: "root", title: "Root topic" })],
+      activeKey: "websocket:root",
+      paneGroups: {
+        "websocket:root": {
+          tabKey: "websocket:root",
+          title: "Root topic",
+          activePaneKey: "websocket:root",
+          panes: [
+            { key: "websocket:root", chatId: "root", title: "Root topic" },
+            { key: "websocket:child", chatId: "child", title: "Research pane" },
+          ],
+        },
+      },
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+    const firstRender = render(<ChatList {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tab: Root topic" }));
+    expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<ChatList {...props} />);
+    expect(screen.getByRole("button", { name: "Tab: Root topic" }))
+      .toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
   });
 
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {

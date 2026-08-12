@@ -1004,7 +1004,7 @@
   },
   "deleteConfirm": {
     "title": "Excluir esta conversa?",
-    "titleMany": "Excluir {{count}} conversas e painéis?",
+    "titleMany": "Excluir {{count}} conversas?",
     "description": "Esta ação não pode ser desfeita.",
     "descriptionMany": "Esta ação não pode ser desfeita.",
     "cancel": "Cancelar",
@@ -1422,6 +1422,8 @@
     "dissolveTab": "Desfazer grupo",
     "layout": "Layout de painéis",
     "addPane": "Adicionar painel",
+    "paneLimit": "Máximo de {{count}} painéis",
+    "deleteConversations": "Excluir tudo",
     "movePane": "Mover painel {{title}}",
     "movePaneHint": "Arraste para mover · As setas também funcionam",
     "resizePaneBoundary": "Redimensionar limite do painel {{index}}",

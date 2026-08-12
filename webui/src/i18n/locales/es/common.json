@@ -991,7 +991,7 @@
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
-    "titleMany": "¿Eliminar {{count}} chats y paneles?",
+    "titleMany": "¿Eliminar {{count}} conversaciones?",
     "description": "Esta acción no se puede deshacer.",
     "descriptionMany": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
@@ -1409,6 +1409,8 @@
     "dissolveTab": "Disolver grupo",
     "layout": "Diseño de paneles",
     "addPane": "Añadir panel",
+    "paneLimit": "Máximo {{count}} paneles",
+    "deleteConversations": "Eliminar todo",
     "movePane": "Mover panel {{title}}",
     "movePaneHint": "Arrastra para mover · También puedes usar las flechas",
     "resizePaneBoundary": "Redimensionar límite de panel {{index}}",

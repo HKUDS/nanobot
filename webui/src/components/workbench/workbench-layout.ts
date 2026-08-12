@@ -2,8 +2,6 @@ import type { CSSProperties } from "react";
 
 import type { WorkbenchLayout } from "@/components/workbench/workbench-model";
 
-export type EffectiveWorkbenchLayout = WorkbenchLayout | "compact";
-
 interface PaneCell {
   xStart: number;
   xEnd: number;
@@ -364,12 +362,12 @@ function bspGeometry(
 }
 
 export function createWorkbenchLayoutGeometry(
-  layout: EffectiveWorkbenchLayout,
+  layout: WorkbenchLayout,
   paneCount: number,
   splitRatios: readonly number[],
 ): WorkbenchLayoutGeometry {
   const count = Math.max(1, paneCount);
-  if (layout === "compact" || count === 1) return singlePaneGeometry();
+  if (count === 1) return singlePaneGeometry();
   switch (layout) {
     case "columns":
       return columnsGeometry(count, splitRatios);

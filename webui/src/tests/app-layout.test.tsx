@@ -314,6 +314,7 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
+    localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     localStorage.removeItem("nanobot-webui.restartStartedAt");
     localStorage.removeItem("nanobot-webui.restartRoute");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
@@ -335,6 +336,7 @@ describe("App layout", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("shows the auth form without an invalid-password error on first load", async () => {
@@ -1717,7 +1719,7 @@ describe("App layout", () => {
     expect(within(sidebar).getByText("2 selected")).toBeInTheDocument();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Delete 2 topics and panes?")).toBeInTheDocument();
+    expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledTimes(2));
@@ -3100,6 +3102,84 @@ describe("App layout", () => {
       ))
       .map((button) => button.getAttribute("title"));
     expect(paneTitles).toEqual(["Alpha child", "Alpha tab"]);
+  });
+
+  it("uses one active pane without workbench editing controls on mobile", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 767px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    mockSessions = [
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-01T10:00:00Z",
+        updatedAt: "2026-08-01T10:00:00Z",
+        title: "Alpha tab",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha-child",
+        channel: "websocket",
+        chatId: "alpha-child",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha child",
+        preview: "",
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/#/chat/websocket%3Aalpha-child",
+    );
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: true,
+                  title: "Alpha tab",
+                  paneKeys: ["websocket:alpha", "websocket:alpha-child"],
+                  layout: "bsp",
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const grid = await screen.findByTestId("pane-grid");
+    await waitFor(() => expect(Array.from(grid.children).map(
+      (pane) => pane.getAttribute("aria-label"),
+    )).toEqual(["Alpha child"]));
+    expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "Alpha child pane actions",
+    }), { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remove" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Move to" })).not.toBeInTheDocument();
   });
 
   it("materializes a singleton tab without linking it to another pane", async () => {

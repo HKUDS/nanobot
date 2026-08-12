@@ -990,7 +990,7 @@
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",
-    "titleMany": "Xóa {{count}} cuộc trò chuyện và khung?",
+    "titleMany": "Xóa {{count}} cuộc trò chuyện?",
     "description": "Không thể hoàn tác thao tác này.",
     "descriptionMany": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
@@ -1408,6 +1408,8 @@
     "dissolveTab": "Giải tán nhóm",
     "layout": "Bố cục khung",
     "addPane": "Thêm khung",
+    "paneLimit": "Tối đa {{count}} khung",
+    "deleteConversations": "Xóa tất cả",
     "movePane": "Di chuyển khung {{title}}",
     "movePaneHint": "Kéo để di chuyển · Cũng có thể dùng các phím mũi tên",
     "resizePaneBoundary": "Đổi kích thước ranh giới khung {{index}}",

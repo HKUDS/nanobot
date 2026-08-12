@@ -990,7 +990,7 @@
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
-    "titleMany": "{{count}} 件のチャットとペインを削除しますか？",
+    "titleMany": "{{count}} 件の会話を削除しますか？",
     "description": "この操作は元に戻せません。",
     "descriptionMany": "この操作は元に戻せません。",
     "cancel": "キャンセル",
@@ -1408,6 +1408,8 @@
     "dissolveTab": "グループを解除",
     "layout": "ペインレイアウト",
     "addPane": "ペインを追加",
+    "paneLimit": "最大 {{count}} ペイン",
+    "deleteConversations": "すべて削除",
     "movePane": "{{title}} ペインを移動",
     "movePaneHint": "ドラッグで移動 · 矢印キーでも移動できます",
     "resizePaneBoundary": "ペイン境界 {{index}} のサイズを変更",

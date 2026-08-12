@@ -990,7 +990,7 @@
   },
   "deleteConfirm": {
     "title": "Supprimer cette discussion ?",
-    "titleMany": "Supprimer {{count}} discussions et volets ?",
+    "titleMany": "Supprimer {{count}} conversations ?",
     "description": "Cette action est irréversible.",
     "descriptionMany": "Cette action est irréversible.",
     "cancel": "Annuler",
@@ -1408,6 +1408,8 @@
     "dissolveTab": "Dissoudre le groupe",
     "layout": "Disposition des volets",
     "addPane": "Ajouter un volet",
+    "paneLimit": "{{count}} volets maximum",
+    "deleteConversations": "Tout supprimer",
     "movePane": "Déplacer le volet {{title}}",
     "movePaneHint": "Faites glisser pour déplacer · Les flèches fonctionnent aussi",
     "resizePaneBoundary": "Redimensionner la séparation {{index}}",
