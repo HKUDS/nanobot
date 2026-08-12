@@ -719,12 +719,13 @@ export function PaneWorkbench({
                           }) : undefined}
                           aria-keyshortcuts={active ? "ArrowLeft ArrowRight ArrowUp ArrowDown" : undefined}
                           data-workbench-pane-action
+                          data-workbench-move-handle
                           data-testid={`pane-move-handle-${pane.key}`}
                           onPointerDown={(event) => handleMovePointerDown(pane.key, event)}
                           onKeyDown={(event) => handleMoveKeyDown(pane.key, event)}
                           className={cn(
                             "group host-no-drag absolute bottom-0 left-1/2 z-30 flex h-6 w-12 -translate-x-1/2 touch-none items-center justify-center rounded-full",
-                            "cursor-grab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background active:cursor-grabbing",
+                            "cursor-grab focus-visible:outline-none active:cursor-grabbing",
                             "transition-opacity duration-100 motion-reduce:transition-none",
                             active ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
                           )}
@@ -732,7 +733,8 @@ export function PaneWorkbench({
                           <span
                             aria-hidden
                             className={cn(
-                              "h-[3px] w-9 rounded-full bg-foreground/35 transition-colors duration-100 motion-reduce:transition-none",
+                              "h-[3px] w-9 rounded-full bg-foreground/35 transition-[height,background-color] duration-100 motion-reduce:transition-none",
+                              "group-focus-visible:h-[5px] group-focus-visible:bg-foreground/70",
                               draggingPaneKey === pane.key
                                 ? "bg-foreground/65"
                                 : "group-hover:bg-foreground/50",
