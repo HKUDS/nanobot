@@ -22,9 +22,10 @@ function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
 }
 
-async function waitUntil(predicate: () => boolean, timeout = 250): Promise<void> {
+async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<void> {
   const deadline = Date.now() + timeout
   while (!predicate() && Date.now() < deadline) await Bun.sleep(5)
+  if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
 function client(sent: string[] = []) {
@@ -130,10 +131,10 @@ describe("NanobotTui layout", () => {
     app.accept({ event: "attached", chat_id: "chat" })
     await Bun.sleep(1)
     const composer = (app as unknown as { composer: TextareaRenderable }).composer
-    for (const value of ["first prompt", "second prompt"]) {
+    for (const [index, value] of ["first prompt", "second prompt"].entries()) {
       composer.setText(value)
       composer.submit()
-      await Bun.sleep(5)
+      await waitUntil(() => sent.length === index + 1)
       app.accept({ event: "turn_end", chat_id: "chat" })
     }
 
@@ -435,7 +436,7 @@ describe("NanobotTui layout", () => {
 
     try {
       app.accept({ event: "attached", chat_id: "chat" })
-      await Bun.sleep(5)
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       app.accept({ event: "attached", chat_id: "chat" })
       composer.setText("sent during reconnect")
       composer.submit()
@@ -448,9 +449,9 @@ describe("NanobotTui layout", () => {
         messages: [{ role: "assistant", content: "restored history" }],
         page: { has_more_before: false },
       })))
-      await Bun.sleep(5)
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       composer.submit()
-      await Bun.sleep(5)
+      await waitUntil(() => sent.length === 1)
       await setup.flush()
       const frame = setup.captureCharFrame()
 
@@ -482,9 +483,9 @@ describe("NanobotTui layout", () => {
     expect(composer.plainText).toBe("draft before attach")
 
     app.accept({ event: "attached", chat_id: "chat" })
-    await Bun.sleep(5)
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
     composer.submit()
-    await Bun.sleep(5)
+    await waitUntil(() => sent.length === 1)
 
     expect(sent).toEqual(["draft before attach"])
   })
