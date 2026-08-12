@@ -58,6 +58,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
 | **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
+| **Sessions** | config directory + workspace ID | `~/.nanobot-A/sessions/<workspace-id>/` |
 | **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
 | **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
 
@@ -126,6 +127,6 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 ## Notes
 
 - Each instance must use a different port if they run at the same time
-- Use a different workspace per instance if you want isolated memory, sessions, and skills
+- Session data follows the active config directory; use a different workspace per instance to isolate memory, skills, and the stable session namespace ID
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory
