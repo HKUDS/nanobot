@@ -299,8 +299,8 @@ def _fake_chat_stream_legacy_function_call_chunks():
 
 
 @pytest.mark.asyncio
-async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
-    """Regression: DeepSeek-V4 / reasoner expose ``delta.reasoning_content`` during streaming."""
+async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
+    """DeepSeek Chat Completions exposes ``delta.reasoning_content`` while streaming."""
     mock_chat = AsyncMock(return_value=_fake_chat_stream_reasoning_chunks())
     spec = find_by_name("deepseek")
     thinking: list[str] = []
@@ -321,6 +321,7 @@ async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -
             default_model="deepseek-v4-pro",
             spec=spec,
         )
+        provider._api_type = "chat_completions"
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             model="deepseek-v4-pro",
@@ -334,6 +335,37 @@ async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -
     assert result.reasoning_content == "step1step2"
     assert result.content == "answer"
     mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_v4_pro_uses_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response("from responses"))
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_class:
+        client_instance = mock_client_class.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model="deepseek-v4-pro",
+            spec=find_by_name("deepseek"),
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="deepseek-v4-pro",
+            reasoning_effort="none",
+        )
+
+    assert result.content == "from responses"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_not_awaited()
+    call_kwargs = mock_responses.call_args.kwargs
+    assert call_kwargs["model"] == "deepseek-v4-pro"
+    assert call_kwargs["reasoning"] == {"effort": "none"}
+    assert call_kwargs["tools"] == [{"type": "web_search"}]
+    assert "include" not in call_kwargs
 
 
 @pytest.mark.asyncio
