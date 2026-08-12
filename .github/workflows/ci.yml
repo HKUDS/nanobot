@@ -179,6 +179,35 @@ jobs:
         working-directory: webui
         run: bun run build
 
+  tui:
+    name: Terminal UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install TUI dependencies
+        working-directory: tui
+        run: bun install --frozen-lockfile
+
+      - name: Check TUI
+        working-directory: tui
+        run: bun run check
+
+      - name: Test TUI
+        working-directory: tui
+        run: bun run test
+
+      - name: Build TUI
+        working-directory: tui
+        run: bun run build
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20

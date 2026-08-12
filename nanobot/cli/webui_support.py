@@ -49,6 +49,7 @@ __all__ = [
     "_validate_gateway_startup",
     "_warn_webui_bind_scope",
     "_webui_browser_url",
+    "webui_bootstrap_secret",
     "_webui_build_mode_for_interactive",
     "_webui_channel_enabled",
     "_webui_display_url",
@@ -224,7 +225,8 @@ def _gateway_health_bind_note(host: str) -> str:
     return "" if is_loopback_host(host) else f" [dim](listening on {host})[/dim]"
 
 
-def _webui_bootstrap_secret(config: Config) -> str:
+def webui_bootstrap_secret(config: Config) -> str:
+    """Return the shared local bootstrap credential for WebUI protocol clients."""
     ws_cfg = _webui_config_dict(config)
     return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
 
@@ -236,7 +238,7 @@ def _webui_browser_url(config: Config) -> str:
     host = _host_for_local_browser(str(ws_cfg.get("host") or "127.0.0.1"))
     port = int(ws_cfg.get("port") or 8765)
     base_url = f"http://{host}:{port}"
-    secret = _webui_bootstrap_secret(config)
+    secret = webui_bootstrap_secret(config)
     if not secret:
         return base_url
     return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"

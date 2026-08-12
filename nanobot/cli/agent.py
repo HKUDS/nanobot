@@ -47,7 +47,7 @@ console = Console()
 
 
 def agent(
-    message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    message: str | None = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -61,6 +61,12 @@ def agent(
         "--logs/--no-logs",
         help="Show nanobot runtime logs during chat",
     ),
+    classic: bool = typer.Option(
+        False,
+        "--classic",
+        "--no-tui",
+        help="Use the classic Python prompt instead of the native terminal UI",
+    ),
 ):
     """Interact with the agent directly."""
     from nanobot.bus.queue import MessageBus
@@ -69,6 +75,33 @@ def agent(
     from nanobot.providers.image_generation import image_gen_provider_configs
 
     runtime_config = _load_runtime_config(config, workspace)
+    native_tui = (
+        message is None
+        and not classic
+        and markdown
+        and not logs
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+    )
+    if native_tui:
+        from nanobot.cli.tui_launcher import TuiUnavailableError, launch_tui
+        from nanobot.config.loader import get_config_path
+
+        try:
+            exit_code = launch_tui(
+                runtime_config,
+                config_path=get_config_path().resolve(strict=False),
+                workspace_override=workspace,
+                session_id=session_id,
+            )
+        except TuiUnavailableError as exc:
+            console.print(f"[yellow]Native TUI unavailable: {exc}[/yellow]")
+            console.print("[dim]Falling back to the classic prompt.[/dim]")
+        else:
+            if exit_code:
+                raise typer.Exit(exit_code)
+            return
+
     try:
         provider = make_provider(runtime_config)
     except ValueError as exc:

@@ -91,8 +91,9 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot agent --session <id>` | Use a specific session key |
 | `nanobot agent --workspace <path>` | Override workspace |
 | `nanobot agent --config <path>` | Use a specific config file |
-| `nanobot agent --no-markdown` | Print plain text instead of Rich-rendered Markdown |
-| `nanobot agent --logs` | Show runtime logs while chatting |
+| `nanobot agent --classic` | Use the classic Python prompt instead of the native terminal UI |
+| `nanobot agent --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
+| `nanobot agent --logs` | Use the classic prompt and show runtime logs while chatting |
 
 ## Session Storage and Rollback
 
@@ -112,7 +113,13 @@ nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bo
 The command never deletes the external store and refuses to overwrite a different existing
 workspace file. Back up both the config directory and workspace before changing versions.
 
-In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
+Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, the command starts one for the lifetime of the terminal UI and stops it on exit.
+
+`Enter` sends the current message. Press `Alt+Enter` to add a newline. `Ctrl+C` stops a running turn, clears a non-empty composer, or exits when idle. Normal terminal scrollback remains available above the fixed composer.
+
+Packaged releases fetch a version-matched, checksummed terminal binary for macOS, Linux, or Windows on first use and cache it under the nanobot data directory. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A source checkout can run the client with Bun after `bun install --cwd tui`.
+
+Non-interactive input/output, `--logs`, and `--no-markdown` automatically retain the classic prompt so existing scripts and diagnostic workflows do not acquire terminal control sequences or silently ignore their options.
 
 Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 

@@ -202,7 +202,7 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 nanobot agent
 ```
 
-This opens an interactive terminal chat with the same configured model, workspace, and tools while keeping its own CLI session history. It does not open a browser or keep chat channels and automations running after you exit. Type `exit` or press `Ctrl+C` when you are done.
+This opens the native terminal client with the same configured model, workspace, tools, streaming protocol, and session engine as the WebUI. It keeps a terminal-specific session, starts a local gateway only when needed, and releases that gateway when you exit. Type `exit` or press `Ctrl+C` when you are done. Use `nanobot agent --classic` for the legacy Python prompt.
 
 For one request and an immediate exit, use:
 
