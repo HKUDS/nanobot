@@ -309,7 +309,11 @@ describe("App layout", () => {
     newTemporaryChatSpy.mockImplementation(async () => (
       `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
     ));
-    newSideChatSpy.mockResolvedValue("00000000-0000-4000-8000-000000000099");
+    newSideChatSpy.mockReset();
+    let sideChatCounter = 99;
+    newSideChatSpy.mockImplementation(async () => (
+      `00000000-0000-4000-8000-${String(sideChatCounter++).padStart(12, "0")}`
+    ));
     sendMessageSpy.mockReset();
     statusHandlers.clear();
     runStatusHandlers.clear();
@@ -618,7 +622,7 @@ describe("App layout", () => {
     ]);
   });
 
-  it("opens /side beside the source chat and discards it on close", async () => {
+  it("opens multiple side conversations in tabs and discards them independently", async () => {
     mockSessions = [{
       key: "websocket:main-chat",
       channel: "websocket",
@@ -658,21 +662,41 @@ describe("App layout", () => {
     expect(screen.getByText(
       "Side conversations are temporary and disappear when you close the app.",
     )).toBeInTheDocument();
-    expect(window.location.hash).toContain("websocket%3Amain-chat");
-
-    act(() => statusHandlers.forEach((handler) => handler("reconnecting")));
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Side conversation")).not.toBeInTheDocument();
-    });
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/side" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const firstSideComposer = screen.getByRole("textbox", { name: "Message Side conversation" });
+    fireEvent.change(firstSideComposer, { target: { value: "draft in first side" } });
+    const sourceComposer = screen.getByRole("textbox", { name: "Message Main chat" });
+    fireEvent.change(sourceComposer, { target: { value: "/side" } });
+    fireEvent.submit(sourceComposer.closest("form")!);
     await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(2));
 
-    const sourceComposer = screen.getByRole("textbox", { name: "Message Main chat" });
-    const sideComposer = screen.getByRole("textbox", { name: "Message Side conversation" });
-    expect(within(screen.getByLabelText("Side conversation"))
-      .getByTestId("thread-welcome-layout"))
+    const sideTabs = screen.getByRole("tablist", { name: "Side conversation tabs" });
+    expect(within(sideTabs).getByRole("tab", { name: "Side conversation" }))
+      .toHaveAttribute("aria-selected", "false");
+    expect(within(sideTabs).getByRole("tab", { name: "Side conversation 2" }))
+      .toHaveAttribute("aria-selected", "true");
+    const hiddenFirstSideComposer = screen.getByRole("textbox", {
+      name: "Message Side conversation",
+      hidden: true,
+    });
+    expect(hiddenFirstSideComposer.closest("[aria-hidden='true']"))
+      .toHaveClass("hidden");
+    expect(screen.getByRole("textbox", { name: "Message Side conversation 2" })
+      .closest("[aria-hidden='false']"))
+      .toHaveClass("flex");
+    fireEvent.keyDown(within(sideTabs).getByRole("tab", { name: "Side conversation 2" }), {
+      key: "ArrowLeft",
+    });
+    expect(within(sideTabs).getByRole("tab", { name: "Side conversation" }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(sideTabs).getByRole("tab", { name: "Side conversation" }));
+    const restoredFirstSideComposer = screen.getByRole("textbox", {
+      name: "Message Side conversation",
+    });
+    expect(restoredFirstSideComposer).toHaveValue("draft in first side");
+    fireEvent.submit(restoredFirstSideComposer.closest("form")!);
+    fireEvent.click(within(sideTabs).getByRole("tab", { name: "Side conversation 2" }));
+    const sideComposer = screen.getByRole("textbox", { name: "Message Side conversation 2" });
+    expect(sideComposer.closest('[data-testid="thread-welcome-layout"]'))
       .toHaveAttribute("data-layout", "thread");
     fireEvent.change(sourceComposer, { target: { value: "continue main" } });
     fireEvent.submit(sourceComposer.closest("form")!);
@@ -687,17 +711,145 @@ describe("App layout", () => {
       );
       expect(sendMessageSpy).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000099",
+        "draft in first side",
+        undefined,
+        expect.any(Object),
+      );
+      expect(sendMessageSpy).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000100",
         "explore in side",
         undefined,
         expect.any(Object),
       );
     });
+    expect(window.location.hash).toContain("websocket%3Amain-chat");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close side conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "New side conversation" }));
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("tab", { name: "Side conversation 3" }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close Side conversation 3" }));
+
+    fireEvent.click(within(sideTabs).getByRole("button", {
+      name: "Close Side conversation 2",
+    }));
+    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000100",
+    ));
+    expect(screen.getByRole("textbox", { name: "Message Side conversation" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Side conversation 2" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Side conversation" }));
     await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000099",
     ));
     expect(screen.queryByLabelText("Side conversation")).not.toBeInTheDocument();
+  });
+
+  it("clears side conversations after reconnecting and can create them again", async () => {
+    mockSessions = [{
+      key: "websocket:main-chat",
+      channel: "websocket",
+      chatId: "main-chat",
+      createdAt: "2026-08-12T08:00:00Z",
+      updatedAt: "2026-08-12T08:00:00Z",
+      title: "Main chat",
+      preview: "Existing context",
+    }];
+    mockFetchRoutes({
+      "/api/commands": {
+        commands: [{
+          command: "/side",
+          title: "Side conversation",
+          description: "Start a temporary conversation with the current chat context.",
+          icon: "messages-square",
+          lifecycle: "side_channel",
+          accepts_args: false,
+        }],
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.click(within(
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
+    ).getByText("Main chat"));
+    const sourceComposer = await screen.findByRole("textbox");
+    fireEvent.change(sourceComposer, { target: { value: "/side" } });
+    fireEvent.submit(sourceComposer.closest("form")!);
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "New side conversation" }));
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("tab", { name: "Side conversation 2" }))
+      .toHaveAttribute("aria-selected", "true");
+
+    act(() => statusHandlers.forEach((handler) => handler("reconnecting")));
+    await waitFor(() => {
+      expect(screen.queryByRole("tablist", { name: "Side conversation tabs" }))
+        .not.toBeInTheDocument();
+    });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const reconnectedSourceComposer = screen.getByRole("textbox", { name: "Message Main chat" });
+    fireEvent.change(reconnectedSourceComposer, { target: { value: "/side" } });
+    fireEvent.submit(reconnectedSourceComposer.closest("form")!);
+    await waitFor(() => expect(newSideChatSpy).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("tab", { name: "Side conversation" }))
+      .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("returns to the retained source conversation from a side conversation on mobile", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 767px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    mockSessions = [{
+      key: "websocket:main-chat",
+      channel: "websocket",
+      chatId: "main-chat",
+      createdAt: "2026-08-12T08:00:00Z",
+      updatedAt: "2026-08-12T08:00:00Z",
+      title: "Main chat",
+      preview: "Existing context",
+    }];
+    mockFetchRoutes({
+      "/api/commands": {
+        commands: [{
+          command: "/side",
+          title: "Side conversation",
+          description: "Start a temporary conversation with the current chat context.",
+          icon: "messages-square",
+          lifecycle: "side_channel",
+          accepts_args: false,
+        }],
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(within(
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
+    ).getByText("Main chat"));
+    const sourceComposer = await screen.findByRole("textbox");
+    fireEvent.change(sourceComposer, { target: { value: "/side" } });
+    fireEvent.submit(sourceComposer.closest("form")!);
+
+    expect(await screen.findByRole("button", { name: "Back to main conversation" }))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to main conversation" }));
+    expect(screen.getByRole("textbox", { name: "Message Main chat" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Message Side conversation" }))
+      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open side conversations" }));
+    expect(screen.getByRole("textbox", { name: "Message Side conversation" }))
+      .toBeInTheDocument();
   });
 
   it("shows the temporary-chat control only on the new-topic hero", async () => {

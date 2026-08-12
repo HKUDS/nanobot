@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Eye, EyeOff, MessageCirclePlus, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, MessageCirclePlus, Moon, PanelLeft, Plus, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -121,6 +121,13 @@ type ShellRoute = {
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
+};
+type SideChatEntry = { key: string; ordinal: number };
+type SidePaneState = {
+  sourceKey: string;
+  chats: SideChatEntry[];
+  activeKey: string;
+  nextOrdinal: number;
 };
 const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
@@ -1050,9 +1057,10 @@ function Shell({
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
-  const [sidePane, setSidePane] = useState<{ sourceKey: string; sideKey: string } | null>(null);
+  const [sidePane, setSidePane] = useState<SidePaneState | null>(null);
   const [sidePaneActive, setSidePaneActive] = useState(false);
   const [sidePaneSplitRatios, setSidePaneSplitRatios] = useState([0.5]);
+  const creatingSideChatRef = useRef(false);
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
@@ -1126,11 +1134,11 @@ function Shell({
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
     () => Object.values(temporarySessions)
-      .filter((session) => session.key !== sidePane?.sideKey)
+      .filter((session) => !sidePane?.chats.some((chat) => chat.key === session.key))
       .sort((a, b) => (
       Date.parse(b.createdAt ?? "") - Date.parse(a.createdAt ?? "")
     )),
-    [sidePane?.sideKey, temporarySessions],
+    [sidePane?.chats, temporarySessions],
   );
   const temporaryChatIds = useMemo(
     () => Object.values(temporarySessions).map((session) => session.chatId),
@@ -1626,26 +1634,61 @@ function Shell({
 
   const closeSidePane = useCallback(() => {
     if (!sidePane) return;
-    const session = temporarySessionsRef.current[sidePane.sideKey];
-    if (session) client.discardTemporaryChat(session.chatId);
+    const sideKeys = new Set(sidePane.chats.map((chat) => chat.key));
+    for (const key of sideKeys) {
+      const session = temporarySessionsRef.current[key];
+      if (session) client.discardTemporaryChat(session.chatId);
+    }
     setTemporarySessions((current) => {
-      if (!current[sidePane.sideKey]) return current;
-      const next = { ...current };
-      delete next[sidePane.sideKey];
-      return next;
+      const entries = Object.entries(current).filter(([key]) => !sideKeys.has(key));
+      return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
     });
     setSidePane(null);
     setSidePaneActive(false);
     setSidePaneSplitRatios([0.5]);
   }, [client, sidePane]);
 
+  const closeSideChat = useCallback((sideKey: string) => {
+    if (!sidePane) return;
+    const index = sidePane.chats.findIndex((chat) => chat.key === sideKey);
+    if (index < 0) return;
+    const session = temporarySessionsRef.current[sideKey];
+    if (session) client.discardTemporaryChat(session.chatId);
+    setTemporarySessions((current) => {
+      if (!current[sideKey]) return current;
+      const next = { ...current };
+      delete next[sideKey];
+      return next;
+    });
+    const chats = sidePane.chats.filter((chat) => chat.key !== sideKey);
+    if (chats.length === 0) {
+      setSidePane(null);
+      setSidePaneActive(false);
+      setSidePaneSplitRatios([0.5]);
+      return;
+    }
+    const activeKey = sidePane.activeKey === sideKey
+        ? (chats[index] ?? chats[index - 1]).key
+        : sidePane.activeKey;
+    setSidePane({ ...sidePane, chats, activeKey });
+  }, [client, sidePane]);
+
   const onCreateSideChat = useCallback(async (sourceChatId: string) => {
-    if (!activeKey || temporarySessionsRef.current[activeKey] || sidePane) return null;
+    if (
+      !activeKey
+      || temporarySessionsRef.current[activeKey]
+      || (sidePane && sidePane.sourceKey !== activeKey)
+      || creatingSideChatRef.current
+    ) return null;
+    creatingSideChatRef.current = true;
     try {
       const chatId = await client.newSideChat(sourceChatId);
+      const ordinal = sidePane?.nextOrdinal ?? 1;
       const session: ChatSummary = {
         ...createTemporaryChatSession(chatId),
-        preview: t("temporaryChat.sideTitle"),
+        preview: ordinal === 1
+          ? t("temporaryChat.sideTitle")
+          : t("temporaryChat.sideTitleNumbered", { number: ordinal }),
         ...(activeWorkspaceScope ? {
           workspaceScope: normalizeWorkspaceScope(
             scopeWithAccessMode(activeWorkspaceScope, "restricted"),
@@ -1653,14 +1696,28 @@ function Shell({
         } : {}),
       };
       setTemporarySessions((current) => ({ ...current, [session.key]: session }));
-      setSidePane({ sourceKey: activeKey, sideKey: session.key });
+      setSidePane((current) => current
+        ? {
+            ...current,
+            chats: [...current.chats, { key: session.key, ordinal }],
+            activeKey: session.key,
+            nextOrdinal: ordinal + 1,
+          }
+        : {
+            sourceKey: activeKey,
+            chats: [{ key: session.key, ordinal }],
+            activeKey: session.key,
+            nextOrdinal: 2,
+          });
       setSidePaneActive(true);
-      setSidePaneSplitRatios([0.5]);
+      if (!sidePane) setSidePaneSplitRatios([0.5]);
       setWorkspaceError(null);
       return chatId;
     } catch (error) {
       console.error("Failed to create side conversation", error);
       return null;
+    } finally {
+      creatingSideChatRef.current = false;
     }
   }, [activeKey, activeWorkspaceScope, client, sidePane, t]);
 
@@ -2383,7 +2440,17 @@ function Shell({
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
   }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
-  const sidePaneSession = sidePane ? temporarySessions[sidePane.sideKey] ?? null : null;
+  const sideChatSessions = useMemo(() => sidePane?.chats
+    .map((chat) => {
+      const session = temporarySessions[chat.key];
+      return session ? { ...chat, session } : null;
+    })
+    .filter((chat): chat is SideChatEntry & { session: ChatSummary } => chat !== null) ?? [],
+  [sidePane?.chats, temporarySessions]);
+  const activeSideChat = sideChatSessions.find((chat) => chat.key === sidePane?.activeKey)
+    ?? sideChatSessions[0]
+    ?? null;
+  const sidePaneWorkbenchKey = sidePane ? `side-pane:${sidePane.sourceKey}` : null;
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
@@ -2392,10 +2459,14 @@ function Shell({
     && (activeTabState.explicit || activeTabState.paneKeys.length > 1),
   );
   const renderedWorkbenchPanes = useMemo(() => {
-    if (sidePaneSession && activeSession) {
+    if (activeSideChat && activeSession && sidePaneWorkbenchKey) {
       return [
         { key: activeSession.key, reactKey: "tab-root", title: headerTitle },
-        { key: sidePaneSession.key, reactKey: `side:${sidePaneSession.key}`, title: t("temporaryChat.sideTitle") },
+        {
+          key: sidePaneWorkbenchKey,
+          reactKey: sidePaneWorkbenchKey,
+          title: activeSideChat.session.preview,
+        },
       ];
     }
     if (paneChromeEnabled) {
@@ -2417,21 +2488,23 @@ function Shell({
     activeTabState?.paneKeys,
     headerTitle,
     paneChromeEnabled,
-    sidePaneSession,
+    activeSideChat,
     activeSession,
+    sidePane?.sourceKey,
+    sidePaneWorkbenchKey,
     t,
     titleForSession,
     workbenchPaneSessions,
   ]);
-  const renderedActivePaneKey = sidePaneSession && sidePaneActive
-    ? sidePaneSession.key
+  const renderedActivePaneKey = activeSideChat && sidePaneActive && sidePaneWorkbenchKey
+    ? sidePaneWorkbenchKey
     : activeKey ?? renderedWorkbenchPanes[0].key;
-  const renderedWorkbenchLayout = sidePaneSession
+  const renderedWorkbenchLayout = activeSideChat
     ? "columns"
     : paneChromeEnabled && activeTabState
     ? activeTabState.layout
     : "columns";
-  const renderedWorkbenchSplitRatios = sidePaneSession
+  const renderedWorkbenchSplitRatios = activeSideChat
     ? sidePaneSplitRatios
     : paneChromeEnabled && activeTabState
     ? activeTabState.splitRatios
@@ -2781,9 +2854,10 @@ function Shell({
                 activePaneKey={renderedActivePaneKey}
                 layout={renderedWorkbenchLayout}
                 splitRatios={renderedWorkbenchSplitRatios}
-                chrome={paneChromeEnabled || Boolean(sidePaneSession)}
-                showLayoutControl={!sidePaneSession && activeTabVisible}
-                allowPaneReorder={!sidePaneSession}
+                chrome={activeSideChat ? !mobileWorkbench : paneChromeEnabled}
+                showLayoutControl={!activeSideChat && activeTabVisible}
+                allowPaneReorder={!activeSideChat}
+                retainCompactPanes={Boolean(activeSideChat)}
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 addPaneDisabledLabel={activePaneLimitReached
                   ? t("workbench.paneLimit", {
@@ -2792,29 +2866,29 @@ function Shell({
                     })
                   : undefined}
                 onActivatePane={(paneKey) => {
-                  if (sidePaneSession) {
-                    setSidePaneActive(paneKey === sidePaneSession.key);
+                  if (activeSideChat && sidePaneWorkbenchKey) {
+                    setSidePaneActive(paneKey === sidePaneWorkbenchKey);
                     return;
                   }
                   onActivateWorkbenchPane(paneKey);
                 }}
                 onAddPane={onAddPane}
                 onLayoutChange={(layout) => {
-                  if (sidePaneSession) return;
+                  if (activeSideChat) return;
                   if (!activeTabKey) return;
                   updateWorkbenchState((current) => (
                     setWorkbenchLayout(current, activeTabKey, layout)
                   ));
                 }}
                 onPaneOrderChange={(paneKeys) => {
-                  if (sidePaneSession) return;
+                  if (activeSideChat) return;
                   if (!activeTabKey) return;
                   updateWorkbenchState((current) => (
                     setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
                   ));
                 }}
                 onSplitRatiosChange={(splitRatios) => {
-                  if (sidePaneSession) {
+                  if (activeSideChat) {
                     setSidePaneSplitRatios(splitRatios);
                     return;
                   }
@@ -2824,43 +2898,183 @@ function Shell({
                   ));
                 }}
                 renderPane={(pane, context) => {
-                  if (sidePaneSession) {
-                    const isSide = pane.key === sidePaneSession.key;
-                    const paneSession = isSide ? sidePaneSession : activeSession;
-                    if (!paneSession) return null;
-                    const paneScope = isSide
-                      ? sidePaneSession.workspaceScope ?? null
-                      : activeWorkspaceScope;
+                  if (activeSideChat && sidePaneWorkbenchKey) {
+                    if (!activeSession) return null;
+                    const sourceChatId = activeSession.chatId;
+                    if (pane.key === sidePaneWorkbenchKey) {
+                      return (
+                        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+                          <div
+                            role="tablist"
+                            aria-label={t("temporaryChat.sideTabs")}
+                            onKeyDown={(event) => {
+                              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                              const currentIndex = sideChatSessions.findIndex(
+                                (chat) => chat.key === activeSideChat.key,
+                              );
+                              const offset = event.key === "ArrowRight" ? 1 : -1;
+                              const nextIndex = (
+                                currentIndex + offset + sideChatSessions.length
+                              ) % sideChatSessions.length;
+                              const next = sideChatSessions[nextIndex];
+                              if (!next) return;
+                              event.preventDefault();
+                              setSidePane((current) => current
+                                ? { ...current, activeKey: next.key }
+                                : current);
+                              document.getElementById(`side-tab-${next.key}`)?.focus();
+                            }}
+                            className="flex h-10 shrink-0 items-end gap-1 overflow-x-auto border-b border-border/55 px-2 pt-1"
+                          >
+                            {mobileWorkbench ? (
+                              <button
+                                type="button"
+                                aria-label={t("temporaryChat.backToSource")}
+                                onClick={() => setSidePaneActive(false)}
+                                className="mb-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                              >
+                                <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
+                              </button>
+                            ) : null}
+                            {sideChatSessions.map((chat) => {
+                              const title = chat.session.preview;
+                              const selected = chat.key === activeSideChat.key;
+                              return (
+                                <div
+                                  key={chat.key}
+                                  className={cn(
+                                    "group flex h-8 shrink-0 items-center rounded-t-lg border border-b-0 px-1",
+                                    selected
+                                      ? "border-border/70 bg-background text-foreground"
+                                      : "border-transparent bg-muted/45 text-muted-foreground hover:bg-muted/70",
+                                  )}
+                                >
+                                  <button
+                                    id={`side-tab-${chat.key}`}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={selected}
+                                    tabIndex={selected ? 0 : -1}
+                                    onClick={() => {
+                                      setSidePane((current) => current
+                                        ? { ...current, activeKey: chat.key }
+                                        : current);
+                                      setSidePaneActive(true);
+                                    }}
+                                    className="flex h-full items-center gap-1.5 px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  >
+                                    <MessageCirclePlus aria-hidden className="h-3.5 w-3.5" />
+                                    <span>{title}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={t("temporaryChat.closeSideNamed", { title })}
+                                    onClick={() => closeSideChat(chat.key)}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  >
+                                    <X aria-hidden className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              aria-label={t("temporaryChat.newSide")}
+                              disabled={runningChatIds.has(sourceChatId)}
+                              onClick={() => void onCreateSideChat(sourceChatId)}
+                              className="mb-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+                            >
+                              <Plus aria-hidden className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="relative min-h-0 flex-1">
+                            {sideChatSessions.map((chat) => {
+                              const selected = chat.key === activeSideChat.key;
+                              return (
+                                <div
+                                  key={chat.key}
+                                  hidden={!selected}
+                                  aria-hidden={!selected}
+                                  className={cn(
+                                    "absolute inset-0 min-h-0 flex-col",
+                                    selected ? "flex" : "hidden",
+                                  )}
+                                >
+                                  <ThreadShell
+                                    session={chat.session}
+                                    sessions={sessions}
+                                    title={chat.session.preview}
+                                    temporary
+                                    temporaryChatIds={temporaryChatIds}
+                                    onToggleSidebar={toggleSidebar}
+                                    onTurnEnd={() => void 0}
+                                    theme={theme}
+                                    onToggleTheme={toggle}
+                                    hideHeader
+                                    composerInputAriaLabel={t("workbench.composerAria", {
+                                      defaultValue: "Message {{title}}",
+                                      title: chat.session.preview,
+                                    })}
+                                    emptyComposerVariant="thread"
+                                    dockEmptyComposer
+                                    emptyStateOverride={(
+                                      <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
+                                        <MessageCirclePlus
+                                          aria-hidden
+                                          className="mb-3 h-7 w-7 text-muted-foreground"
+                                          strokeWidth={1.7}
+                                        />
+                                        <h2 className="text-base font-medium text-foreground">
+                                          {t("temporaryChat.sideTitle")}
+                                        </h2>
+                                        <p className="mt-1 text-sm text-muted-foreground">
+                                          {t("temporaryChat.sideDescription")}
+                                        </p>
+                                      </div>
+                                    )}
+                                    workspaceScope={chat.session.workspaceScope ?? null}
+                                    workspaceDefaultScope={workspaces?.default_scope ?? null}
+                                    workspaceControls={workspaces?.controls ?? null}
+                                    workspaceScopeDisabled={runningChatIds.has(chat.session.chatId)}
+                                    settingsSnapshot={settingsSnapshot}
+                                    onOpenModelSettings={onOpenModelSettings}
+                                    skills={skills}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      );
+                    }
                     return (
                       <ThreadShell
-                        session={paneSession}
+                        session={activeSession}
                         sessions={sessions}
                         title={pane.title}
-                        temporary={isSide}
                         temporaryChatIds={temporaryChatIds}
                         onToggleSidebar={toggleSidebar}
-                        onForkChat={isSide ? undefined : onForkChat}
-                        onCreateSideChat={undefined}
-                        onTurnEnd={isSide ? () => void 0 : onTurnEnd}
+                        onForkChat={onForkChat}
+                        onCreateSideChat={onCreateSideChat}
+                        onTurnEnd={onTurnEnd}
                         theme={theme}
                         onToggleTheme={toggle}
-                        hideSidebarToggle={!context.active}
-                        hideSidebarToggleForHostChrome={context.active}
+                        hideSidebarToggleForHostChrome
                         hostChromeTitleInset={hostSidebarCollapsed}
-                        hideThemeButton={!context.active}
+                        hideThemeButton={false}
                         hideHeaderTitle
-                        headerActions={(
+                        headerActions={mobileWorkbench ? (
                           <button
                             type="button"
-                            aria-label={t("temporaryChat.closeSide")}
-                            onClick={closeSidePane}
+                            aria-label={t("temporaryChat.openSide")}
+                            onClick={() => setSidePaneActive(true)}
                             className="host-no-drag inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/45 hover:text-foreground"
                           >
-                            <X className="h-4 w-4" />
+                            <MessageCirclePlus aria-hidden className="h-4 w-4" />
                           </button>
-                        )}
+                        ) : undefined}
                         headerPortalTarget={context.headerPortalTarget}
-                        headerActive={context.active}
+                        headerActive
                         composerActive={context.active}
                         composerInputAriaLabel={t("workbench.composerAria", {
                           defaultValue: "Message {{title}}",
@@ -2868,28 +3082,13 @@ function Shell({
                         })}
                         emptyComposerVariant="thread"
                         dockEmptyComposer
-                        emptyStateOverride={isSide ? (
-                          <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
-                            <MessageCirclePlus
-                              aria-hidden
-                              className="mb-3 h-7 w-7 text-muted-foreground"
-                              strokeWidth={1.7}
-                            />
-                            <h2 className="text-base font-medium text-foreground">
-                              {t("temporaryChat.sideTitle")}
-                            </h2>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {t("temporaryChat.sideDescription")}
-                            </p>
-                          </div>
-                        ) : undefined}
                         composerPortalTarget={undefined}
-                        workspaceScope={paneScope}
+                        workspaceScope={activeWorkspaceScope}
                         workspaceDefaultScope={workspaces?.default_scope ?? null}
                         workspaceControls={workspaces?.controls ?? null}
-                        workspaceScopeDisabled={runningChatIds.has(paneSession.chatId)}
-                        workspaceError={!isSide && context.active ? workspaceError : null}
-                        onWorkspaceScopeChange={isSide ? undefined : applyWorkspaceScope}
+                        workspaceScopeDisabled={runningChatIds.has(activeSession.chatId)}
+                        workspaceError={context.active ? workspaceError : null}
+                        onWorkspaceScopeChange={applyWorkspaceScope}
                         settingsSnapshot={settingsSnapshot}
                         onOpenModelSettings={onOpenModelSettings}
                         skills={skills}

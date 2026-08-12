@@ -356,6 +356,46 @@ describe("PaneWorkbench", () => {
     expect(screen.queryByTestId("workbench-pane-gamma")).not.toBeInTheDocument();
   });
 
+  it("can retain inactive mobile panes without displaying them", () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 767px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const props = {
+      panes: [
+        { key: "source", title: "Source" },
+        { key: "side", title: "Side" },
+      ],
+      layout: "columns" as const,
+      showLayoutControl: false,
+      retainCompactPanes: true,
+      onActivatePane: vi.fn(),
+      onAddPane: vi.fn(),
+      onLayoutChange: vi.fn(),
+      onPaneOrderChange: vi.fn(),
+      renderPane: (pane: { key: string; title: string }) => <span>{pane.title}</span>,
+    };
+
+    const { rerender } = render(<PaneWorkbench {...props} activePaneKey="side" />);
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(2);
+    expect(screen.getByTestId("workbench-pane-source")).not.toBeVisible();
+    expect(screen.getByTestId("workbench-pane-source")).toHaveClass("hidden");
+    expect(screen.getByTestId("workbench-pane-side")).toBeVisible();
+    expect(screen.getByTestId("workbench-pane-side")).toHaveClass("flex");
+
+    rerender(<PaneWorkbench {...props} activePaneKey="source" />);
+    expect(screen.getByTestId("workbench-pane-source")).toBeVisible();
+    expect(screen.getByTestId("workbench-pane-source")).toHaveClass("flex");
+    expect(screen.getByTestId("workbench-pane-side")).not.toBeVisible();
+    expect(screen.getByTestId("workbench-pane-side")).toHaveClass("hidden");
+  });
+
   it("explains why the desktop add-pane control is disabled", () => {
     render(
       <PaneWorkbench

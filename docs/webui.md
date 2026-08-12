@@ -118,7 +118,9 @@ topic history or long-term memory:
 
 From an existing topic, enter `/side` to open a temporary conversation beside
 the topic. The right-hand pane inherits the topic's current context without
-adding the side conversation back to the original topic.
+adding the side conversation back to the original topic. Run `/side` again to
+add another temporary conversation to the right-hand pane, then switch or close
+individual side conversations from its tab bar.
 
 You can keep more than one temporary chat open and switch between them under
 **Temporary chats** in the sidebar while the current WebUI connection remains
