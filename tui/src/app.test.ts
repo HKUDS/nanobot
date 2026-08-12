@@ -179,15 +179,38 @@ describe("NanobotTui layout", () => {
     app.accept({
       event: "delta",
       chat_id: "chat",
-      text: "中文会随着终端宽度重新排版。\n\n```ts\nconst greeting = '你好，nanobot'\n```",
+      text: [
+        "中文、emoji 👨‍💻 and combining text é reflow with the terminal.",
+        "https://nanobot.test/a-very-long-unbroken-path-that-must-not-break-the-layout",
+        "```ts",
+        "const greeting = '你好，nanobot'",
+        "```",
+      ].join("\n\n"),
     })
     app.accept({ event: "stream_end", chat_id: "chat" })
 
-    for (const [width, height] of [[42, 12], [30, 9], [84, 24], [48, 14], [110, 32]] as const) {
+    for (const [width, height] of [
+      [240, 80],
+      [42, 12],
+      [30, 9],
+      [20, 6],
+      [12, 4],
+      [8, 3],
+      [4, 2],
+      [84, 24],
+      [48, 14],
+      [110, 32],
+    ] as const) {
       setup.resize(width, height)
       await setup.renderOnce()
       const frame = setup.captureCharFrame()
-      expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
+      expect(setup.renderer.width).toBe(width)
+      expect(setup.renderer.height).toBe(height)
+      expect(frame).not.toContain("undefined")
+      expect(occurrences(frame, "Ask nanobot anything")).toBeLessThanOrEqual(1)
+      if (width >= 30 && height >= 9) {
+        expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
+      }
       expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 12 ? 1 : 0)
     }
   })
@@ -274,6 +297,26 @@ describe("NanobotTui layout", () => {
     await starting
     expect(connected).toBe(true)
     expect((app as unknown as { palette: { background: string } }).palette.background).toBe("#FAFAFA")
+  })
+
+  test("falls back to the dark palette when terminal theme probing has no answer", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let connected = false
+    setup.renderer.waitForThemeMode = async () => null
+    Object.defineProperty(setup.renderer, "themeMode", { configurable: true, value: null })
+    const transport = client()
+    transport.connect = () => { connected = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    await app.start()
+
+    expect(connected).toBe(true)
+    expect((app as unknown as { palette: { background: string } }).palette.background).toBe("#0E0F11")
   })
 
   test("keeps semantic colors legible in both terminal appearances", async () => {

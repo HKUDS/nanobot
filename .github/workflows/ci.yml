@@ -218,6 +218,11 @@ jobs:
         working-directory: tui
         run: bun run test
 
+      - name: Test TUI in a real pseudo-terminal
+        if: runner.os != 'Windows'
+        working-directory: tui
+        run: python3 scripts/pty_smoke.py
+
       - name: Build TUI
         working-directory: tui
         run: bun run build
