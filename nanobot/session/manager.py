@@ -514,9 +514,14 @@ class JsonlSessionStore:
     def _migrate_from_workspace(self, workspace: Path) -> None:
         """Move legacy in-workspace session files into the out-of-workspace store."""
         old_dir = Path(workspace).expanduser() / "sessions"
-        if not old_dir.is_dir():
+        if old_dir.is_symlink() or not old_dir.is_dir():
+            if old_dir.is_symlink():
+                logger.warning("Skipping symlinked legacy sessions directory: {}", old_dir)
             return
         for src in old_dir.glob("*.jsonl"):
+            if src.is_symlink() or not src.is_file():
+                logger.warning("Skipping unsafe legacy session file: {}", src)
+                continue
             dst = self.sessions_dir / src.name
             if dst.exists():
                 continue

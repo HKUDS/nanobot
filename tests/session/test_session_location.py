@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from nanobot.session.manager import JsonlSessionStore, SessionManager
 
 
@@ -101,3 +103,40 @@ def test_legacy_in_workspace_sessions_are_migrated(tmp_path: Path) -> None:
     # Migration is idempotent: a second construction must not corrupt anything.
     again = SessionManager(workspace=workspace).get_or_create(key)
     assert again.messages[-1]["content"] == "migrated-msg"
+
+
+def test_legacy_migration_rejects_symlinked_session_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    old_dir = workspace / "sessions"
+    old_dir.mkdir(parents=True)
+    key = "telegram:symlink"
+    outside = _write_legacy_session(tmp_path / "outside", key, "outside-secret")
+    source = old_dir / outside.name
+    try:
+        source.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+
+    manager = SessionManager(workspace=workspace)
+
+    assert source.is_symlink()
+    assert not (manager.sessions_dir / source.name).exists()
+    assert manager.get_or_create(key).messages == []
+
+
+def test_legacy_migration_rejects_symlinked_sessions_directory(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    key = "telegram:directory-symlink"
+    outside_file = _write_legacy_session(outside, key, "outside-secret")
+    workspace.mkdir()
+    try:
+        (workspace / "sessions").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    manager = SessionManager(workspace=workspace)
+
+    assert outside_file.exists()
+    assert not (manager.sessions_dir / outside_file.name).exists()
+    assert manager.get_or_create(key).messages == []
