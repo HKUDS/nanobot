@@ -185,6 +185,15 @@ class Session:
         compare=False,
     )
 
+    def bind_manager_generation(self, generation: int) -> None:
+        """Bind this runtime object to the manager generation that loaded it."""
+        if self._manager_generation is None:
+            self._manager_generation = generation
+
+    def is_stale_for_manager_generation(self, generation: int) -> bool:
+        """Return whether invalidation revoked this runtime object."""
+        return self._manager_generation is not None and self._manager_generation != generation
+
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
             self.metadata = {}
@@ -1533,8 +1542,7 @@ class SessionManager:
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
-        if isinstance(session, Session) and session._manager_generation is None:
-            session._manager_generation = self._generations.get(session.key, 0)
+        session.bind_manager_generation(self._generations.get(session.key, 0))
         self._overflow_cache.pop(session.key, None)
         self._cache[session.key] = session
         self._cache.move_to_end(session.key)
@@ -1656,11 +1664,7 @@ class SessionManager:
             return
 
         generation = self._generations.get(session.key, 0)
-        if (
-            isinstance(session, Session)
-            and session._manager_generation is not None
-            and session._manager_generation != generation
-        ):
+        if session.is_stale_for_manager_generation(generation):
             logger.warning(
                 "Discarding stale save for invalidated session {}",
                 session.key,
