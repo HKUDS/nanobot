@@ -67,6 +67,11 @@ def agent(
         "--no-tui",
         help="Use the classic Python prompt instead of the native terminal UI",
     ),
+    theme: str = typer.Option(
+        "auto",
+        "--theme",
+        help="Terminal UI appearance: auto, dark, or light",
+    ),
 ):
     """Interact with the agent directly."""
     from nanobot.bus.queue import MessageBus
@@ -75,6 +80,9 @@ def agent(
     from nanobot.providers.image_generation import image_gen_provider_configs
 
     runtime_config = _load_runtime_config(config, workspace)
+    theme = theme.strip().lower()
+    if theme not in {"auto", "dark", "light"}:
+        raise typer.BadParameter("must be auto, dark, or light", param_hint="--theme")
     native_tui = (
         message is None
         and not classic
@@ -93,6 +101,7 @@ def agent(
                 config_path=get_config_path().resolve(strict=False),
                 workspace_override=workspace,
                 session_id=session_id,
+                theme=theme,
             )
         except TuiUnavailableError as exc:
             console.print(f"[yellow]Native TUI unavailable: {exc}[/yellow]")

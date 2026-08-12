@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { TextareaRenderable } from "@opentui/core"
+import { CliRenderEvents, TextareaRenderable } from "@opentui/core"
 import {
   MockTreeSitterClient,
   createTestRenderer,
@@ -16,10 +16,23 @@ const options: AppOptions = {
   workspace: "/tmp/nanobot-workspace",
   version: "test",
   access: "workspace access",
+  theme: "auto",
 }
 
 function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channel = (offset: number) => {
+      const value = Number.parseInt(color.slice(offset, offset + 2), 16) / 255
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    }
+    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+  }
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+  return ((lighter ?? 0) + 0.05) / ((darker ?? 0) + 0.05)
 }
 
 async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<void> {
@@ -177,6 +190,108 @@ describe("NanobotTui layout", () => {
       expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
       expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 12 ? 1 : 0)
     }
+  })
+
+  test("rethemes the complete retained interface when the terminal appearance changes", async () => {
+    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: "# Existing answer" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "message", chat_id: "chat", text: "tool", kind: "tool_hint" })
+    await setup.renderOnce()
+
+    const internals = app as unknown as {
+      palette: { background: string; text: string; border: string }
+      shell: { backgroundColor: { toInts(): number[] } }
+      composer: { backgroundColor: { toInts(): number[] }; textColor: { toInts(): number[] } }
+      transcript: {
+        frames: Set<{ borderColor: { toInts(): number[] } }>
+        markdown: Set<{ syntaxStyle: object }>
+      }
+    }
+    const markdown = [...internals.transcript.markdown][0]
+    const darkSyntax = markdown?.syntaxStyle
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+
+    expect(internals.palette).toMatchObject({
+      background: "#FAFAFA",
+      text: "#18181B",
+      border: "#D4D4D8",
+    })
+    expect(internals.shell.backgroundColor.toInts().slice(0, 3)).toEqual([250, 250, 250])
+    expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([244, 244, 245])
+    expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
+    expect([...internals.transcript.frames][0]?.borderColor.toInts().slice(0, 3)).toEqual([
+      212, 212, 216,
+    ])
+    expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
+  })
+
+  test("keeps an explicit theme stable when the terminal reports another mode", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, theme: "light" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const internals = app as unknown as { palette: { background: string } }
+    Object.defineProperty(setup.renderer, "themeMode", { configurable: true, value: "dark" })
+
+    await app.start()
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "dark")
+    await setup.renderOnce()
+
+    expect(internals.palette.background).toBe("#FAFAFA")
+  })
+
+  test("waits for automatic terminal detection before connecting or painting", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let connected = false
+    let resolveMode: (mode: "light") => void = () => undefined
+    setup.renderer.waitForThemeMode = () => new Promise((resolve) => {
+      resolveMode = resolve
+    })
+    Object.defineProperty(setup.renderer, "themeMode", { configurable: true, value: "light" })
+    const transport = client()
+    transport.connect = () => { connected = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    const starting = app.start()
+    await Bun.sleep(1)
+    expect(connected).toBe(false)
+
+    resolveMode("light")
+    await starting
+    expect(connected).toBe(true)
+    expect((app as unknown as { palette: { background: string } }).palette.background).toBe("#FAFAFA")
+  })
+
+  test("keeps semantic colors legible in both terminal appearances", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const internals = app as unknown as {
+      palette: Record<string, string> & { background: string; panel: string; faint: string }
+    }
+    const assertContrast = () => {
+      for (const tone of ["text", "muted", "accent", "success", "error", "user", "warm", "cool"]) {
+        expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.panel)).toBeGreaterThanOrEqual(4.5)
+      }
+      expect(contrastRatio(internals.palette.faint, internals.palette.panel)).toBeGreaterThanOrEqual(3)
+    }
+
+    assertContrast()
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    assertContrast()
   })
 
   test("replaces streamed drafts with canonical stream-end text", async () => {

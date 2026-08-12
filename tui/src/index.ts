@@ -6,6 +6,12 @@ function required(name: string): string {
   return value
 }
 
+function themePreference(): AppOptions["theme"] {
+  const value = process.env.NANOBOT_TUI_THEME?.trim() || "auto"
+  if (value === "auto" || value === "dark" || value === "light") return value
+  throw new Error("NANOBOT_TUI_THEME must be auto, dark, or light")
+}
+
 const options: AppOptions = {
   wsUrl: required("NANOBOT_TUI_WS_URL"),
   apiUrl: process.env.NANOBOT_TUI_API_URL?.trim() || "",
@@ -15,6 +21,7 @@ const options: AppOptions = {
   workspace: process.env.NANOBOT_TUI_WORKSPACE?.trim() || "",
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
+  theme: themePreference(),
 }
 
 let app: NanobotTui | undefined
@@ -42,4 +49,4 @@ process.once("unhandledRejection", (error) => {
 
 app = await NanobotTui.create(options)
 if (shuttingDown) app.stop()
-else app.start()
+else await app.start()

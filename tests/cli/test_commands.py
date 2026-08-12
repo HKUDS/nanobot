@@ -1565,6 +1565,15 @@ def test_agent_help_shows_workspace_and_config_options():
     assert "-w" in stripped_output
     assert "--config" in stripped_output
     assert "-c" in stripped_output
+    assert "--theme" in stripped_output
+
+
+def test_agent_rejects_unknown_tui_theme(mock_agent_runtime):
+    result = runner.invoke(app, ["agent", "-m", "hello", "--theme", "sepia"])
+
+    assert result.exit_code != 0
+    assert "must be auto, dark, or light" in result.output
+    mock_agent_runtime["from_config"].assert_not_called()
 
 
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):

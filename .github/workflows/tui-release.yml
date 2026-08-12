@@ -22,8 +22,12 @@ jobs:
             target: darwin-x64
           - os: ubuntu-latest
             target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
           - os: windows-latest
             target: win32-x64
+          - os: windows-11-arm
+            target: win32-arm64
 
     steps:
       - uses: actions/checkout@v4

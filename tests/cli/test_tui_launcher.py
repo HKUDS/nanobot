@@ -73,6 +73,7 @@ def test_interactive_agent_uses_native_tui(
         markdown=True,
         logs=False,
         classic=False,
+        theme="light",
     )
 
     assert launched["args"] == (config,)
@@ -80,6 +81,7 @@ def test_interactive_agent_uses_native_tui(
         "config_path": config_path,
         "workspace_override": None,
         "session_id": "websocket:terminal-chat",
+        "theme": "light",
     }
 
 

@@ -49,6 +49,7 @@ def launch_tui(
     config_path: Path,
     workspace_override: str | None,
     session_id: str,
+    theme: str,
 ) -> int:
     """Run the native TUI, owning a local gateway only when one is not running."""
     command = _resolve_tui_command()
@@ -74,6 +75,7 @@ def launch_tui(
                 "NANOBOT_TUI_ACCESS": (
                     "workspace access" if config.tools.restrict_to_workspace else "full access"
                 ),
+                "NANOBOT_TUI_THEME": theme,
             }
         )
         chat_id = _websocket_chat_id(session_id)

@@ -81,10 +81,15 @@ export class Transcript {
   }
 
   setTheme(theme: TranscriptTheme): void {
+    const previousSyntax = this.theme.syntax
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
     for (const frame of this.frames) frame.borderColor = theme.border
+    // Markdown may still be rendering this frame. Release the prior native
+    // style only after the renderer reaches idle, matching OpenCode's retained
+    // theme lifecycle and avoiding both leaks and use-after-free transitions.
+    void this.renderer.idle().catch(() => {}).finally(() => previousSyntax.destroy())
   }
 
   header(options: TranscriptHeader): void {
@@ -225,6 +230,7 @@ export class Transcript {
   destroy(): void {
     this.live = null
     this.activity = null
+    this.theme.syntax.destroy()
   }
 
   private id(prefix: string): string {

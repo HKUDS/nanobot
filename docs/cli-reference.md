@@ -92,6 +92,7 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot agent --workspace <path>` | Override workspace |
 | `nanobot agent --config <path>` | Use a specific config file |
 | `nanobot agent --classic` | Use the classic Python prompt instead of the native terminal UI |
+| `nanobot agent --theme auto\|dark\|light` | Auto-detect the terminal appearance or force a TUI palette |
 | `nanobot agent --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
 | `nanobot agent --logs` | Use the classic prompt and show runtime logs while chatting |
 
@@ -114,6 +115,8 @@ The command never deletes the external store and refuses to overwrite a differen
 workspace file. Back up both the config directory and workspace before changing versions.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, the command starts one for the lifetime of the terminal UI and stops it on exit.
+
+The default `--theme auto` mode probes the terminal's real foreground and background colors before first paint and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably.
 
 `Enter` sends the current message. Press `Alt+Enter` to add a newline and use `Up`/`Down` at the composer edge to recall recent prompts. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
 

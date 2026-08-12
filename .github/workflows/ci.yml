@@ -191,8 +191,14 @@ jobs:
             os: ubuntu-latest
           - name: Terminal UI (macOS)
             os: macos-latest
+          - name: Terminal UI (macOS Intel)
+            os: macos-15-intel
           - name: Terminal UI (Windows)
             os: windows-latest
+          - name: Terminal UI (Linux arm64)
+            os: ubuntu-24.04-arm
+          - name: Terminal UI (Windows arm64)
+            os: windows-11-arm
 
     steps:
       - uses: actions/checkout@v4

@@ -9,6 +9,7 @@ import {
   getTreeSitterClient,
   type CliRenderer,
   type KeyEvent,
+  type ThemeMode,
   type TreeSitterClient,
 } from "@opentui/core"
 
@@ -29,6 +30,7 @@ interface AppOptions {
   workspace: string
   version: string
   access: string
+  theme: "auto" | ThemeMode
 }
 
 interface ChatClient {
@@ -49,6 +51,8 @@ interface Palette {
   success: string
   error: string
   user: string
+  warm: string
+  cool: string
 }
 
 const DARK: Palette = {
@@ -62,19 +66,23 @@ const DARK: Palette = {
   success: "#5CC489",
   error: "#F87171",
   user: "#60A5FA",
+  warm: "#C26A25",
+  cool: "#1795A2",
 }
 
 const LIGHT: Palette = {
   background: "#FAFAFA",
   panel: "#F4F4F5",
   text: "#18181B",
-  muted: "#71717A",
-  faint: "#A1A1AA",
+  muted: "#6F6F78",
+  faint: "#8A8A94",
   border: "#D4D4D8",
-  accent: "#6D5BD0",
-  success: "#218358",
-  error: "#DC2626",
-  user: "#2563EB",
+  accent: "#5B4BC4",
+  success: "#166534",
+  error: "#B91C1C",
+  user: "#1D4ED8",
+  warm: "#C2410C",
+  cool: "#0F766E",
 }
 
 function syntaxStyle(palette: Palette): SyntaxStyle {
@@ -88,8 +96,8 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
     string: color(palette.success),
     comment: { ...color(palette.muted), italic: true },
     number: color(palette.user),
-    function: color("#C26A25"),
-    type: color("#168A96"),
+    function: color(palette.warm),
+    type: color(palette.cool),
     variable: color(palette.text),
     property: color(palette.user),
     "markup.heading": { ...color(palette.accent), bold: true },
@@ -98,7 +106,7 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
     "markup.link": { ...color(palette.user), underline: true },
     "markup.link.label": { ...color(palette.user), underline: true },
     "markup.link.url": { ...color(palette.user), underline: true },
-    "markup.raw": color("#C26A25"),
+    "markup.raw": color(palette.warm),
     conceal: color(palette.faint),
   })
 }
@@ -150,6 +158,7 @@ export class NanobotTui {
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private palette: Palette
+  private activeThemeMode: ThemeMode
   private activeTurn = false
   private activeLabel = "Thinking"
   private activeStartedAt = 0
@@ -177,7 +186,8 @@ export class NanobotTui {
     treeSitterClient = getTreeSitterClient(),
   ) {
     this.renderer = renderer
-    this.palette = renderer.themeMode === "light" ? LIGHT : DARK
+    this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
+    this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
     this.client = client || new NanobotClient({
       url: options.wsUrl,
@@ -300,7 +310,16 @@ export class NanobotTui {
     return new NanobotTui(renderer, options, client, treeSitterClient)
   }
 
-  start(): void {
+  async start(): Promise<void> {
+    // OpenTUI learns the real terminal background through OSC 10/11. Wait for
+    // that bounded probe before first paint, as OpenCode does, so a light
+    // terminal does not briefly render the dark palette. The app already owns
+    // the renderer here, so a signal during the probe can still restore it.
+    if (this.options.theme === "auto") await this.renderer.waitForThemeMode(1_000)
+    if (this.quitting) return
+    if (this.options.theme === "auto" && this.renderer.themeMode) {
+      this.applyTheme(this.renderer.themeMode)
+    }
     this.client.connect()
     this.renderer.start()
   }
@@ -615,8 +634,19 @@ export class NanobotTui {
     return true
   }
 
-  private handleTheme = (): void => {
-    this.palette = this.renderer.themeMode === "light" ? LIGHT : DARK
+  private handleTheme = (mode: ThemeMode): void => {
+    if (this.options.theme !== "auto") return
+    this.applyTheme(mode)
+  }
+
+  private resolveThemeMode(detected: ThemeMode | null): ThemeMode {
+    return this.options.theme === "auto" ? detected ?? "dark" : this.options.theme
+  }
+
+  private applyTheme(mode: ThemeMode): void {
+    if (this.activeThemeMode === mode) return
+    this.activeThemeMode = mode
+    this.palette = mode === "light" ? LIGHT : DARK
     this.transcript.setTheme(transcriptTheme(this.palette))
     this.renderer.setBackgroundColor(this.palette.background)
     this.shell.backgroundColor = this.palette.background
