@@ -15,7 +15,9 @@ import httpx
 
 from nanobot import __version__
 from nanobot.config.loader import get_config_path, load_config, save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.image_generation import get_image_gen_provider
+from nanobot.providers.registry import find_by_name
 from nanobot.webui import settings_capabilities as capabilities
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as models
@@ -293,6 +295,21 @@ def create_provider_settings(
 
 def _normalized_provider_reference(value: str) -> str:
     return value.strip().replace("-", "_").casefold()
+
+
+def _resolve_settings_provider(
+    config: Config,
+    provider_name: str,
+) -> tuple[Any, str, Any] | None:
+    return models.resolve_settings_provider(config, provider_name)
+
+
+def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
+    return models.provider_configured_for_settings(
+        spec,
+        provider_config,
+        models.oauth_provider_status,
+    )
 
 
 def _preset_uses_provider(
