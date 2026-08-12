@@ -441,8 +441,12 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
+    await act(async () => {
+      await import("@/components/settings/SettingsView");
+    });
+
     expect(
-      await screen.findByRole("navigation", { name: "Settings sections" }),
+      screen.getByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
     expect(container.querySelectorAll("main")).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();

@@ -10,6 +10,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  McpOAuthFlowPayload,
   MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
@@ -97,7 +98,19 @@ async function request<T>(
   );
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
-    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+    let message = text;
+    if (text.startsWith("{")) {
+      try {
+        const payload: unknown = JSON.parse(text);
+        if (payload && typeof payload === "object") {
+          const error = (payload as { error?: unknown }).error;
+          if (typeof error === "string" && error.trim()) message = error.trim();
+        }
+      } catch {
+        // Preserve non-JSON error bodies exactly as returned by the gateway.
+      }
+    }
+    throw new ApiError(res.status, message || `HTTP ${res.status}`);
   }
   const contentType = res.headers?.get?.("content-type") ?? "";
   if (contentType && !contentType.toLowerCase().includes("application/json")) {
@@ -686,6 +699,56 @@ export async function fetchMcpPresets(
   );
 }
 
+export async function startMcpOAuth(
+  transport: WebUIMutationTransport,
+  name: string,
+  reset: boolean = false,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_start",
+    { name, ...(reset ? { reset: true } : {}) },
+    30_000,
+  );
+}
+
+export async function fetchMcpOAuthStatus(
+  token: string,
+  flowId: string,
+  base: string = "",
+): Promise<McpOAuthFlowPayload> {
+  const query = new URLSearchParams({ flow_id: flowId });
+  return request<McpOAuthFlowPayload>(
+    `${base}/api/settings/mcp-oauth/status?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function completeMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+  callbackUrl: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_complete",
+    { flow_id: flowId, callback_url: callbackUrl },
+  );
+}
+
+export async function cancelMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_cancel",
+    { flow_id: flowId },
+  );
+}
+
 export async function fetchProviderModels(
   token: string,
   provider: string,
@@ -703,7 +766,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "remove" | "test",
+  action: "enable" | "disable" | "remove" | "test" | "reconnect",
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {

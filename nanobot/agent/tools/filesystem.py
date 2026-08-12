@@ -148,9 +148,19 @@ class _FsTool(Tool):
         )
 
     def _resolve_read(self, path: str) -> Path:
+        plugin_skill_dirs: list[Path] = []
+        if self._workspace is not None:
+            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+
+            try:
+                plugin_skill_dirs = list(
+                    enabled_agent_plugin_skill_dirs(Path(self._workspace))
+                )
+            except (OSError, RuntimeError):
+                pass
         return self._resolve_with_extra(
             path,
-            self._extra_read_allowed_dirs,
+            [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
             self._extra_read_allowed_files,
             include_media_dir=True,
             extra_files_require_allowed_root=True,
@@ -827,7 +837,8 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Perform a small, exact replacement in one file by replacing "
-            "old_text with new_text. Use this for narrow text substitutions "
+            "old_text with new_text. When replacing text in an existing file, "
+            "old_text and new_text must be different. Use this for narrow text substitutions "
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
             "multiple times, provide more context or set occurrence, line_hint, "
@@ -862,9 +873,12 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
             fp = self._resolve_write(path)
+            file_exists = fp.exists()
+            if file_exists and old_text == new_text:
+                return ToolResult.error("Error: new_text must be different from old_text.")
 
             # Create-file semantics: old_text='' + file doesn't exist → create
-            if not fp.exists():
+            if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")

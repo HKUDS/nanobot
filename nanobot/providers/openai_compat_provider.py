@@ -447,6 +447,28 @@ def _merge_unique_list(base: object, override: object) -> object:
     return result
 
 
+def _merge_chat_extra_body(
+    kwargs: dict[str, Any],
+    extra_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge configured Chat Completions fields without clobbering tools."""
+    regular_extra = {key: value for key, value in extra_body.items() if key != "tools"}
+    merged = dict(kwargs)
+    if regular_extra:
+        existing = kwargs.get("extra_body", {})
+        merged["extra_body"] = _deep_merge(existing, regular_extra)
+
+    if "tools" in extra_body:
+        current_tools = kwargs.get("tools")
+        configured_tools = extra_body["tools"]
+        if isinstance(current_tools, list) and isinstance(configured_tools, list):
+            merged["tools"] = [*current_tools, *configured_tools]
+        else:
+            merged["tools"] = configured_tools
+
+    return merged
+
+
 def _merge_responses_extra_body(
     body: dict[str, Any],
     extra_body: dict[str, Any],
@@ -500,9 +522,6 @@ class OpenAICompatProvider(LLMProvider):
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
         self._native_compaction_available = True
-
-        if api_key and spec and spec.env_key:
-            self._setup_env(api_key, api_base)
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
         self._effective_base = effective_base
@@ -595,20 +614,6 @@ class OpenAICompatProvider(LLMProvider):
             if self._client is None:
                 raise RuntimeError("OpenAI client initialization did not produce a client")
             return self._client
-
-    def _setup_env(self, api_key: str, api_base: str | None) -> None:
-        """Set environment variables based on provider spec."""
-        spec = self._spec
-        if not spec or not spec.env_key:
-            return
-        if spec.is_gateway:
-            os.environ[spec.env_key] = api_key
-        else:
-            os.environ.setdefault(spec.env_key, api_key)
-        effective_base = api_base or spec.default_api_base
-        for env_name, env_val in spec.env_extras:
-            resolved = env_val.replace("{api_key}", api_key).replace("{api_base}", effective_base)
-            os.environ.setdefault(env_name, resolved)
 
     @classmethod
     def _apply_cache_control(
@@ -968,14 +973,11 @@ class OpenAICompatProvider(LLMProvider):
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""
 
-        # Merge user-configured extra_body last so it can override or
-        # extend provider-specific defaults (e.g. chat_template_kwargs,
-        # guided_json, repetition_penalty).  Uses recursive merge so
-        # nested dicts like {"chat_template_kwargs": {"enable_thinking": false}}
-        # do not clobber sibling keys already set by thinking-style logic.
+        # Merge user-configured extra_body last so ordinary fields can override
+        # provider defaults. Keep configured tools at the top level: the SDK
+        # otherwise lets extra_body.tools replace nanobot's generated functions.
         if self._extra_body:
-            existing = kwargs.get("extra_body", {})
-            kwargs["extra_body"] = _deep_merge(existing, self._extra_body)
+            kwargs = _merge_chat_extra_body(kwargs, self._extra_body)
 
         return kwargs
 

@@ -362,7 +362,7 @@ function AuthForm({
               disabled={submitting}
               aria-invalid={validationError ? true : undefined}
               aria-describedby={validationError ? "webui-auth-error" : undefined}
-              className="pr-10 focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+              className="pr-10"
               autoFocus
             />
             <Button

@@ -14,10 +14,10 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -160,12 +160,17 @@ _WEBUI_MUTATION_PATHS = {
     "settings.pairing.approve": "/api/settings/pairing/approve",
     "settings.pairing.deny": "/api/settings/pairing/deny",
     "settings.mcp.enable": "/api/settings/mcp-presets/enable",
+    "settings.mcp.disable": "/api/settings/mcp-presets/disable",
     "settings.mcp.remove": "/api/settings/mcp-presets/remove",
     "settings.mcp.test": "/api/settings/mcp-presets/test",
+    "settings.mcp.reconnect": "/api/settings/mcp-presets/reconnect",
     "settings.mcp.custom": "/api/settings/mcp-presets/custom",
     "settings.mcp.import": "/api/settings/mcp-presets/import",
     "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
     "settings.mcp.tools": "/api/settings/mcp-presets/tools",
+    "settings.mcp.oauth_start": "/api/settings/mcp-oauth/start",
+    "settings.mcp.oauth_complete": "/api/settings/mcp-oauth/complete",
+    "settings.mcp.oauth_cancel": "/api/settings/mcp-oauth/cancel",
 }
 
 _WEBUI_CHANNEL_CONNECT_ACTIONS = {
@@ -204,6 +209,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.settings_services import WebUISettingsServices
 
 def _decode_api_key(raw_key: str) -> str | None:
     key = unquote(raw_key)
@@ -292,6 +298,7 @@ class GatewayHTTPHandler:
         media: WebUIMediaGateway,
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
+        settings: WebUISettingsServices,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -300,6 +307,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
@@ -312,6 +320,7 @@ class GatewayHTTPHandler:
         self.media = media
         self.ingress = ingress
         self.workspaces = workspaces
+        self.settings = settings
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills: set[str] = (
             disabled_skills if disabled_skills is not None else set()
@@ -330,6 +339,7 @@ class GatewayHTTPHandler:
 
         self._capabilities = _rc(runtime_surface, runtime_capabilities_overrides or {})
         self.settings_routes = WebUISettingsRouter(
+            settings=settings,
             bus=bus,
             logger=self._log,
             check_api_token=self.check_api_token,
@@ -340,6 +350,8 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
+            mcp_runtime_status=mcp_runtime_status,
+            mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -612,6 +624,14 @@ class GatewayHTTPHandler:
         scheme = "wss" if secure else "ws"
         expected_path = _normalize_config_path(self.config.path)
         return f"{scheme}://{host}{expected_path}"
+
+    def _mcp_oauth_redirect_uri(self, request: WsRequest) -> str:
+        """Derive the browser callback from the same public origin as WebSocket bootstrap."""
+        from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
+
+        public_ws_url = urlsplit(self._bootstrap_ws_url(request))
+        scheme = "https" if public_ws_url.scheme == "wss" else "http"
+        return urlunsplit((scheme, public_ws_url.netloc, MCP_OAUTH_CALLBACK_PATH, "", ""))
 
     # -- Session routes -----------------------------------------------------
 

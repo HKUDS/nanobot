@@ -373,6 +373,7 @@ class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
     type: Literal["stdio", "sse", "streamableHttp"] | None = None  # auto-detected if omitted
+    auth: Literal["oauth"] | None = None  # Remote MCP OAuth; tokens are stored outside config
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars

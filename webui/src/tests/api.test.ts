@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cancelMcpOAuth,
   configureChannel,
+  completeMcpOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -14,6 +16,7 @@ import {
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
+  fetchMcpOAuthStatus,
   fetchMcpPresets,
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
@@ -41,6 +44,7 @@ import {
   saveCustomMcpServer,
   searchMarketplaceSkills,
   startApiService,
+  startMcpOAuth,
   stopApiService,
   cancelChannelConnect,
   pollChannelConnect,
@@ -545,6 +549,23 @@ describe("webui API helpers", () => {
     });
   });
 
+  it("extracts user-facing messages from JSON API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => JSON.stringify({ error: "Paste the complete callback URL." }),
+      }),
+    );
+
+    await expect(fetchMcpOAuthStatus("tok", "flow-123")).rejects.toMatchObject({
+      status: 400,
+      message: "Paste the complete callback URL.",
+    });
+  });
+
   it("times out when an API request never responds", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
@@ -882,6 +903,35 @@ describe("webui API helpers", () => {
       { name: "browserbase", browserbase_api_key: "bb_live_test" },
       20_000,
     );
+
+    await startMcpOAuth(mutationTransport, "notion", true);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "notion", reset: true },
+      30_000,
+    );
+
+    await fetchMcpOAuthStatus("tok", "flow-123");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/mcp-oauth/status?flow_id=flow-123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    const callbackUrl =
+      "http://127.0.0.1:8765/auth/mcp/callback?code=secret&state=state-123";
+    await completeMcpOAuth(mutationTransport, "flow-123", callbackUrl);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_complete",
+      { flow_id: "flow-123", callback_url: callbackUrl },
+      20_000,
+    );
+
+    await cancelMcpOAuth(mutationTransport, "flow-123");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_cancel",
+      { flow_id: "flow-123" },
+      20_000,
+    );
   });
 
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {
@@ -896,6 +946,19 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenLastCalledWith(
       "settings.mcp.custom",
       custom,
+      20_000,
+    );
+
+    const oauthCustom = {
+      name: "company-mcp",
+      transport: "streamableHttp",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+    };
+    await saveCustomMcpServer(mutationTransport, oauthCustom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      oauthCustom,
       20_000,
     );
 
