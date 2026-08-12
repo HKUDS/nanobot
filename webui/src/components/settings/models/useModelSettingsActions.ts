@@ -18,6 +18,7 @@ import {
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
+  deleteProviderSettings,
   deleteModelConfiguration,
   loginProviderOAuth,
   logoutProviderOAuth,
@@ -419,6 +420,35 @@ export function useModelSettingsActions({
     }
   };
 
+  const deleteProvider = async (providerName: string): Promise<string | null> => {
+    if (providerSaving) return null;
+    setProviderSaving(providerName);
+    try {
+      const payload = await deleteProviderSettings(client, providerName);
+      applyPayload(payload);
+      setExpandedProvider(null);
+      setError(null);
+      return null;
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.includes("model presets")) {
+        return t("settings.providers.deleteBlockedByPreset", {
+          defaultValue:
+            "This provider is used by a model preset. Remove it from the preset before trying again.",
+        });
+      }
+      if (message.includes("image provider")) {
+        return t("settings.providers.deleteBlockedByImage", {
+          defaultValue:
+            "This provider is used for image generation. Choose another image provider first.",
+        });
+      }
+      return message;
+    } finally {
+      setProviderSaving(null);
+    }
+  };
+
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
     let popup: Window | null = null;
@@ -549,6 +579,7 @@ export function useModelSettingsActions({
     changeModelCallOrder,
     completeProviderOAuthResponse,
     createCustomProvider,
+    deleteProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
     handleToggleProvider,

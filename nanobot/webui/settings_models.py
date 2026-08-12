@@ -62,6 +62,7 @@ class ModelSettingsOperations:
     update_call_order: SettingsOperation
     update_provider: SettingsOperation
     create_provider: SettingsOperation
+    delete_provider: SettingsOperation
     provider_models: SettingsOperation
     oauth_login: SettingsOperation
     oauth_complete: SettingsOperation
@@ -1385,6 +1386,55 @@ def update_provider_settings(
     return changed, restart_required
 
 
+def delete_provider_settings(
+    config: Config,
+    query: QueryParams,
+) -> bool:
+    provider_name = (query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+    if spec.is_oauth:
+        raise WebUISettingsError("use sign out for OAuth providers")
+
+    presets = [config.resolve_default_preset(), *config.model_presets.values()]
+    if any(
+        preset.provider == provider_key
+        or (
+            preset.provider == "auto"
+            and preset.model.lower().startswith(f"{provider_key.lower()}/")
+        )
+        for preset in presets
+    ):
+        raise WebUISettingsError(
+            "remove this provider from model presets before removing its configuration",
+            status=409,
+        )
+
+    is_custom = find_by_name(provider_key) is None
+    if is_custom:
+        if config.tools.image_generation.provider == provider_key:
+            raise WebUISettingsError(
+                "choose a different image provider before deleting this provider",
+                status=409,
+            )
+        assert config.providers.model_extra is not None
+        del config.providers.model_extra[provider_key]
+    else:
+        setattr(config.providers, provider_key, type(provider_config)())
+
+    image_config = config.tools.image_generation
+    return (
+        image_config.enabled
+        and image_config.provider == provider_key
+        and get_image_gen_provider(provider_key) is not None
+    )
+
+
 def login_oauth_provider(
     config: Config,
     query: QueryParams,
@@ -1622,9 +1672,13 @@ class ModelSettingsHandler:
                 payload = self.settings.mutate(mutation, request.query)
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
-            if action == "provider-update":
+            if action in {"provider-update", "provider-delete"}:
                 payload = self.settings.mutate(
-                    operations.update_provider,
+                    (
+                        operations.update_provider
+                        if action == "provider-update"
+                        else operations.delete_provider
+                    ),
                     request.query,
                 )
                 payload, image_restart_cleared = await operations.apply_image_runtime_change(
