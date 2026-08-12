@@ -154,9 +154,12 @@ def _unsafe_url_request_error(exc: BaseException) -> str | None:
 # name: over-matching only costs the local readability fallback, while
 # under-matching leaks a secret.
 _CREDENTIAL_QUERY_PARAMS = frozenset({
-    "access_token", "apikey", "api_key", "auth", "authorization",
-    "client_secret", "id_token", "key", "password", "passwd", "pwd",
-    "refresh_token", "secret", "sig", "signature", "token",
+    "access_token", "api-key", "api-token", "apikey", "api_key", "api_token",
+    "auth", "authorization", "client_assertion", "client_secret", "code",
+    "credential", "credentials", "id_token", "jwt", "key", "password",
+    "passwd", "private_key", "pwd", "refresh_token", "samlresponse", "secret",
+    "session_id", "session_token", "sessionid", "sig", "signature", "sso_token",
+    "ticket", "token",
 })
 _CREDENTIAL_QUERY_PREFIXES = ("x-amz-", "x-goog-")
 
@@ -168,11 +171,34 @@ def _url_carries_credentials(url: str) -> bool:
         return True
     if parsed.username is not None or parsed.password is not None:
         return True
-    for name, _value in parse_qsl(parsed.query, keep_blank_values=True):
-        lowered = name.lower()
+    # Some frameworks still accept semicolons as query separators. Treating
+    # them as separators here may over-match a value, but the safe consequence
+    # is only using the local extractor instead of disclosing a credential.
+    query = parsed.query.replace(";", "&")
+    for name, _value in parse_qsl(query, keep_blank_values=True):
+        lowered = name.strip().lower()
         if lowered in _CREDENTIAL_QUERY_PARAMS or lowered.startswith(_CREDENTIAL_QUERY_PREFIXES):
             return True
     return False
+
+
+def _redact_url_for_log(url: str) -> str:
+    """Return only a URL's origin, excluding userinfo, path, query, and fragment."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not parsed.scheme or hostname is None:
+            return "<redacted URL>"
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        authority = f"{hostname}:{port}" if port is not None else hostname
+        return f"{parsed.scheme}://{authority}"
+    except ValueError:
+        return "<redacted URL>"
 
 
 async def _get_with_safe_redirects(
@@ -1118,7 +1144,11 @@ class WebFetchTool(Tool):
             unsafe_error = _unsafe_url_request_error(e)
             if unsafe_error is not None:
                 return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
-            logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
+            logger.debug(
+                "Pre-fetch image detection failed for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
 
         result = None
         if self.config.use_jina_reader and jina_remote_safe:
@@ -1130,12 +1160,9 @@ class WebFetchTool(Tool):
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""
         if _url_carries_credentials(url):
-            redacted = urlparse(url)
             logger.debug(
-                "Skipping Jina Reader for {}://{}{}: URL carries credential material",
-                redacted.scheme,
-                redacted.hostname or "",
-                redacted.path,
+                "Skipping Jina Reader for {}: URL carries credential material",
+                _redact_url_for_log(url),
             )
             return None
         # httpx already drops the fragment when building the request; strip it
@@ -1173,7 +1200,11 @@ class WebFetchTool(Tool):
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except Exception as e:
-            logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
+            logger.debug(
+                "Jina Reader failed for {}, falling back to readability ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return None
 
     async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
@@ -1204,7 +1235,11 @@ class WebFetchTool(Tool):
                     text = self._extract_readable_html(r.text, extract_mode)
                     extractor = "readability"
                 except Exception as e:
-                    logger.warning("Readability failed for {}, using raw HTML fallback: {}", url, e)
+                    logger.warning(
+                        "Readability failed for {}, using raw HTML fallback ({})",
+                        _redact_url_for_log(url),
+                        type(e).__name__,
+                    )
                     text, extractor = _normalize(_strip_tags(r.text)), "html"
             else:
                 text, extractor = r.text, "raw"
@@ -1220,10 +1255,18 @@ class WebFetchTool(Tool):
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except httpx.ProxyError as e:
-            logger.exception("WebFetch proxy error for {}", url)
+            logger.warning(
+                "WebFetch proxy error for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
         except Exception as e:
-            logger.exception("WebFetch error for {}", url)
+            logger.warning(
+                "WebFetch error for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
 
     def _extract_readable_html(self, html_content: str, extract_mode: str) -> str:

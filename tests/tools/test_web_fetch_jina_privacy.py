@@ -11,6 +11,7 @@ import pytest
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import (
     WebFetchTool,
+    _redact_url_for_log,
     _url_carries_credentials,
 )
 
@@ -67,6 +68,9 @@ def jina_client():
         "https://storage.googleapis.com/o/file?X-Goog-Signature=deadbeef",
         "https://example.com/blob?sig=sas-token-material",
         "https://maps.example.com/api?key=AIzaFixture",
+        "https://example.com/callback?code=oauth-code",
+        "https://example.com/download?API-KEY=secret",
+        "https://example.com/download?file=report;token=secret",
     ],
 )
 def test_credential_urls_are_detected(url: str) -> None:
@@ -86,6 +90,16 @@ def test_plain_urls_are_not_detected(url: str) -> None:
     assert _url_carries_credentials(url) is False
 
 
+def test_log_label_excludes_every_credential_bearing_component() -> None:
+    url = "https://user:secret@example.com:8443/private/webhook-token?token=abc#secret"
+    assert _redact_url_for_log(url) == "https://example.com:8443"
+
+
+def test_log_label_preserves_ipv6_origin_without_credentials() -> None:
+    url = "https://user:secret@[2001:db8::1]:8443/private?token=abc"
+    assert _redact_url_for_log(url) == "https://[2001:db8::1]:8443"
+
+
 async def test_jina_is_skipped_for_credential_urls(jina_client) -> None:
     tool = WebFetchTool()
     result = await tool._fetch_jina(
@@ -102,6 +116,25 @@ async def test_jina_is_skipped_for_userinfo_urls(jina_client) -> None:
     )
     assert result is None
     assert jina_client.requested == []
+
+
+async def test_jina_skip_log_does_not_contain_url_credentials(
+    jina_client, monkeypatch
+) -> None:
+    logged: list[tuple[object, ...]] = []
+    monkeypatch.setattr(web_module.logger, "debug", lambda *args: logged.append(args))
+
+    result = await WebFetchTool()._fetch_jina(
+        "https://user:secret@example.com/private/webhook-token?token=abc",
+        max_chars=1000,
+    )
+
+    assert result is None
+    assert jina_client.requested == []
+    rendered_log_arguments = " ".join(str(item) for call in logged for item in call)
+    assert "secret" not in rendered_log_arguments
+    assert "webhook-token" not in rendered_log_arguments
+    assert "token=abc" not in rendered_log_arguments
 
 
 async def test_jina_still_used_for_plain_urls(jina_client) -> None:
