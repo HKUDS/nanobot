@@ -1,0 +1,175 @@
+# 发布归档
+
+本页面将发布和每日更新历史置于 README 之外，以便项目主页可以专注于 nanobot 是什么、能做什么，以及如何开始使用。
+
+有关带标签的发布版本，请参阅 [GitHub Releases](https://github.com/HKUDS/nanobot/releases)。
+
+## 亮点
+
+- **2026-07-24** 🧭 引导式首次运行设置、内联子代理，以及从 composer 切换 model。
+- **2026-07-23** 🔎 通过托管 X Search 使用 Grok OAuth、实时图像设置，以及更清晰的回退 model。
+- **2026-07-22** 🔌 并行搜索、实时配置重载、更丰富的应用发现，以及更流畅的移动端 WebUI。
+- **2026-07-21** ⚡ Codex 快速模式、可见的 skill 引用、更安全的配置保存，以及更稳健的任务清理。
+- **2026-07-20** 💬 更简洁的代码块和复制操作、自包含的 channel，以及更稳定的 QQ 重连。
+- **2026-07-19** 🔀 跨 provider 故障转移、更安全的本地触发器、WhatsApp 群组允许列表，以及更稳健的 workspace 暂存。
+- **2026-07-18** 🧰 更具弹性的自动化恢复和 UTF-8 CLI App 安装。
+- **2026-07-17** 🌙 Kimi K3 支持、更可靠的计划任务，以及更简洁的 provider 行为。
+- **2026-07-16** 📁 原生文件夹选择器桥接、更严格的 Docker 默认设置，以及有边界的 session 缓存。
+- **2026-07-15** 🔐 短时效 Render 访问、更安全的 gateway 关闭、经验证的文件预览，以及高亮显示的应用提及。
+- **2026-07-14** 📎 文档附件、一键 Render 部署、更清晰的 workflow 文档，以及更强的 Windows 支持。
+- **2026-07-13** 🌍 引导式 WebUI 设置、巴西葡萄牙语，以及更稳定的 Dream、gateway 和 Discord 行为。
+- **2026-07-12** 🎯 显式 `/goal` 激活、更安全的运行时和 workspace 访问。
+- **2026-07-11** 🛠️ 带语法高亮的预览和 diff、排队的 prompt、更安全的编辑。
+- **2026-07-10** 🧠 稳定的 model 路由、多行 CLI 输入、新的自动化指南。
+- **2026-07-09** 📝 实时文件编辑 diff、更安全的 localhost 设置、Matrix 图像修复。
+- **2026-07-08** 🔐 更安全的 WebUI/API 设置、初始刷新、响应式 prompt 栏。
+- **2026-07-07** ⌨️ CLI 多行输入、更稳定的斜杠命令、更安全的网页获取。
+- **2026-07-06** 💬 Mattermost channel、Serper 搜索、更安全的 Windows shell。
+- **2026-07-04** 🔌 MCP 重连、更安全的 Copilot 刷新、Windows 关闭修复。
+- **2026-07-03** 🧙 引导式 WebUI 设置、plugin 控制、Claude Sonnet 4.6 默认配置。
+- **2026-07-02** ⏰ 带恢复功能的本地触发器、审计历史、WebUI 待处理状态。
+- **2026-07-01** 🛡️ 用于远程绑定的 API keys、`$skill` 快捷方式、更清晰的 tool 错误。
+- **2026-06-30** 🌐 provider 代理、Copilot Enterprise、更稳定的 WhatsApp 和 Weixin。
+- **2026-06-29** 🧠 上下文重放可随 model 窗口扩展，不再受固定消息上限限制。
+- **2026-06-28** 🖼️ MCP 图像、更稳定的 WebUI 重连、更安全的 tool 调用。
+- **2026-06-27** 🔒 防冲突 session、更安全的 shell、Neonize WhatsApp。
+- **2026-06-25** 🎛️ 思考控制、MiMo 语音输入、选择启用的 Telegram 富消息。
+- **2026-06-24** 🌙 Kimi Coding 和 OpenCode、更稳定的推理和 Anthropic tool 调用。
+- **2026-06-22** 🚀 发布 **v0.2.2** — **耐用性发布版**让 nanobot 更适合日常 agent 工作：分段式 WebUI 转录记录、一等公民 Python SDK 运行时控制、自动化管理、更丰富的搜索/STT provider，以及更强的 gateway/session/provider 可靠性。详情请参阅[发行说明](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2)。
+- **2026-06-21** 🧰 Python SDK 运行时控制、可选的 Keenable key、更简洁的运行钩子。
+- **2026-06-20** 💬 Telegram 富消息、更安全的 SDK 并发、更顺畅的快速入门。
+- **2026-06-19** 🔎 Firecrawl app、OpenAI 图像编辑、更安全的 session 删除。
+- **2026-06-18** 💬 Feishu 恢复、Keenable 搜索、Mistral 优化、感知 workspace 的 git。
+- **2026-06-17** 🧠 默认空闲时自动压缩、更清晰的 `/dream`、macOS 安装程序修复。
+- **2026-06-16** 🎯 更新鲜的目标上下文、Kimi K2.7 思考、更简洁的 API 重试。
+- **2026-06-15** 📱 移动端 WebUI 优化、可选文件 tool、真实 API 用量。
+- **2026-06-14** 🖼️ 主题封面、合作伙伴链接、更强的 Codex 图像流传输。
+- **2026-06-13** 🗓️ 与 session 绑定的自动化、更稳健的 WhatsApp、更快的 WebUI 启动。
+- **2026-06-12** 💬 Slack 允许列表中的 channel 可以要求提及。
+- **2026-06-11** ✂️ 围栏代码消息拆分。
+- **2026-06-10** 📜 分段转录文本、Exa/Bocha 搜索、StepFun/SiliconFlow ASR。
+- **2026-06-09** 🎙️ 共享语音输入、更多 STT provider、TeX 和电子邮件优化。
+- **2026-06-08** 🧮 Token 热力图修复、更安全的 MCP HTTP 探测、文档清理。
+- **2026-06-06** 🧰 SDK MCP 清理、可移除的 OpenAI 图像默认设置。
+- **2026-06-05** 🖼️ Azure AAD、自定义图像 provider、`/skill`、更稳定的配对。
+- **2026-06-04** 🔌 MCP 重连、`uv pip` 安装回退、QQ 配对。
+- **2026-06-03** 🧠 隐藏历史恢复、更安静的电子邮件进度处理。
+- **2026-06-02** 📬 电子邮件附件、Napcat QQ、Volcengine 搜索、更简单的 Dream。
+- **2026-06-01** 🚀 发布 **v0.2.1** — **工作台版本**将打包的 WebUI 转变为日常 agent 工作台：更清晰的 Thought/回复时间线、实时文件编辑活动、项目 workspace、model 和上下文控制、更稳定的持续目标、CLI Apps + MCP 扩展，以及更广泛的 provider/channel 支持。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1)。
+- **2026-05-30** 🔐 更安全的 Matrix 验证、有边界的媒体下载、更清晰的 WebUI model 时间线。
+- **2026-05-29** 🧩 扩展注册表、上下文窗口调优、文档提取控制。
+- **2026-05-28** 🗂️ 项目 workspace、访问控制、更稳定的目标和流式传输。
+- **2026-05-27** ⏱️ Codex 流在长时间运行期间遵守空闲超时。
+- **2026-05-26** 📡 Telegram webhook、更新的 Kagi 搜索、更清晰的传输错误。
+- **2026-05-25** 🔌 统一的 CLI Apps 和 MCP、Step Plan 支持、更稳定的持续目标。
+- **2026-05-24** 🧰 MCP 预设、更丰富的斜杠操作、可配置的 OpenAI 兼容请求。
+- **2026-05-23** 🖼️ Zhipu 图像生成、更长的 exec 窗口、更清晰的转录配置。
+- **2026-05-22** 🛠️ CLI Apps、更多图像 provider、更安全的 Web 重定向和编辑。
+- **2026-05-21** ⚡ Novita provider、更快的侧边栏、更流畅的编码工具和 Weixin 回复。
+- **2026-05-20** 📶 Signal channel、更快的 gateway 启动、多语言 README 链接。
+- **2026-05-19** 🎨 图像 provider 注册表、StepFun 和 Skywork、更强大的 WebUI 控制。
+- **2026-05-18** 🖌️ Gemini 和 MiniMax 图像、Ant Ling、实时文件编辑活动。
+- **2026-05-17** 🌊 更流畅的 WebUI 流式传输、AutoCompact 修复、缓冲的 CLI 推理。
+- **2026-05-16** 🧠 Atomic Chat provider、目标感知超时、更安全的 exec URL 处理。
+- **2026-05-15** 🚀 发布 **v0.2.0** — **`/goal`** 可跨轮次保持持续目标，WebUI 现已内置于 wheel 中，端到端图像生成、5 个带有 `fallback_models` 的新 provider，以及真正的 agent-loop 重构。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.2.0)。
+- **2026-05-14** 🎯 面向长期目标的 **`/goal`**、可见的多步骤进度、chat 中的长程任务。
+- **2026-05-13** 🧠 在答案前流式输出推理、自动备用 model、更流畅的 plug-in 重连。
+- **2026-05-12** 🎛️ 带 WebUI 徽章的已保存 model 预设、更简单的 plug-in tool、更安静的 Feishu 主题线程。
+- **2026-05-11** 🖥️ NVIDIA NIM 支持、终端 bot 名称和图标、流式推理以及更清晰的 MiMo 开关。
+- **2026-05-09** 🖼️ 更清晰的图像重放、在 Settings 中自带 Web 搜索密钥、Feishu 线程整洁路由。
+- **2026-05-08** ✨ 内联 chat 图像、重新设计的 Settings 和密钥、Dream memory 与可见历史保持一致。
+- **2026-05-07** 📜 WebUI 中支持区域设置的斜杠面板、LAN 登录、忠实的 HTTP 流式响应。
+- **2026-05-06** 🧩 可调的 tool 提示、更稳定的语音和 plug-in 启动、可持续生效的计划与提醒。
+- **2026-05-05** 🛡️ 静默拒绝未知 Telegram chat、Dream 清理、更完整的自动化摘要。
+- **2026-05-04** 🔐 更安全的 DingTalk 出站媒体链接、持久的 cron 持久化、DeepSeek 优化。
+- **2026-05-03** ⚙️ 可预测的 shell 允许列表行为、回复中途隔离 chat、更清晰的交互式重试。
+- **2026-05-02** 🐈 LongCat 支持、更智能的 Token 大小提示、更清晰的捆绑升级指南。
+- **2026-05-01** ☁️ 原生 AWS Bedrock provider、更紧密的 helper 交接和范围限定的 session 文件。
+- **2026-04-30** 💬 尊重回复和主题的 Feishu 线程、源文件编辑时刷新 WhatsApp bridge。
+- **2026-04-29** 🚀 发布 **v0.1.5.post3** — Feishu、Discord、Slack 和 Teams 上更智能的线程；**DeepSeek-V4**；Hugging Face 和 Olostep；选择项、`/history` 和更稳定的长 chat。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post3)。
+- **2026-04-28** 🌐 Olostep Web 搜索、Hugging Face provider、更安全的 workspace-tool 中断。
+- **2026-04-27** 💬 `/history` 命令、更智能的 session 重放上限、更流畅的 Discord / Slack 线程。
+- **2026-04-26** 🧭 自然语言 cron 提醒、线程感知重启、更安全的本地 provider 和 shell 行为。
+- **2026-04-25** 🧩 `ask_user` 选项、macOS LaunchAgent 部署、MSTeams 过期引用清理。
+- **2026-04-24** 🎥 channel 视频附件、DeepSeek 思考控制、更快的文档启动。
+- **2026-04-23** 🧵 Discord 线程 session、Telegram 内联按钮、结构化 tool 进度更新。
+- **2026-04-22** 🔎 GitHub Copilot GPT-5 / o-series 支持、可配置的 Web 获取、WebUI 图像上传。
+- **2026-04-21** 🚀 发布 **v0.1.5.post2** — Windows 和 Python 3.14 支持、Office 文档读取、用于 OpenAI 兼容 API 的 SSE 流式传输，以及跨 session、memory 和 channel 的更强可靠性。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post2)。
+- **2026-04-20** 🎨 Kimi K2.6 支持、Telegram 长消息拆分、WebUI 排版与深色模式优化。
+- **2026-04-19** 🌐 WebUI i18n 区域设置切换器、带自动修复的原子 session 写入。
+- **2026-04-18** 🧪 初始 WebUI chat、更智能的设置向导菜单、WebSocket 多 chat 多路复用。
+- **2026-04-17** 🪟 Windows 和 Python 3.14 CI、Dream 谱系 memory、电子邮件自循环防护。
+- **2026-04-16** 📡 用于 OpenAI 兼容 API 的 SSE 流式传输、Discord channel 允许列表。
+- **2026-04-15** 🎛️ LM Studio 和可空 API 密钥、MiniMax 思考端点、运行时 SelfTool。
+- **2026-04-14** 🚀 发布 **v0.1.5.post1** — Dream skill 发现、轮次中途后续注入、WebSocket channel，以及更深入的 channel 集成。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post1)。
+- **2026-04-13** 🛡️ 加固 agent 轮次 — 提前持久化用户消息，自动压缩跳过活跃任务。
+- **2026-04-12** 🔒 Lark 全球域名支持、Dream 学习已发现的 skill、收紧 shell sandbox。
+- **2026-04-11** ⚡ 上下文压缩即时缩小 session；Kagi Web 搜索；QQ 和 WeCom 完整媒体支持。
+- **2026-04-10** 📓 多个 MCP server、Feishu 流式传输和完成 emoji。
+- **2026-04-09** 🔌 WebSocket channel、统一的跨 channel session、`disabled_skills` 配置。
+- **2026-04-08** 📤 API 文件上传、带 Responses 回退的 OpenAI 推理自动路由。
+- **2026-04-07** 🧠 Anthropic 自适应思考、将 MCP resource 和 prompt 暴露为 tool。
+- **2026-04-06** 🛰️ Langfuse 可观测性、统一 Whisper 转录、电子邮件附件。
+- **2026-04-05** 🚀 发布 **v0.1.5** — 更稳固的长时间运行任务、Dream 两阶段 memory、可用于生产环境的 sandboxing 和编程 Agent SDK。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5)。
+- **2026-04-04** 🚀 Jinja2 响应模板、Dream memory 加固、更智能的重试处理。
+- **2026-04-03** 🧠 Xiaomi MiMo provider、可见的思维链推理、Telegram UX 优化。
+- **2026-04-02** 🧱 长时间运行任务更可靠地运行 — 核心运行时加固。
+- **2026-04-01** 🔑 GitHub Copilot auth 恢复；更严格的 workspace path；OpenRouter Claude 缓存修复。
+- **2026-03-31** 🛰️ WeChat 多模态对齐、Discord/Matrix 优化、Python SDK facade、MCP 和 tool 修复。
+- **2026-03-30** 🧩 收紧 OpenAI 兼容 API；可组合的 agent 生命周期 hook。
+- **2026-03-29** 💬 WeChat 语音、输入状态、QR/媒体弹性；固定 session 的 OpenAI 兼容 API。
+- **2026-03-28** 📚 Provider 文档更新；skill 模板措辞修复。
+- **2026-03-27** 🚀 发布 **v0.1.4.post6** — 架构解耦、移除 litellm、端到端流式传输、WeChat channel 和一项安全修复。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6)。
+- **2026-03-26** 🏗️ 提取 Agent runner 并统一生命周期 hook；在边界处合并 stream delta。
+- **2026-03-25** 🌏 StepFun provider、可配置时区、Gemini 思考签名。
+- **2026-03-24** 🔧 WeChat 兼容性、Feishu CardKit 流式传输、重构测试套件。
+- **2026-03-23** 🔧 为 plug-in 重构命令路由、WhatsApp/WeChat 媒体、统一 channel 登录 CLI。
+- **2026-03-22** ⚡ 端到端流式传输、WeChat channel、Anthropic 缓存优化、`/status` 命令。
+- **2026-03-21** 🔒 使用原生 `openai` + `anthropic` SDK 替换 `litellm`。详情请参阅[commit](https://github.com/HKUDS/nanobot/commit/3dfdab7)。
+- **2026-03-20** 🧙 交互式设置向导 — 选择 provider、model 自动补全，然后即可开始使用。
+- **2026-03-19** 💬 Telegram 在高负载下更具弹性；Feishu 现在可以正确渲染代码块。
+- **2026-03-18** 📷 Telegram 现在可以通过 URL 发送媒体。Cron 计划显示人类可读的详细信息。
+- **2026-03-17** ✨ Feishu 格式升级、Slack 在完成时作出反应、自定义端点支持额外 header，并且图像处理更加可靠。
+- **2026-03-16** 🚀 发布 **v0.1.4.post5** — 专注于优化的版本，具备更强的可靠性和 channel 支持，以及更可靠的日常体验。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5)。
+- **2026-03-15** 🧩 DingTalk 富媒体、更智能的内置 skill，以及更清晰的 model 兼容性。
+- **2026-03-14** 💬 Channel plug-in、Feishu 回复，以及更稳定的 MCP、QQ 和媒体处理。
+- **2026-03-13** 🌐 多 provider Web 搜索、LangSmith，以及更广泛的可靠性改进。
+- **2026-03-12** 🚀 VolcEngine 支持、Telegram 回复上下文、`/restart` 和更稳固的 memory。
+- **2026-03-11** 🔌 WeCom、Ollama、更清晰的发现机制和更安全的 tool 行为。
+- **2026-03-10** 🧠 基于 Token 的 memory、共享重试，以及更清晰的 gateway 和 Telegram 行为。
+- **2026-03-09** 💬 Slack 线程优化和更好的 Feishu 音频兼容性。
+- **2026-03-08** 🚀 发布 **v0.1.4.post4** — 一个充满可靠性改进的版本，具有更安全的默认设置、更好的多实例支持、更稳固的 MCP，以及重大的 channel 和 provider 改进。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post4)。
+- **2026-03-07** 🚀 Azure OpenAI provider、WhatsApp 媒体、QQ 群 chat，以及更多 Telegram/Feishu 优化。
+- **2026-03-06** 🪄 更轻量的 provider、更智能的媒体处理，以及更稳固的 memory 和 CLI 兼容性。
+- **2026-03-05** ⚡️ Telegram 草稿流式传输、MCP SSE 支持，以及更广泛的 channel 可靠性修复。
+- **2026-03-04** 🛠️ 依赖项清理、更安全的文件读取，以及新一轮测试和 Cron 修复。
+- **2026-03-03** 🧠 更清晰的用户消息合并、更安全的多模态保存，以及更强的 Cron 防护。
+- **2026-03-02** 🛡️ 更安全的默认访问控制、更稳固的 Cron 重新加载，以及更清晰的 Matrix 媒体处理。
+- **2026-03-01** 🌐 Web proxy 支持、更智能的 Cron 提醒，以及 Feishu 富文本解析改进。
+- **2026-02-28** 🚀 发布 **v0.1.4.post3** — 更清晰的上下文、加固的 session 历史和更智能的 agent。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post3)。
+- **2026-02-27** 🧠 实验性思考模式支持、DingTalk 媒体消息、Feishu 和 QQ channel 修复。
+- **2026-02-26** 🛡️ Session 投毒修复、WhatsApp 去重、Windows path 防护、Mistral 兼容性。
+- **2026-02-25** 🧹 新增 Matrix channel、更清晰的 session 上下文、自动 workspace 模板同步。
+- **2026-02-24** 🚀 发布 **v0.1.4.post2** — 专注于可靠性的版本，具有重新设计的 heartbeat、prompt 缓存优化，以及加固的 provider 和 channel 稳定性。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post2)。
+- **2026-02-23** 🔧 虚拟 tool-call heartbeat、prompt 缓存优化、Slack mrkdwn 修复。
+- **2026-02-22** 🛡️ Slack 线程隔离、Discord 输入状态修复、agent 可靠性改进。
+- **2026-02-21** 🎉 发布 **v0.1.4.post1** — 新 provider、跨 channel 媒体支持，以及重大稳定性改进。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post1)。
+- **2026-02-20** 🐦 Feishu 现在可以接收来自用户的多模态文件。底层 memory 更加可靠。
+- **2026-02-19** ✨ Slack 现在可以发送文件，Discord 拆分长消息，subagent 可在 CLI 模式下工作。
+- **2026-02-18** ⚡️ nanobot 现支持 VolcEngine、MCP 自定义 auth header 和 Anthropic prompt 缓存。
+- **2026-02-17** 🎉 发布 **v0.1.4** — MCP 支持、进度流式传输、新 provider 和多项 channel 改进。详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4)。
+- **2026-02-16** 🦞 nanobot 现已集成 [ClawHub](https://clawhub.ai) skill — 搜索并安装公开的 agent skill。
+- **2026-02-15** 🔑 nanobot 现支持带 OAuth 登录支持的 OpenAI Codex provider。
+- **2026-02-14** 🔌 nanobot 现支持 MCP！详情请参阅 [MCP 部分](configuration-zh.md#mcp-model-context-protocol)。
+- **2026-02-13** 🎉 发布 **v0.1.3.post7** — 包含安全加固和多项改进。**请升级到最新版本以解决安全问题**。更多详情请参阅[发布说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7)。
+- **2026-02-12** 🧠 重新设计的 memory 系统 — 更少代码，更高可靠性。加入关于它的[讨论](https://github.com/HKUDS/nanobot/discussions/566)！
+- **2026-02-11** ✨ 增强 CLI 体验并新增 MiniMax 支持！
+- **2026-02-10** 🎉 发布改进后的 **v0.1.3.post6**！查看更新[说明](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6)和我们的[路线图](https://github.com/HKUDS/nanobot/discussions/431)。
+- **2026-02-09** 💬 新增 Slack、Email 和 QQ 支持 — nanobot 现支持多个 chat 平台！
+- **2026-02-08** 🔧 重构 Providers——现在新增一个 LLM provider 只需 2 个简单步骤！请查看[此处](configuration-zh.md#providers)。
+- **2026-02-07** 🚀 发布支持 Qwen 和多项关键改进的 **v0.1.3.post5**！详情请查看[此处](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5)。
+- **2026-02-06** ✨ 新增 Moonshot/Kimi provider、Discord 集成和增强的安全加固！
+- **2026-02-05** ✨ 新增 Feishu channel、DeepSeek provider 和增强的计划任务支持！
+- **2026-02-04** 🚀 发布支持多 provider 和 Docker 的 **v0.1.3.post4**！详情请查看[此处](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4)。
+- **2026-02-03** ⚡ 集成 vLLM 以支持本地 LLM，并改进自然语言任务调度！
+- **2026-02-02** 🎉 nanobot 正式发布！欢迎试用 🐈 nanobot！
