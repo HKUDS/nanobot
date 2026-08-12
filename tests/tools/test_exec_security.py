@@ -519,3 +519,21 @@ def test_exec_blocks_outside_paths_with_redirection_and_delimiters(tmp_path):
         result = tool._guard_command(cmd, str(workspace), workspace_root=str(workspace))
         assert result is not None, f"Expected {cmd} to be blocked"
         assert "path outside working dir" in result
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX double-slash path semantics")
+@pytest.mark.parametrize("path", ["//etc/passwd", "///etc/passwd"])
+def test_exec_blocks_double_slash_absolute_paths(tmp_path, path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert path in tool._extract_absolute_paths(f"cat {path}")
+    result = tool._guard_command(
+        f"cat {path}",
+        str(workspace),
+        workspace_root=str(workspace),
+    )
+
+    assert result is not None
+    assert "path outside working dir" in result
