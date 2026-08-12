@@ -3,7 +3,8 @@ import json
 import re
 import shutil
 import signal
-from contextlib import suppress
+import urllib.error
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +34,7 @@ from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
+from nanobot.webui.dev import WebUIDevError
 from nanobot.webui.metadata import (
     WEBUI_MESSAGE_SOURCE_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -81,6 +83,10 @@ class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
     tools = ToolRegistry()
+
+    @staticmethod
+    def mcp_runtime_status() -> dict[str, str]:
+        return {}
 
     @staticmethod
     def pending_cron_job_ids_for_session(_session_key: str) -> set[str]:
@@ -684,7 +690,10 @@ def test_provider_login_openai_codex_handles_missing_oauth_symbol(monkeypatch):
     result = runner.invoke(app, ["provider", "login", "openai-codex"])
 
     assert result.exit_code == 1
-    assert "oauth_cli_kit not installed" in result.stdout
+    assert (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    ) in re.sub(r"\s+", " ", result.stdout)
     assert result.exception is not None
 
 
@@ -1224,27 +1233,6 @@ def test_openai_compat_provider_passes_model_through():
         provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
-
-
-def test_make_provider_uses_github_copilot_backend():
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
-
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "github-copilot",
-                    "model": "github-copilot/gpt-4.1",
-                }
-            }
-        }
-    )
-
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = make_provider(config)
-
-    assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
 def test_openai_codex_proxy_config_affects_provider_and_signature():
@@ -2176,6 +2164,171 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "Press Ctrl+C here to stop nanobot" in compact_output
 
 
+def test_webui_dev_rejects_background_before_creating_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+
+    result = runner.invoke(
+        app,
+        ["webui", "--dev", "--background", "--yes", "--config", str(config_file)],
+    )
+
+    assert result.exit_code == 1
+    assert "--dev cannot be combined with --background" in result.stdout
+    assert not config_file.exists()
+
+
+def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+
+    @contextmanager
+    def fake_dev_server(**kwargs):
+        seen["dev_kwargs"] = kwargs
+        seen["dev_running"] = True
+        dev_server = SimpleNamespace(
+            url=kwargs["browser_url"],
+            ensure_running=lambda: None,
+        )
+        seen["dev_server"] = dev_server
+        try:
+            yield dev_server
+        finally:
+            seen["dev_running"] = False
+
+    def fake_run_gateway(_config: Config, **kwargs) -> None:
+        assert seen["dev_running"] is True
+        seen["gateway_kwargs"] = kwargs
+
+    monkeypatch.setattr("nanobot.cli.webui.run_webui_dev_server", fake_dev_server)
+    monkeypatch.setattr("nanobot.cli.webui._run_gateway", fake_run_gateway)
+
+    result = runner.invoke(
+        app,
+        [
+            "webui",
+            "--dev",
+            "--config",
+            str(config_file),
+            "--port",
+            "8899",
+            "--gateway-port",
+            "18888",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    dev_kwargs = seen["dev_kwargs"]
+    assert isinstance(dev_kwargs, dict)
+    assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
+    browser_url = dev_kwargs["browser_url"]
+    assert isinstance(browser_url, str)
+    assert browser_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
+    gateway_kwargs = seen["gateway_kwargs"]
+    assert isinstance(gateway_kwargs, dict)
+    assert gateway_kwargs == {
+        "port": 18888,
+        "open_browser_url": browser_url,
+        "open_browser_ready_url": "http://127.0.0.1:8899/webui/bootstrap",
+        "webui_static_dist": False,
+        "webui_bundle_mode": "skip",
+        "unconfigured_provider_error": None,
+        "webui_dev_server": seen["dev_server"],
+    }
+    assert seen["dev_running"] is False
+    assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
+        r"\s+", " ", _strip_ansi(result.stdout)
+    )
+
+
+def test_webui_dev_waits_for_external_gateway_via_health_endpoint(monkeypatch) -> None:
+    health_results = iter((True, False))
+    health_calls: list[tuple[str, int]] = []
+    sidecar_checks = 0
+
+    def fake_health(host: str, port: int) -> bool:
+        health_calls.append((host, port))
+        return next(health_results)
+
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", fake_health)
+    monkeypatch.setattr(
+        "nanobot.cli.webui._webui_endpoint_reachable",
+        lambda _url: pytest.fail("must not probe the WebSocket endpoint while waiting"),
+    )
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    def ensure_sidecar_running() -> None:
+        nonlocal sidecar_checks
+        sidecar_checks += 1
+
+    dev_server = MagicMock()
+    dev_server.ensure_running.side_effect = ensure_sidecar_running
+    cli_webui._wait_with_existing_foreground_gateway("127.0.0.1", 18888, dev_server)
+
+    assert health_calls == [("127.0.0.1", 18888), ("127.0.0.1", 18888)]
+    assert sidecar_checks == 2
+
+
+async def test_webui_dev_monitor_fails_when_sidecar_exits() -> None:
+    dev_server = MagicMock()
+    dev_server.ensure_running.side_effect = WebUIDevError(
+        "WebUI development server exited unexpectedly (code 23)"
+    )
+
+    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
+        await cli_gateway_runtime._watch_webui_dev_server(
+            dev_server,
+            asyncio.Event(),
+            poll_interval_s=0,
+        )
+
+
+async def test_webui_dev_monitor_ignores_an_expected_gateway_shutdown() -> None:
+    dev_server = MagicMock()
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()
+
+    await cli_gateway_runtime._watch_webui_dev_server(
+        dev_server,
+        shutdown_event,
+        poll_interval_s=0,
+    )
+
+    dev_server.ensure_running.assert_not_called()
+
+
+def test_browser_readiness_accepts_http_auth_response(monkeypatch) -> None:
+    def auth_required(*_args, **_kwargs):
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:8765/webui/bootstrap",
+            401,
+            "authentication required",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", auth_required)
+
+    assert cli_gateway_runtime._http_endpoint_responding(
+        "http://127.0.0.1:8765/webui/bootstrap"
+    ) is True
+
+
+def test_browser_readiness_rejects_connection_error(monkeypatch) -> None:
+    def unavailable(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", unavailable)
+
+    assert cli_gateway_runtime._http_endpoint_responding(
+        "http://127.0.0.1:8765/webui/bootstrap"
+    ) is False
+
+
 def test_webui_yes_starts_first_run_without_provider_setup(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
     seen: dict[str, object] = {}
@@ -2504,6 +2657,21 @@ def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> No
     assert "Closing the browser does not stop channels or automations" in output
     assert "Press Ctrl+C here to stop nanobot" in output
     assert "Gateway stopped" in output
+
+
+def test_attach_to_background_gateway_checks_owned_sidecar() -> None:
+    class _FakeRuntime:
+        def status(self):
+            return SimpleNamespace(running=True)
+
+    def sidecar_exited() -> None:
+        raise WebUIDevError("WebUI development server exited unexpectedly (code 23)")
+
+    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
+        cli_webui_support._attach_to_background_gateway(
+            _FakeRuntime(),
+            poll_hook=sidecar_exited,
+        )
 
 
 def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:

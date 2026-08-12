@@ -57,7 +57,7 @@ export function ChannelGuideLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full items-center gap-2 border border-border/45 bg-background/90 font-semibold text-foreground transition-colors hover:bg-muted",
+        "inline-flex max-w-full items-center gap-2 bg-background/80 font-semibold text-foreground transition-colors hover:bg-background",
         compact
           ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
           : "mt-3 rounded-[12px] py-1.5 pl-1.5 pr-3 text-[12px]",
@@ -65,7 +65,7 @@ export function ChannelGuideLink({
     >
       <span
         className={cn(
-          "grid shrink-0 place-items-center overflow-hidden border border-border/45 bg-background font-bold",
+          "grid shrink-0 place-items-center overflow-hidden bg-muted/70 font-bold",
           compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-[7px] text-[10px]",
         )}
         style={{ color }}
@@ -135,10 +135,10 @@ export function ChannelOfficialLink({
       href={setup.officialUrl}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full border border-border/45 bg-background/90 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors hover:bg-muted"
+      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full bg-background/80 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors hover:bg-background"
     >
       <span
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background"
+        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-muted/70"
         style={{ color }}
         aria-hidden
       >
@@ -182,8 +182,8 @@ export function ChannelSetupActions({
           key={action.id}
           type="button"
           size="sm"
-          variant="outline"
-          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+          variant="secondary"
+          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
           onClick={() => {
             if (action.copyText) {
               void copyTextToClipboard(action.copyText).then((ok) =>
@@ -246,8 +246,7 @@ export function ChannelProviderPresets({
             }}
             className={cn(
               "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
-              selected === preset.id
-                && "bg-background text-foreground ring-1 ring-inset ring-border/45",
+              selected === preset.id && "bg-background text-foreground",
             )}
           >
             {preset.label}
@@ -304,10 +303,13 @@ export function ChannelValidationDetails({ validation }: { validation: ChannelVa
 }
 
 export function ChannelValidationChecks({ validation }: { validation: ChannelValidationPayload }) {
+  const { t } = useTranslation();
   if (!validation.checks.length) return null;
   return (
-    <div className="border-t border-border/60 px-4 py-4">
-      <div className="mb-2 text-[12px] font-semibold text-foreground">Connection checks</div>
+    <div>
+      <div className="mb-2 text-[12px] font-semibold text-foreground">
+        {t("settings.channels.connectionChecks")}
+      </div>
       <div className="space-y-2">
         {validation.checks.slice(0, 6).map((check) => (
           <div key={check.id} className="flex gap-2 text-[12px] leading-5">
@@ -326,7 +328,7 @@ export function ChannelValidationChecks({ validation }: { validation: ChannelVal
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4"
                 >
-                  Open
+                  {t("settings.channels.open")}
                   <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
               ) : null}
@@ -350,7 +352,7 @@ export function ChannelSetupSteps({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="border-t border-border/60 px-4 py-4 text-[12.5px] leading-5 text-muted-foreground">
+    <div className="text-[12.5px] leading-5 text-muted-foreground">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="text-[12px] font-semibold text-foreground">
           {tx("settings.channels.setupSteps", "Next steps")}
@@ -368,7 +370,7 @@ export function ChannelSetupSteps({
         ))}
       </ol>
       {tryIt ? (
-        <div className="mt-3 rounded-[12px] border border-border/55 bg-background px-3 py-2 text-[12px] text-muted-foreground">
+        <div className="mt-3 rounded-[12px] bg-background/75 px-3 py-2 text-[12px] text-muted-foreground">
           <span className="font-medium text-foreground">
             {tx("settings.channels.tryIt", "Try it")}
           </span>

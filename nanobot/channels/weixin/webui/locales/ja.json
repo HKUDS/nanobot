@@ -20,7 +20,21 @@
       "token": {
         "label": "トークン",
         "placeholder": "QR ログインで保存"
-      }
+      },
+      "sendProgress": { "label": "進捗を送信" },
+      "sendToolHints": { "label": "ツールのヒントを送信" },
+      "streaming": { "label": "ストリーミング API を使用" },
+      "replyProgressMessages": { "label": "構造化された進捗を送信" },
+      "replyProgressMaxMessages": { "label": "構造化進捗の上限" },
+      "contextMessageBudget": { "label": "コンテキストのメッセージ予算" },
+      "blockStreaming": { "label": "応答をブロック単位で送信" },
+      "blockStreamingMinChars": { "label": "最小ブロックサイズ" },
+      "blockStreamingMaxMessages": { "label": "ブロックメッセージの上限" },
+      "baseUrl": { "label": "API URL" },
+      "cdnBaseUrl": { "label": "CDN URL" },
+      "routeTag": { "label": "ルートタグ" },
+      "stateDir": { "label": "状態ディレクトリ" },
+      "pollTimeout": { "label": "ポーリングタイムアウト" }
     }
   },
   "custom": {
@@ -30,6 +44,13 @@
     "waiting": "WeChat のスキャンを待っています...",
     "connected": "WeChat に接続しました。",
     "stopped": "WeChat ログインを停止しました。",
-    "connecting": "接続中..."
+    "connecting": "接続中...",
+    "verifyTitle": "確認が必要です",
+    "verifyDescription": "WeChat に表示された数字を入力してください。",
+    "verifyMismatch": "コードが一致しません。WeChat に表示された新しい数字を入力してください。",
+    "expired": "WeChat のログイン期限が切れました。再接続するにはもう一度スキャンしてください。",
+    "failed": "WeChat に接続できません。もう一度お試しください。",
+    "verifyPlaceholder": "コード",
+    "verifySubmit": "確認"
   }
 }

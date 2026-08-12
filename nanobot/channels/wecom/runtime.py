@@ -30,12 +30,14 @@ WECOM_UPLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
 
 
-def _sanitize_filename(name: str) -> str:
+def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
     """Sanitize filename to avoid traversal and problematic chars."""
-    name = (name or "").strip()
-    name = Path(name).name
-    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
-    return name
+    def _clean(value: str) -> str:
+        value = (value or "").strip()
+        value = Path(value).name
+        return _SAFE_NAME_RE.sub("_", value).strip("._ ")
+
+    return _clean(name) or _clean(fallback) or "unnamed"
 
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -399,9 +401,8 @@ class WecomChannel(BaseChannel):
                 return None
 
             media_dir = get_media_dir("wecom")
-            if not filename:
-                filename = fname or f"{media_type}_{hash(file_url) % 100000}"
-            filename = _sanitize_filename(cast(str, filename))
+            fallback_name = fname or f"{media_type}_{hash(file_url) % 100000}"
+            filename = _sanitize_filename(cast(str, filename or fallback_name), fallback=fallback_name)
 
             file_path = media_dir / filename
             await asyncio.to_thread(file_path.write_bytes, data)

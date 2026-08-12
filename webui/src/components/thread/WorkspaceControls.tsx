@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, ChevronDown, Folder, Hand } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,7 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  floatingItemClassName,
+  floatingItemFocusClassName,
+} from "@/components/ui/floating-surface";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type {
   WorkspaceAccessMode,
   WorkspaceScopePayload,
@@ -25,8 +34,18 @@ import {
   shortWorkspacePath,
 } from "@/lib/workspace";
 
+function workspacePathPlaceholder(defaultWorkspacePath: string, macPlaceholder: string): string {
+  const normalized = defaultWorkspacePath.trim().replace(/\\/g, "/");
+  const windowsDrive = normalized.match(/^([A-Za-z]):\//)?.[1];
+  if (windowsDrive) return `${windowsDrive.toUpperCase()}:\\path\\to\\project`;
+  if (normalized.startsWith("/Users/")) return macPlaceholder;
+  return "/home/name/project";
+}
+
 export function WorkspaceProjectPicker({
   isHero,
+  compact = false,
+  connected = false,
   disabled,
   scope,
   defaultScope,
@@ -35,6 +54,8 @@ export function WorkspaceProjectPicker({
   onChange,
 }: {
   isHero: boolean;
+  compact?: boolean;
+  connected?: boolean;
   disabled?: boolean;
   scope: WorkspaceScopePayload | null;
   defaultScope: WorkspaceScopePayload | null;
@@ -47,6 +68,9 @@ export function WorkspaceProjectPicker({
   const [pathDraft, setPathDraft] = useState("");
   const [pathError, setPathError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
+  const pathErrorId = useId();
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const projectLabel = currentProjectScope
     ? currentProjectScope.project_name || projectNameFromPath(currentProjectScope.project_path)
@@ -65,8 +89,20 @@ export function WorkspaceProjectPicker({
   }, [currentProjectScope?.project_path, open]);
 
   useEffect(() => {
-    if (error && visible) setOpen(true);
-  }, [error, visible]);
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!error || !visible || disabled) return;
+    const frame = window.requestAnimationFrame(() => triggerRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [disabled, error, visible]);
+
+  useEffect(() => {
+    if (!open || !error) return;
+    const frame = window.requestAnimationFrame(() => pathInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [error, open]);
 
   const applyProjectPath = useCallback(
     (projectPath: string, projectName?: string) => {
@@ -106,24 +142,31 @@ export function WorkspaceProjectPicker({
 
   if (nativeProjectPicker) {
     return (
-      <div className="flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
+      <div className={cn(
+        compact
+          ? "inline-flex"
+          : "flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4",
+      )}>
         <button
+          ref={triggerRef}
           type="button"
           disabled={disabled || pickingFolder}
           aria-label={t("thread.composer.workspace.projectAria")}
           title={currentProjectScope?.project_path}
           onClick={() => void pickNativeFolder()}
           className={cn(
-            "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
-            "text-[12px] font-medium text-muted-foreground/90 transition-colors",
-            "hover:bg-background/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
-            currentProjectScope && "text-foreground/82",
+            compact
+              ? "thread-composer-action touch-target inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent"
+              : "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
+            "text-[12px] font-medium text-muted-foreground/90 transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
+            compact ? "hover:bg-muted/65" : "hover:bg-background/70",
+            (connected || currentProjectScope) && "text-primary",
           )}
         >
-          <Folder className={cn("h-3.5 w-3.5 shrink-0", currentProjectScope && "text-primary")} />
-          <span className="truncate">{projectLabel}</span>
+          <Folder className={cn("shrink-0", compact ? "h-4 w-4" : "h-3.5 w-3.5")} />
+          <span className={compact ? "sr-only" : "truncate"}>{projectLabel}</span>
         </button>
-        {pathError || error ? (
+        {!compact && (pathError || error) ? (
           <span role="alert" className="ml-2 min-w-0 truncate text-[11.5px] font-medium text-destructive">
             {pathError ?? error}
           </span>
@@ -133,34 +176,48 @@ export function WorkspaceProjectPicker({
   }
 
   return (
-    <div className="flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
+    <div className={cn(
+      compact
+        ? "inline-flex"
+        : "flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4",
+    )}>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
           <button
+            ref={triggerRef}
             type="button"
             disabled={disabled}
             aria-label={t("thread.composer.workspace.projectAria")}
             className={cn(
-              "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
-              "text-[12px] font-medium text-muted-foreground/90 transition-colors",
-              "hover:bg-background/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
-              currentProjectScope && "text-foreground/82",
+              compact
+                ? "thread-composer-action touch-target inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent"
+                : "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
+              "text-[12px] font-medium text-muted-foreground/90 transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
+              compact ? "hover:bg-muted/65" : "hover:bg-background/70",
+              (connected || currentProjectScope) && "text-primary",
             )}
           >
-            <Folder className={cn("h-3.5 w-3.5 shrink-0", currentProjectScope && "text-primary")} />
-            <span className="truncate">{projectLabel}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Folder className={cn("shrink-0", compact ? "h-4 w-4" : "h-3.5 w-3.5")} />
+            <span className={compact ? "sr-only" : "truncate"}>{projectLabel}</span>
+            {!compact ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : null}
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
+        </PopoverTrigger>
+        <PopoverContent
           align="start"
           side="bottom"
           sideOffset={8}
-          className="w-[min(25rem,calc(100vw-2rem))] rounded-[22px]"
+          className="w-[min(25rem,calc(100vw-2rem))]"
         >
-          <DropdownMenuItem
-            onSelect={() => applyProjectPath(defaultScope.project_path, defaultScope.project_name)}
-            className="flex min-h-[48px] cursor-default gap-3 rounded-[16px] px-3 py-2.5 focus:bg-muted/55"
+          <button
+            type="button"
+            onClick={() => applyProjectPath(defaultScope.project_path, defaultScope.project_name)}
+            className={cn(
+              floatingItemClassName,
+              floatingItemFocusClassName,
+              "flex min-h-[48px] w-full cursor-default gap-3 px-3 py-2.5 focus:bg-muted/55",
+            )}
           >
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/80">
               <Folder className="h-4 w-4" />
@@ -174,14 +231,9 @@ export function WorkspaceProjectPicker({
               </span>
             </span>
             {!currentProjectScope ? <Check className="h-4 w-4 text-foreground/80" /> : null}
-          </DropdownMenuItem>
+          </button>
           <div className="my-1 h-px bg-border/45" />
-          <div
-            className="space-y-1.5 px-1.5 py-1.5"
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") event.stopPropagation();
-            }}
-          >
+          <div className="space-y-1.5 px-1.5 py-1.5">
             <form
               className="flex items-center gap-2"
               onSubmit={(event) => {
@@ -190,18 +242,21 @@ export function WorkspaceProjectPicker({
               }}
             >
               <Input
+                ref={pathInputRef}
                 value={pathDraft}
                 disabled={disabled}
                 onChange={(event) => {
                   setPathDraft(event.target.value);
                   setPathError(null);
                 }}
-                placeholder={t("workspace.dialog.manualPlaceholder")}
-                aria-label={t("workspace.dialog.manual")}
-                className={cn(
-                  "h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]",
-                  "focus-visible:ring-1 focus-visible:ring-foreground/10 focus-visible:ring-offset-0",
+                placeholder={workspacePathPlaceholder(
+                  defaultScope.project_path,
+                  t("workspace.dialog.manualPlaceholder"),
                 )}
+                aria-label={t("workspace.dialog.manual")}
+                aria-invalid={pathError || error ? true : undefined}
+                aria-describedby={pathError || error ? pathErrorId : undefined}
+                className="h-9 rounded-full border-border/55 bg-background/80 px-3 text-[12.5px]"
               />
               <Button
                 type="submit"
@@ -212,13 +267,22 @@ export function WorkspaceProjectPicker({
               </Button>
             </form>
             {pathError || error ? (
-              <p role="alert" className="px-1 text-[11.5px] font-medium text-destructive">
+              <p
+                id={pathErrorId}
+                role="alert"
+                className="px-1 text-[11.5px] font-medium text-destructive"
+              >
                 {pathError ?? error}
               </p>
             ) : null}
           </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </PopoverContent>
+      </Popover>
+      {!compact && error && !open ? (
+        <span role="alert" className="ml-2 min-w-0 truncate text-[11.5px] font-medium text-destructive">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -323,7 +387,7 @@ function AccessMenuItem({
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        "flex h-10 items-center gap-3 rounded-xl px-3 text-[13.5px] font-semibold",
+        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold",
         warning && "text-orange-600 focus:text-orange-600 dark:text-orange-300 dark:focus:text-orange-300",
       )}
     >

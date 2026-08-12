@@ -27,11 +27,19 @@
         "placeholder": "ID d’équipe facultatif"
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Comportement en canal",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
-          "allowlist": "Liste d’autorisation"
+          "allowlist": "Liste d'autorisation"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Comportement en fil",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages (sans mention)",
+          "allowlist": "Liste d'autorisation"
         }
       },
       "allowFrom": {

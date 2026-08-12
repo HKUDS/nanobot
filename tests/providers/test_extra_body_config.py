@@ -117,6 +117,30 @@ class TestBuildKwargsExtraBody:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
+    def test_extra_body_appends_tools_without_clobbering_functions(self) -> None:
+        function_tool = {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write a local file",
+                "parameters": {"type": "object"},
+            },
+        }
+        server_tool = {"type": "openrouter:web_search"}
+        provider = _make_provider({
+            "tools": [server_tool],
+            "custom_param": "value",
+        })
+
+        kwargs = provider._build_kwargs(
+            messages=_simple_messages(),
+            tools=[function_tool], model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort=None, tool_choice=None,
+        )
+
+        assert kwargs["tools"] == [function_tool, server_tool]
+        assert kwargs["extra_body"] == {"custom_param": "value"}
+
     def test_extra_body_merges_with_thinking(self) -> None:
         """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
@@ -240,6 +264,112 @@ class TestBuildResponsesBodyExtraBody:
             },
             {"type": "web_search"},
         ]
+
+    def test_responses_web_search_tool_owns_the_local_function(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="gpt-4o",
+            spec=find_by_name("openai"),
+            extra_body={"tools": [{"type": "web_search"}]},
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search with nanobot's configured backend",
+                        "parameters": {"type": "object"},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "description": "Read a file",
+                        "parameters": {"type": "object"},
+                    },
+                },
+            ],
+            model=None,
+            max_tokens=100,
+            temperature=0.1,
+            reasoning_effort=None,
+            tool_choice=None,
+        )
+
+        assert body["tools"] == [
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {"type": "object"},
+            },
+            {"type": "web_search"},
+        ]
+        assert body["include"] == ["web_search_call.action.sources"]
+        assert provider._should_use_responses_api(None, None) is True
+
+    def test_deepseek_default_search_replaces_the_local_search_function(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="deepseek-v4-flash",
+            spec=find_by_name("deepseek"),
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search with nanobot's configured backend",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            model=None,
+            max_tokens=100,
+            temperature=0.1,
+            reasoning_effort=None,
+            tool_choice=None,
+        )
+
+        assert body["tools"] == [{"type": "web_search"}]
+        assert "include" not in body
+
+    def test_explicit_empty_tools_disables_deepseek_default_search(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="deepseek-v4-flash",
+            spec=find_by_name("deepseek"),
+            extra_body={"tools": []},
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search with nanobot's configured backend",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            model=None,
+            max_tokens=100,
+            temperature=0.1,
+            reasoning_effort=None,
+            tool_choice=None,
+        )
+
+        assert body["tools"] == [{
+            "type": "function",
+            "name": "web_search",
+            "description": "Search with nanobot's configured backend",
+            "parameters": {"type": "object"},
+        }]
 
     def test_responses_extra_body_merges_include_without_duplicates(self) -> None:
         provider = OpenAICompatProvider(

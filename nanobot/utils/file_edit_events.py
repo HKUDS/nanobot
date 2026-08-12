@@ -274,24 +274,6 @@ def _text_line_count(text: str) -> int:
     return line_count if last_was_newline else line_count + 1
 
 
-def prepare_file_edit_tracker(
-    *,
-    call_id: str,
-    tool_name: str,
-    tool: Any,
-    workspace: Path | None,
-    params: dict[str, Any] | None,
-) -> FileEditTracker | None:
-    trackers = prepare_file_edit_trackers(
-        call_id=call_id,
-        tool_name=tool_name,
-        tool=tool,
-        workspace=workspace,
-        params=params,
-    )
-    return trackers[0] if trackers else None
-
-
 def prepare_file_edit_trackers(
     *,
     call_id: str,

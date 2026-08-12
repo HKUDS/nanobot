@@ -453,12 +453,15 @@ class WebSearchTool(Tool):
 
     async def _search_olostep(self, query: str, n: int) -> str:
         try:
-            from olostep import (  # pyright: ignore[reportMissingImports]
+            from olostep import (  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
                 AsyncOlostep,  # pyright: ignore[reportUnknownVariableType]
-                Olostep_BaseError,  # pyright: ignore[reportUnknownVariableType]
+                Olostep_BaseError,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
             )
         except ImportError:
-            return ToolResult.error("Error: olostep package not installed. Run: pip install olostep")
+            return ToolResult.error(
+                "Error: Olostep support is not installed. "
+                "Run `nanobot plugins enable olostep`."
+            )
         async_olostep = cast(Any, AsyncOlostep)
         olostep_base_error = cast(type[Exception], Olostep_BaseError)
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")

@@ -104,12 +104,17 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 |---|---|
 | `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, and open `http://127.0.0.1:8765` |
 | `nanobot webui --background` | Start or reuse a background gateway, then open the WebUI |
+| `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
 | `nanobot webui --gateway-port <port>` | Override the gateway health port |
 | `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; configure provider credentials in **Settings → Models** |
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
+
+`--dev` is a foreground source-checkout workflow and cannot be combined with `--background`.
+It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured
+WebSocket channel port, and stops Vite together with the foreground gateway.
 
 ## Gateway
 

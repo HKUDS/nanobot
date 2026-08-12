@@ -1,11 +1,8 @@
-"""Tests for the signed ``/api/media/<sig>/<payload>`` route and its replay
-integration on ``/api/sessions/<key>/messages``.
+"""Tests for the signed ``/api/media/<sig>/<payload>`` route and WebUI replay.
 
-The route is the return path for images attached to persisted user turns:
-:meth:`WebSocketChannel.gateway.media.sign_media_path` mints URLs during session reads,
-and :meth:`GatewayHTTPHandler._handle_media_fetch` serves the bytes back.
-These tests cover the two halves end-to-end plus the adversarial edges
-(bad signatures, ``..`` traversal, non-existent files, non-image types).
+The route is the return path for local media rendered by the WebUI. These tests
+cover URL signing and serving end-to-end plus the adversarial edges (bad
+signatures, ``..`` traversal, non-existent files, non-image types).
 """
 
 from __future__ import annotations
@@ -20,11 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.media_api import (
     b64url_decode,
     b64url_encode,
+    sign_media_path,
 )
 
 from .ws_test_client import InProcessHttpChannel
@@ -87,8 +85,16 @@ def _fake_media_dir(root: Path):
     return inner
 
 
+def _sign_media_path(channel: WebSocketChannel, path: Path) -> str | None:
+    return sign_media_path(
+        path,
+        secret=channel.gateway.media.secret,
+        media_dir=channel.gateway.media._media_dir,
+    )
+
+
 # ---------------------------------------------------------------------------
-# gateway.media.sign_media_path: the URL minter
+# media_api.sign_media_path: the URL minter
 # ---------------------------------------------------------------------------
 
 
@@ -108,10 +114,10 @@ def test_sign_media_path_rejects_paths_outside_media_root(
     media.mkdir()
     channel = _ch(bus, port=0)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        assert channel.gateway.media.sign_media_path(outside) is None
+        assert _sign_media_path(channel, outside) is None
         # Traversal via the media root is also rejected — the resolve() step
         # normalises ``..`` out before the relative_to check.
-        assert channel.gateway.media.sign_media_path(media / ".." / "secrets" / "cred.txt") is None
+        assert _sign_media_path(channel, media / ".." / "secrets" / "cred.txt") is None
 
 
 def test_sign_media_path_round_trips_via_hmac(
@@ -123,7 +129,7 @@ def test_sign_media_path_round_trips_via_hmac(
     (media / "a.png").write_bytes(_PNG_BYTES)
     channel = _ch(bus, port=0)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url = channel.gateway.media.sign_media_path(media / "a.png")
+        url = _sign_media_path(channel, media / "a.png")
     assert url is not None
     assert url.startswith("/api/media/")
     sig, payload = url[len("/api/media/"):].split("/", 1)
@@ -238,7 +244,7 @@ async def test_media_route_serves_signed_file(
 
     channel = _ch(bus, port=29920)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         try:
@@ -270,7 +276,7 @@ async def test_media_route_serves_video_byte_ranges(
 
     channel = _ch(bus, port=29927)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         try:
@@ -301,7 +307,7 @@ async def test_media_route_serves_suffix_video_byte_ranges(
 
     channel = _ch(bus, port=29928)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         try:
@@ -329,7 +335,7 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
 
     channel = _ch(bus, port=29929)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         try:
@@ -361,7 +367,7 @@ async def test_media_route_rejects_bad_signature(
 
     channel = _ch(bus, port=29921)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        good = channel.gateway.media.sign_media_path(media / "f.png")
+        good = _sign_media_path(channel, media / "f.png")
         assert good is not None
         _, payload = good[len("/api/media/"):].split("/", 1)
         # Forge a sig with a *different* secret.
@@ -426,7 +432,7 @@ async def test_media_route_404s_missing_file(
 
     channel = _ch(bus, port=29923)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         target.unlink()  # the file vanishes between signing and fetching
         server_task = asyncio.create_task(channel.start())
@@ -483,7 +489,7 @@ async def test_media_route_serves_svg_with_strict_csp(
 
     channel = _ch(bus, port=29928)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        url_path = channel.gateway.media.sign_media_path(target)
+        url_path = _sign_media_path(channel, target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         try:
@@ -497,91 +503,3 @@ async def test_media_route_serves_svg_with_strict_csp(
     assert resp.headers.get("x-content-type-options") == "nosniff"
     assert "default-src 'none'" in resp.headers.get("content-security-policy", "")
     assert "sandbox" in resp.headers.get("content-security-policy", "")
-
-
-# ---------------------------------------------------------------------------
-# /api/sessions/<key>/messages: media_urls hydration on session read
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_session_messages_exposes_signed_media_urls(
-    bus: MagicMock, tmp_path: Path
-) -> None:
-    """The read path must map persisted ``media`` paths onto signed URLs
-    and strip the raw path — the client never learns the server's layout."""
-    media = tmp_path / "media"
-    media.mkdir()
-    img = media / "u.png"
-    img.write_bytes(_PNG_BYTES)
-
-    sm = SessionManager(tmp_path / "ws_state")
-    sess = Session(key="websocket:media-hydrate")
-    sess.add_message("user", "look at this", media=[str(img)])
-    sess.add_message("assistant", "nice")
-    sm.save(sess)
-
-    channel = _ch(bus, session_manager=sm, port=29925)
-    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        server_task = asyncio.create_task(channel.start())
-        try:
-            token = channel.gateway.tokens.issue_api_token(300)
-            auth = {"Authorization": f"Bearer {token}"}
-            resp = await _http_get(
-                "http://127.0.0.1:29925/api/sessions/websocket:media-hydrate/messages",
-                headers=auth,
-            )
-            body = resp.json()
-            # The signed URL round-trips end-to-end: fetching it yields the same bytes.
-            user_msg = next(m for m in body["messages"] if m["role"] == "user")
-            urls = user_msg["media_urls"]
-            assert isinstance(urls, list) and len(urls) == 1
-            assert urls[0]["name"] == "u.png"
-            assert urls[0]["url"].startswith("/api/media/")
-            # Raw paths must not leak to the wire.
-            assert "media" not in user_msg
-
-            # And the URL actually works.
-            fetched = await _http_get(f"http://127.0.0.1:29925{urls[0]['url']}")
-            assert fetched.status_code == 200
-            assert fetched.content == _PNG_BYTES
-        finally:
-            await channel.stop()
-            await server_task
-
-
-@pytest.mark.asyncio
-async def test_session_messages_skips_vanished_media(
-    bus: MagicMock, tmp_path: Path
-) -> None:
-    """Paths that no longer resolve inside the media root produce no URL —
-    the message is still delivered, just without the preview."""
-    media = tmp_path / "media"
-    media.mkdir()
-
-    sm = SessionManager(tmp_path / "ws_state")
-    sess = Session(key="websocket:vanished")
-    sess.add_message("user", "missing pic", media=[str(media / "absent.png")])
-    sm.save(sess)
-
-    channel = _ch(bus, session_manager=sm, port=29926)
-    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
-        server_task = asyncio.create_task(channel.start())
-        try:
-            token = channel.gateway.tokens.issue_api_token(300)
-            resp = await _http_get(
-                "http://127.0.0.1:29926/api/sessions/websocket:vanished/messages",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            user_msg = next(m for m in resp.json()["messages"] if m["role"] == "user")
-            # absent.png lives inside the media root so it *does* get a signed
-            # URL (we don't stat the file at signing time — that would slow
-            # the listing). Fetching the URL is where the 404 surfaces.
-            urls = user_msg.get("media_urls") or []
-            assert len(urls) == 1
-            fetched = await _http_get(f"http://127.0.0.1:29926{urls[0]['url']}")
-            assert fetched.status_code == 404
-            assert "media" not in user_msg
-        finally:
-            await channel.stop()
-            await server_task

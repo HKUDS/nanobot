@@ -32,7 +32,11 @@
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: 221 70% 50%;
+    --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 17 88% 32%;
+    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -66,7 +70,11 @@
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;
-    --inline-token-highlight: 217 92% 72%;
+    --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 32 98% 73%;
+    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-accent: var(--background);
@@ -142,7 +150,7 @@
     pointer-events: none;
     background-color: rgb(236 141 49);
     opacity: 0;
-    transition: opacity 600ms ease-in-out;
+    transition: opacity 220ms ease-out;
   }
 
   .composer-model-badge[data-fallback="true"]::before {
@@ -233,10 +241,6 @@
     display: none;
     width: 0;
     height: 0;
-  }
-
-  .shadow-inner-right {
-    box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
 
   /* Keep the outer document rhythm clean at message boundaries. */
@@ -338,7 +342,6 @@
       animation: none;
       content: "";
     }
-    .markdown-content-streaming > :last-child::after,
     .streaming-text-fallback::after {
       animation: none;
     }
@@ -352,8 +355,7 @@
    */
   .thread-layout {
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
-    transition:
-      grid-template-rows 900ms cubic-bezier(0.33, 1, 0.68, 1);
+    transition: grid-template-rows 220ms ease-out;
   }
   .thread-layout[data-layout="thread"] {
     grid-template-rows: minmax(0, 1fr) auto 0fr;
@@ -404,7 +406,7 @@
     animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
-    --composer-status-drawer-duration: 600ms;
+    --composer-status-drawer-duration: 220ms;
     --composer-status-drawer-easing: ease-out;
 
     display: grid;
@@ -435,6 +437,41 @@
   .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
     opacity: 1;
     transform: translateY(0);
+  }
+  .composer-workspace-drawer {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .composer-workspace-drawer[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .composer-workspace-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .composer-workspace-drawer {
+      transition:
+        grid-template-rows var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-6px);
+      transition: transform var(--composer-workspace-drawer-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+      transform: translateY(0);
+    }
   }
   @keyframes run-pulse-dot {
     0%,
@@ -501,14 +538,14 @@
       animation: none;
     }
     .composer-status-drawer {
-      transition-duration: 220ms;
+      transition-duration: 0.01ms;
     }
     .composer-status-drawer-content {
-      transform: translateY(2px);
-      transition-duration: 140ms, 220ms;
+      transform: none;
+      transition-duration: 120ms, 0.01ms;
     }
     .thread-layout {
-      transition-duration: 360ms;
+      transition-duration: 0.01ms;
     }
     .run-pulse-icon,
     .run-pulse-icon * {
@@ -563,52 +600,6 @@
     }
     .dark .goal-shell-glow {
       filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
-    }
-  }
-
-  @keyframes cli-app-linked-sheen {
-    0% {
-      transform: translateX(-140%) skewX(-14deg);
-      opacity: 0;
-    }
-    18% {
-      opacity: 0.7;
-    }
-    72%,
-    100% {
-      transform: translateX(140%) skewX(-14deg);
-      opacity: 0;
-    }
-  }
-  .cli-app-linked-chip::after {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    pointer-events: none;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      hsl(var(--foreground) / 0.14) 46%,
-      hsl(var(--background) / 0.7) 50%,
-      hsl(var(--foreground) / 0.12) 54%,
-      transparent 100%
-    );
-    animation: cli-app-linked-sheen 1.25s ease-out 1;
-  }
-  .dark .cli-app-linked-chip::after {
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      hsl(var(--foreground) / 0.12) 46%,
-      hsl(var(--background) / 0.5) 50%,
-      hsl(var(--foreground) / 0.1) 54%,
-      transparent 100%
-    );
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .cli-app-linked-chip::after {
-      animation: none;
-      content: none;
     }
   }
 

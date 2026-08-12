@@ -28,6 +28,7 @@ const VOICE_MIME_CANDIDATES = [
 export type VoiceRecorderState = "idle" | "recording" | "transcribing";
 export type VoiceRecorderErrorKey =
   | "failed"
+  | "insecureContext"
   | "noDevice"
   | "notConfigured"
   | "permission"
@@ -163,6 +164,10 @@ export function useVoiceRecorder({
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
     onClearError();
+    if (window.isSecureContext === false) {
+      onError("insecureContext");
+      return;
+    }
     const mediaDevices = navigator.mediaDevices;
     const MediaRecorderCtor = mediaRecorderConstructor();
     if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {

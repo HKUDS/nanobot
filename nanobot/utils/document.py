@@ -11,35 +11,6 @@ from loguru import logger
 
 from nanobot.utils.helpers import detect_image_mime
 
-# Supported file extensions for text extraction
-SUPPORTED_EXTENSIONS: set[str] = {
-    # Document formats
-    ".pdf",
-    ".docx",
-    ".xlsx",
-    ".pptx",
-    # Text formats
-    ".txt",
-    ".md",
-    ".csv",
-    ".json",
-    ".xml",
-    ".html",
-    ".htm",
-    ".log",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".ini",
-    ".cfg",
-    # Image formats (for future OCR support)
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-}
-
 _MAX_TEXT_LENGTH = 200_000
 _MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 _MAX_OFFICE_ARCHIVE_MEMBERS = 10_000

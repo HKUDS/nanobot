@@ -651,6 +651,7 @@ def test_plugin_setup_contract_drives_save_and_validation(
     from nanobot.channels.validation import validate_channel_config
     from nanobot.config import loader
     from nanobot.webui.settings_routes import WebUISettingsRouter
+    from nanobot.webui.settings_services import WebUISettingsServices
 
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -660,6 +661,7 @@ def test_plugin_setup_contract_drives_save_and_validation(
         _channel_plugin(_SetupPlugin, setup=_SETUP_PLUGIN_SPEC),
     )
     router = object.__new__(WebUISettingsRouter)
+    router.settings = WebUISettingsServices.create(config_path)
 
     saved = router._save_channel_config_values(
         "setupplugin",
@@ -738,6 +740,7 @@ def test_webui_save_rejects_duplicate_feishu_ids_without_writing(monkeypatch, tm
     from nanobot.config import loader
     from nanobot.webui.settings_api import WebUISettingsError
     from nanobot.webui.settings_routes import WebUISettingsRouter
+    from nanobot.webui.settings_services import WebUISettingsServices
 
     config_path = tmp_path / "config.json"
     config_path.write_text(
@@ -756,6 +759,7 @@ def test_webui_save_rejects_duplicate_feishu_ids_without_writing(monkeypatch, tm
     before = config_path.read_text(encoding="utf-8")
     monkeypatch.setattr(loader, "_current_config_path", config_path)
     router = object.__new__(WebUISettingsRouter)
+    router.settings = WebUISettingsServices.create(config_path)
 
     with pytest.raises(WebUISettingsError, match="duplicate Feishu instance id 'default'") as error:
         router._save_channel_config_values(
@@ -2479,6 +2483,69 @@ def test_optional_features_payload_preserves_legacy_flat_feishu_config(monkeypat
     assert "instances" not in saved
 
 
+@pytest.mark.parametrize(
+    "index_url",
+    [
+        "",
+        "https://mirror.example/simple",
+    ],
+)
+def test_enable_uses_uv_when_tool_environment_has_no_pip(
+    monkeypatch,
+    index_url,
+):
+    from nanobot import optional_features
+
+    calls: list[list[str]] = []
+    call_envs: list[dict[str, str] | None] = []
+
+    def _run(
+        argv: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        call_envs.append(env)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No module named pip")
+        if argv[0] == "uv":
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout="",
+            stderr="No module named ensurepip",
+        )
+
+    monkeypatch.setattr("shutil.which", lambda name: "uv" if name == "uv" else None)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.delenv("UV_INDEX_URL", raising=False)
+    if index_url:
+        monkeypatch.setenv("PIP_INDEX_URL", index_url)
+    else:
+        monkeypatch.delenv("PIP_INDEX_URL", raising=False)
+
+    assert optional_features.install_extra("feishu", ["lark-oapi>=1.5.0"], runner=_run).ok is True
+    assert calls == [
+        [sys.executable, "-m", "pip", "install", "lark-oapi>=1.5.0"],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "lark-oapi>=1.5.0",
+        ],
+    ]
+    assert call_envs[0] is None
+    assert call_envs[1] is not None
+    assert call_envs[1]["HTTPS_PROXY"] == "http://proxy.example:8080"
+    if index_url:
+        assert call_envs[1]["UV_INDEX_URL"] == index_url
+    else:
+        assert "UV_INDEX_URL" not in call_envs[1]
+
+
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     from nanobot import optional_features
 
@@ -2489,6 +2556,8 @@ def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
         if len(calls) == 1:
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No module named pip")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("shutil.which", lambda _name: None)
 
     assert optional_features.install_extra("bedrock", None, runner=_run).ok is True
     assert calls == [

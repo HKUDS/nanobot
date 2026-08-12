@@ -35,6 +35,7 @@ export interface ThreadViewportHandle {
 
 interface ThreadViewportProps {
   messages: UIMessage[];
+  temporary?: boolean;
   isStreaming: boolean;
   composer: ReactNode;
   emptyState?: ReactNode;
@@ -97,6 +98,11 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
   ].includes(element.type);
 }
 
+function isThreadDisclosureTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest("[data-thread-disclosure]") !== null;
+}
+
 type ThreadScrollDirection = "backward" | "forward";
 
 const KEYBOARD_SCROLL_DIRECTIONS: Readonly<
@@ -152,6 +158,7 @@ function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
 
 export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages,
+  temporary = false,
   isStreaming,
   composer,
   emptyState,
@@ -186,6 +193,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const pendingPromptJumpRef = useRef<string | null>(null);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
+  const composerInputScrollTopRef = useRef<number | null>(null);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [composerDockHeight, setComposerDockHeight] = useState(0);
@@ -571,7 +579,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       handleDirectionalInput(directionFromDelta(event.deltaY));
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button === 0 && event.target === el) yieldCameraToUser();
+      if (
+        event.button === 0
+        && (event.target === el || isThreadDisclosureTarget(event.target))
+      ) {
+        yieldCameraToUser();
+      }
     };
     let lastTouchY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
@@ -597,6 +610,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         || event.metaKey
         || isKeyboardEditableElement(event.target as Element | null)
       ) {
+        return;
+      }
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isThreadDisclosureTarget(event.target)
+      ) {
+        yieldCameraToUser();
         return;
       }
       handleDirectionalInput(keyboardScrollDirection(event));
@@ -664,6 +684,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
+                  temporary={temporary}
                   isStreaming={isStreaming}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
@@ -688,7 +709,21 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             data-testid="thread-composer-dock"
             onInputCapture={(event) => {
               if (event.target instanceof HTMLTextAreaElement) {
+                composerInputScrollTopRef.current = scrollRef.current?.scrollTop ?? null;
                 threadMotionRef.current?.handleComposerInput();
+              }
+            }}
+            onInput={(event) => {
+              if (!(event.target instanceof HTMLTextAreaElement)) return;
+              const previousScrollTop = composerInputScrollTopRef.current;
+              composerInputScrollTopRef.current = null;
+              const scrollEl = scrollRef.current;
+              if (scrollEl && previousScrollTop !== null) {
+                // Textarea autosizing briefly collapses to `height: auto` while
+                // measuring. Chrome can clamp the sibling thread scrollport in
+                // that intermediate layout; restore it before paint, then let
+                // ResizeObserver handle any real final composer height change.
+                scrollEl.scrollTop = previousScrollTop;
               }
             }}
             className={cn(

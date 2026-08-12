@@ -27,10 +27,18 @@
         "placeholder": "可選的團隊 ID"
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "頻道行為",
         "choices": {
           "mention": "僅提及時",
           "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "線程行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息（無需提及）",
           "allowlist": "允許清單"
         }
       },

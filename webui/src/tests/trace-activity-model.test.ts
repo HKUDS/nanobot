@@ -8,6 +8,10 @@ function describeTrace(line: string, status: GenericToolStatus = "done") {
 }
 
 describe("trace activity semantics", () => {
+  it("uses readable copy when a hosted search query is unavailable", () => {
+    expect(describeTrace("web_search()").label).toBe("Searched the web");
+  });
+
   it.each([
     ['web_search({"query":"nanobot latest release"})', "done", "Searched nanobot latest release", ""],
     ['web_fetch({"url":"https://example.com/docs?token=private"})', "done", "Read", "example.com/docs"],

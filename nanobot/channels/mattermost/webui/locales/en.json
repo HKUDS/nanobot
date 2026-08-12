@@ -27,10 +27,18 @@
         "placeholder": "Optional team ID"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Channel behavior",
         "choices": {
           "mention": "Mention only",
           "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Thread behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages (no mention needed)",
           "allowlist": "Allowlist"
         }
       },

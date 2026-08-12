@@ -46,6 +46,19 @@ _SENSITIVE_ERROR_KEYS = {
 }
 
 
+def _is_hosted_x_search_tool(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return cast(dict[object, object], value).get("type") == "x_search"
+
+
+def _is_named_x_search_tool(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    record = cast(dict[object, object], value)
+    return record.get("type") == "function" and record.get("name") == "x_search"
+
+
 class XAIGrokProvider(LLMProvider):
     """Call xAI's subscription proxy and expose supported hosted tools."""
 
@@ -112,13 +125,27 @@ class XAIGrokProvider(LLMProvider):
         stage = "oauth_token"
         try:
             token = await asyncio.to_thread(get_xai_oauth_token, proxy=self.proxy)
-            stage = "model_capabilities"
-            supports_backend_search = await self._supports_backend_search(token, wire_model)
+            configured_tools = self._extra_body.get("tools")
+            tools_are_explicit = "tools" in self._extra_body
+            configured_hosted_search = (
+                isinstance(configured_tools, list)
+                and any(
+                    _is_hosted_x_search_tool(tool)
+                    for tool in cast(list[object], configured_tools)
+                )
+            )
+            supports_backend_search = False
+            if not tools_are_explicit:
+                stage = "model_capabilities"
+                supports_backend_search = await self._supports_backend_search(token, wire_model)
             converted_tools = convert_tools(tools or [])
-            if supports_backend_search:
+            if isinstance(configured_tools, list):
+                converted_tools.extend(cast(list[dict[str, Any]], configured_tools))
+            if supports_backend_search or configured_hosted_search:
                 converted_tools = [
-                    tool for tool in converted_tools if tool.get("name") != "x_search"
+                    tool for tool in converted_tools if not _is_named_x_search_tool(tool)
                 ]
+            if supports_backend_search:
                 converted_tools.append({"type": "x_search"})
 
             body: dict[str, Any] = {
@@ -137,7 +164,13 @@ class XAIGrokProvider(LLMProvider):
                 "reasoning": _build_reasoning_options(reasoning_effort),
             }
             if self._extra_body:
-                body.update(self._extra_body)
+                body.update({
+                    key: value
+                    for key, value in self._extra_body.items()
+                    if key != "tools"
+                })
+                if tools_are_explicit and not isinstance(configured_tools, list):
+                    body["tools"] = configured_tools
 
             headers = _build_headers(token.access, wire_model)
             stage = "xai_request"

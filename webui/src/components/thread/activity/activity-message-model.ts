@@ -1,6 +1,7 @@
 import {
   canonicalToolTrace,
   mergeToolProgressEvents,
+  mergeToolProgressTraceLines,
   mergeUniqueToolTraceLines,
 } from "@/lib/tool-traces";
 import type { UIMediaAttachment, UIMessage } from "@/lib/types";
@@ -56,8 +57,15 @@ function canMergeAdjacentProgress(
 }
 
 function mergeTraceMessages(previous: UIMessage, incoming: UIMessage): UIMessage {
-  const traces = mergeUniqueToolTraceLines(messageTraces(previous), messageTraces(incoming)).traces;
   const toolEvents = mergeToolProgressEvents(previous.toolEvents, incoming.toolEvents ?? []);
+  const traces = incoming.toolEvents?.length
+    ? mergeToolProgressTraceLines(
+        messageTraces(previous),
+        previous.toolEvents,
+        messageTraces(incoming),
+        incoming.toolEvents ?? [],
+      )
+    : mergeUniqueToolTraceLines(messageTraces(previous), messageTraces(incoming)).traces;
   const fileEdits = [...(previous.fileEdits ?? []), ...(incoming.fileEdits ?? [])];
   const media = uniqueMedia([...(previous.media ?? []), ...(incoming.media ?? [])]);
 

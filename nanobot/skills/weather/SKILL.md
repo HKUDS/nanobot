@@ -11,22 +11,38 @@ Two free services, no API keys needed.
 
 ## wttr.in (primary)
 
-Quick one-liner:
+Choose one request that matches the user's scope. Do not fetch current
+conditions separately when a today or forecast request already includes them.
+
+Platform notes:
+- On Windows PowerShell, use `curl.exe`; bare `curl` may resolve to
+  `Invoke-WebRequest`.
+- On macOS and Linux, use `curl`.
+
+Current conditions only:
 ```bash
-curl -s "wttr.in/London?format=3"
+curl -s "https://wttr.in/London?format=3"
 # Output: London: ⛅️ +8°C
 ```
 
-Compact format:
+Custom current conditions format:
 ```bash
-curl -s "wttr.in/London?format=%l:+%c+%t+%h+%w"
+curl -s "https://wttr.in/London?format=%l:+%c+%t+%h+%w"
 # Output: London: ⛅️ +8°C 71% ↙5km/h
+```
+
+Today's weather, including current conditions (use this single request for
+questions about today's weather):
+```bash
+curl -s "https://wttr.in/London?1&m"
 ```
 
 Full forecast:
 ```bash
-curl -s "wttr.in/London?T"
+curl -s "https://wttr.in/London?T&m"
 ```
+
+On Windows PowerShell, replace `curl` with `curl.exe` in the commands above.
 
 Format codes: `%c` condition · `%t` temp · `%h` humidity · `%w` wind · `%l` location · `%m` moon
 
@@ -35,7 +51,8 @@ Tips:
 - Airport codes: `wttr.in/JFK`
 - Units: `?m` (metric) `?u` (USCS)
 - Today only: `?1` · Current only: `?0`
-- PNG: `curl -s "wttr.in/Berlin.png" -o /tmp/weather.png`
+- PNG (macOS/Linux): `curl -s "https://wttr.in/Berlin.png" -o weather.png`
+- PNG (Windows PowerShell): `curl.exe -s "https://wttr.in/Berlin.png" -o weather.png`
 
 ## Open-Meteo (fallback, JSON)
 

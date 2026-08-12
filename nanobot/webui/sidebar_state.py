@@ -25,7 +25,7 @@ _MAX_KEY_LEN = 512
 _MAX_TITLE_LEN = 160
 _MAX_TAG_LEN = 40
 _ALLOWED_DENSITIES = {"comfortable", "compact"}
-_ALLOWED_SORTS = {"updated_desc", "created_desc", "title_asc"}
+_ALLOWED_SORTS = {"updated_desc", "created_desc", "title_asc", "manual"}
 
 
 def webui_sidebar_state_path() -> Path:
@@ -37,6 +37,7 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "schema_version": WEBUI_SIDEBAR_STATE_SCHEMA_VERSION,
         "pinned_keys": [],
         "archived_keys": [],
+        "session_order": [],
         "title_overrides": {},
         "project_name_overrides": {},
         "tags_by_key": {},
@@ -138,6 +139,7 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     state = default_webui_sidebar_state()
     state["pinned_keys"] = _clean_string_list(raw.get("pinned_keys"))
     state["archived_keys"] = _clean_string_list(raw.get("archived_keys"))
+    state["session_order"] = _clean_string_list(raw.get("session_order"))
     state["title_overrides"] = _clean_title_overrides(raw.get("title_overrides"))
     state["project_name_overrides"] = _clean_title_overrides(
         raw.get("project_name_overrides")

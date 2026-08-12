@@ -5,11 +5,14 @@ from __future__ import annotations
 import re
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
+
+from nanobot.bus.events import OutboundMessage
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.events import InboundMessage, OutboundMessage
+    from nanobot.bus.events import InboundMessage
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -80,18 +83,21 @@ class CommandRouter:
         return normalize_command_text(text).lower() in self._priority
 
     def is_dispatchable_command(self, text: str) -> bool:
-        """Check whether *text* matches any non-priority command tier (exact or prefix).
+        """Check whether *text* should be handled by non-priority dispatch.
 
-        Does NOT check priority tier.
-        If this returns True, ``dispatch()`` is guaranteed to match a handler.
+        Exact priority commands are handled separately. Recognized non-priority
+        commands and invalid slash commands are dispatched here so malformed
+        commands can be rejected instead of reaching the LLM.
         """
         cmd = normalize_command_text(text).lower()
+        if cmd in self._priority:
+            return False
         if cmd in self._exact:
             return True
         for pfx, _ in self._prefix:
             if cmd.startswith(pfx):
                 return True
-        return False
+        return cmd.startswith("/")
 
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
@@ -102,7 +108,7 @@ class CommandRouter:
         return None
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
-        """Try exact, then prefix handlers. Returns None if unhandled."""
+        """Try exact and prefix handlers, then reject invalid slash commands."""
         ctx.raw = normalize_command_text(ctx.raw)
         cmd = ctx.raw.lower()
 
@@ -114,4 +120,51 @@ class CommandRouter:
                 ctx.args = ctx.raw[len(pfx):]
                 return await handler(ctx)
 
-        return None
+        return self._invalid_command_response(ctx)
+
+    def _invalid_command_response(self, ctx: CommandContext) -> OutboundMessage | None:
+        if not ctx.raw.startswith("/"):
+            return None
+
+        entered = ctx.raw.split(maxsplit=1)[0]
+        commands = self._registered_commands()
+        canonical = commands.get(entered.lower())
+        if canonical is not None:
+            accepts_args = any(
+                pfx.rstrip().lower() == entered.lower()
+                for pfx, _ in self._prefix
+            )
+            if accepts_args:
+                content = (
+                    f'Invalid command "{entered}". '
+                    'Use "/help" to list available commands.'
+                )
+            else:
+                content = (
+                    f'Command "{canonical}" does not accept arguments. '
+                    f'Did you mean "{canonical}"?'
+                )
+        else:
+            matches = get_close_matches(entered.lower(), commands, n=1, cutoff=0.6)
+            if matches:
+                content = (
+                    f'Unknown command "{entered}". '
+                    f'Did you mean "{commands[matches[0]]}"?'
+                )
+            else:
+                content = (
+                    f'Unknown command "{entered}". '
+                    'Use "/help" to list available commands.'
+                )
+
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    def _registered_commands(self) -> dict[str, str]:
+        commands = [*self._priority, *self._exact]
+        commands.extend(pfx.rstrip() for pfx, _ in self._prefix)
+        return {command.lower(): command for command in commands if command}

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -858,14 +858,13 @@ class Consolidator:
         return last_boundary
 
     @staticmethod
-    def _full_unconsolidated_history(
+    def _full_replay_history(
         session: Session,
     ) -> list[dict[str, Any]]:
-        """Return the whole unconsolidated tail for consolidation decisions."""
-        unconsolidated_count = len(session.messages) - session.last_consolidated
-        if unconsolidated_count <= 0:
+        """Return all messages that can reach the next model prompt."""
+        if not session.messages:
             return []
-        return session.get_history(max_messages=unconsolidated_count)
+        return session.get_history(max_messages=len(session.messages))
 
     @staticmethod
     def _replay_overflow_boundary(
@@ -948,8 +947,8 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
     ) -> tuple[int, str]:
-        """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session)
+        """Estimate prompt size from the full replayable session history."""
+        history = self._full_replay_history(session)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -1160,42 +1159,37 @@ class Consolidator:
         session_key: str,
         *,
         runtime: LLMRuntime,
-        max_suffix: int = 8,
+        max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
     ) -> str | None:
-        """Archive an idle prefix and hide it from replay without deleting it."""
+        """Archive the full idle tail while keeping recent messages replayable.
+
+        ``max_suffix`` remains accepted for SDK compatibility. Replay retention
+        is now derived independently from archive progress using the project-wide
+        compacted-session window.
+        """
+        if max_suffix != MIN_COMPACTED_REPLAY_MESSAGES:
+            logger.debug(
+                "Idle-session compact for {} uses the fixed replay window ({}, requested {})",
+                session_key,
+                MIN_COMPACTED_REPLAY_MESSAGES,
+                max_suffix,
+            )
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
             session = self.sessions.get_or_create(session_key)
 
-            messages_to_summarize = list(session.messages[session.last_consolidated:])
-            if not messages_to_summarize:
-                self.sessions.save(session)
-                return ""
-
-            probe = Session(
-                key=session.key,
-                messages=messages_to_summarize.copy(),
-                created_at=session.created_at,
-                updated_at=session.updated_at,
-                metadata={},
-                last_consolidated=0,
-            )
-            result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
-            visible_suffix = probe.messages
-            messages_to_remove = result.dropped
-
-            if not messages_to_remove:
-                self.sessions.save(session)
+            archive_start = session.last_consolidated
+            messages_to_archive = list(session.messages[archive_start:])
+            if not messages_to_archive:
                 return ""
 
             last_active = session.updated_at
-            # The visible suffix informs the summary but stays out of raw fallback.
+            archive_end = archive_start + len(messages_to_archive)
             summary = await self.archive(
-                messages_to_remove,
+                messages_to_archive,
                 runtime=runtime,
                 session_key=session_key,
-                summary_messages=messages_to_summarize,
             )
 
             if summary and summary != "(nothing)":
@@ -1204,16 +1198,22 @@ class Consolidator:
                     "last_active": last_active.isoformat(),
                 }
 
-            # Preserve history and advance only the replay boundary.
-            session.last_consolidated = len(session.messages) - len(visible_suffix)
+            # A turn can append while the provider call is in flight. Advance only
+            # through the captured batch so new messages remain eligible next time.
+            session.last_consolidated = archive_end
             session.provider_state = None
             self.sessions.save(session)
+
+            visible = session.get_history(
+                max_messages=MIN_COMPACTED_REPLAY_MESSAGES,
+                extend_to_user=True,
+            )
 
             logger.info(
                 "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
                 session_key,
-                len(messages_to_remove),
-                len(visible_suffix),
+                len(messages_to_archive),
+                len(visible),
                 len(session.messages),
                 bool(summary),
             )

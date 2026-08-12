@@ -64,6 +64,8 @@ export interface UIMessage {
   cliApps?: UICliAppAttachment[];
   /** Settings-managed MCP presets explicitly attached to this user turn. */
   mcpPresets?: UIMcpPresetAttachment[];
+  /** Persisted sessions explicitly referenced by this user turn. */
+  sessionMentions?: SessionMention[];
   /** Assistant turn: accumulated model reasoning / thinking text. Built up
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
@@ -105,6 +107,14 @@ export interface UIMcpPresetAttachment {
   configured?: boolean;
   logo_url?: string | null;
   brand_color?: string | null;
+}
+
+export interface SessionMention {
+  /** Text token inserted in the composer, without the leading @. */
+  name: string;
+  /** Stable persisted-session identifier used by read_session. */
+  session_key: string;
+  title: string;
 }
 
 export interface SessionAutomationJob {
@@ -357,7 +367,7 @@ export interface WorkspacesPayload {
 }
 
 export type SidebarDensity = "comfortable" | "compact";
-export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc";
+export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc" | "manual";
 
 export interface SidebarViewState {
   density: SidebarDensity;
@@ -371,6 +381,7 @@ export interface SidebarStatePayload {
   schema_version: number;
   pinned_keys: string[];
   archived_keys: string[];
+  session_order: string[];
   title_overrides: Record<string, string>;
   project_name_overrides: Record<string, string>;
   tags_by_key: Record<string, string[]>;
@@ -380,11 +391,11 @@ export interface SidebarStatePayload {
 }
 
 export interface BootstrapResponse {
-  token: string;
-  api_token: string;
+  token?: string;
+  api_token?: string;
   ws_path: string;
   ws_url?: string | null;
-  expires_in: number;
+  expires_in?: number;
   limits?: WebUIIngressLimits;
   model_name?: string | null;
   runtime_surface?: RuntimeSurface;
@@ -490,8 +501,6 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     timezone: string;
-    bot_name: string;
-    bot_icon: string;
     tool_hint_max_length: number;
   };
   model_presets: Array<{
@@ -947,13 +956,16 @@ export interface McpPresetInfo {
   description: string;
   docs_url: string;
   transport: "stdio" | "streamableHttp" | "sse" | "oauth" | string;
+  auth?: "oauth" | null;
   requires: string;
   note: string;
   install_supported: boolean;
   installed: boolean;
   configured: boolean;
+  enabled?: boolean;
   available: boolean;
   status: "not_installed" | "configured" | "missing_credentials" | "missing_dependency" | "coming_soon" | string;
+  runtime_status?: "connecting" | "connected" | "failed" | string;
   logo_url?: string | null;
   brand_color?: string | null;
   required_fields: McpPresetField[];
@@ -965,6 +977,30 @@ export interface McpPresetInfo {
   enabled_tools?: string[];
   source?: "preset" | "custom" | string;
   manifest?: AppManifest;
+}
+
+export type McpOAuthFlowStatus =
+  | "starting"
+  | "authorization_required"
+  | "connecting"
+  | "authorized"
+  | "connected"
+  | "failed"
+  | "cancelled";
+
+export interface McpOAuthFlowPayload {
+  flow_id: string;
+  name: string;
+  status: McpOAuthFlowStatus;
+  expires_in: number;
+  authorization_url?: string;
+  completion_input?: "callback_url";
+  error?: string;
+  hot_reload?: {
+    ok: boolean;
+    message?: string;
+    requires_restart?: boolean;
+  };
 }
 
 export interface McpPresetsPayload {
@@ -1028,8 +1064,6 @@ export interface SettingsUpdate {
   modelPreset?: string | null;
   contextWindowTokens?: number;
   timezone?: string;
-  botName?: string;
-  botIcon?: string;
   toolHintMaxLength?: number;
 }
 
@@ -1155,7 +1189,7 @@ export interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "attached"; chat_id: string; temporary?: boolean }
   | { event: "message_accepted"; chat_id: string; turn_id: string }
   | ({
       event: "message";
@@ -1255,6 +1289,18 @@ export type InboundEvent =
       provider?: string;
     }
   | {
+      event: "webui_response";
+      request_id: string;
+      ok: true;
+      result: unknown;
+    }
+  | {
+      event: "webui_response";
+      request_id: string;
+      ok: false;
+      error: { status: number; message: string };
+    }
+  | {
       event: "error";
       chat_id?: string;
       detail?: string;
@@ -1331,8 +1377,17 @@ export interface FilePreviewPayload {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "new_temporary_chat" }
+  | {
+      type: "webui_request";
+      request_id: string;
+      action: string;
+      payload: Record<string, unknown>;
+    }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
+  | { type: "set_sidebar_state"; state: SidebarStatePayload }
+  | { type: "discard_temporary_chat"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {
@@ -1342,6 +1397,7 @@ export type Outbound =
       media?: OutboundMedia[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
+      session_mentions?: SessionMention[];
       quoted_context?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;

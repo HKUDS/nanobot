@@ -17,7 +17,33 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
+_SKILL_NAME = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
+
+
+def parse_skill_metadata(content: str) -> dict[str, object] | None:
+    """Parse a skill document's YAML frontmatter."""
+    if not (match := _STRIP_SKILL_FRONTMATTER.match(content)):
+        return None
+    try:
+        parsed = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {str(key): value for key, value in cast(dict[object, object], parsed).items()}
+
+
+def valid_skill_metadata(metadata: dict[str, object], name: str) -> bool:
+    """Return whether metadata satisfies the Agent Skills identity contract."""
+    description = metadata.get("description")
+    return (
+        metadata.get("name") == name
+        and len(name) <= 64
+        and _SKILL_NAME.fullmatch(name) is not None
+        and isinstance(description, str)
+        and 1 <= len(description.strip()) <= 1024
+    )
 
 
 class SkillsLoader:
@@ -33,6 +59,15 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+
+    def _skill_aliases(self) -> dict[str, str]:
+        """Return compatibility aliases owned by installed CLI Apps."""
+        from nanobot.apps.cli import CliAppManager
+
+        try:
+            return CliAppManager(workspace=self.workspace).installed_skill_aliases()
+        except OSError:
+            return {}
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -60,15 +95,33 @@ class SkillsLoader:
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
+        from nanobot.agent.plugins import enabled_agent_plugin_skills
+
+        plugin_skills = enabled_agent_plugin_skills(self.workspace)
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        workspace_names = {entry["name"] for entry in skills}
+        seen_names = {entry["name"] for entry in skills}
+        for name, path in plugin_skills:
+            if name in seen_names:
+                continue
+            skills.append(
+                {
+                    "name": name,
+                    "path": str(path),
+                    "source": "plugin",
+                }
+            )
+            seen_names.add(name)
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
+                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=seen_names)
             )
 
         if self.disabled_skills:
-            skills = [s for s in skills if s["name"] not in self.disabled_skills]
+            disabled = set(self.disabled_skills)
+            for legacy, canonical in self._skill_aliases().items():
+                if legacy in disabled or canonical in disabled:
+                    disabled.update((legacy, canonical))
+            skills = [s for s in skills if s["name"] not in disabled]
 
         if filter_unavailable:
             return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
@@ -84,14 +137,11 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        roots = [self.workspace_skills]
-        if self.builtin_skills:
-            roots.append(self.builtin_skills)
-        for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
-        return None
+        skills = self.list_skills(filter_unavailable=False)
+        available = {skill["name"] for skill in skills}
+        resolved = name if name in available else self._skill_aliases().get(name, name)
+        entry = next((skill for skill in skills if skill["name"] == resolved), None)
+        return Path(entry["path"]).read_text(encoding="utf-8") if entry else None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -118,9 +168,11 @@ class SkillsLoader:
             entry["name"]
             for entry in self.list_skills(filter_unavailable=True)
         }
+        aliases = self._skill_aliases()
         invoked: list[str] = []
         for match in _SKILL_REFERENCE.finditer(text):
-            name = match.group(1)
+            requested = match.group(1)
+            name = requested if requested in available else aliases.get(requested, requested)
             if name in available and name not in invoked:
                 invoked.append(name)
         return invoked
@@ -145,6 +197,7 @@ class SkillsLoader:
         sections: list[str] = []
         groups = (
             ("Workspace skills", "workspace", self.workspace_skills),
+            ("Agent Plugin skills", "plugin", self.workspace / "plugins"),
             ("Built-in skills", "builtin", self.builtin_skills),
         )
         for label, source, root in groups:
@@ -278,21 +331,4 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        content = self.load_skill(name)
-        if not content or not content.startswith("---"):
-            return None
-        match = _STRIP_SKILL_FRONTMATTER.match(content)
-        if not match:
-            return None
-        try:
-            parsed = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        # yaml.safe_load returns native types (int, bool, list, etc.);
-        # keep values as-is so downstream consumers get correct types.
-        metadata: dict[str, object] = {}
-        for key, value in cast(dict[object, object], parsed).items():
-            metadata[str(key)] = value
-        return metadata
+        return parse_skill_metadata(self.load_skill(name) or "")

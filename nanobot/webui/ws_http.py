@@ -14,28 +14,30 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
+from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
-from nanobot.runtime_context import public_history_messages
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.triggers.local_types import LocalTrigger
-from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
     file_preview_payload,
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
+from nanobot.webui.http_utils import (
+    accepts_gzip as _accepts_gzip,
+)
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -59,6 +61,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
+)
+from nanobot.webui.http_utils import (
+    is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
 )
 from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
@@ -114,7 +119,65 @@ from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
-_AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+_WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
+_WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
+
+_WEBUI_MUTATION_PATHS = {
+    "automation.enable": "/api/webui/automations/enable",
+    "automation.disable": "/api/webui/automations/disable",
+    "automation.delete": "/api/webui/automations/delete",
+    "automation.run": "/api/webui/automations/run",
+    "automation.update": "/api/webui/automations/update",
+    "skill.install": "/api/webui/skills/install",
+    "skill.update": "/api/webui/skills/update",
+    "skill.delete": "/api/webui/skills/delete",
+    "sidebar.update": "/api/webui/sidebar-state/update",
+    "settings.agent.update": "/api/settings/update",
+    "settings.model_configuration.create": "/api/settings/model-configurations/create",
+    "settings.model_configuration.update": "/api/settings/model-configurations/update",
+    "settings.model_configuration.delete": "/api/settings/model-configurations/delete",
+    "settings.model_configuration.migrate": "/api/settings/model-configurations/migrate",
+    "settings.model_call_order.update": "/api/settings/model-call-order/update",
+    "settings.provider.update": "/api/settings/provider/update",
+    "settings.provider.create": "/api/settings/provider/create",
+    "settings.provider.oauth_login": "/api/settings/provider/oauth-login",
+    "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
+    "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
+    "settings.web_search.update": "/api/settings/web-search/update",
+    "settings.api_service.start": "/api/settings/api-service/start",
+    "settings.api_service.stop": "/api/settings/api-service/stop",
+    "settings.image_generation.update": "/api/settings/image-generation/update",
+    "settings.transcription.update": "/api/settings/transcription/update",
+    "settings.network_safety.update": "/api/settings/network-safety/update",
+    "settings.cli_app.install": "/api/settings/cli-apps/install",
+    "settings.cli_app.update": "/api/settings/cli-apps/update",
+    "settings.cli_app.uninstall": "/api/settings/cli-apps/uninstall",
+    "settings.cli_app.test": "/api/settings/cli-apps/test",
+    "settings.feature.enable": "/api/settings/nanobot-features/enable",
+    "settings.feature.disable": "/api/settings/nanobot-features/disable",
+    "settings.channel.validate": "/api/settings/channels/validate",
+    "settings.channel.configure": "/api/settings/channels/configure",
+    "settings.pairing.approve": "/api/settings/pairing/approve",
+    "settings.pairing.deny": "/api/settings/pairing/deny",
+    "settings.mcp.enable": "/api/settings/mcp-presets/enable",
+    "settings.mcp.disable": "/api/settings/mcp-presets/disable",
+    "settings.mcp.remove": "/api/settings/mcp-presets/remove",
+    "settings.mcp.test": "/api/settings/mcp-presets/test",
+    "settings.mcp.reconnect": "/api/settings/mcp-presets/reconnect",
+    "settings.mcp.custom": "/api/settings/mcp-presets/custom",
+    "settings.mcp.import": "/api/settings/mcp-presets/import",
+    "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
+    "settings.mcp.tools": "/api/settings/mcp-presets/tools",
+    "settings.mcp.oauth_start": "/api/settings/mcp-oauth/start",
+    "settings.mcp.oauth_complete": "/api/settings/mcp-oauth/complete",
+    "settings.mcp.oauth_cancel": "/api/settings/mcp-oauth/cancel",
+}
+
+_WEBUI_CHANNEL_CONNECT_ACTIONS = {
+    "settings.channel.connect.start": "start",
+    "settings.channel.connect.poll": "poll",
+    "settings.channel.connect.cancel": "cancel",
+}
 
 # Fix for #5190: On Windows, mimetypes.guess_type() reads the registry key
 # HKEY_CLASSES_ROOT\.js\Content Type, which is commonly set to 'text/plain'
@@ -146,6 +209,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.settings_services import WebUISettingsServices
 
 def _decode_api_key(raw_key: str) -> str | None:
     key = unquote(raw_key)
@@ -153,6 +217,33 @@ def _decode_api_key(raw_key: str) -> str | None:
     if _api_key_re.match(key) is None:
         return None
     return key
+
+
+def _mutation_payload(request: WsRequest) -> dict[str, Any] | None:
+    payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, None)
+    if not isinstance(payload, dict):
+        return None
+    return cast(dict[str, Any], payload)
+
+
+def _request_query(request: WsRequest) -> dict[str, list[str]]:
+    payload = _mutation_payload(request)
+    if payload is None:
+        return _parse_query(request.path)
+    query: dict[str, list[str]] = {}
+    for key, value in payload.items():
+        if not key:
+            continue
+        if isinstance(value, bool):
+            text = "true" if value else "false"
+        elif value is None:
+            text = ""
+        elif isinstance(value, (dict, list)):
+            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        else:
+            text = str(value)
+        query[key] = [text]
+    return query
 
 
 def _default_model_name_from_config() -> str | None:
@@ -207,6 +298,7 @@ class GatewayHTTPHandler:
         media: WebUIMediaGateway,
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
+        settings: WebUISettingsServices,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -215,6 +307,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         log: Any = logger,
     ) -> None:
@@ -227,6 +320,7 @@ class GatewayHTTPHandler:
         self.media = media
         self.ingress = ingress
         self.workspaces = workspaces
+        self.settings = settings
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills: set[str] = (
             disabled_skills if disabled_skills is not None else set()
@@ -245,6 +339,7 @@ class GatewayHTTPHandler:
 
         self._capabilities = _rc(runtime_surface, runtime_capabilities_overrides or {})
         self.settings_routes = WebUISettingsRouter(
+            settings=settings,
             bus=bus,
             logger=self._log,
             check_api_token=self.check_api_token,
@@ -255,6 +350,8 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
+            mcp_runtime_status=mcp_runtime_status,
+            mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -263,6 +360,8 @@ class GatewayHTTPHandler:
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
+        if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
+            return True
         return self.tokens.check_api_token(request)
 
     # -- Main dispatch ------------------------------------------------------
@@ -272,12 +371,92 @@ class GatewayHTTPHandler:
         got, _ = _parse_request_path(request.path)
         started = time.perf_counter()
         response: Any | None = None
+        setattr(
+            request,
+            "_nanobot_trusted_proxy_authenticated",
+            _is_trusted_proxy_authenticated_request(connection, request.headers, self.config),
+        )
 
         try:
+            if self._is_webui_mutation_path(got):
+                return _http_error(
+                    405,
+                    "WebUI mutations require an authenticated WebSocket",
+                )
             response = await self._dispatch_resolved(connection, request, got)
             return response
         finally:
             self._log_slow_http(got, response, started)
+
+    async def dispatch_webui_mutation(
+        self,
+        connection: Any,
+        action: str,
+        payload: dict[str, Any],
+    ) -> Response:
+        """Run one explicitly allowlisted mutation for an authenticated WebUI socket."""
+        path = self._webui_mutation_path(action, payload)
+        if isinstance(path, Response):
+            return path
+
+        source_request = getattr(connection, "request", None)
+        source_headers = getattr(source_request, "headers", None)
+        if source_headers is None:
+            headers = Headers()
+        else:
+            try:
+                headers = Headers(source_headers.raw_items())
+            except (AttributeError, TypeError):
+                try:
+                    headers = Headers(source_headers)
+                except TypeError:
+                    headers = Headers()
+        request = WsRequest(path, headers)
+        setattr(request, "_nanobot_trusted_proxy_authenticated", True)
+        setattr(request, _WEBUI_MUTATION_REQUEST_ATTR, True)
+        setattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, dict(payload))
+        response = await self._dispatch_resolved(connection, request, path)
+        if isinstance(response, Response):
+            return response
+        return _http_error(404, "WebUI mutation action not found")
+
+    def _is_webui_mutation_path(self, path: str) -> bool:
+        if self.settings_routes.is_mutation_path(path):
+            return True
+        if re.match(r"^/api/sessions/[^/]+/delete$", path):
+            return True
+        if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", path):
+            return True
+        return path in {
+            "/api/webui/skills/install",
+            "/api/webui/skills/update",
+            "/api/webui/skills/delete",
+            "/api/webui/sidebar-state/update",
+        }
+
+    @staticmethod
+    def _webui_mutation_path(
+        action: str,
+        payload: dict[str, Any],
+    ) -> str | Response:
+        path = _WEBUI_MUTATION_PATHS.get(action)
+        if path is not None:
+            return path
+        if action == "session.delete":
+            key = payload.get("key")
+            if not isinstance(key, str) or not key.strip():
+                return _http_error(400, "missing session key")
+            return f"/api/sessions/{quote(key, safe='')}/delete"
+        connect_action = _WEBUI_CHANNEL_CONNECT_ACTIONS.get(action)
+        if connect_action is not None:
+            channel = payload.get("channel")
+            if not isinstance(channel, str) or re.fullmatch(
+                r"[A-Za-z0-9_-]{1,64}",
+                channel,
+            ) is None:
+                return _http_error(400, "invalid channel name")
+            return f"/api/settings/channels/{channel}/connect/{connect_action}"
+        return _http_error(404, "unknown WebUI mutation action")
 
     async def _dispatch_resolved(
         self,
@@ -326,7 +505,10 @@ class GatewayHTTPHandler:
 
         # Static SPA serving
         if self.static_dist_path is not None:
-            response = self._serve_static(got)
+            response = self._serve_static(
+                got,
+                accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            )
             if response is not None:
                 return response
 
@@ -372,11 +554,30 @@ class GatewayHTTPHandler:
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
-        if secret:
-            if not _issue_route_secret_matches(request.headers, secret):
-                return _http_error(401, "Unauthorized")
-        elif not is_local_browser:
-            return _http_error(403, "bootstrap is localhost-only")
+        is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
+            connection,
+            request.headers,
+            self.config,
+        )
+        if not is_proxy_authenticated:
+            if secret:
+                if not _issue_route_secret_matches(request.headers, secret):
+                    return _http_error(401, "Unauthorized")
+            elif not is_local_browser:
+                return _http_error(403, "bootstrap is localhost-only")
+
+        if is_proxy_authenticated:
+            payload = {
+                "ws_path": _normalize_config_path(self.config.path),
+                "ws_url": self._bootstrap_ws_url(request),
+                "limits": self.ingress.bootstrap_limits(
+                    max_frame_bytes=self.config.max_message_bytes,
+                ),
+                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+                "runtime_surface": self._runtime_surface,
+                "runtime_capabilities": self._capabilities,
+            }
+            return _http_json_response(payload)
 
         api_token_allowed = bool(secret) or is_local_browser
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
@@ -412,6 +613,8 @@ class GatewayHTTPHandler:
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
+        if self.config.public_ws_url:
+            return self.config.public_ws_url
         host = _safe_host_header(_case_insensitive_header(headers, "Host"))
         if not host:
             host = _host_for_url(self.config.host, self.config.port)
@@ -422,13 +625,17 @@ class GatewayHTTPHandler:
         expected_path = _normalize_config_path(self.config.path)
         return f"{scheme}://{host}{expected_path}"
 
+    def _mcp_oauth_redirect_uri(self, request: WsRequest) -> str:
+        """Derive the browser callback from the same public origin as WebSocket bootstrap."""
+        from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
+
+        public_ws_url = urlsplit(self._bootstrap_ws_url(request))
+        scheme = "https" if public_ws_url.scheme == "wss" else "http"
+        return urlunsplit((scheme, public_ws_url.netloc, MCP_OAUTH_CALLBACK_PATH, "", ""))
+
     # -- Session routes -----------------------------------------------------
 
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
-        m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
-        if m:
-            return self._handle_session_messages(request, m.group(1))
-
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
@@ -489,34 +696,6 @@ class GatewayHTTPHandler:
             row["workspace_scope"] = scope.payload()
             cleaned.append(row)
         return {"sessions": cleaned}
-
-    def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if self.session_manager is None:
-            return _http_error(503, "session manager unavailable")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
-        data = self.session_manager.read_session_file(decoded_key)
-        if data is None:
-            return _http_error(404, "session not found")
-        messages = data.get("messages")
-        if isinstance(messages, list):
-            session_messages = cast(list[dict[str, Any]], messages)
-            scrub_subagent_messages_for_channel(session_messages)
-            raw_session_messages = cast(list[Any], messages)
-            data["messages"] = public_history_messages(
-                [
-                    cast(dict[str, Any], message)
-                    for message in raw_session_messages
-                    if isinstance(message, dict)
-                ]
-            )
-        self.media.augment_media_urls(data)
-        return _http_json_response(data)
 
     def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
@@ -643,7 +822,7 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        query = _parse_query(request.path)
+        query = _request_query(request)
         delete_automations = (_query_first(query, "delete_automations") or "").lower()
         automation_jobs = session_automation_jobs(
             self.cron_service,
@@ -739,7 +918,7 @@ class GatewayHTTPHandler:
         if self.cron_service is None and self.local_trigger_store is None:
             return _http_error(503, "automation service unavailable")
 
-        query = _parse_query(request.path)
+        query = _request_query(request)
         job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
         if not job_id:
             return _http_error(400, "missing automation id")
@@ -971,7 +1150,7 @@ class GatewayHTTPHandler:
         if self._skill_install_lock.locked():
             return _http_error(409, "another skill installation is already in progress")
 
-        query = _parse_query(request.path)
+        query = _request_query(request)
         provider = _query_first(query, "provider") or "skills_sh"
         source = _query_first(query, "source") or ""
         skill_id = _query_first(query, "skill") or ""
@@ -1012,7 +1191,7 @@ class GatewayHTTPHandler:
     def _handle_webui_skill_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        query = _parse_query(request.path)
+        query = _request_query(request)
         name = _query_first(query, "name") or ""
         raw_enabled = (_query_first(query, "enabled") or "").lower()
         if raw_enabled not in {"true", "false"}:
@@ -1044,7 +1223,7 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         if not _is_local_browser_request(connection, request.headers):
             return _http_error(403, "remote skill deletion is disabled")
-        name = _query_first(_parse_query(request.path), "name") or ""
+        name = _query_first(_request_query(request), "name") or ""
         try:
             action = delete_webui_skill(
                 self.skills_workspace_path,
@@ -1091,18 +1270,14 @@ class GatewayHTTPHandler:
     def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        query = _parse_query(request.path)
-        raw_state = _query_first(query, "state")
-        if raw_state is None:
+        payload = _mutation_payload(request)
+        state_value = payload.get("state") if payload is not None else None
+        if state_value is None:
             return _http_error(400, "missing state")
-        try:
-            decoded = json.loads(raw_state)
-        except json.JSONDecodeError:
-            return _http_error(400, "state must be JSON")
-        if not isinstance(decoded, dict):
+        if not isinstance(state_value, dict):
             return _http_error(400, "state must be an object")
         try:
-            state = write_webui_sidebar_state(cast(dict[str, Any], decoded))
+            state = write_webui_sidebar_state(cast(dict[str, Any], state_value))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:
@@ -1112,7 +1287,12 @@ class GatewayHTTPHandler:
 
     # -- Static file serving ------------------------------------------------
 
-    def _serve_static(self, request_path: str) -> Response | None:
+    def _serve_static(
+        self,
+        request_path: str,
+        *,
+        accept_encoding: str = "",
+    ) -> Response | None:
         assert self.static_dist_path is not None
         rel = request_path.lstrip("/")
         if not rel:
@@ -1130,15 +1310,28 @@ class GatewayHTTPHandler:
                 candidate = index
             else:
                 return None
-        try:
-            body = candidate.read_bytes()
-        except OSError as e:
-            self._log.warning("static: failed to read {}: {}", candidate, e)
-            return _http_error(500, "Internal Server Error")
         ctype, _ = mimetypes.guess_type(candidate.name)
         if ctype is None:
             ctype = "application/octet-stream"
-        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+        utf8_text = ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+        }
+        compressible = utf8_text or ctype == "image/svg+xml"
+        response_path = candidate
+        extra_headers: list[tuple[str, str]] = []
+        if compressible:
+            extra_headers.append(("Vary", "Accept-Encoding"))
+            gzip_candidate = candidate.with_name(f"{candidate.name}.gz")
+            if _accepts_gzip(accept_encoding) and gzip_candidate.is_file():
+                response_path = gzip_candidate
+                extra_headers.append(("Content-Encoding", "gzip"))
+        try:
+            body = response_path.read_bytes()
+        except OSError as e:
+            self._log.warning("static: failed to read {}: {}", response_path, e)
+            return _http_error(500, "Internal Server Error")
+        if utf8_text:
             ctype = f"{ctype}; charset=utf-8"
         if candidate.name == "index.html":
             cache = "no-cache"
@@ -1148,21 +1341,15 @@ class GatewayHTTPHandler:
             body,
             status=200,
             content_type=ctype,
-            extra_headers=[("Cache-Control", cache)],
+            extra_headers=[("Cache-Control", cache), *extra_headers],
         )
 
 
 def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None:
-    raw = _case_insensitive_header(request.headers, _AUTOMATION_VALUES_HEADER)
-    if not raw:
+    payload = _mutation_payload(request)
+    if payload is None or "values" not in payload:
         return {}
-    try:
-        values = json.loads(raw)
-    except Exception:
-        try:
-            values = json.loads(unquote(raw))
-        except Exception:
-            return None
+    values = payload.get("values")
     return cast(dict[str, Any], values) if isinstance(values, dict) else None
 
 

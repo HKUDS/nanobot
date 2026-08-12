@@ -15,6 +15,7 @@ export default {
         { key: "channels.mattermost.token" },
         { key: "channels.mattermost.teamId" },
         { key: "channels.mattermost.groupPolicy" },
+        { key: "channels.mattermost.groupPolicyInThread" },
       ],
     },
   },

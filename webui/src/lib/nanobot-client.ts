@@ -5,6 +5,8 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   OutboundMedia,
+  SessionMention,
+  SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
@@ -106,6 +108,20 @@ interface PendingRequest<T> {
   timer: ReturnType<typeof setTimeout>;
 }
 
+export class WebUIMutationError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "WebUIMutationError";
+  }
+}
+
+interface PendingChatRequest extends PendingRequest<string> {
+  temporary: boolean;
+}
+
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 const TURN_REJECTION_DETAILS = new Set([
   "access_denied",
@@ -171,6 +187,8 @@ export class NanobotClient {
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
+  /** Temporary chats are connection-owned and intentionally not reattached. */
+  private temporaryChatIds = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
@@ -192,9 +210,10 @@ export class NanobotClient {
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingRequest<string> | null = null;
+  private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
+  private pendingWebUIRequests = new Map<string, PendingRequest<unknown>>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -278,6 +297,16 @@ export class NanobotClient {
   getRunStartedAt(chatId: string): number | null {
     const v = this.runStartedAtByChatId.get(chatId);
     return v === undefined ? null : v;
+  }
+
+  /** Clear the optimistic run state immediately after the user stops a turn. */
+  finishRunLocally(chatId: string): void {
+    const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
+    for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    if (this.runStartedAtByChatId.delete(chatId)) {
+      this.emitRunStatus(chatId, null);
+    }
   }
 
   /** Refresh transport policy after bootstrap token renewal. */
@@ -723,7 +752,16 @@ export class NanobotClient {
     } catch {
       // ignore
     }
+    this.clearTemporaryChats();
     this.setStatus("closed");
+  }
+
+  discardTemporaryChat(chatId: string): void {
+    if (!this.temporaryChatIds.has(chatId)) return;
+    if (this.socket?.readyState === WS_OPEN) {
+      this.rawSend({ type: "discard_temporary_chat", chat_id: chatId });
+    }
+    this.forgetTemporaryChat(chatId);
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
@@ -736,11 +774,26 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("newChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
       });
+    });
+  }
+
+  /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
+  newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
+    if (this.pendingNewChat) {
+      return Promise.reject(new Error("newChat already in flight"));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNewChat = null;
+        reject(new Error("newTemporaryChat timed out"));
+      }, timeoutMs);
+      this.pendingNewChat = { resolve, reject, timer, temporary: true };
+      this.queueSend({ type: "new_temporary_chat" });
     });
   }
 
@@ -765,6 +818,60 @@ export class NanobotClient {
     });
   }
 
+  /**
+   * Send one non-replayable WebUI mutation over the authenticated socket.
+   * A client-side timeout only abandons the reply; the server may finish work
+   * that already started, so timed-out requests are never retried automatically.
+   */
+  requestMutation<T>(
+    action: string,
+    payload: Record<string, unknown> = {},
+    timeoutMs: number = 20_000,
+  ): Promise<T> {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WS_OPEN) {
+      return Promise.reject(
+        new WebUIMutationError(503, "WebUI connection is not open"),
+      );
+    }
+    const requestId = crypto.randomUUID();
+    const frame: Outbound = {
+      type: "webui_request",
+      request_id: requestId,
+      action,
+      payload,
+    };
+    if (!this.frameFitsTransport(frame)) {
+      return Promise.reject(
+        new WebUIMutationError(413, "WebUI mutation payload is too large"),
+      );
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingWebUIRequests.delete(requestId);
+        reject(
+          new WebUIMutationError(
+            504,
+            `WebUI request timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+      this.pendingWebUIRequests.set(requestId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer,
+      });
+      try {
+        socket.send(JSON.stringify(frame));
+      } catch {
+        clearTimeout(timer);
+        this.pendingWebUIRequests.delete(requestId);
+        reject(new WebUIMutationError(503, "Could not send WebUI request"));
+      }
+    });
+  }
+
   /** Ask the server to create a non-destructive fork before a user-message index. */
   forkChat(
     sourceChatId: string,
@@ -780,7 +887,7 @@ export class NanobotClient {
         this.pendingNewChat = null;
         reject(new Error("forkChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "fork_chat",
         source_chat_id: sourceChatId,
@@ -791,6 +898,7 @@ export class NanobotClient {
   }
 
   attach(chatId: string): void {
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
@@ -804,6 +912,7 @@ export class NanobotClient {
     options?: {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
+      sessionMentions?: SessionMention[];
       quotedContext?: string;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
@@ -811,7 +920,8 @@ export class NanobotClient {
       startsNewRun?: boolean;
     },
   ): void {
-    this.knownChats.add(chatId);
+    const temporary = this.temporaryChatIds.has(chatId);
+    if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
       type: "message",
       chat_id: chatId,
@@ -819,6 +929,9 @@ export class NanobotClient {
       ...(media && media.length > 0 ? { media } : {}),
       ...(options?.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options?.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
+      ...(options?.sessionMentions?.length
+        ? { session_mentions: options.sessionMentions }
+        : {}),
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
@@ -857,12 +970,17 @@ export class NanobotClient {
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
+    if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
     this.queueSend({
       type: "set_workspace_scope",
       chat_id: chatId,
       workspace_scope: workspaceScope,
     });
+  }
+
+  setSidebarState(state: SidebarStatePayload): Promise<SidebarStatePayload> {
+    return this.requestMutation<SidebarStatePayload>("sidebar.update", { state });
   }
 
   // -- internals ---------------------------------------------------------
@@ -910,6 +1028,23 @@ export class NanobotClient {
 
     if (wsInboundDebugEnabled()) {
       console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
+    }
+
+    if (parsed.event === "webui_response") {
+      const pending = this.pendingWebUIRequests.get(parsed.request_id);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      this.pendingWebUIRequests.delete(parsed.request_id);
+      if (parsed.ok) {
+        pending.resolve(parsed.result);
+      } else {
+        const status = Number.isFinite(parsed.error?.status)
+          ? parsed.error.status
+          : 500;
+        const message = parsed.error?.message || "WebUI mutation failed";
+        pending.reject(new WebUIMutationError(status, message));
+      }
+      return;
     }
 
     if (parsed.event === "error" && !parsed.turn_id) {
@@ -977,8 +1112,15 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
-      this.knownChats.add(parsed.chat_id);
-      if (this.pendingNewChat) {
+      if (parsed.temporary === true) {
+        this.temporaryChatIds.add(parsed.chat_id);
+      } else {
+        this.knownChats.add(parsed.chat_id);
+      }
+      if (
+        this.pendingNewChat
+        && this.pendingNewChat.temporary === (parsed.temporary === true)
+      ) {
         clearTimeout(this.pendingNewChat.timer);
         this.pendingNewChat.resolve(parsed.chat_id);
         this.pendingNewChat = null;
@@ -1084,12 +1226,20 @@ export class NanobotClient {
 
   private handleClose(event?: { code?: number }): void {
     this.socket = null;
+    this.clearTemporaryChats();
     if (this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
     this.rejectAllTranscriptions("socket closed");
+    for (const pending of this.pendingWebUIRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(
+        new WebUIMutationError(503, "Socket closed before WebUI response"),
+      );
+    }
+    this.pendingWebUIRequests.clear();
     for (const pending of this.pendingSystemCommands.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("socket closed"));
@@ -1228,6 +1378,40 @@ export class NanobotClient {
     } else {
       this.sendQueue.push(frame);
     }
+  }
+
+  private clearTemporaryChats(): void {
+    for (const chatId of [...this.temporaryChatIds]) {
+      this.forgetTemporaryChat(chatId);
+    }
+  }
+
+  private forgetTemporaryChat(chatId: string): void {
+    this.temporaryChatIds.delete(chatId);
+    this.knownChats.delete(chatId);
+    this.chatHandlers.delete(chatId);
+    this.pendingInboundByChat.delete(chatId);
+    const wasRunning = this.runStartedAtByChatId.delete(chatId);
+    this.runGenerationByChatId.delete(chatId);
+    this.latestRunTurnIdByChatId.delete(chatId);
+    this.unsettledRunTurnIdsByChatId.delete(chatId);
+    this.canonicalCompletedTurnIdsByChatId.delete(chatId);
+    this.goalStateByChatId.delete(chatId);
+    for (const key of [...this.runStartedAtByTurnKey.keys()]) {
+      if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);
+    }
+    for (const [key, pending] of [...this.pendingMessageSends]) {
+      if (pending.chatId !== chatId) continue;
+      this.pendingMessageSends.delete(key);
+      this.socketPendingMessageSendKeys.delete(key);
+    }
+    this.sendQueue = this.sendQueue.filter((frame) => (
+      !("chat_id" in frame) || frame.chat_id !== chatId
+    ));
+    if (this.lastSocketMessageSendKey?.startsWith(`${chatId}\u0000`)) {
+      this.lastSocketMessageSendKey = null;
+    }
+    if (wasRunning) this.emitRunStatus(chatId, null);
   }
 
   private frameFitsTransport(frame: Outbound): boolean {

@@ -7,7 +7,6 @@ from nanobot.agent.tools.filesystem import (
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
-    _find_match,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,52 +116,6 @@ class TestReadFileTool:
 
 
 # ---------------------------------------------------------------------------
-# _find_match  (unit tests for the helper)
-# ---------------------------------------------------------------------------
-
-class TestFindMatch:
-
-    def test_exact_match(self):
-        match, count = _find_match("hello world", "world")
-        assert match == "world"
-        assert count == 1
-
-    def test_exact_no_match(self):
-        match, count = _find_match("hello world", "xyz")
-        assert match is None
-        assert count == 0
-
-    def test_crlf_normalisation(self):
-        # Caller normalises CRLF before calling _find_match, so test with
-        # pre-normalised content to verify exact match still works.
-        content = "line1\nline2\nline3"
-        old_text = "line1\nline2\nline3"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-
-    def test_line_trim_fallback(self):
-        content = "    def foo():\n        pass\n"
-        old_text = "def foo():\n    pass"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        # The returned match should be the *original* indented text
-        assert "    def foo():" in match
-
-    def test_line_trim_multiple_candidates(self):
-        content = "  a\n  b\n  a\n  b\n"
-        old_text = "a\nb"
-        match, count = _find_match(content, old_text)
-        assert count == 2
-
-    def test_empty_old_text(self):
-        match, count = _find_match("hello", "")
-        # Empty string is always "in" any string via exact match
-        assert match == ""
-
-
-# ---------------------------------------------------------------------------
 # EditFileTool
 # ---------------------------------------------------------------------------
 
@@ -179,6 +132,16 @@ class TestEditFileTool:
         result = await tool.execute(path=str(f), old_text="world", new_text="earth")
         assert "Successfully" in result
         assert f.read_text() == "hello earth"
+
+    @pytest.mark.asyncio
+    async def test_identical_replacement_returns_clear_error(self, tool, tmp_path):
+        f = tmp_path / "a.py"
+        f.write_text("hello world", encoding="utf-8")
+
+        result = await tool.execute(path=str(f), old_text="world", new_text="world")
+
+        assert result == "Error: new_text must be different from old_text."
+        assert f.read_text(encoding="utf-8") == "hello world"
 
     @pytest.mark.asyncio
     async def test_crlf_normalisation(self, tool, tmp_path):

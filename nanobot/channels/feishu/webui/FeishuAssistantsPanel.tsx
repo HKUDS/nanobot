@@ -15,6 +15,7 @@ import type {
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 import { FeishuConnectFlow } from "./FeishuConnectFlow";
 
@@ -33,7 +34,6 @@ export function FeishuAssistantsPanel({
 
   return (
     <ChannelInstancesPanel
-      token={token}
       feature={feature}
       showBrandLogos={showBrandLogos}
       chatAppsDocsUrl={chatAppsDocsUrl}
@@ -92,6 +92,7 @@ function FeishuInstanceAction({
   instance: NanobotChannelInstanceInfo;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const { client } = useClient();
   const { t } = useTranslation();
   const tx = channelTranslator(t, "feishu");
   const [busy, setBusy] = useState(false);
@@ -114,7 +115,7 @@ function FeishuInstanceAction({
     setError(null);
     try {
       onFeaturesUpdate(
-        await enableNanobotFeature(token, "feishu", { instanceId: instance.id }),
+        await enableNanobotFeature(client, "feishu", { instanceId: instance.id }),
       );
     } catch (err) {
       setError((err as Error).message);

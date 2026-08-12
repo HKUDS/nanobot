@@ -105,7 +105,7 @@ export function presentWebSearchAction(
   if (target === "x") {
     return queryTarget ? `${verb} X · ${queryTarget}` : `${verb} X`;
   }
-  return queryTarget ? `${verb} ${queryTarget}` : verb;
+  return queryTarget ? `${verb} ${queryTarget}` : `${verb} the web`;
 }
 
 function mergeWebSearchRun(

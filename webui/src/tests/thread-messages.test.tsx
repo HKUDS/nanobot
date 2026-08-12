@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -56,7 +56,9 @@ describe("ThreadMessages", () => {
   });
 
   it("preserves an answer's markdown tree across completion and the next prompt", async () => {
-    await preloadMarkdownText();
+    await act(async () => {
+      await preloadMarkdownText();
+    });
     const turnId = "turn-1";
     const streaming: UIMessage[] = [
       {

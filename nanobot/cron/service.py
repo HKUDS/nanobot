@@ -26,9 +26,6 @@ from nanobot.cron.types import (
     CronStore,
 )
 from nanobot.utils.run_records import (
-    safe_run_record_name,
-)
-from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
 
@@ -75,13 +72,22 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
 
-    if schedule.kind == "cron" and schedule.tz:
+    if schedule.kind == "cron":
+        if not schedule.expr or not schedule.expr.strip():
+            raise ValueError("cron schedule requires a non-empty 'expr'")
         try:
-            from zoneinfo import ZoneInfo
+            from croniter import croniter
 
-            ZoneInfo(schedule.tz)
-        except Exception:
-            raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+            croniter(schedule.expr)
+        except Exception as exc:
+            raise ValueError(f"invalid cron expression '{schedule.expr}': {exc}") from None
+        if schedule.tz:
+            try:
+                from zoneinfo import ZoneInfo
+
+                ZoneInfo(schedule.tz)
+            except Exception:
+                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
 def _has_legacy_delivery_context(payload: CronPayload) -> bool:
@@ -430,10 +436,6 @@ class CronService:
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
-
-    @staticmethod
-    def _safe_run_record_name(run_id: str) -> str:
-        return safe_run_record_name(run_id)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""

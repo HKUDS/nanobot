@@ -4,10 +4,67 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import type { StreamError } from "@/lib/nanobot-client";
-import type { ConnectionStatus, InboundEvent, GoalStateWsPayload } from "@/lib/types";
+import type {
+  ConnectionStatus,
+  GoalStateWsPayload,
+  InboundEvent,
+  UIMessage,
+} from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
+import projectionFixture from "./fixtures/live-replay-event-projection.json";
 
-const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
+const EMPTY_MESSAGES: UIMessage[] = [];
+
+interface ProjectionFixtureCase {
+  name: string;
+  chat_id: string;
+  initial_messages: UIMessage[];
+  live_events: InboundEvent[];
+  expected: Array<Record<string, unknown>>;
+}
+
+const PROJECTION_FIXTURE_CASES = (
+  projectionFixture as unknown as { cases: ProjectionFixtureCase[] }
+).cases;
+const SEMANTIC_MESSAGE_FIELDS = [
+  "role",
+  "content",
+  "kind",
+  "traces",
+  "toolEvents",
+  "fileEdits",
+  "images",
+  "media",
+  "cliApps",
+  "mcpPresets",
+  "sessionMentions",
+  "reasoning",
+  "latencyMs",
+  "source",
+  "turnId",
+  "turnPhase",
+  "turnSeq",
+] as const satisfies ReadonlyArray<keyof UIMessage>;
+
+function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknown>> {
+  const segmentAliases = new Map<string, string>();
+  return messages.map((message) => {
+    const row: Record<string, unknown> = {};
+    for (const field of SEMANTIC_MESSAGE_FIELDS) {
+      const value = message[field];
+      if (value !== undefined && value !== null) row[field] = value;
+    }
+    if (message.activitySegmentId) {
+      let alias = segmentAliases.get(message.activitySegmentId);
+      if (!alias) {
+        alias = `segment-${segmentAliases.size + 1}`;
+        segmentAliases.set(message.activitySegmentId, alias);
+      }
+      row.activitySegmentId = alias;
+    }
+    return row;
+  });
+}
 
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
@@ -76,6 +133,7 @@ function fakeClient() {
         return () => set!.delete(h);
       },
       sendMessage: vi.fn(),
+      finishRunLocally: vi.fn(),
       newChat: vi.fn(),
       forkChat: vi.fn(),
       attach: vi.fn(),
@@ -608,6 +666,51 @@ describe("useNanobotStream", () => {
       { phase: "end", call_id: "call-exec", name: "exec" },
       { phase: "error", call_id: "call-read", name: "read_file", error: "missing" },
     ]);
+  });
+
+  it("replaces a hosted search placeholder when its query arrives", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-hosted-search", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-hosted-search", {
+        event: "message",
+        chat_id: "chat-hosted-search",
+        text: "web_search()",
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "ws-1",
+          name: "web_search",
+          arguments: {},
+        }],
+      });
+      fake.emit("chat-hosted-search", {
+        event: "message",
+        chat_id: "chat-hosted-search",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "end",
+          call_id: "ws-1",
+          name: "web_search",
+          arguments: { query: "nanobot news" },
+          result: { status: "completed" },
+        }],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].traces).toEqual([
+      'web_search({"query":"nanobot news"})',
+    ]);
+    expect(result.current.messages[0].toolEvents).toMatchObject([{
+      phase: "end",
+      call_id: "ws-1",
+      arguments: { query: "nanobot news" },
+    }]);
   });
 
   it("keeps phase updates when a tool event trace line is deduped", () => {
@@ -2202,6 +2305,7 @@ describe("useNanobotStream", () => {
     });
 
     expect(fake.client.sendMessage).toHaveBeenLastCalledWith("chat-stop", "/stop");
+    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-stop");
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
@@ -2793,4 +2897,22 @@ describe("useNanobotStream", () => {
     expect(result.current.goalState).toEqual({ active: false });
   });
 
+});
+
+describe("live/replay projection before canonical-event revision migration", () => {
+  it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+      { wrapper: wrap(fake.client) },
+    );
+
+    for (const event of fixtureCase.live_events) {
+      act(() => {
+        fake.emit(fixtureCase.chat_id, event);
+      });
+    }
+
+    expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+  });
 });

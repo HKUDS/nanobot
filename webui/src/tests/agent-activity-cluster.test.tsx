@@ -265,6 +265,63 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("feathers only the activity edges with clipped content", () => {
+    const raf = installAnimationFrameQueue();
+    try {
+      render(
+        <AgentActivityCluster
+          messages={activityMessages()}
+          isTurnStreaming
+          hasBodyBelow={false}
+        />,
+      );
+
+      const scrollport = screen.getByTestId("agent-activity-scroll");
+      setScrollGeometry(scrollport, {
+        scrollHeight: 1000,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+
+      act(() => {
+        raf.flush();
+      });
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      const topFade = screen.getByTestId("activity-scroll-fade-top");
+      expect(scrollport).not.toContainElement(topFade);
+      expect(scrollport).not.toHaveClass("activity-scroll-fade");
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
+
+      scrollport.scrollTop = 440;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.getByTestId("activity-scroll-fade-top")).toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
+
+      scrollport.scrollTop = 0;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
+
+      setScrollGeometry(scrollport, {
+        scrollHeight: 100,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
+    } finally {
+      raf.restore();
+    }
+  });
+
   it("turns the live reasoning marker into an animated check when thinking completes", async () => {
     const liveReasoning: UIMessage = {
       id: "r-check",
@@ -338,7 +395,7 @@ describe("AgentActivityCluster", () => {
 
       expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
       act(() => {
-        vi.advanceTimersByTime(901);
+        vi.advanceTimersByTime(301);
       });
       expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Thought" })).toHaveAttribute(
@@ -366,12 +423,13 @@ describe("AgentActivityCluster", () => {
     );
 
     const button = screen.getByRole("button", { name: "Thought" });
+    expect(button).toHaveAttribute("data-thread-disclosure");
     const chevron = button.querySelector("svg");
     expect(chevron).toBeInTheDocument();
     expect(chevron).toHaveClass("transition-colors", "duration-200");
     expect(chevron?.parentElement).toHaveClass(
       "transition-transform",
-      "[transition-duration:600ms]",
+      "[transition-duration:220ms]",
     );
   });
 
@@ -1118,12 +1176,13 @@ describe("AgentActivityCluster", () => {
             id: "search-start",
             role: "tool",
             kind: "trace",
-            content: line,
-            traces: [line],
+            content: "web_search()",
+            traces: ["web_search()"],
             toolEvents: [{
               phase: "start",
+              call_id: "hosted-search-1",
               name: "web_search",
-              arguments: { query: "site:linkedin.com/company Evomap startup" },
+              arguments: {},
             }],
             createdAt: 1,
           },
@@ -1135,6 +1194,7 @@ describe("AgentActivityCluster", () => {
             traces: [line],
             toolEvents: [{
               phase: "error",
+              call_id: "hosted-search-1",
               name: "web_search",
               arguments: { query: "site:linkedin.com/company Evomap startup" },
               error: "Search provider rate limited the request",

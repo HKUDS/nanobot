@@ -173,7 +173,7 @@ jobs:
 
       - name: Test WebUI
         working-directory: webui
-        run: bun run test
+        run: bun run test:coverage
 
       - name: Build WebUI
         working-directory: webui

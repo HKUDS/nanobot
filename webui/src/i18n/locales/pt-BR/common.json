@@ -10,11 +10,12 @@
       "gatewayHint": "Verifique se o gateway está em execução (`nanobot gateway`) e se esta página está aberta na mesma máquina."
     },
     "auth": {
-      "title": "Autenticação necessária",
-      "hint": "Informe o segredo configurado como tokenIssueSecret na configuração do gateway.",
-      "placeholder": "Senha",
+      "label": "Senha",
+      "showPassword": "Mostrar senha",
+      "hidePassword": "Ocultar senha",
       "submit": "Conectar",
-      "invalid": "Senha inválida. Tente novamente."
+      "required": "Digite a senha.",
+      "invalid": "Senha incorreta. Tente novamente."
     },
     "account": {
       "section": "Conta",
@@ -23,7 +24,7 @@
     },
     "system": {
       "section": "Sistema",
-      "restartHint": "Reinicie o nanobot para aplicar as alterações de runtime.",
+      "restartHint": "Reinicie o nanobot para aplicar as alterações de tempo de execução.",
       "restart": "Reiniciar nanobot",
       "restarting": "Reiniciando nanobot...",
       "restartEngine": "Reiniciar motor",
@@ -37,8 +38,26 @@
       "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "Interface web do nanobot — converse com o seu workspace do nanobot."
+      "description": "Interface web do nanobot — converse com o seu espaço de trabalho do nanobot."
+    },
+    "pairing": {
+      "title": "Vincular usuário do chat",
+      "description": "Digite o código de vinculação exibido no chat.",
+      "code": "Código de vinculação",
+      "matched": "Correspondência com {{channel}}. Conectando...",
+      "expiresInline": "O código expira {{expires}}.",
+      "queueCount": "{{count}} pendentes",
+      "noMatch": "Nenhuma solicitação pendente corresponde a este código."
     }
+  },
+  "temporaryChat": {
+    "title": "Chat temporário",
+    "retention": "Não é salvo no histórico nem na memória.",
+    "expiration": "Recarregar, fechar ou perder a conexão encerra estes chats.",
+    "externalEffects": "As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "clear": "Limpar chat temporário",
+    "sectionTitle": "Chats temporários",
+    "closeAction": "Fechar chat temporário: {{title}}"
   },
   "sidebar": {
     "navigation": "Navegação da barra lateral",
@@ -54,10 +73,10 @@
       "label": "Idioma",
       "ariaLabel": "Trocar idioma"
     },
-    "apps": "Apps",
+    "apps": "Aplicativos",
     "automations": "Automações",
     "skills": {
-      "title": "Skills"
+      "title": "Habilidades"
     }
   },
   "settings": {
@@ -77,13 +96,13 @@
       "voice": "Voz",
       "browser": "Web",
       "channels": "Canais",
-      "cliApps": "Apps CLI",
+      "cliApps": "Aplicativos CLI",
       "mcp": "MCP",
       "runtime": "Sistema",
       "advanced": "Segurança",
       "apps": "Aplicativos",
       "automations": "Automações",
-      "skills": "Skills"
+      "skills": "Habilidades"
     },
     "sections": {
       "interface": "Interface do usuário",
@@ -97,9 +116,9 @@
       "imageDefaults": "Padrões",
       "webSearch": "Busca na web",
       "webBehavior": "Comportamento",
-      "cliApps": "Apps CLI",
+      "cliApps": "Aplicativos CLI",
       "mcp": "Servidores MCP",
-      "identity": "Identidade",
+      "regional": "Regional",
       "webuiSafety": "Segurança da WebUI",
       "capabilities": "Capacidades",
       "apps": "Aplicativos",
@@ -190,10 +209,8 @@
       "defaultImageSize": "Tamanho padrão",
       "maxImagesPerTurn": "Máx. de imagens por turno",
       "imageSaveDir": "Diretório de salvamento",
-      "botName": "Nome do bot",
-      "botIcon": "Ícone do bot",
       "timezone": "Fuso horário",
-      "workspacePath": "Workspace padrão",
+      "workspacePath": "Espaço de trabalho padrão",
       "localServiceAccess": "Serviços locais",
       "webuiDefaultAccess": "Acesso padrão",
       "cliAppsCatalog": "Catálogo",
@@ -219,10 +236,10 @@
       "selectedModelProvider": "Definido pelo modelo selecionado.",
       "selectedModelValue": "Definido pelo modelo selecionado.",
       "selectedPreset": "As predefinições nomeadas são somente leitura aqui; edite-as em config.json.",
-      "presetModel": "Mude para Default para editar modelo e provedor pela WebUI.",
+      "presetModel": "Mude para Padrão para editar o modelo e o provedor pela WebUI.",
       "density": "Armazenado apenas neste navegador.",
       "activityMode": "Escolha quanto detalhe de atividade do agente é exibido por padrão.",
-      "fileEditDisplay": "Escolha se a atividade de edição de arquivo é exibida como contagem de linhas ou como diff.",
+      "fileEditDisplay": "Escolha se a atividade de edição de arquivo é exibida como contagem de linhas ou como diferenças.",
       "codeWrap": "Mantém linhas longas de código legíveis em telas menores.",
       "brandLogos": "Mostra logotipos de provedores terceiros e de CLIs em Configurações.",
       "maxResults": "Resultados retornados por cada chamada de web_search.",
@@ -230,22 +247,20 @@
       "jinaReader": "Usa o Jina Reader para web_fetch quando disponível.",
       "imageGeneration": "Expõe generate_image nas conversas quando há um provedor de imagem configurado.",
       "imageProvider": "Escolha o provedor do registro usado por generate_image.",
-      "imageProviderStatus": "A geração de imagens reaproveita as credenciais de Provedores.",
+      "imageProviderStatus": "A geração de imagens reaproveita as credenciais dos provedores.",
       "imageModel": "Nome do modelo enviado ao provedor de imagem selecionado.",
-      "defaultAspectRatio": "Usado quando o prompt não escolhe uma proporção.",
+      "defaultAspectRatio": "Usado quando a instrução não escolhe uma proporção.",
       "defaultImageSize": "Dica de tamanho enviada a provedores compatíveis.",
       "maxImagesPerTurn": "Limite superior para uma requisição de generate_image.",
-      "botName": "Exibido sempre que o nanobot usa um nome visível.",
-      "botIcon": "Emoji ou texto curto exibido junto ao nome do bot.",
       "timezone": "Usado para agendamentos e respostas sensíveis ao horário.",
-      "cliAppsCatalog": "Instale apenas os adaptadores CLI de apps que o nanobot pode executar localmente; apps nativos permanecem intactos.",
-      "cliAppsFilter": "Busque por app, categoria ou capacidade.",
-      "localServiceAccess": "Permite que comandos shell com Acesso Total alcancem serviços localhost.",
+      "cliAppsCatalog": "Instale apenas os adaptadores CLI de aplicativos que o nanobot pode executar localmente; aplicativos nativos permanecem intactos.",
+      "cliAppsFilter": "Busque por aplicativo, categoria ou capacidade.",
+      "localServiceAccess": "Permite que comandos shell com acesso completo alcancem serviços locais.",
       "webuiDefaultAccess": "Usado por chats web sem permissão específica de projeto.",
       "securityManagedControls": "As buscas na web sempre protegem serviços locais, privados e de metadados. A segurança essencial dos canais fica em config.json.",
       "logs": "Abre a pasta de logs do motor nativo.",
-      "diagnostics": "Exporta um pequeno relatório de runtime para o suporte.",
-      "localServiceAccessNative": "Permite que comandos shell com Acesso Total alcancem serviços neste Mac.",
+      "diagnostics": "Exporta um pequeno relatório de tempo de execução para o suporte.",
+      "localServiceAccessNative": "Permite que comandos shell com acesso completo alcancem serviços neste Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sem permissão específica de projeto.",
       "contextWindow": "Escolha o orçamento de contexto padrão para esta configuração de modelo.",
       "transcription": "Transcreve a entrada do microfone antes de enviá-la. Mensagens de voz dos canais de chat usam as mesmas configurações.",
@@ -261,25 +276,25 @@
     },
     "cliApps": {
       "allCategories": "Todas as categorias",
-      "availableCount": "{{count}} apps",
+      "availableCount": "{{count}} aplicativos",
       "installedCount": "{{count}} CLIs instaladas",
       "summary": "{{installed}} de {{total}} CLIs instaladas",
       "filterAll": "Todos",
       "filterInstalled": "CLIs instaladas",
       "filterNotInstalled": "Não instaladas",
       "searchPlaceholder": "Buscar CLIs",
-      "loading": "Carregando Apps CLI...",
-      "empty": "Nenhum App CLI corresponde a este filtro.",
-      "statusInstalled": "App pronto",
+      "loading": "Carregando aplicativos CLI...",
+      "empty": "Nenhum aplicativo CLI corresponde a este filtro.",
+      "statusInstalled": "Aplicativo pronto",
       "statusMissing": "Faltando",
       "statusAvailable": "Disponível",
       "statusUnsupported": "Não compatível",
-      "statusNotInstalled": "App não instalado",
+      "statusNotInstalled": "Aplicativo não instalado",
       "requires": "Requer",
-      "test": "Testar app",
-      "update": "Atualizar app",
-      "uninstall": "Desinstalar app",
-      "install": "Instalar app",
+      "test": "Testar aplicativo",
+      "update": "Atualizar aplicativo",
+      "uninstall": "Desinstalar aplicativo",
+      "install": "Instalar aplicativo",
       "readyTitle": "@{{name}} está pronto",
       "readyStatus": "Pronto",
       "readyTry": "Experimentar @{{name}}",
@@ -304,8 +319,8 @@
       "filterInstalled": "Habilitadas",
       "filterNotInstalled": "Não habilitadas",
       "searchPlaceholder": "Buscar predefinições MCP",
-      "moreOptions": "Adicionar integração",
-      "moreOptionsSubtitle": "Conecte um servidor de ferramentas personalizado ou importe uma configuração existente.",
+      "moreOptions": "Adicionar servidor MCP",
+      "moreOptionsSubtitle": "Conecte um servidor MCP personalizado ou importe uma configuração existente.",
       "customTitle": "MCP personalizado",
       "customSubtitle": "Adicione qualquer servidor MCP stdio, HTTP ou SSE.",
       "customAction": "Personalizado",
@@ -313,10 +328,15 @@
       "serverName": "Nome do servidor",
       "serverUrl": "URL",
       "transport": "Transporte",
+      "authentication": "Autenticação",
+      "authNone": "Nenhuma",
+      "authHeaders": "Cabeçalhos",
       "command": "Comando",
-      "args": "Args JSON",
-      "headers": "Headers JSON",
-      "env": "Env JSON",
+      "args": "Argumentos JSON",
+      "headers": "Cabeçalhos JSON",
+      "oauthAfterSave": "Salve o servidor e selecione Conectar para entrar.",
+      "headersHelp": "Adicione os cabeçalhos de solicitação usados por este servidor.",
+      "env": "Ambiente JSON",
       "timeout": "Tempo limite da ferramenta",
       "advancedOptions": "Opções avançadas",
       "hideAdvanced": "Ocultar avançado",
@@ -334,7 +354,10 @@
       "enabled": "Habilitado",
       "setup": "Conectar",
       "configure": "Conectar",
+      "reconnect": "Reconectar",
       "connectTitle": "Conectar {{name}}",
+      "reconnectTitle": "Reconectar {{name}}",
+      "actionsTitle": "Ações para {{name}}",
       "connectHint": "Adicione a chave a partir das configurações da sua conta.",
       "saveAndEnable": "Salvar e habilitar",
       "updateSetup": "Atualizar configuração",
@@ -342,8 +365,24 @@
       "keepExisting": "Deixe em branco para manter o valor atual",
       "statusConfigured": "Configurado",
       "statusMissingCredentials": "Precisa de chave",
+      "connectingAccount": "Conectando {{name}}",
+      "connectingLabel": "Conectando…",
+      "continueSignIn": "Continuar login",
+      "preparingSignIn": "Preparando login seguro…",
+      "openSignInToContinue": "Abra a página de login para continuar.",
+      "finishSignInInBrowser": "Conclua o login na janela do navegador.",
+      "manualCallbackRequired": "Conclua o login e cole a URL de callback no nanobot.",
+      "manualCallbackHelp": "Depois de autorizar o acesso, a página localhost não será carregada. Copie a URL completa da barra de endereços e cole-a aqui.",
+      "finishingConnection": "Finalizando conexão…",
+      "activatingTools": "Ativando ferramentas…",
+      "connected": "Conectado.",
+      "connectionFailed": "Falha na conexão.",
+      "connectionCancelled": "Conexão cancelada.",
+      "reloadFailed": "Login concluído, mas o nanobot não conseguiu conectar as ferramentas. Tente reiniciar o nanobot.",
+      "oauthFailed": "Não foi possível conectar. Tente fazer login novamente.",
       "statusMissingDependency": "Precisa de dependência",
       "statusComingSoon": "Em breve",
+      "comingSoon": "Em breve",
       "statusNotInstalled": "Não habilitado",
       "toolScope": "Ferramentas",
       "allTools": "Todas",
@@ -360,15 +399,15 @@
       "ready": "Pronto",
       "privateEngine": "Motor privado",
       "unixSocket": "Socket Unix",
-      "defaultWorkspace": "Workspace padrão",
+      "defaultWorkspace": "Espaço de trabalho padrão",
       "comfortable": "Confortável",
       "compact": "Compacto",
       "auto": "Automático",
       "expanded": "Expandido",
       "default": "Padrão",
       "summary": "Resumo",
-      "diff": "Diff",
-      "collapsedDiff": "Diff recolhido",
+      "diff": "Diferenças",
+      "collapsedDiff": "Diferenças recolhidas",
       "on": "Ligado",
       "off": "Desligado",
       "defaultPermission": "Permissão padrão",
@@ -376,7 +415,10 @@
       "configured": "Configurado",
       "notConfigured": "Não configurado",
       "pending": "Pendente",
-      "restartingEngine": "Reiniciando"
+      "restartingEngine": "Reiniciando",
+      "checking": "Verificando",
+      "running": "Em execução",
+      "needsSetup": "Requer configuração"
     },
     "status": {
       "loading": "Carregando configurações...",
@@ -404,6 +446,7 @@
       "deleting": "Excluindo...",
       "edit": "Editar",
       "cancel": "Cancelar",
+      "dismiss": "Dispensar",
       "open": "Abrir",
       "export": "Exportar",
       "opening": "Abrindo...",
@@ -459,7 +502,7 @@
       "webSearch": "Busca na web",
       "imageGeneration": "Geração de imagens",
       "voiceInput": "Entrada de voz",
-      "workspace": "Workspace"
+      "workspace": "Espaço de trabalho"
     },
     "usage": {
       "title": "Atividade de tokens",
@@ -504,7 +547,15 @@
       "profile": "Perfil",
       "extraHeaders": "Cabeçalhos adicionais",
       "extraBody": "Corpo adicional",
-      "extraQuery": "Parâmetros de consulta adicionais"
+      "extraQuery": "Parâmetros de consulta adicionais",
+      "capabilityFastMode": "Modo rápido",
+      "capabilityFastModeHelp": "Usa o nível de serviço prioritário da OpenAI para respostas mais rápidas. Isso consome créditos mais rapidamente.",
+      "capabilityDeepSeekSearch": "Pesquisa web do DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Permite que o DeepSeek V4 Flash pesquise na web pela Responses API. A atividade de pesquisa aparece no chat.",
+      "capabilityXSearch": "Pesquisa no X",
+      "capabilityXSearchHelp": "Permite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
+      "capabilityOpenAISearch": "Pesquisa web da OpenAI",
+      "capabilityOpenAISearchHelp": "Permite que modelos compatíveis com a Responses API pesquisem na web. A atividade de pesquisa aparece no chat."
     },
     "legal": {
       "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."
@@ -513,8 +564,18 @@
       "selectProvider": "Selecionar provedor",
       "selectAspect": "Selecionar proporção",
       "selectSize": "Selecionar tamanho",
+      "selectModel": "Selecionar modelo de imagem",
+      "searchOrTypeModel": "Pesquisar ou digitar ID do modelo",
+      "typeModelId": "Digite o ID de modelo compatível com este provedor.",
       "configureProvider": "Configurar provedor",
       "missingCredential": "Configure o provedor antes de habilitar a geração de imagens."
+    },
+    "capabilities": {
+      "providerSupport": "Suporte do provedor",
+      "providerInstallOnSave": "O suporte necessário será instalado automaticamente ao salvar este provedor.",
+      "searchSupport": "Suporte do provedor de pesquisa",
+      "searchInstallOnSave": "O suporte ao Olostep será instalado automaticamente ao salvar.",
+      "installing": "Instalando suporte..."
     },
     "api": {
       "title": "Servidor de API",
@@ -545,29 +606,37 @@
     },
     "apps": {
       "description": "Adicione ferramentas ao nanobot e mencione-as com @ na conversa.",
-      "cliLabel": "App",
-      "mcpLabel": "Integração",
+      "cliLabel": "Aplicativo",
+      "mcpLabel": "MCP",
       "channelLabel": "Canal",
       "featureLabel": "Recurso",
       "filterAll": "Prontos",
       "filterPlugins": "Complementos",
-      "filterCli": "Apps",
-      "filterMcp": "Integrações",
+      "filterCli": "Aplicativos",
+      "filterMcp": "MCP",
       "enabledSummary": "{{count}} prontos",
-      "caption": "{{cli}} apps · {{mcp}} integrações",
+      "caption": "{{cli}} aplicativos · {{mcp}} ferramentas MCP",
       "searchPlaceholder": "Buscar ferramentas",
       "featured": "Ferramentas",
-      "loading": "Carregando Apps...",
-      "empty": "Nenhuma ferramenta corresponde a esta visualização.",
-      "restartRequired": "Reinicie o nanobot para aplicar os apps e integrações atualizados."
+      "mcpTools": "Ferramentas MCP",
+      "loading": "Carregando aplicativos...",
+      "empty": "Nenhuma ferramenta corresponde à sua busca.",
+      "emptyApps": "Nenhum aplicativo disponível.",
+      "emptyIntegrations": "Nenhuma ferramenta MCP disponível.",
+      "emptyReady": "Ainda não há ferramentas prontas.",
+      "clearSearch": "Limpar busca",
+      "browseApps": "Explorar aplicativos",
+      "browseIntegrations": "Explorar ferramentas MCP",
+      "emptyIntegrationsHint": "Adicione um servidor MCP personalizado abaixo.",
+      "restartRequired": "Reinicie o nanobot para aplicar os aplicativos e ferramentas MCP atualizados."
     },
     "channels": {
-      "description": "Conecte apps de chat, e-mail e WebUI ao nanobot.",
+      "description": "Conecte aplicativos de chat, e-mail e WebUI ao nanobot.",
       "caption": "{{enabled}} habilitados · {{total}} canais",
       "searchPlaceholder": "Buscar canais",
       "backToChannels": "Todos os canais",
       "catalog": "Canais",
-      "loading": "Carregando Canais...",
+      "loading": "Carregando canais...",
       "empty": "Nenhum canal corresponde a este filtro.",
       "restartRequired": "Reinicie o nanobot para aplicar o suporte de canais atualizado.",
       "requires": "Requer: {{requirements}}",
@@ -583,6 +652,8 @@
       "advanced": "Avançado",
       "checkAndEnable": "Verificar e ativar",
       "checkConnection": "Verificar conexão",
+      "connectionChecks": "Verificações de conexão",
+      "open": "Abrir",
       "checkedAndEnabled": "Verificado e ativado.",
       "checking": "Verificando...",
       "checkOnly": "Apenas verificar",
@@ -659,7 +730,9 @@
       "loading": "Carregando automações...",
       "noMatches": "Nenhuma automação corresponde a esta visualização.",
       "empty": "Nenhuma automação ainda.",
-      "emptyHint": "Crie uma de onde ela deve rodar para que o nanobot mantenha o contexto correto.",
+      "emptyHint": "Crie automações em uma conversa para que mantenham o contexto correto.",
+      "emptyAction": "Abrir uma conversa",
+      "clearFilters": "Limpar filtros",
       "oneShot": "Uma vez",
       "systemTask": "Automação gerenciada pelo sistema",
       "localTrigger": "Gatilho local",
@@ -678,6 +751,8 @@
       "protected": "Protegida",
       "editTitle": "Editar automação",
       "save": "Salvar",
+      "commandCopied": "Copiado",
+      "copyCommand": "Copiar",
       "deleteTitle": "Excluir automação",
       "deleteDescription": "Isso remove {{name}} do armazenamento do cron. As mensagens anteriores da conversa permanecem na sessão.",
       "cancel": "Cancelar",
@@ -737,6 +812,7 @@
       "fields": {
         "name": "Nome",
         "message": "Mensagem",
+        "command": "Comando",
         "scheduleType": "Tipo de agendamento",
         "every": "A cada",
         "unit": "Unidade",
@@ -794,56 +870,56 @@
       "finishSignIn": "Concluir login"
     },
     "skills": {
-      "description": "Revise as skills de instrução que este agente pode carregar durante uma conversa.",
+      "description": "Revise as habilidades de instrução que este agente pode carregar durante uma conversa.",
       "caption": "{{available}} disponíveis · {{total}} no total",
-      "views": "Visualizações de skills",
+      "views": "Visualizações de habilidades",
       "installedTab": "Instaladas",
       "discoverTab": "Descobrir",
       "customGroup": "Personalizadas",
       "builtinGroup": "Integradas",
       "otherGroup": "Outras",
-      "searchInstalled": "Buscar skills instaladas",
+      "searchInstalled": "Buscar habilidades instaladas",
       "filterAll": "Todas",
       "filterEnabled": "Ativadas",
       "filterDisabled": "Desativadas",
-      "noMatching": "Nenhuma skill correspondente.",
+      "noMatching": "Nenhuma habilidade correspondente.",
       "statusDisabled": "Desativada",
       "statusEnabled": "Ativada",
       "statusNeedsSetup": "Requer configuração",
       "showLess": "Mostrar menos",
       "showMore": "Mostrar mais",
-      "enabledControl": "Usar esta skill",
-      "enabledDescription": "Permite que o agente carregue esta skill quando os requisitos estiverem prontos.",
+      "enabledControl": "Usar esta habilidade",
+      "enabledDescription": "Permite que o agente carregue esta habilidade quando os requisitos estiverem prontos.",
       "enableSkill": "Ativar {{name}}",
       "disableSkill": "Desativar {{name}}",
-      "updateFailed": "Não foi possível atualizar esta skill.",
-      "deleteTitle": "Excluir skill",
-      "deleteDescription": "Remove esta skill do workspace atual.",
+      "updateFailed": "Não foi possível atualizar esta habilidade.",
+      "deleteTitle": "Excluir habilidade",
+      "deleteDescription": "Remove esta habilidade do espaço de trabalho atual.",
       "deleteAction": "Excluir",
-      "deleteFailed": "Não foi possível excluir esta skill.",
+      "deleteFailed": "Não foi possível excluir esta habilidade.",
       "deleteConfirmTitle": "Excluir {{name}}?",
-      "deleteConfirmDescription": "Isso remove os arquivos da skill do workspace atual. Esta ação não pode ser desfeita.",
-      "deleteConfirmAction": "Excluir skill",
-      "instructionsTitle": "Instruções da skill",
+      "deleteConfirmDescription": "Isso remove os arquivos da habilidade do espaço de trabalho atual. Esta ação não pode ser desfeita.",
+      "deleteConfirmAction": "Excluir habilidade",
+      "instructionsTitle": "Instruções da habilidade",
       "setupRequired": "Requer configuração",
       "setupDescription": "Instale a dependência ausente na máquina que executa o nanobot e verifique novamente.",
       "copySetupCommand": "Copiar comando de configuração",
       "checkAgain": "Verificar novamente",
-      "marketplaceSearchFailed": "Não foi possível pesquisar nos mercados de skills.",
-      "marketplaceInstallFailed": "Não foi possível instalar esta skill.",
-      "marketplaceSearchPlaceholder": "Pesquisar skills",
-      "marketplaceSearchLabel": "Pesquisar skills",
+      "marketplaceSearchFailed": "Não foi possível pesquisar nos mercados de habilidades.",
+      "marketplaceInstallFailed": "Não foi possível instalar esta habilidade.",
+      "marketplaceSearchPlaceholder": "Pesquisar habilidades",
+      "marketplaceSearchLabel": "Pesquisar habilidades",
       "marketplaceSearching": "Pesquisando",
-      "marketplaceProviderFilter": "Origem da skill",
+      "marketplaceProviderFilter": "Origem da habilidade",
       "marketplaceProviderAll": "Todas",
       "marketplaceTrendingTitle": "Tendências por mercado",
       "marketplaceTrendingDescription": "Cada mercado mantém seu próprio ranking e métricas de instalação.",
       "marketplaceViewAll": "Ver todas",
-      "marketplaceTrendingUnavailable": "As skills em alta estão temporariamente indisponíveis.",
-      "marketplaceEmpty": "Nenhuma skill encontrada para “{{query}}”.",
+      "marketplaceTrendingUnavailable": "As habilidades em alta estão temporariamente indisponíveis.",
+      "marketplaceEmpty": "Nenhuma habilidade encontrada para “{{query}}”.",
       "marketplaceConfirmTitle": "Instalar {{name}}?",
-      "marketplaceConfirmDescription": "Esta skill de terceiros vem de {{provider}} ({{source}}) e pode incluir instruções ou scripts executáveis.",
-      "marketplaceConfirmInstall": "Instalar skill",
+      "marketplaceConfirmDescription": "Esta habilidade de terceiros vem de {{provider}} ({{source}}) e pode incluir instruções ou scripts executáveis.",
+      "marketplaceConfirmInstall": "Instalar habilidade",
       "marketplaceOpen": "Abrir {{name}} no {{provider}}",
       "marketplaceOpenProvider": "Abrir {{provider}}",
       "marketplaceInstalls24h": "{{formattedCount}} instalações / 24 h",
@@ -854,16 +930,16 @@
       "marketplaceInstall": "Instalar",
       "marketplaceNoTrend": "Ainda sem tendência",
       "marketplaceTrendLabel": "Tendência de instalações em 8 semanas",
-      "featured": "Skills do agente",
-      "empty": "Nenhuma skill disponível.",
+      "featured": "Habilidades do agente",
+      "empty": "Nenhuma habilidade disponível.",
       "sourceWorkspace": "Personalizada",
       "sourceBuiltin": "Embutida",
       "statusAvailable": "Disponível",
       "statusUnavailable": "Indisponível",
       "unavailableReason": "Faltando: {{reason}}",
       "openDetails": "Abrir detalhes de {{name}}",
-      "loadingDetail": "Carregando detalhes da skill...",
-      "loadFailed": "Não foi possível carregar os detalhes da skill.",
+      "loadingDetail": "Carregando detalhes da habilidade...",
+      "loadFailed": "Não foi possível carregar os detalhes da habilidade.",
       "descriptionTitle": "Descrição",
       "source": "Origem",
       "status": "Status",
@@ -881,12 +957,12 @@
     "voice": {
       "selectProvider": "Selecionar provedor",
       "configureProvider": "Configurar provedor",
-      "languageAuto": "Auto"
+      "languageAuto": "Automático"
     }
   },
   "chat": {
     "fallbackTitle": "Tópico {{id}}",
-    "forkTitle": "Fork: {{title}}",
+    "forkTitle": "Bifurcação: {{title}}",
     "loading": "Carregando…",
     "noSessions": "Nenhuma sessão ainda.",
     "showMore": "Mostrar mais {{count}}",
@@ -976,7 +1052,7 @@
         },
         "brainstorm": {
           "title": "Fazer um brainstorming",
-          "prompt": "Sugira algumas ideias práticas e tradeoffs para este problema."
+          "prompt": "Sugira algumas ideias práticas e seus compromissos para este problema."
         },
         "code": {
           "title": "Escrever código",
@@ -988,25 +1064,25 @@
         },
         "more": {
           "title": "Mais",
-          "prompt": "Mostre-me algumas formas úteis com as quais você pode ajudar neste workspace."
+          "prompt": "Mostre-me algumas formas úteis com as quais você pode ajudar neste espaço de trabalho."
         }
       },
       "imageQuickActions": {
         "icon": {
-          "title": "Desenhar um ícone de app",
-          "prompt": "Gere um ícone de app 1:1 limpo para o nanobot: robô amigável, estilo vetorial simples, paleta suave em azul e branco, sem texto."
+          "title": "Desenhar um ícone de aplicativo",
+          "prompt": "Gere um ícone de aplicativo 1:1 limpo para o nanobot: robô amigável, estilo vetorial simples, paleta suave em azul e branco, sem texto."
         },
         "sticker": {
           "title": "Criar um sticker",
-          "prompt": "Gere uma imagem estilo sticker de um pequeno assistente robô, com fundo de aparência transparente, expressivo e divertido."
+          "prompt": "Gere uma imagem estilo adesivo de um pequeno assistente robô, com fundo de aparência transparente, expressivo e divertido."
         },
         "poster": {
           "title": "Criar um pôster",
-          "prompt": "Gere um conceito de pôster polido para um assistente pessoal de IA, composição moderna, hierarquia visual forte, adequado para uma landing page."
+          "prompt": "Gere um conceito de pôster polido para um assistente pessoal de IA, composição moderna, hierarquia visual forte, adequado para uma página de destino."
         },
         "product": {
-          "title": "Mockup de produto",
-          "prompt": "Gere uma imagem limpa de mockup de produto para um app web de IA conversacional, interface mínima, iluminação premium, moldura de dispositivo realista."
+          "title": "Maquete de produto",
+          "prompt": "Gere uma imagem limpa de maquete de produto para um aplicativo web de IA conversacional, interface mínima, iluminação premium, moldura de dispositivo realista."
         },
         "portrait": {
           "title": "Retrato estilizado",
@@ -1105,6 +1181,7 @@
         "recordingStatus": "Gravando {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Por segurança, o Chrome e outros navegadores bloqueiam o acesso ao microfone em páginas HTTP remotas. Abra esta WebUI por HTTPS para usar a entrada de voz.",
         "unsupported": "A entrada de voz não é compatível com este navegador.",
         "permission": "Permita o microfone na barra de endereço e tente novamente.",
         "notConfigured": "Configure primeiro um provedor de transcrição.",
@@ -1145,7 +1222,7 @@
           },
           "status": {
             "title": "Mostrar status",
-            "description": "Exibe o status de runtime, provedor e canais."
+            "description": "Exibe o status de tempo de execução, provedor e canais."
           },
           "model": {
             "title": "Modelo",
@@ -1169,7 +1246,7 @@
           },
           "dream_prompt": {
             "title": "Memória do Dream",
-            "description": "Diz ao Dream como organizar a memória deste workspace."
+            "description": "Diz ao Dream como organizar a memória deste espaço de trabalho."
           },
           "goal": {
             "title": "Objetivo de longa duração",
@@ -1190,18 +1267,23 @@
         }
       },
       "mentions": {
-        "ariaLabel": "Apps",
-        "label": "Apps",
-        "cliGroup": "Apps CLI",
+        "ariaLabel": "Aplicativos",
+        "label": "Aplicativos",
+        "cliGroup": "Aplicativos CLI",
         "mcpGroup": "Serviços MCP",
+        "sessionGroup": "Conversas do Nanobot",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
-        "cliDescription": "Usar @{{name}} como app CLI local",
-        "mcpDescription": "Usar @{{name}} como servidor MCP"
+        "cliDescription": "Usar @{{name}} como aplicativo CLI local",
+        "mcpDescription": "Usar @{{name}} como servidor MCP",
+        "cliTitle": "Aplicativo CLI: {{name}}",
+        "mcpTitle": "Servidor MCP: {{name}}",
+        "sessionBadge": "Conversa do Nanobot",
+        "sessionDescription": "Referenciar @{{name}} como chat anterior"
       },
       "encoding": "Codificando…",
       "remove": "Remover anexo",
-      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "normalizedSizeHint": "{{orig}} → {{current}} (automático)",
       "textTooLarge": "O texto da mensagem é grande demais (máximo de {{max}})",
       "imageRejected": {
         "unsupported_type": "Tipo de arquivo não compatível",
@@ -1216,7 +1298,7 @@
         "io": "Não foi possível ler este arquivo"
       },
       "workspace": {
-        "accessAria": "Modo de acesso ao workspace",
+        "accessAria": "Modo de acesso ao espaço de trabalho",
         "projectAria": "Escolher projeto",
         "projectPlaceholder": "Selecionar projeto",
         "default": "Permissão padrão",
@@ -1227,13 +1309,14 @@
     },
     "scrollToBottom": "Rolar para o final",
     "loadEarlier": "Carregar mensagens anteriores",
-    "forkedFromHistory": "Fork a partir do histórico",
+    "forkedFromHistory": "Bifurcado a partir do histórico",
     "promptNavigator": {
-      "open": "Abrir navegador de prompts",
-      "title": "Prompts",
-      "search": "Buscar prompts",
-      "noResults": "Nenhum prompt correspondente.",
-      "jumpTo": "Ir para o prompt: {{label}}"
+      "open": "Abrir navegador de instruções",
+      "title": "Instruções",
+      "search": "Buscar instruções",
+      "noResults": "Nenhuma instrução correspondente.",
+      "jumpTo": "Ir para a instrução: {{label}}",
+      "railAria": "Navegação pelas instruções do usuário"
     }
   },
   "message": {
@@ -1265,13 +1348,21 @@
     "cliActivityRunningOne": "Usando {{name}}",
     "cliActivityRanOne": "Usou {{name}}",
     "cliActivityFailedOne": "Falhou em {{name}}",
-    "cliActivityRunningMany": "Usando {{count}} apps CLI",
-    "cliActivityRanMany": "Usou {{count}} apps CLI",
-    "cliActivityFailedMany": "{{count}} apps CLI falharam",
+    "cliActivityRunningMany": "Usando {{count}} aplicativos CLI",
+    "cliActivityRanMany": "Usou {{count}} aplicativos CLI",
+    "cliActivityFailedMany": "{{count}} aplicativos CLI falharam",
     "cliRunRunning": "Usando",
     "cliRunRan": "Usou",
     "cliRunFailed": "Falhou",
     "imageAttachment": "Anexo de imagem",
+    "videoAttachment": "Anexo de vídeo",
+    "fileAttachment": "Anexo de arquivo",
+    "attachmentUnavailable": "Anexo indisponível",
+    "dataTable": "Tabela de dados",
+    "fileEditPreparing": "Preparando a edição do arquivo…",
+    "openLink": "Abrir link: {{label}}",
+    "openAttachment": "Abrir {{name}}",
+    "skill": "Habilidade: {{name}}",
     "automationSourceFallback": "Automação",
     "automationTriggered": "Acionada automaticamente",
     "askAboutSelection": "Perguntar sobre isto",
@@ -1279,14 +1370,14 @@
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tempo de resposta (ponta a ponta)",
-    "fileEditViewDiff": "Ver diff",
-    "fileEditViewLargeDiff": "Ver diff grande",
+    "fileEditViewDiff": "Ver diferenças",
+    "fileEditViewLargeDiff": "Ver diferenças grandes",
     "fileEditDiffLineCount": "{{count}} linhas",
     "fileEditUnchangedLinesHidden": "{{count}} linhas inalteradas ocultas",
     "fileEditShowMoreLines": "Mostrar mais {{count}} linhas",
     "fileEditShowFewerLines": "Mostrar menos linhas",
     "fileEditOpenFile": "Abrir arquivo",
-    "fileEditDiffTruncated": "Diff truncado. Abra o arquivo para ver a alteração completa."
+    "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa."
   },
   "lightbox": {
     "title": "Pré-visualização de imagem",
@@ -1297,6 +1388,7 @@
   },
   "filePreview": {
     "aria": "Pré-visualização de arquivo",
+    "breadcrumb": "Caminho do arquivo",
     "close": "Fechar pré-visualização de arquivo",
     "loading": "Carregando pré-visualização...",
     "failed": "Não foi possível pré-visualizar este arquivo.",
@@ -1311,7 +1403,10 @@
     "copied": "Copiado"
   },
   "common": {
-    "dismiss": "Descartar"
+    "dismiss": "Descartar",
+    "close": "Fechar",
+    "current": "Atual",
+    "cancel": "Cancelar"
   },
   "errors": {
     "messageTooBig": {
@@ -1319,8 +1414,8 @@
       "body": "O servidor rejeitou sua última mensagem porque ela excedeu o limite de tamanho. Remova algumas imagens ou tente arquivos menores e envie novamente."
     },
     "workspaceScopeRejected": {
-      "title": "O workspace não foi alterado",
-      "body": "O nanobot manteve o workspace anterior porque o projeto ou modo de acesso solicitado foi rejeitado pelo gateway."
+      "title": "O espaço de trabalho não foi alterado",
+      "body": "O gateway rejeitou este projeto ou modo de acesso. Escolha um projeto existente ou outro modo de acesso e tente novamente."
     },
     "turnRejected": {
       "title": "A mensagem não foi enviada",
@@ -1329,7 +1424,7 @@
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Workspace padrão",
+      "defaultProject": "Espaço de trabalho padrão",
       "manual": "Colar caminho",
       "manualPlaceholder": "/Users/nome/projeto",
       "usePath": "Usar caminho",
