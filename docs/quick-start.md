@@ -48,7 +48,8 @@ The WebUI launcher creates or updates:
 | Path | Purpose |
 |---|---|
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
-| `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
+| `~/.nanobot/workspace/` | Memory, skills, automations, and generated files |
+| `~/.nanobot/sessions/<workspace-hash>/` | Recent session history, isolated by canonical workspace path |
 
 If the installer did not open the browser, run:
 
