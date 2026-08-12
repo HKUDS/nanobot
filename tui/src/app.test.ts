@@ -235,7 +235,7 @@ describe("NanobotTui layout", () => {
       if (width >= 30 && height >= 9) {
         expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
       }
-      expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 12 ? 1 : 0)
+      expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 14 ? 1 : 0)
     }
   })
 
@@ -282,7 +282,6 @@ describe("NanobotTui layout", () => {
       shell: { backgroundColor: { intent: string } }
       composer: { backgroundColor: { intent: string }; textColor: { toInts(): number[] } }
       transcript: {
-        frames: Set<{ borderColor: { toInts(): number[] } }>
         markdown: Set<{ syntaxStyle: object }>
       }
     }
@@ -300,10 +299,48 @@ describe("NanobotTui layout", () => {
     expect(internals.shell.backgroundColor.intent).toBe("default")
     expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
-    expect([...internals.transcript.frames][0]?.borderColor.toInts().slice(0, 3)).toEqual([
-      212, 212, 216,
-    ])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
+  })
+
+  test("uses asymmetric roles instead of chat bubbles", async () => {
+    setup = await createRenderer({ width: 72, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: "Agent **answer**" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    ;(app as unknown as { transcript: { user(content: string): void } }).transcript.user("User question")
+    await setup.flush()
+
+    const frame = setup.captureCharFrame()
+    const userLine = frame.split("\n").find((line) => line.includes("User question")) || ""
+    const agentLine = frame.split("\n").find((line) => line.includes("Agent **answer**")) || ""
+    const headerLine = frame.split("\n").find((line) => line.includes(">_  nanobot")) || ""
+
+    expect(userLine).toContain("› User question")
+    expect(agentLine).toContain("• Agent **answer**")
+    expect(headerLine).not.toMatch(/[╭╮│]/u)
+  })
+
+  test("keeps footer status and shortcuts visually separated", async () => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat", latency_ms: 1700 })
+    await setup.flush()
+
+    const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
+    expect(footer).toContain("Ready · 1.7s")
+    expect(footer).toContain("enter send")
+    expect(footer).not.toContain("1.7senter")
+
+    app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden" })
+    await Bun.sleep(130)
+    await setup.renderOnce()
+    const activeFooter = setup.captureCharFrame().split("\n").find((line) => line.includes("Thinking")) || ""
+    expect(activeFooter).toContain("ctrl+c stop")
+    expect(activeFooter).not.toContain("enter send")
+    app.accept({ event: "turn_end", chat_id: "chat" })
   })
 
   test("keeps an explicit theme stable when the terminal reports another mode", async () => {

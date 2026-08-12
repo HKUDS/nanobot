@@ -16,7 +16,7 @@ export interface TranscriptTheme {
   muted: string
   error: string
   user: string
-  border: string
+  assistant: string
   syntax: SyntaxStyle
 }
 
@@ -43,10 +43,9 @@ export class Transcript {
   private activity: Activity | null = null
   private readonly styledText: Array<{
     renderable: TextRenderable
-    tone: "text" | "muted" | "error" | "user"
+    tone: "text" | "muted" | "error" | "user" | "assistant"
   }> = []
   private readonly markdown = new Set<MarkdownRenderable>()
-  private readonly frames = new Set<BoxRenderable>()
   private readonly activities = new Set<Activity>()
   private wrote = false
   private nextId = 0
@@ -85,7 +84,6 @@ export class Transcript {
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
-    for (const frame of this.frames) frame.borderColor = theme.border
     // Markdown may still be rendering this frame. Release the prior native
     // style only after the renderer reaches idle, matching OpenCode's retained
     // theme lifecycle and avoiding both leaks and use-after-free transitions.
@@ -93,11 +91,16 @@ export class Transcript {
   }
 
   header(options: TranscriptHeader): void {
-    this.writeText([
-      `>_  nanobot  v${options.version}`,
+    const row = this.createRow("header")
+    const title = this.createText(`>_  nanobot  v${options.version}`, "text", true)
+    const context = this.createText([
       `${options.model}  ·  ${options.access}`,
       options.workspace,
-    ].join("\n"), "text", true, true)
+    ].join("\n"), "muted")
+    row.add(title)
+    row.add(context)
+    this.root.add(row)
+    this.wrote = true
   }
 
   reset(header: TranscriptHeader): void {
@@ -109,7 +112,6 @@ export class Transcript {
     this.activity = null
     this.styledText.length = 0
     this.markdown.clear()
-    this.frames.clear()
     this.activities.clear()
     this.wrote = false
     this.nextId = 0
@@ -128,7 +130,7 @@ export class Transcript {
 
   user(content: string): void {
     this.finishActivity()
-    this.writeText(`› ${content}`, "user", true)
+    this.writeRole("›", content, "user")
   }
 
   assistant(content: string): void {
@@ -139,19 +141,16 @@ export class Transcript {
 
   notice(content: string, error = false): void {
     this.finishActivity()
-    this.writeText(content, error ? "error" : "muted")
+    this.writeRole(error ? "×" : "·", content, error ? "error" : "muted")
   }
 
   stream(delta: string): void {
     if (!delta) return
     if (!this.live) {
       this.finishActivity()
-      const row = this.createRow()
       const markdown = this.createMarkdown("", true, "assistant-stream")
-      row.add(markdown)
-      this.root.add(row)
+      const row = this.writeAssistant(markdown)
       this.live = { row, markdown, content: "" }
-      this.wrote = true
     }
     this.live.content += delta
     this.live.markdown.content = this.live.content
@@ -238,24 +237,17 @@ export class Transcript {
     return `${prefix}-${this.nextId}`
   }
 
-  private createRow(framed = false): BoxRenderable {
-    const row = new BoxRenderable(this.renderer, {
-      id: this.id(framed ? "text-frame" : "text-row"),
+  private createRow(kind = "row", direction: "column" | "row" = "column"): BoxRenderable {
+    return new BoxRenderable(this.renderer, {
+      id: this.id(`${kind}-row`),
       width: "100%",
       marginTop: this.wrote ? 1 : 0,
-      border: framed,
-      borderStyle: "rounded",
-      borderColor: this.theme.border,
-      paddingLeft: 1,
-      paddingRight: 1,
-      flexDirection: "column",
+      flexDirection: direction,
     })
-    if (framed) this.frames.add(row)
-    return row
   }
 
   private createActivity(): Activity {
-    const row = this.createRow()
+    const row = this.createRow("activity")
     const text = new TextRenderable(this.renderer, {
       id: this.id("agent-activity"),
       content: "",
@@ -282,24 +274,40 @@ export class Transcript {
     activity.text.content = [`  … ${hidden} earlier steps · Ctrl+O expand`, ...visible].join("\n")
   }
 
-  private writeText(
+  private createText(
     content: string,
-    tone: "text" | "muted" | "error" | "user",
+    tone: "text" | "muted" | "error" | "user" | "assistant",
     bold = false,
-    framed = false,
-  ): void {
-    const row = this.createRow(framed)
+    id = "text",
+  ): TextRenderable {
     const text = new TextRenderable(this.renderer, {
-      id: this.id("text"),
+      id: this.id(id),
       content,
       width: "100%",
       wrapMode: "word",
       fg: this.theme[tone],
       attributes: bold ? TextAttributes.BOLD : 0,
     })
+    this.styledText.push({ renderable: text, tone })
+    return text
+  }
+
+  private writeRole(
+    marker: string,
+    content: string,
+    tone: "muted" | "error" | "user",
+  ): void {
+    const row = this.createRow(tone === "user" ? "user" : "notice", "row")
+    const prefix = this.createText(marker, tone, true, "role-marker")
+    prefix.width = 2
+    prefix.flexShrink = 0
+    const text = this.createText(content, tone === "user" ? "text" : tone, false, "role-content")
+    text.width = "auto"
+    text.minWidth = 0
+    text.flexGrow = 1
+    row.add(prefix)
     row.add(text)
     this.root.add(row)
-    this.styledText.push({ renderable: text, tone })
     this.wrote = true
   }
 
@@ -307,7 +315,9 @@ export class Transcript {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
       content,
-      width: "100%",
+      width: "auto",
+      minWidth: 0,
+      flexGrow: 1,
       syntaxStyle: this.theme.syntax,
       streaming,
       internalBlockMode: "top-level",
@@ -318,10 +328,19 @@ export class Transcript {
   }
 
   private writeMarkdown(content: string, streaming: boolean): void {
-    const row = this.createRow()
-    row.add(this.createMarkdown(content, streaming))
+    this.writeAssistant(this.createMarkdown(content, streaming))
+  }
+
+  private writeAssistant(markdown: MarkdownRenderable): BoxRenderable {
+    const row = this.createRow("assistant", "row")
+    const prefix = this.createText("•", "assistant", false, "role-marker")
+    prefix.width = 2
+    prefix.flexShrink = 0
+    row.add(prefix)
+    row.add(markdown)
     this.root.add(row)
     this.wrote = true
+    return row
   }
 }
 

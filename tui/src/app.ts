@@ -116,7 +116,7 @@ function transcriptTheme(palette: Palette): TranscriptTheme {
     muted: palette.muted,
     error: palette.error,
     user: palette.user,
-    border: palette.border,
+    assistant: palette.accent,
     syntax: syntaxStyle(palette),
   }
 }
@@ -176,6 +176,7 @@ export class NanobotTui {
   private readonly promptHistory: string[] = []
   private historyCursor = 0
   private historyDraft = ""
+  private modelName: string
   private quitting = false
 
   private constructor(
@@ -185,6 +186,7 @@ export class NanobotTui {
     treeSitterClient = getTreeSitterClient(),
   ) {
     this.renderer = renderer
+    this.modelName = options.model
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
@@ -210,7 +212,7 @@ export class NanobotTui {
     })
     this.title = new TextRenderable(renderer, {
       id: "nanobot-tui-title",
-      content: `nanobot  ·  ${options.model}`,
+      content: `nanobot  ·  ${this.modelName}`,
       height: 1,
       flexShrink: 0,
       fg: this.palette.muted,
@@ -258,13 +260,18 @@ export class NanobotTui {
       content: "Connecting…",
       fg: this.palette.muted,
       height: 1,
+      width: "auto",
+      minWidth: 0,
       flexGrow: 1,
+      flexShrink: 1,
     })
     this.meta = new TextRenderable(renderer, {
       id: "nanobot-tui-meta",
       content: "enter send · alt+enter newline · ctrl+c stop",
       fg: this.palette.faint,
       height: 1,
+      width: "auto",
+      flexShrink: 1,
     })
 
     const statusRow = new BoxRenderable(renderer, {
@@ -274,6 +281,7 @@ export class NanobotTui {
       flexShrink: 0,
       flexDirection: "row",
       justifyContent: "space-between",
+      gap: 2,
     })
     this.composerFrame.add(this.composer)
     statusRow.add(this.status)
@@ -465,10 +473,10 @@ export class NanobotTui {
       case "goal_state":
         return
       case "turn_model_updated":
-        this.title.content = `nanobot  ·  ${event.model_name}`
+        this.setModel(event.model_name)
         return
       case "runtime_model_updated":
-        this.title.content = `nanobot  ·  ${event.model_name}`
+        this.setModel(event.model_name)
         return
       case "error":
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
@@ -484,7 +492,7 @@ export class NanobotTui {
     try {
       if (restoring) {
         this.transcript.reset({
-          model: this.options.model,
+          model: this.modelName,
           workspace: this.options.workspace,
           version: this.options.version,
           access: this.options.access,
@@ -544,6 +552,7 @@ export class NanobotTui {
       return
     }
     this.activeTurn = active
+    this.updateMeta()
     if (active) {
       this.activeStartedAt = startedAt ?? Date.now()
       this.shimmerFrame = 0
@@ -664,12 +673,27 @@ export class NanobotTui {
 
   private handleResize = (): void => {
     this.resizeComposer()
-    this.title.visible = this.renderer.height >= 12
-    this.meta.content = this.renderer.width >= 72
+    this.title.visible = this.renderer.height >= 14
+    this.updateMeta()
+  }
+
+  private updateMeta(): void {
+    if (this.activeTurn) {
+      this.meta.content = this.renderer.width >= 48 ? "ctrl+c stop" : ""
+      return
+    }
+    this.meta.content = this.renderer.width >= 112
       ? "enter send · alt+enter newline · pgup/pgdn scroll · ctrl+o tools · ctrl+c stop"
-      : this.renderer.width >= 48
+      : this.renderer.width >= 72
+        ? "enter send · alt+enter newline · ctrl+c stop"
+        : this.renderer.width >= 48
         ? "enter send · alt+enter newline"
         : ""
+  }
+
+  private setModel(model: string): void {
+    this.modelName = model
+    this.title.content = `nanobot  ·  ${model}`
   }
 
   private resizeComposer(): void {
