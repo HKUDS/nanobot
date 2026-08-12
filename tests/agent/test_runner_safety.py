@@ -326,6 +326,84 @@ async def test_runner_does_not_warn_on_two_repeats_or_varied_calls():
 
 
 @pytest.mark.asyncio
+async def test_runner_warns_on_batched_identical_tool_calls_in_one_round():
+    """Loop guard, batched variant: 3 identical (name + args) tool calls
+    issued together in a single round must warn immediately, on that first
+    round -- not just when the same round repeats across iterations. This is
+    the gap _detect_tool_call_loop's one-signature-per-round approach can't
+    see (three parallel calls in one round produce a distinct joined
+    signature exactly once, so it would never look like a repeat).
+    """
+    batched_calls = [
+        ToolCallRequest(id="c1", name="read_file", arguments={"path": "/workspace/a.md"}),
+        ToolCallRequest(id="c2", name="read_file", arguments={"path": "/workspace/a.md"}),
+        ToolCallRequest(id="c3", name="read_file", arguments={"path": "/workspace/a.md"}),
+    ]
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=batched_calls),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("not found", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    warnings = [
+        m for m in result.messages
+        if m.get("role") == "system" and "same tool call" in m.get("content", "")
+    ]
+    assert len(warnings) == 1, (
+        f"expected exactly one loop warning on the first (batched) round, got {len(warnings)}: {warnings}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_warn_on_two_batched_identical_or_varied_calls():
+    """Two identical calls batched in one round is not (yet) a loop; a
+    third, differently-argued call in the same round must not tip it over
+    into a false-positive warning.
+    """
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[
+            ToolCallRequest(id="c1", name="read_file", arguments={"path": "/workspace/a.md"}),
+            ToolCallRequest(id="c2", name="read_file", arguments={"path": "/workspace/a.md"}),
+            ToolCallRequest(id="c3", name="read_file", arguments={"path": "/workspace/b.md"}),
+        ]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=ToolResult("ok", is_error=False))
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    warnings = [
+        m for m in result.messages
+        if m.get("role") == "system" and "same tool call" in m.get("content", "")
+    ]
+    assert warnings == [], f"expected no loop warning, got: {warnings}"
+
+
+@pytest.mark.asyncio
 async def test_runner_rejects_leaked_tool_call_markup_after_max_iterations():
     """Reporter scenario 2026-08-11: a model asked to finalize with no tools
     offered (has_tool_calls is therefore always False) can still emit

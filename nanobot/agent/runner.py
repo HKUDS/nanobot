@@ -533,7 +533,7 @@ class AgentRunner:
 
                 loop_warning = self._detect_tool_call_loop(
                     response.tool_calls, recent_tool_signatures
-                )
+                ) or self._detect_intra_round_duplicate_calls(response.tool_calls)
                 if loop_warning:
                     messages.append({"role": "system", "content": loop_warning})
 
@@ -1323,6 +1323,18 @@ class AgentRunner:
         )
 
     @staticmethod
+    def _single_call_signature(tc: ToolCallRequest) -> str:
+        """Build a stable signature for one tool call (name + arguments)."""
+        if isinstance(tc.arguments, str):
+            args_repr = tc.arguments
+        else:
+            try:
+                args_repr = json.dumps(tc.arguments, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                args_repr = str(tc.arguments)
+        return f"{tc.name}:{args_repr}"
+
+    @staticmethod
     def _tool_call_signature(tool_calls: Iterable[ToolCallRequest]) -> str:
         """Build a stable signature for one round of tool calls (name + args).
 
@@ -1330,17 +1342,40 @@ class AgentRunner:
         calls in one round and their relative order isn't semantically
         meaningful for loop detection.
         """
-        parts: list[str] = []
-        for tc in tool_calls:
-            if isinstance(tc.arguments, str):
-                args_repr = tc.arguments
-            else:
-                try:
-                    args_repr = json.dumps(tc.arguments, sort_keys=True, default=str)
-                except (TypeError, ValueError):
-                    args_repr = str(tc.arguments)
-            parts.append(f"{tc.name}:{args_repr}")
+        parts = [AgentRunner._single_call_signature(tc) for tc in tool_calls]
         return "|".join(sorted(parts))
+
+    @staticmethod
+    def _detect_intra_round_duplicate_calls(
+        tool_calls: Iterable[ToolCallRequest],
+        *,
+        threshold: int = 3,
+    ) -> str | None:
+        """Detect several identical calls batched into a single round.
+
+        Complements ``_detect_tool_call_loop``, which only tracks one
+        signature per whole round and so only catches a loop that repeats
+        across separate rounds -- it cannot see ``threshold`` identical
+        calls issued together in one round (e.g. three parallel read_file
+        calls with the same path), since that round produces its own
+        distinct joined signature just once. This checks within a single
+        round instead, so it fires the first time such a round occurs
+        rather than requiring it to repeat.
+        """
+        counts: dict[str, int] = {}
+        for tc in tool_calls:
+            signature = AgentRunner._single_call_signature(tc)
+            counts[signature] = counts.get(signature, 0) + 1
+        if not any(count >= threshold for count in counts.values()):
+            return None
+        return (
+            f"You have just made the exact same tool call {threshold}+ times "
+            "in a single turn (identical tool name and arguments, issued "
+            "together). Repeating an identical call will not produce a "
+            "different result. Stop repeating this action -- either try a "
+            "genuinely different approach, or report what you have found so "
+            "far and ask how to proceed."
+        )
 
     @staticmethod
     def _detect_tool_call_loop(
