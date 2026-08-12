@@ -17,17 +17,20 @@ const options: AppOptions = {
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
 }
 
-const app = await NanobotTui.create(options)
+let app: NanobotTui | undefined
+let shuttingDown = false
 
 const shutdown = (code = 0) => {
-  app.stop()
+  if (shuttingDown) return
+  shuttingDown = true
+  app?.stop()
   process.exitCode = code
 }
 
 for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => shutdown())
 }
-process.once("exit", () => app.stop())
+process.once("exit", () => app?.stop())
 process.once("uncaughtException", (error) => {
   shutdown(1)
   process.stderr.write(`${error instanceof Error ? error.stack || error.message : String(error)}\n`)
@@ -37,4 +40,6 @@ process.once("unhandledRejection", (error) => {
   process.stderr.write(`${error instanceof Error ? error.stack || error.message : String(error)}\n`)
 })
 
-app.start()
+app = await NanobotTui.create(options)
+if (shuttingDown) app.stop()
+else app.start()

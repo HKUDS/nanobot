@@ -22,6 +22,11 @@ function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
 }
 
+async function waitUntil(predicate: () => boolean, timeout = 250): Promise<void> {
+  const deadline = Date.now() + timeout
+  while (!predicate() && Date.now() < deadline) await Bun.sleep(5)
+}
+
 function client(sent: string[] = []) {
   return {
     activeChatId: "chat",
@@ -113,7 +118,7 @@ describe("NanobotTui layout", () => {
     composer.setText("你")
     composer.submit()
     setTimeout(() => composer.setText("你好"), 0)
-    await Bun.sleep(10)
+    await waitUntil(() => sent.length > 0)
 
     expect(sent).toEqual(["你好"])
   })

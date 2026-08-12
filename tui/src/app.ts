@@ -164,6 +164,7 @@ export class NanobotTui {
   private shimmerFrame = 0
   private shimmerTimer: ReturnType<typeof setInterval> | null = null
   private submitPending = false
+  private submitGeneration = 0
   private readonly promptHistory: string[] = []
   private historyCursor = 0
   private historyDraft = ""
@@ -311,14 +312,17 @@ export class NanobotTui {
   private deferSubmit(): void {
     if (this.submitPending) return
     this.submitPending = true
+    const generation = ++this.submitGeneration
     setTimeout(() => setTimeout(() => {
+      if (generation !== this.submitGeneration) return
       this.submitPending = false
+      if (this.composer.isDestroyed) return
       this.submit()
     }, 0), 0)
   }
 
   private submit(): void {
-    if (this.quitting) return
+    if (this.quitting || this.composer.isDestroyed) return
     const content = this.composer.plainText.trim()
     if (!content) return
     if (!this.ready) {
@@ -658,6 +662,8 @@ export class NanobotTui {
   private quit(): void {
     if (this.quitting) return
     this.quitting = true
+    this.submitGeneration += 1
+    this.submitPending = false
     this.client.close()
     this.renderer.destroy()
   }
