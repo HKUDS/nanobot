@@ -230,6 +230,7 @@ export function useSidebarState(
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
+      if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
       persist(next);

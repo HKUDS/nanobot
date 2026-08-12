@@ -1,5 +1,9 @@
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
+import nanobot.webui.sidebar_state as sidebar_state
 from nanobot.webui.sidebar_state import (
     default_webui_sidebar_state,
     read_webui_sidebar_state,
@@ -39,13 +43,11 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                             "title": "  Research  ",
                             "paneKeys": ["websocket:a", "websocket:b", "websocket:a"],
                             "layoutPaneKeys": ["websocket:b", "missing", "websocket:a"],
-                            "activePaneKey": "missing",
                             "layout": "invalid-layout",
                             "splitRatios": [0.4, 2, "bad", float("nan")],
                         },
                         "tab:websocket:b": {
                             "paneKeys": ["websocket:b", "websocket:c"],
-                            "activePaneKey": "websocket:c",
                             "layout": "bsp",
                         },
                     },
@@ -74,18 +76,8 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                 "title": "Research",
                 "paneKeys": ["websocket:a", "websocket:b"],
                 "layoutPaneKeys": ["websocket:b", "websocket:a"],
-                "activePaneKey": "websocket:a",
                 "layout": "columns",
                 "splitRatios": [0.4, 0.95],
-            },
-            "tab:websocket:b": {
-                "explicit": False,
-                "title": None,
-                "paneKeys": ["websocket:c"],
-                "layoutPaneKeys": ["websocket:c"],
-                "activePaneKey": "websocket:c",
-                "layout": "bsp",
-                "splitRatios": [],
             },
         },
     }
@@ -122,3 +114,67 @@ def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch)
     assert state["view"]["sort"] == "manual"
     assert webui_sidebar_state_path().is_file()
     assert read_webui_sidebar_state()["pinned_keys"] == ["websocket:a"]
+
+
+def test_sidebar_state_persists_only_visible_workbench_groups(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    tabs = {
+        f"tab:websocket:{index}": {
+            "explicit": False,
+            "paneKeys": [f"websocket:{index}"],
+            "layoutPaneKeys": [f"websocket:{index}"],
+            "layout": "columns",
+            "splitRatios": [],
+        }
+        for index in range(2_000)
+    }
+
+    state = write_webui_sidebar_state({"workbench": {"version": 1, "tabs": tabs}})
+
+    assert state["workbench"] == {"version": 1, "tabs": {}}
+    assert webui_sidebar_state_path().stat().st_size < 2_048
+
+
+def test_sidebar_state_requires_supported_workbench_version(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+    state = write_webui_sidebar_state(
+        {
+            "workbench": {
+                "version": 2,
+                "tabs": {
+                    "tab:websocket:a": {
+                        "explicit": True,
+                        "paneKeys": ["websocket:a"],
+                    }
+                },
+            }
+        }
+    )
+
+    assert state["workbench"] == {"version": 1, "tabs": {}}
+
+
+def test_sidebar_state_serializes_concurrent_writes(monkeypatch) -> None:
+    counter_lock = threading.Lock()
+    active_writes = 0
+    peak_writes = 0
+
+    def fake_write(raw: dict[str, object]) -> dict[str, object]:
+        nonlocal active_writes, peak_writes
+        with counter_lock:
+            active_writes += 1
+            peak_writes = max(peak_writes, active_writes)
+        time.sleep(0.01)
+        with counter_lock:
+            active_writes -= 1
+        return raw
+
+    monkeypatch.setattr(sidebar_state, "_write_webui_sidebar_state", fake_write)
+    payloads = [{"write": index} for index in range(12)]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(sidebar_state.write_webui_sidebar_state, payloads))
+
+    assert results == payloads
+    assert peak_writes == 1

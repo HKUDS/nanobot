@@ -1267,7 +1267,6 @@ describe("NanobotClient", () => {
             explicit: true,
             title: "Research",
             paneKeys: ["websocket:a", "websocket:b"],
-            activePaneKey: "websocket:a",
             layout: "columns",
           },
         },

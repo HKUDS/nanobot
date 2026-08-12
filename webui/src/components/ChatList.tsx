@@ -100,7 +100,7 @@ interface ChatListProps {
   onToggleArchive: (key: string) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
-  onCreateTab?: (tabKey: string) => void;
+  onCreateTab?: (paneKey: string) => void;
   onDetachPane?: (tabKey: string, paneKey: string) => void;
   onDissolveTab?: (tabKey: string) => void;
   onAttachPane?: (
@@ -710,7 +710,7 @@ export const ChatList = memo(function ChatList({
                                 {isArchived ? t("chat.unarchive") : t("chat.archive")}
                               </DropdownMenuItem>
                               {paneGroup && onCreateTab ? (
-                                <DropdownMenuItem onSelect={() => onCreateTab(paneGroup.tabKey)}>
+                                <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
                                   {t("workbench.createGroup", {
                                     defaultValue: "Create group",

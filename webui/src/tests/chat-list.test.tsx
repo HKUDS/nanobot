@@ -122,8 +122,7 @@ describe("ChatList", () => {
       name: "Topic actions for Solo pane",
     }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Create group" }));
-    expect(onCreateTab).toHaveBeenCalledWith("tab:solo");
-    expect(onAttachPane).not.toHaveBeenCalled();
+    expect(onCreateTab).toHaveBeenCalledWith("websocket:solo");
 
     fireEvent.pointerDown(screen.getByRole("button", {
       name: "Topic actions for Solo pane",

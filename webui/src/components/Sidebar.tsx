@@ -50,7 +50,7 @@ interface SidebarProps {
   onToggleArchive: (key: string) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
-  onCreateTab?: (tabKey: string) => void;
+  onCreateTab?: (paneKey: string) => void;
   onDetachPane?: (tabKey: string, paneKey: string) => void;
   onDissolveTab?: (tabKey: string) => void;
   onAttachPane?: (

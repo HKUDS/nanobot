@@ -1060,7 +1060,6 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
                                 "title": "Research",
                                 "paneKeys": ["websocket:a", "websocket:b"],
                                 "layoutPaneKeys": ["websocket:b", "websocket:a"],
-                                "activePaneKey": "websocket:a",
                                 "layout": "columns",
                                 "splitRatios": [0.35],
                             }

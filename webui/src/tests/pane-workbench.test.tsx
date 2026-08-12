@@ -7,8 +7,6 @@ import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   EMPTY_WORKBENCH_STATE,
   addWorkbenchPane,
-  ensureWorkbenchPaneTab,
-  focusWorkbenchPane,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
   workbenchTab,
@@ -38,14 +36,11 @@ function WorkbenchHarness({
   onPaneOrderChange?: (paneKeys: string[]) => void;
   onSplitRatiosChange?: (splitRatios: number[]) => void;
 } = {}) {
+  const [activePaneKey, setActivePaneKey] = useState("beta");
   const [state, setState] = useState(() => {
-    const initial = ensureWorkbenchPaneTab(EMPTY_WORKBENCH_STATE, "alpha");
+    const initial = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "alpha", "beta");
     const tabKey = workbenchTabForPane(initial, "alpha").tabKey;
-    return setWorkbenchLayout(
-      addWorkbenchPane(initial, tabKey, "beta"),
-      tabKey,
-      initialLayout,
-    );
+    return setWorkbenchLayout(initial, tabKey, initialLayout);
   });
   const tabKey = workbenchTabForPane(state, "alpha").tabKey;
   const tab = workbenchTab(state, tabKey);
@@ -55,13 +50,11 @@ function WorkbenchHarness({
   return (
     <PaneWorkbench
       panes={tab.layoutPaneKeys.map((key) => ({ key, title: titles[key] }))}
-      activePaneKey={tab.activePaneKey}
+      activePaneKey={activePaneKey}
       layout={tab.layout}
       splitRatios={tab.splitRatios}
       showLayoutControl
-      onActivatePane={(key) => setState((current) => (
-        focusWorkbenchPane(current, tabKey, key)
-      ))}
+      onActivatePane={setActivePaneKey}
       onAddPane={vi.fn()}
       onLayoutChange={(layout) => setState((current) => (
         setWorkbenchLayout(current, tabKey, layout)

@@ -17,15 +17,12 @@ import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
-  EMPTY_WORKBENCH_STATE,
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
   attachWorkbenchPane,
   createWorkbenchTab,
   detachWorkbenchPane,
   dissolveWorkbenchTab,
-  ensureWorkbenchPaneTab,
-  focusWorkbenchPane,
   orderWorkbenchTabs,
   reconcileWorkbench,
   renameWorkbenchTab,
@@ -1060,12 +1057,16 @@ function Shell({
   const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
-  const [workbenchState, setWorkbenchState] = useState<WorkbenchState>(
-    EMPTY_WORKBENCH_STATE,
-  );
-  const workbenchServerHydratedRef = useRef(false);
-  const lastServerWorkbenchRef = useRef("");
-  const skipWorkbenchPersistenceRef = useRef(false);
+  const workbenchState = sidebarState.workbench;
+  const updateWorkbenchState = useCallback((
+    updater: (current: WorkbenchState) => WorkbenchState,
+  ) => {
+    void updateSidebarState((current) => {
+      const next = updater(current.workbench);
+      return next === current.workbench ? current : { ...current, workbench: next };
+    });
+  }, [updateSidebarState]);
+  const lastActivePaneByTabRef = useRef(new Map<string, string>());
   const [creatingPane, setCreatingPane] = useState(false);
   const topicSessions = sessions;
   const [pendingDelete, setPendingDelete] = useState<{
@@ -1184,19 +1185,6 @@ function Shell({
   }, [getToken]);
 
   useEffect(() => {
-    if (sidebarStateLoading) return;
-    const serialized = JSON.stringify(sidebarState.workbench);
-    if (
-      workbenchServerHydratedRef.current
-      && lastServerWorkbenchRef.current === serialized
-    ) return;
-    workbenchServerHydratedRef.current = true;
-    lastServerWorkbenchRef.current = serialized;
-    skipWorkbenchPersistenceRef.current = true;
-    setWorkbenchState(sidebarState.workbench);
-  }, [sidebarState.workbench, sidebarStateLoading]);
-
-  useEffect(() => {
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
@@ -1206,21 +1194,6 @@ function Shell({
       // ignore storage errors (private mode, etc.)
     }
   }, [hostSidebarOpen]);
-
-  useEffect(() => {
-    if (!workbenchServerHydratedRef.current || sidebarStateLoading) return;
-    if (skipWorkbenchPersistenceRef.current) {
-      skipWorkbenchPersistenceRef.current = false;
-      return;
-    }
-    const serialized = JSON.stringify(workbenchState);
-    if (serialized === JSON.stringify(sidebarState.workbench)) return;
-    lastServerWorkbenchRef.current = serialized;
-    void updateSidebarState((current) => ({
-      ...current,
-      workbench: workbenchState,
-    }));
-  }, [sidebarState.workbench, sidebarStateLoading, updateSidebarState, workbenchState]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -1292,11 +1265,11 @@ function Shell({
   ), [activeKey, temporarySessions, workbenchState]);
   const activeTabKey = activeTabMatch?.tabKey ?? null;
   const activeTabState = activeTabMatch?.tab ?? null;
-  const activePaneSession = useMemo<ChatSummary | null>(() => {
-    if (!activeTabState) return activeSession;
-    return sessions.find((session) => session.key === activeTabState.activePaneKey)
-      ?? activeSession;
-  }, [activeSession, activeTabState, sessions]);
+  const activePaneSession = activeSession;
+  useEffect(() => {
+    if (!activeTabKey || !activeKey || !activeTabState?.paneKeys.includes(activeKey)) return;
+    lastActivePaneByTabRef.current.set(activeTabKey, activeKey);
+  }, [activeKey, activeTabKey, activeTabState]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activePaneSession?.chatId ?? null;
@@ -1364,20 +1337,14 @@ function Shell({
   useEffect(() => {
     if (loading || sidebarStateLoading) return;
     const validKeys = new Set(sessions.map((session) => session.key));
-    setWorkbenchState((current) => {
-      const reconciled = reconcileWorkbench(current, validKeys);
-      if (!activeKey || temporarySessions[activeKey] || !validKeys.has(activeKey)) {
-        return reconciled;
-      }
-      const match = workbenchTabForPane(reconciled, activeKey);
-      return focusWorkbenchPane(reconciled, match.tabKey, activeKey);
+    updateWorkbenchState((current) => {
+      return reconcileWorkbench(current, validKeys);
     });
   }, [
-    activeKey,
     loading,
     sidebarStateLoading,
     sessions,
-    temporarySessions,
+    updateWorkbenchState,
   ]);
 
   useEffect(() => {
@@ -1817,11 +1784,11 @@ function Shell({
 
   const onConfirmTabRename = useCallback((title: string) => {
     if (!pendingTabRename) return;
-    setWorkbenchState((current) => (
+    updateWorkbenchState((current) => (
       renameWorkbenchTab(current, pendingTabRename.key, title)
     ));
     setPendingTabRename(null);
-  }, [pendingTabRename]);
+  }, [pendingTabRename, updateWorkbenchState]);
 
   const onToggleGroup = useCallback(
     (groupId: string) => {
@@ -1940,11 +1907,7 @@ function Shell({
       const chatId = await createChat(scope);
       const paneKey = `websocket:${chatId}`;
       pendingCreatedSessionKeyRef.current = paneKey;
-      setWorkbenchState((current) => {
-        const withTab = ensureWorkbenchPaneTab(current, activeKey);
-        const target = workbenchTabForPane(withTab, activeKey);
-        return addWorkbenchPane(withTab, target.tabKey, paneKey);
-      });
+      updateWorkbenchState((current) => addWorkbenchPane(current, activeKey, paneKey));
       navigate({
         view: "chat",
         activeKey: paneKey,
@@ -1974,6 +1937,7 @@ function Shell({
     creatingPane,
     navigate,
     t,
+    updateWorkbenchState,
   ]);
 
   useEffect(() => {
@@ -2395,9 +2359,7 @@ function Shell({
     titleForSession,
     workbenchPaneSessions,
   ]);
-  const renderedActivePaneKey = paneChromeEnabled && activeTabState
-    ? activeTabState.activePaneKey
-    : renderedWorkbenchPanes[0].key;
+  const renderedActivePaneKey = activeKey ?? renderedWorkbenchPanes[0].key;
   const renderedWorkbenchLayout = paneChromeEnabled && activeTabState
     ? activeTabState.layout
     : "columns";
@@ -2419,12 +2381,15 @@ function Shell({
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,
         title: presentation.title,
-        activePaneKey: orderedTab.tab.activePaneKey,
+        activePaneKey: activeKey && orderedTab.paneKeys.includes(activeKey)
+          ? activeKey
+          : orderedTab.paneKeys[0],
         visible: orderedTab.tab.explicit || orderedTab.paneKeys.length > 1,
         panes,
       }];
     }));
   }, [
+    activeKey,
     sessions,
     sidebarTabPresentations,
     titleForSession,
@@ -2434,14 +2399,18 @@ function Shell({
   );
 
   const onActivateWorkbenchPane = useCallback((paneKey: string) => {
-    if (!activeTabKey) return;
-    setWorkbenchState((current) => focusWorkbenchPane(current, activeTabKey, paneKey));
     onSelectChat(paneKey);
-  }, [activeTabKey, onSelectChat]);
+  }, [onSelectChat]);
 
   const onSelectSidebarTab = useCallback((tabKey: string) => {
     const tab = workbenchTab(workbenchState, tabKey);
-    if (tab) onSelectChat(tab.activePaneKey);
+    if (!tab) return;
+    const rememberedPaneKey = lastActivePaneByTabRef.current.get(tabKey);
+    onSelectChat(
+      rememberedPaneKey && tab.paneKeys.includes(rememberedPaneKey)
+        ? rememberedPaneKey
+        : tab.paneKeys[0],
+    );
   }, [onSelectChat, workbenchState]);
 
   const onSelectSidebarItem = useCallback((key: string) => {
@@ -2455,33 +2424,32 @@ function Shell({
     onSelectSidebarTab(key);
   }, [onSelectChat, onSelectSidebarTab, sessions]);
 
-  const onSelectSidebarPane = useCallback((tabKey: string, paneKey: string) => {
-    setWorkbenchState((current) => focusWorkbenchPane(current, tabKey, paneKey));
+  const onSelectSidebarPane = useCallback((_tabKey: string, paneKey: string) => {
     onSelectChat(paneKey);
   }, [onSelectChat]);
 
   const onDetachWorkbenchPane = useCallback((tabKey: string, paneKey: string) => {
-    setWorkbenchState((current) => detachWorkbenchPane(current, tabKey, paneKey));
-  }, []);
+    updateWorkbenchState((current) => detachWorkbenchPane(current, tabKey, paneKey));
+  }, [updateWorkbenchState]);
 
-  const onCreateWorkbenchTab = useCallback((tabKey: string) => {
-    setWorkbenchState((current) => createWorkbenchTab(current, tabKey));
-  }, []);
+  const onCreateWorkbenchTab = useCallback((paneKey: string) => {
+    updateWorkbenchState((current) => createWorkbenchTab(current, paneKey));
+  }, [updateWorkbenchState]);
 
   const onDissolveWorkbenchTab = useCallback((tabKey: string) => {
-    setWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
-  }, []);
+    updateWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
+  }, [updateWorkbenchState]);
 
   const onAttachWorkbenchPane = useCallback((
     paneKey: string,
     tabKey: string,
   ) => {
-    setWorkbenchState((current) => {
+    updateWorkbenchState((current) => {
       const target = workbenchTab(current, tabKey);
       if (!target || (!target.explicit && target.paneKeys.length < 2)) return current;
       return attachWorkbenchPane(current, tabKey, paneKey);
     });
-  }, []);
+  }, [updateWorkbenchState]);
 
   useEffect(() => {
     if (view === "settings") {
@@ -2746,19 +2714,19 @@ function Shell({
                 onAddPane={onAddPane}
                 onLayoutChange={(layout) => {
                   if (!activeTabKey) return;
-                  setWorkbenchState((current) => (
+                  updateWorkbenchState((current) => (
                     setWorkbenchLayout(current, activeTabKey, layout)
                   ));
                 }}
                 onPaneOrderChange={(paneKeys) => {
                   if (!activeTabKey) return;
-                  setWorkbenchState((current) => (
+                  updateWorkbenchState((current) => (
                     setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
                   ));
                 }}
                 onSplitRatiosChange={(splitRatios) => {
                   if (!activeTabKey) return;
-                  setWorkbenchState((current) => (
+                  updateWorkbenchState((current) => (
                     setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
                   ));
                 }}
