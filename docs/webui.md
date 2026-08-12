@@ -301,6 +301,19 @@ runtime configuration. Use it to review or adjust model presets, providers,
 image generation, voice transcription, web tools, chat channels, Apps,
 Automations, Skills, runtime identity, and advanced safety controls.
 
+The Models screen lets you delete providers created through **Add your own model
+provider**. Deletion is blocked while the provider is referenced by the default
+agent, a saved model preset, or an inline fallback; remove that reference first.
+For configured built-in providers, **Remove configuration** clears saved
+credentials and options instead of deleting the provider type. This action is
+also blocked while the provider is referenced. OAuth providers use **Sign out**
+to clear their session.
+
+In the chat composer, select the model preset badge to choose a saved preset.
+Each option shows its provider and model, and the same selector is available on
+the empty landing composer and existing chats. A failed switch leaves the active
+preset unchanged and displays the error in the composer.
+
 Some settings take effect immediately. Runtime settings that affect the gateway
 or agent process may require a restart; the WebUI shows that requirement next to
 the relevant control.

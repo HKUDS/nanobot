@@ -1773,6 +1773,126 @@ def create_provider_settings(
     return payload
 
 
+def _normalized_provider_reference(value: str) -> str:
+    return value.strip().replace("-", "_").casefold()
+
+
+def _preset_uses_provider(
+    config: Config,
+    preset: ModelPresetConfig,
+    provider_key: str,
+) -> bool:
+    provider = _normalized_provider_reference(preset.provider)
+    if provider == provider_key:
+        return True
+    if provider != "auto":
+        return False
+    resolved_provider = config.get_provider_name(model=preset.model, preset=preset)
+    return _normalized_provider_reference(resolved_provider or "") == provider_key
+
+
+def _provider_dependency_locations(config: Config, provider_key: str) -> list[str]:
+    locations: list[str] = []
+    defaults = config.agents.defaults
+    if _normalized_provider_reference(defaults.provider) == provider_key:
+        locations.append("default agent provider")
+    elif _preset_uses_provider(config, config.resolve_default_preset(), provider_key):
+        locations.append(f'default agent model "{defaults.model}"')
+
+    for name, preset in config.model_presets.items():
+        if _preset_uses_provider(config, preset, provider_key):
+            provider = _normalized_provider_reference(preset.provider)
+            if provider == provider_key:
+                locations.append(f'model preset "{name}"')
+            else:
+                locations.append(f'model preset "{name}" (model "{preset.model}")')
+
+    for fallback in defaults.fallback_models:
+        if isinstance(fallback, str):
+            preset = config.model_presets.get(fallback)
+            if preset is not None and _preset_uses_provider(config, preset, provider_key):
+                locations.append(f'fallback preset "{fallback}"')
+            continue
+        fallback_preset = ModelPresetConfig(model=fallback.model, provider=fallback.provider)
+        if _preset_uses_provider(config, fallback_preset, provider_key):
+            locations.append(f'inline fallback "{fallback.model}"')
+    return locations
+
+
+def delete_provider_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    provider_name = (_query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+
+    config = _load_settings_config(config_path)
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None or find_by_name(resolved_provider[1]) is not None:
+        raise WebUISettingsError("only custom providers can be deleted")
+    _spec, provider_key, provider_config = resolved_provider
+    dynamic_providers = config.providers.model_extra
+    if dynamic_providers is None or provider_key not in dynamic_providers:
+        raise WebUISettingsError("only custom providers can be deleted")
+
+    normalized_key = _normalized_provider_reference(provider_key)
+    dependencies = _provider_dependency_locations(config, normalized_key)
+    if dependencies:
+        raise WebUISettingsError(
+            f'provider "{provider_config.display_name or provider_key}" is referenced by: '
+            + ", ".join(dependencies),
+            status=409,
+        )
+
+    del dynamic_providers[provider_key]
+    _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
+
+
+def reset_provider_settings(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    provider_name = (_query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+
+    config = _load_settings_config(config_path)
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+    if find_by_name(provider_key) is None or provider_key == "custom":
+        raise WebUISettingsError("custom providers must be deleted")
+    if spec.is_oauth:
+        raise WebUISettingsError("OAuth providers must use sign out instead")
+    if not _provider_configured_for_settings(spec, provider_config):
+        raise WebUISettingsError("provider is not configured")
+
+    dependencies = _provider_dependency_locations(
+        config,
+        _normalized_provider_reference(provider_key),
+    )
+    if dependencies:
+        raise WebUISettingsError(
+            f'provider "{spec.label}" is referenced by: ' + ", ".join(dependencies),
+            status=409,
+        )
+
+    image_config = config.tools.image_generation
+    restart_required = (
+        image_config.enabled
+        and image_config.provider == provider_key
+        and get_image_gen_provider(provider_key) is not None
+    )
+    setattr(config.providers, provider_key, type(provider_config)())
+    _save_settings_config(config, config_path)
+    return settings_payload(requires_restart=restart_required, config_path=config_path)
+
+
 def update_provider_settings(
     query: QueryParams,
     *,

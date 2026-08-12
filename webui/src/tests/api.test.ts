@@ -9,6 +9,8 @@ import {
   createProviderSettings,
   deleteSkill,
   deleteModelConfiguration,
+  deleteProviderSettings,
+  resetProviderSettings,
   deleteSession,
   fetchFilePreview,
   fetchFilePreviewAvailability,
@@ -631,6 +633,26 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.provider.create",
       update,
+      20_000,
+    );
+  });
+
+  it("serializes custom provider deletion", async () => {
+    await deleteProviderSettings(mutationTransport, "custom-company");
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.delete",
+      { provider: "custom-company" },
+      20_000,
+    );
+  });
+
+  it("serializes native provider configuration reset", async () => {
+    await resetProviderSettings(mutationTransport, "openrouter");
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.reset",
+      { provider: "openrouter" },
       20_000,
     );
   });

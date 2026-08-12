@@ -58,10 +58,12 @@ from nanobot.webui.settings_api import (
     create_provider_settings,
     decorate_settings_payload,
     delete_model_configuration,
+    delete_provider_settings,
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
     provider_models_payload,
+    reset_provider_settings,
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
@@ -116,6 +118,8 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/model-call-order/update",
     "/api/settings/provider/update",
     "/api/settings/provider/create",
+    "/api/settings/provider/delete",
+    "/api/settings/provider/reset",
     "/api/settings/provider/oauth-login",
     "/api/settings/provider/oauth-login/complete",
     "/api/settings/provider/oauth-logout",
@@ -235,6 +239,10 @@ class WebUISettingsRouter:
             return await self._handle_settings_provider_update(request)
         if path == "/api/settings/provider/create":
             return self._handle_settings_provider_create(request)
+        if path == "/api/settings/provider/delete":
+            return self._handle_settings_provider_delete(request)
+        if path == "/api/settings/provider/reset":
+            return await self._handle_settings_provider_reset(request)
         if path == "/api/settings/provider-models":
             return await self._handle_settings_provider_models(request)
         if path == "/api/settings/provider/oauth-login":
@@ -505,6 +513,31 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload))
+
+    def _handle_settings_provider_delete(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = self.settings.mutate(
+                delete_provider_settings,
+                self._parse_provider_settings_query(request),
+            )
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
+
+    async def _handle_settings_provider_reset(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = self.settings.mutate(
+                reset_provider_settings,
+                self._parse_provider_settings_query(request),
+            )
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        payload = await self._apply_image_generation_runtime_change(payload)
+        return self._json_response(self._with_restart_state(payload, section="image"))
 
     async def _handle_settings_provider_models(self, request: WsRequest) -> Response:
         if not self._authorized(request):

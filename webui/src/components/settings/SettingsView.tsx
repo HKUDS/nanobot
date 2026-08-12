@@ -121,6 +121,8 @@ import {
   createModelConfiguration,
   createProviderSettings,
   deleteModelConfiguration,
+  deleteProviderSettings,
+  resetProviderSettings,
   disableNanobotFeature,
   enableNanobotFeature,
   fetchApiService,
@@ -780,6 +782,12 @@ export function SettingsView({
   const [modelMigrationSaving, setModelMigrationSaving] = useState(false);
   const [modelPresetPendingDelete, setModelPresetPendingDelete] =
     useState<SettingsPayload["model_presets"][number] | null>(null);
+  const [providerPendingDelete, setProviderPendingDelete] =
+    useState<SettingsPayload["providers"][number] | null>(null);
+  const [providerDeleteSaving, setProviderDeleteSaving] = useState(false);
+  const [providerPendingReset, setProviderPendingReset] =
+    useState<SettingsPayload["providers"][number] | null>(null);
+  const [providerResetSaving, setProviderResetSaving] = useState(false);
   const modelPresetBeforeCreateRef = useRef<string | null>(null);
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
@@ -1520,6 +1528,46 @@ export function SettingsView({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDeleteProvider = async () => {
+    if (!providerPendingDelete || providerDeleteSaving) return;
+    setProviderDeleteSaving(true);
+    try {
+      const payload = await deleteProviderSettings(client, providerPendingDelete.name);
+      applyPayload(payload);
+      setProviderPendingDelete(null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderDeleteSaving(false);
+    }
+  };
+
+  const requestProviderDeletion = (provider: SettingsPayload["providers"][number]) => {
+    setError(null);
+    setProviderPendingDelete(provider);
+  };
+
+  const handleResetProvider = async () => {
+    if (!providerPendingReset || providerResetSaving) return;
+    setProviderResetSaving(true);
+    try {
+      const payload = await resetProviderSettings(client, providerPendingReset.name);
+      applyPayload(payload);
+      setProviderPendingReset(null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderResetSaving(false);
+    }
+  };
+
+  const requestProviderReset = (provider: SettingsPayload["providers"][number]) => {
+    setError(null);
+    setProviderPendingReset(provider);
   };
 
   const saveImageGenerationSettings = async () => {
@@ -2475,6 +2523,8 @@ export function SettingsView({
                 }))
               }
               onSaveProvider={saveProvider}
+              onDeleteProvider={requestProviderDeletion}
+              onResetProvider={requestProviderReset}
               onCreateCustomProvider={createCustomProvider}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
@@ -2708,6 +2758,26 @@ export function SettingsView({
           if (!open) setModelPresetPendingDelete(null);
         }}
         onConfirm={handleDeleteModelConfiguration}
+      />
+
+      <ProviderDeleteDialog
+        provider={providerPendingDelete}
+        deleting={providerDeleteSaving}
+        error={error}
+        onOpenChange={(open) => {
+          if (!open) setProviderPendingDelete(null);
+        }}
+        onConfirm={handleDeleteProvider}
+      />
+
+      <ProviderResetDialog
+        provider={providerPendingReset}
+        resetting={providerResetSaving}
+        error={error}
+        onOpenChange={(open) => {
+          if (!open) setProviderPendingReset(null);
+        }}
+        onConfirm={handleResetProvider}
       />
 
       <ProviderOAuthLoginDialog
@@ -3556,6 +3626,134 @@ function ModelPresetDeleteDialog({
             {deleting
               ? tx("settings.actions.deleting", "Deleting...")
               : tx("settings.actions.delete", "Delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProviderDeleteDialog({
+  provider,
+  deleting,
+  error,
+  onOpenChange,
+  onConfirm,
+}: {
+  provider: SettingsPayload["providers"][number] | null;
+  deleting: boolean;
+  error: string | null;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  return (
+    <Dialog open={provider !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[440px] rounded-[24px]">
+        <DialogHeader className="text-left">
+          <DialogTitle>
+            {tx("settings.providers.deleteTitle", "Delete custom provider?")}
+          </DialogTitle>
+          <DialogDescription className="leading-5">
+            {tx(
+              "settings.providers.deleteHelp",
+              "This removes \u201c{{name}}\u201d and its saved credentials. Providers used by a model preset cannot be deleted.",
+              { name: provider?.label ?? "" },
+            )}
+          </DialogDescription>
+          {error ? (
+            <p role="alert" className="text-[12px] leading-5 text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:space-x-0">
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-full"
+            disabled={deleting}
+            onClick={() => onOpenChange(false)}
+          >
+            {tx("settings.actions.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="rounded-full"
+            disabled={deleting}
+            onClick={onConfirm}
+          >
+            {deleting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {deleting
+              ? tx("settings.actions.deleting", "Deleting...")
+              : tx("settings.actions.delete", "Delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProviderResetDialog({
+  provider,
+  resetting,
+  error,
+  onOpenChange,
+  onConfirm,
+}: {
+  provider: SettingsPayload["providers"][number] | null;
+  resetting: boolean;
+  error: string | null;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  return (
+    <Dialog open={provider !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[440px] rounded-[24px]">
+        <DialogHeader className="text-left">
+          <DialogTitle>
+            {tx("settings.providers.resetTitle", "Remove provider configuration?")}
+          </DialogTitle>
+          <DialogDescription className="leading-5">
+            {tx(
+              "settings.providers.resetHelp",
+              "This clears the saved credentials and options for {{name}}. Presets and defaults using this provider must be changed first.",
+              { name: provider?.label ?? "" },
+            )}
+          </DialogDescription>
+          {error ? (
+            <p role="alert" className="text-[12px] leading-5 text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:space-x-0">
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-full"
+            disabled={resetting}
+            onClick={() => onOpenChange(false)}
+          >
+            {tx("settings.actions.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="rounded-full"
+            disabled={resetting}
+            onClick={onConfirm}
+          >
+            {resetting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {resetting
+              ? tx("settings.actions.removing", "Removing...")
+              : tx("settings.actions.remove", "Remove")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -4618,6 +4816,8 @@ function ProvidersSettings({
   onToggleProviderKeyEditing,
   onChangeProviderForm,
   onSaveProvider,
+  onDeleteProvider,
+  onResetProvider,
   onCreateCustomProvider,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
@@ -4641,6 +4841,8 @@ function ProvidersSettings({
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
+  onDeleteProvider: (provider: SettingsPayload["providers"][number]) => void;
+  onResetProvider: (provider: SettingsPayload["providers"][number]) => void;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
@@ -4986,6 +5188,31 @@ function ProvidersSettings({
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <div className="flex items-center justify-end gap-2">
+                  {provider.is_custom ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onDeleteProvider(provider)}
+                      disabled={saving}
+                      className="mr-auto rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.providers.delete", "Delete provider")}
+                    </Button>
+                  ) : provider.name !== "custom"
+                    && provider.configured
+                    && provider.auth_type === "api_key" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onResetProvider(provider)}
+                      disabled={saving}
+                      className="mr-auto rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.providers.reset", "Remove configuration")}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
