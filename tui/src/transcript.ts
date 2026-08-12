@@ -17,6 +17,7 @@ export interface TranscriptTheme {
   error: string
   user: string
   assistant: string
+  border: string
   syntax: SyntaxStyle
 }
 
@@ -47,6 +48,7 @@ export class Transcript {
   }> = []
   private readonly markdown = new Set<MarkdownRenderable>()
   private readonly activities = new Set<Activity>()
+  private readonly frames = new Set<BoxRenderable>()
   private wrote = false
   private nextId = 0
 
@@ -84,6 +86,7 @@ export class Transcript {
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
+    for (const frame of this.frames) frame.borderColor = theme.border
     // Markdown may still be rendering this frame. Release the prior native
     // style only after the renderer reaches idle, matching OpenCode's retained
     // theme lifecycle and avoiding both leaks and use-after-free transitions.
@@ -91,15 +94,27 @@ export class Transcript {
   }
 
   header(options: TranscriptHeader): void {
-    const row = this.createRow("header")
+    const row = new BoxRenderable(this.renderer, {
+      id: this.id("header-row"),
+      width: "100%",
+      maxWidth: 62,
+      flexDirection: "column",
+      border: true,
+      borderStyle: "rounded",
+      borderColor: this.theme.border,
+      paddingLeft: 1,
+      paddingRight: 1,
+    })
     const title = this.createText(`>_  nanobot  v${options.version}`, "text", true)
     const context = this.createText([
+      "",
       `${options.model}  ·  ${options.access}`,
       options.workspace,
     ].join("\n"), "muted")
     row.add(title)
     row.add(context)
     this.root.add(row)
+    this.frames.add(row)
     this.wrote = true
   }
 
@@ -113,6 +128,7 @@ export class Transcript {
     this.styledText.length = 0
     this.markdown.clear()
     this.activities.clear()
+    this.frames.clear()
     this.wrote = false
     this.nextId = 0
     this.header(header)
@@ -229,6 +245,7 @@ export class Transcript {
   destroy(): void {
     this.live = null
     this.activity = null
+    this.frames.clear()
     this.theme.syntax.destroy()
   }
 

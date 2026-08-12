@@ -117,6 +117,7 @@ function transcriptTheme(palette: Palette): TranscriptTheme {
     error: palette.error,
     user: palette.user,
     assistant: palette.accent,
+    border: palette.border,
     syntax: syntaxStyle(palette),
   }
 }

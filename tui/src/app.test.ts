@@ -283,9 +283,11 @@ describe("NanobotTui layout", () => {
       composer: { backgroundColor: { intent: string }; textColor: { toInts(): number[] } }
       transcript: {
         markdown: Set<{ syntaxStyle: object }>
+        frames: Set<{ borderColor: { toInts(): number[] } }>
       }
     }
     const markdown = [...internals.transcript.markdown][0]
+    const sessionFrame = [...internals.transcript.frames][0]
     const darkSyntax = markdown?.syntaxStyle
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
@@ -299,6 +301,7 @@ describe("NanobotTui layout", () => {
     expect(internals.shell.backgroundColor.intent).toBe("default")
     expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
+    expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
   })
 
@@ -316,10 +319,14 @@ describe("NanobotTui layout", () => {
     const userLine = frame.split("\n").find((line) => line.includes("User question")) || ""
     const agentLine = frame.split("\n").find((line) => line.includes("Agent **answer**")) || ""
     const headerLine = frame.split("\n").find((line) => line.includes(">_  nanobot")) || ""
+    const headerBorder = frame.split("\n").find((line) => line.includes("╭")) || ""
 
     expect(userLine).toContain("› User question")
     expect(agentLine).toContain("• Agent **answer**")
-    expect(headerLine).not.toMatch(/[╭╮│]/u)
+    expect(userLine).not.toContain("│")
+    expect(agentLine).not.toContain("│")
+    expect(headerLine).toContain("│")
+    expect(headerBorder.trim().length).toBeLessThanOrEqual(62)
   })
 
   test("keeps footer status and shortcuts visually separated", async () => {
