@@ -51,6 +51,33 @@ Main files:
 - feeds tool results back into the model;
 - stops when a final answer is produced or runtime limits are hit.
 
+MCP connections are application-owned infrastructure. The CLI, gateway, API,
+and `Nanobot.from_config()` create an `MCPProvider` and share its `ToolRegistry`
+with `AgentLoop`; the loop does not connect, reload, or close MCP servers. Custom
+low-level compositions using `AgentLoop.from_config()` must likewise own the
+provider lifecycle: share its registry, pass
+`mcp_runtime_owned_externally=True`, await `MCPProvider.connect()` before using
+the loop, and await `MCPProvider.aclose()` during shutdown. The complete shape is:
+
+```python
+registry = ToolRegistry()
+mcp_provider = MCPProvider.from_config(config, registry)
+loop = AgentLoop.from_config(
+    config,
+    tool_registry=registry,
+    mcp_runtime_owned_externally=True,
+)
+
+try:
+    await mcp_provider.connect()
+    await loop.process_direct(message)
+finally:
+    try:
+        await loop.aclose()
+    finally:
+        await mcp_provider.aclose()
+```
+
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
 
 ## Providers

@@ -458,14 +458,42 @@ class AgentLoop:
         cls,
         config: Config,
         bus: MessageBus | None = None,
+        *,
+        mcp_runtime_owned_externally: bool = False,
         **extra: Any,
     ) -> AgentLoop:
         """Create an AgentLoop from config with the common parameter set.
+
+        MCP lifecycle belongs to the application. Callers with configured MCP
+        servers must provide a shared ``tool_registry`` and explicitly confirm
+        that an application-owned ``MCPProvider`` manages that registry.
 
         Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
         allowing callers to override or extend the standard config-derived
         parameters (e.g. ``cron_service``, ``session_manager``).
         """
+        if mcp_runtime_owned_externally:
+            if extra.get("tool_registry") is None:
+                raise ValueError(
+                    "mcp_runtime_owned_externally=True requires a shared tool_registry"
+                )
+        else:
+            from nanobot.agent.plugins import agent_plugin_mcp_servers
+
+            configured_mcp = agent_plugin_mcp_servers(
+                config.workspace_path,
+                config.tools.mcp_servers,
+            )
+            if configured_mcp:
+                raise ValueError(
+                    "Configured MCP servers require an application-owned MCPProvider; "
+                    "AgentLoop no longer manages MCP lifecycle. Use Nanobot.from_config(), "
+                    "or create mcp_provider = MCPProvider.from_config(config, registry), "
+                    "pass the registry to AgentLoop.from_config(..., "
+                    "mcp_runtime_owned_externally=True), await mcp_provider.connect() "
+                    "before using the loop, and await mcp_provider.aclose() during shutdown."
+                )
+
         from nanobot.providers.factory import make_provider
 
         if bus is None:

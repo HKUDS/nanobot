@@ -101,6 +101,19 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop.workspace == tmp_path
 
 
+def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        {"tools": {"mcpServers": {"demo": {"command": "fake-mcp"}}}},
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    assert bot._mcp_provider is not None
+    assert bot._mcp_provider.configured_server_names == {"demo"}
+    assert bot._mcp_provider._registry is bot._loop.tools
+
+
 def test_from_config_accepts_default_model_override(tmp_path):
     config_path = _write_config(tmp_path)
 

@@ -11,9 +11,11 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Config, MCPServerConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
@@ -71,6 +73,80 @@ def test_loop_registers_default_tools_in_injected_registry(tmp_path: Path) -> No
 
     assert loop.tools is registry
     assert registry.has("read_file")
+
+
+def _config_for_loop(tmp_path: Path, *, with_mcp: bool = False) -> Config:
+    payload: dict = {"agents": {"defaults": {"workspace": str(tmp_path)}}}
+    if with_mcp:
+        payload["tools"] = {"mcpServers": {"demo": {"command": "fake-mcp"}}}
+    return Config.model_validate(payload)
+
+
+def _provider_for_loop() -> MagicMock:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return provider
+
+
+def test_loop_from_config_rejects_silently_unmanaged_mcp(tmp_path: Path) -> None:
+    config = _config_for_loop(tmp_path, with_mcp=True)
+
+    with pytest.raises(ValueError, match="application-owned MCPProvider") as exc_info:
+        AgentLoop.from_config(config, provider=_provider_for_loop())
+
+    message = str(exc_info.value)
+    assert "await mcp_provider.connect()" in message
+    assert "await mcp_provider.aclose()" in message
+
+
+def test_loop_from_config_detects_plugin_only_mcp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config_for_loop(tmp_path)
+    monkeypatch.setattr(
+        "nanobot.agent.plugins.agent_plugin_mcp_servers",
+        lambda _workspace, _configured: {"plugin-demo": MCPServerConfig(command="fake-mcp")},
+    )
+
+    with pytest.raises(ValueError, match="application-owned MCPProvider"):
+        AgentLoop.from_config(config, provider=_provider_for_loop())
+
+
+def test_loop_from_config_requires_registry_for_external_mcp_owner(tmp_path: Path) -> None:
+    config = _config_for_loop(tmp_path, with_mcp=True)
+
+    with pytest.raises(ValueError, match="requires a shared tool_registry"):
+        AgentLoop.from_config(
+            config,
+            provider=_provider_for_loop(),
+            mcp_runtime_owned_externally=True,
+        )
+
+
+def test_loop_from_config_accepts_explicit_external_mcp_owner(tmp_path: Path) -> None:
+    config = _config_for_loop(tmp_path, with_mcp=True)
+    registry = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(config, registry)
+
+    loop = AgentLoop.from_config(
+        config,
+        provider=_provider_for_loop(),
+        tool_registry=registry,
+        mcp_runtime_owned_externally=True,
+    )
+
+    assert loop.tools is registry
+    assert mcp_provider.configured_server_names == {"demo"}
+
+
+def test_loop_from_config_without_mcp_keeps_low_level_usage(tmp_path: Path) -> None:
+    loop = AgentLoop.from_config(
+        _config_for_loop(tmp_path),
+        provider=_provider_for_loop(),
+    )
+
+    assert loop.tools.has("read_file")
 
 
 @pytest.mark.asyncio
