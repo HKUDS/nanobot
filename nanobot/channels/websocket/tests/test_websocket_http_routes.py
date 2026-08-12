@@ -227,6 +227,7 @@ async def test_bootstrap_returns_token_for_localhost(
     try:
         resp = await _http_get("http://127.0.0.1:29901/webui/bootstrap")
         assert resp.status_code == 200
+        assert resp.headers["Cache-Control"] == "no-store"
         body = resp.json()
         assert body["token"].startswith("nbwt_")
         assert channel.gateway.tokens.issued_token_audiences[body["token"]] == "webui"

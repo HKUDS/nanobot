@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const SW_SCRIPT = readFileSync(resolve(process.cwd(), "public/sw.js"), "utf8");
 
 const ORIGIN = "https://nanobot.test";
-const CACHE_NAME = "nanobot-static-v1";
+const CACHE_NAME = "nanobot-static-v2";
 
 /** Minimal Cache-compatible in-memory store with SW-style URL normalization. */
 class FakeCacheStore {
@@ -66,7 +66,7 @@ function loadSw(): LoadedSw {
   const caches = {
     open: vi.fn(async () => store),
     match: vi.fn((input: Request | string) => store.match(input)),
-    keys: vi.fn(async () => [CACHE_NAME, "nanobot-static-v0"]),
+    keys: vi.fn(async () => [CACHE_NAME, "nanobot-static-v1", "other-app-cache"]),
     delete: vi.fn(async (name: string) => {
       deletedCacheNames.push(name);
       return true;
@@ -149,7 +149,7 @@ describe("service worker", () => {
 
     await sw.fire("activate");
 
-    expect(sw.deletedCacheNames).toEqual(["nanobot-static-v0"]);
+    expect(sw.deletedCacheNames).toEqual(["nanobot-static-v1"]);
     expect(sw.claimMock).toHaveBeenCalledTimes(1);
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
@@ -161,7 +161,7 @@ describe("service worker", () => {
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.css`)).toBe(false);
   });
 
-  it("does not intercept API, auth, WebSocket, or WebUI endpoint requests", async () => {
+  it("does not intercept dynamic or unknown endpoint requests", async () => {
     const sw = loadSw();
     const paths = [
       "/api/v1/models",
@@ -171,6 +171,8 @@ describe("service worker", () => {
       "/api/chat/completions",
       "/webui/bootstrap",
       "/webui/session/list",
+      "/custom-token",
+      "/mcp-oauth/callback",
     ];
 
     for (const path of paths) {
@@ -228,6 +230,30 @@ describe("service worker", () => {
     expect(sw.fetchMock).toHaveBeenCalledWith(originalRequest);
     expect(sw.store.entries.has(assetUrl)).toBe(true);
   });
+
+  it.each(["private", "no-cache", "no-store"])(
+    "does not cache a %s response even under the static asset prefix",
+    async (cacheControl) => {
+      const sw = loadSw();
+      const tokenUrl = `${ORIGIN}/assets/custom-token`;
+      const originalRequest = new Request(tokenUrl);
+      sw.fetchMock.mockResolvedValue(
+        new Response('{"token":"short-lived"}', {
+          headers: {
+            "Cache-Control": cacheControl,
+            "Content-Type": "application/json",
+          },
+        }),
+      );
+
+      const event = { request: originalRequest, respondWith: vi.fn() };
+      await sw.fire("fetch", event);
+
+      const response = (await event.respondWith.mock.calls[0][0]) as Response;
+      expect(await response.json()).toEqual({ token: "short-lived" });
+      expect(sw.store.entries.has(tokenUrl)).toBe(false);
+    },
+  );
 
   it("keeps un-hashed brand assets on the network-first path", async () => {
     const sw = loadSw();

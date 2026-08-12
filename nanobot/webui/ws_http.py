@@ -121,6 +121,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
 _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
+_NO_STORE_HEADERS = [("Cache-Control", "no-store")]
 
 _WEBUI_MUTATION_PATHS = {
     "automation.enable": "/api/webui/automations/enable",
@@ -547,9 +548,16 @@ class GatewayHTTPHandler:
                 "too many outstanding issued tokens ({}), rejecting issuance",
                 len(self.tokens.issued_tokens),
             )
-            return _http_json_response({"error": "too many outstanding tokens"}, status=429)
+            return _http_json_response(
+                {"error": "too many outstanding tokens"},
+                status=429,
+                extra_headers=_NO_STORE_HEADERS,
+            )
         token_value = self.tokens.issue_token(self.config.token_ttl_s)
-        return _http_json_response(token_response_payload(token_value, self.config.token_ttl_s))
+        return _http_json_response(
+            token_response_payload(token_value, self.config.token_ttl_s),
+            extra_headers=_NO_STORE_HEADERS,
+        )
 
     # -- Bootstrap ----------------------------------------------------------
 
@@ -579,7 +587,7 @@ class GatewayHTTPHandler:
                 "runtime_surface": self._runtime_surface,
                 "runtime_capabilities": self._capabilities,
             }
-            return _http_json_response(payload)
+            return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
         api_token_allowed = bool(secret) or is_local_browser
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
@@ -587,6 +595,7 @@ class GatewayHTTPHandler:
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
                 status=429,
                 content_type="application/json; charset=utf-8",
+                extra_headers=_NO_STORE_HEADERS,
             )
         token = self.tokens.issue_token(self.config.token_ttl_s, audience="webui")
         api_token = (
@@ -611,7 +620,7 @@ class GatewayHTTPHandler:
         }
         if api_token is not None:
             payload["api_token"] = api_token
-        return _http_json_response(payload)
+        return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}

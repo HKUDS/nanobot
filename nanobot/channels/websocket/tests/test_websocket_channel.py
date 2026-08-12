@@ -717,7 +717,7 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
         bus,
         port=port,
         token="static-token",
-        tokenIssuePath="/auth/token",
+        tokenIssuePath="/custom-token",
         websocketRequiresToken=True,
     )
 
@@ -725,15 +725,16 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
     await asyncio.sleep(0.3)
 
     try:
-        denied = await _http_get(f"http://127.0.0.1:{port}/auth/token")
+        denied = await _http_get(f"http://127.0.0.1:{port}/custom-token")
         assert denied.status_code == 401
 
         allowed = await _http_get(
-            f"http://127.0.0.1:{port}/auth/token",
+            f"http://127.0.0.1:{port}/custom-token",
             headers={"Authorization": "Bearer static-token"},
         )
         assert allowed.status_code == 200
         assert allowed.json()["token"].startswith("nbwt_")
+        assert allowed.headers["Cache-Control"] == "no-store"
     finally:
         await channel.stop()
         await server_task
@@ -3803,6 +3804,7 @@ async def test_token_issue_rejects_when_at_capacity(bus: MagicMock) -> None:
             headers={"Authorization": "Bearer s"},
         )
         assert resp.status_code == 429
+        assert resp.headers["Cache-Control"] == "no-store"
         data = resp.json()
         assert "error" in data
     finally:
