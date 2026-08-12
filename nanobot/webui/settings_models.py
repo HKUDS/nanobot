@@ -62,6 +62,8 @@ class ModelSettingsOperations:
     update_call_order: SettingsOperation
     update_provider: SettingsOperation
     create_provider: SettingsOperation
+    delete_provider: SettingsOperation
+    reset_provider: SettingsOperation
     provider_models: SettingsOperation
     oauth_login: SettingsOperation
     oauth_complete: SettingsOperation
@@ -1617,6 +1619,7 @@ class ModelSettingsHandler:
                 "models-migrate": operations.migrate_models,
                 "call-order-update": operations.update_call_order,
                 "provider-create": operations.create_provider,
+                "provider-delete": operations.delete_provider,
             }.get(action)
             if mutation is not None:
                 payload = self.settings.mutate(mutation, request.query)
@@ -1625,6 +1628,23 @@ class ModelSettingsHandler:
             if action == "provider-update":
                 payload = self.settings.mutate(
                     operations.update_provider,
+                    request.query,
+                )
+                payload, image_restart_cleared = await operations.apply_image_runtime_change(
+                    payload
+                )
+                return SettingsRouteResult.success(
+                    payload,
+                    decorate_restart=True,
+                    restart_section="image",
+                    clear_restart_section=(
+                        "image" if image_restart_cleared else None
+                    ),
+                )
+
+            if action == "provider-reset":
+                payload = self.settings.mutate(
+                    operations.reset_provider,
                     request.query,
                 )
                 payload, image_restart_cleared = await operations.apply_image_runtime_change(

@@ -278,6 +278,18 @@ async def test_oauth_completion_reads_websocket_payload(
             {"name": ["spare"]},
         ),
         (
+            "/api/settings/provider/delete",
+            "delete_provider_settings",
+            {"provider": "custom-company"},
+            {"provider": ["custom-company"]},
+        ),
+        (
+            "/api/settings/provider/reset",
+            "reset_provider_settings",
+            {"provider": "openrouter"},
+            {"provider": ["openrouter"]},
+        ),
+        (
             "/api/settings/model-configurations/migrate",
             "migrate_model_configurations",
             {},

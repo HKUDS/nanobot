@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
@@ -20,10 +20,12 @@ from nanobot.webui.settings_api import (
     create_model_configuration,
     create_provider_settings,
     delete_model_configuration,
+    delete_provider_settings,
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
     provider_models_payload,
+    reset_provider_settings,
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
@@ -528,6 +530,180 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
     payload = delete_model_configuration({"name": ["spare"]})
     assert {row["name"] for row in payload["model_presets"]} == {"default", "primary"}
     assert "spare" not in load_config(config_path).model_presets
+
+
+def test_delete_provider_settings_removes_dynamic_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = _dynamic_provider_config()
+    config.agents.defaults.provider = "openai"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = delete_provider_settings({"provider": [DYNAMIC_PROVIDER_NAME]})
+
+    assert DYNAMIC_PROVIDER_NAME not in {row["name"] for row in payload["providers"]}
+    assert DYNAMIC_PROVIDER_NAME not in (load_config(config_path).providers.model_extra or {})
+
+
+def test_delete_provider_settings_blocks_referenced_dynamic_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = _dynamic_provider_config(defaults=True)
+    config.model_presets["writer"] = ModelPresetConfig(
+        model=f"{DYNAMIC_PROVIDER_NAME}/writer",
+        provider="auto",
+    )
+    config.agents.defaults.fallback_models = [
+        "writer",
+        InlineFallbackConfig(model="backup", provider=DYNAMIC_PROVIDER_NAME),
+    ]
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="default agent provider") as exc_info:
+        delete_provider_settings({"provider": [DYNAMIC_PROVIDER_NAME]})
+
+    assert exc_info.value.status == 409
+    assert "model preset \"writer\"" in str(exc_info.value)
+    assert "fallback preset \"writer\"" in str(exc_info.value)
+    assert "inline fallback \"backup\"" in str(exc_info.value)
+    assert DYNAMIC_PROVIDER_NAME in (load_config(config_path).providers.model_extra or {})
+
+
+def test_delete_provider_settings_blocks_auto_resolved_custom_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = _dynamic_provider_config()
+    config.agents.defaults.provider = "auto"
+    config.agents.defaults.model = "plain-model"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="default agent model") as exc_info:
+        delete_provider_settings({"provider": [DYNAMIC_PROVIDER_NAME]})
+
+    assert exc_info.value.status == 409
+
+
+def test_delete_provider_settings_rejects_builtin_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="custom provider"):
+        delete_provider_settings({"provider": ["openai"]})
+
+
+def test_reset_provider_settings_clears_builtin_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter = ProviderConfig(
+        api_key="sk-secret",
+        api_base="https://openrouter.example/v1",
+        extra_headers={"X-Tenant": "tenant"},
+    )
+    config.agents.defaults.provider = "anthropic"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = reset_provider_settings({"provider": ["openrouter"]})
+    saved = load_config(config_path)
+
+    assert saved.providers.openrouter == ProviderConfig()
+    row = next(row for row in payload["providers"] if row["name"] == "openrouter")
+    assert row["configured"] is False
+    assert row["api_key_hint"] is None
+    assert row["api_base"] is None
+
+
+def test_reset_provider_settings_blocks_provider_in_use(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter = ProviderConfig(api_key="sk-secret")
+    config.agents.defaults.provider = "openrouter"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="default agent provider") as exc_info:
+        reset_provider_settings({"provider": ["openrouter"]})
+
+    assert exc_info.value.status == 409
+    assert load_config(config_path).providers.openrouter.api_key == "sk-secret"
+
+
+def test_reset_provider_settings_marks_image_runtime_for_reload(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter = ProviderConfig(api_key="sk-secret")
+    config.agents.defaults.provider = "anthropic"
+    config.tools.image_generation.enabled = True
+    config.tools.image_generation.provider = "openrouter"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = reset_provider_settings({"provider": ["openrouter"]})
+
+    assert payload["requires_restart"] is True
+
+
+def test_reset_provider_settings_rejects_oauth_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="sign out"):
+        reset_provider_settings({"provider": ["openai_codex"]})
+
+
+def test_reset_provider_settings_rejects_builtin_custom_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.custom = ProviderConfig(api_key="sk-secret")
+    config.agents.defaults.provider = "anthropic"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="custom providers must be deleted"):
+        reset_provider_settings({"provider": ["custom"]})
+
+
+def test_reset_provider_settings_rejects_unconfigured_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.provider = "anthropic"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="not configured"):
+        reset_provider_settings({"provider": ["openrouter"]})
 
 
 def test_update_provider_settings_updates_dynamic_custom_provider(
