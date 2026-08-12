@@ -9,6 +9,7 @@ from nanobot.cli.tui_launcher import (
     TuiUnavailableError,
     _authenticated_ws_url,
     _download_release_tui,
+    _ensure_gateway,
     _resolve_tui_command,
     _websocket_chat_id,
 )
@@ -102,9 +103,38 @@ def test_release_tui_is_verified_and_cached(
 
     assert target == tmp_path / "bin" / "tui" / "9.9.9" / "nanobot-tui-linux-x64"
     assert target.read_bytes() == binary
+    assert target.with_name(f"{target.name}.sha256").read_text().startswith(digest.decode())
     assert len(downloads) == 2
 
     assert _download_release_tui("nanobot-tui-linux-x64") == target
+    assert len(downloads) == 2
+
+
+def test_release_tui_replaces_a_corrupted_cached_binary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = b"native-tui"
+    digest = hashlib.sha256(binary).hexdigest().encode()
+    asset = "nanobot-tui-linux-x64"
+    target = tmp_path / "bin" / "tui" / "9.9.9" / asset
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"corrupted")
+    target.with_name(f"{target.name}.sha256").write_text(
+        f"{hashlib.sha256(binary).hexdigest()}  {asset}\n"
+    )
+    downloads: list[str] = []
+
+    def read_asset(url: str, *, max_bytes: int) -> bytes:
+        downloads.append(url)
+        return digest if url.endswith(".sha256") else binary
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.__version__", "9.9.9")
+    monkeypatch.setattr("nanobot.cli.tui_launcher.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.cli.tui_launcher._read_release_asset", read_asset)
+
+    assert _download_release_tui(asset) == target
+    assert target.read_bytes() == binary
     assert len(downloads) == 2
 
 
@@ -121,3 +151,66 @@ def test_release_tui_rejects_bad_checksum(
 
     with pytest.raises(TuiUnavailableError, match="checksum"):
         _download_release_tui("nanobot-tui-linux-x64")
+
+
+def test_gateway_reuse_requires_the_matching_managed_instance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config.agents.defaults.workspace = str(workspace)
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(running=False, port=None)
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: True)
+
+    with pytest.raises(TuiUnavailableError, match="different nanobot instance"):
+        _ensure_gateway(
+            config,
+            config_path=tmp_path / "config.json",
+            workspace_override=str(workspace),
+        )
+
+
+def test_gateway_reuses_the_matching_managed_instance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config.agents.defaults.workspace = str(workspace)
+    runtime: object | None = None
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            nonlocal runtime
+            self.paths = paths
+            runtime = self
+
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(running=True, port=config.gateway.port)
+
+        def stop(self, *, timeout_s: int) -> None:
+            raise AssertionError(f"unowned gateway stopped with timeout {timeout_s}")
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: True)
+
+    lease = _ensure_gateway(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=str(workspace),
+    )
+
+    assert lease.runtime is runtime
+    assert lease.owned is False
+    lease.close()

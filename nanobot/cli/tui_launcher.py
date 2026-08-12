@@ -24,7 +24,7 @@ from nanobot.cli.webui_support import (
     _webui_endpoint_reachable,
     webui_bootstrap_secret,
 )
-from nanobot.config.paths import get_data_dir
+from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
 
 
@@ -140,8 +140,26 @@ def _download_release_tui(asset: str) -> Path | None:
 
     target_dir = get_data_dir() / "bin" / "tui" / version
     target = target_dir / asset
+    cached_checksum = target.with_name(f"{target.name}.sha256")
     if target.is_file():
-        return target
+        try:
+            expected = cached_checksum.read_text(encoding="utf-8").split()[0].lower()
+            actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        except (OSError, IndexError):
+            expected = ""
+            actual = ""
+        if len(expected) == 64 and actual == expected:
+            if os.name != "nt":
+                try:
+                    target.chmod(0o755)
+                except OSError:
+                    return None
+            return target
+        try:
+            target.unlink(missing_ok=True)
+            cached_checksum.unlink(missing_ok=True)
+        except OSError:
+            return None
 
     base = f"https://github.com/HKUDS/nanobot/releases/download/v{version}"
     try:
@@ -156,14 +174,22 @@ def _download_release_tui(asset: str) -> Path | None:
         raise TuiUnavailableError("downloaded TUI binary failed checksum verification")
 
     temporary = target.with_suffix(f"{target.suffix}.tmp-{os.getpid()}")
+    temporary_checksum = cached_checksum.with_suffix(
+        f"{cached_checksum.suffix}.tmp-{os.getpid()}"
+    )
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
         temporary.write_bytes(binary)
+        temporary_checksum.write_text(f"{expected}  {asset}\n", encoding="utf-8")
         if os.name != "nt":
             temporary.chmod(0o755)
         temporary.replace(target)
+        temporary_checksum.replace(cached_checksum)
     except OSError:
         temporary.unlink(missing_ok=True)
+        temporary_checksum.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+        cached_checksum.unlink(missing_ok=True)
         return None
     return target
 
@@ -189,25 +215,42 @@ def _ensure_gateway(
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
     base_url = _webui_browser_url(config).split("/#/", 1)[0].rstrip("/")
-    if _webui_endpoint_reachable(base_url):
-        return _GatewayLease(runtime=None, owned=False, base_url=base_url)
-
-    workspace = (
+    workspace_override_path = (
         str(Path(workspace_override).expanduser().resolve(strict=False))
         if workspace_override
         else None
     )
+    effective_workspace = config.workspace_path.resolve(strict=False)
+    runtime_workspace = (
+        None if is_default_workspace(effective_workspace) else str(effective_workspace)
+    )
     runtime = GatewayRuntime(
         paths=GatewayRuntimePaths.for_instance(
             data_dir=config_path.parent,
-            workspace=workspace,
+            workspace=runtime_workspace,
             config_path=str(config_path),
         )
     )
+    status = runtime.status()
+    endpoint_reachable = _webui_endpoint_reachable(base_url)
+    if status.running:
+        if status.port not in {None, config.gateway.port}:
+            raise TuiUnavailableError(
+                "the matching gateway instance is running on a different port; "
+                "restart it or use `nanobot agent --classic`"
+            )
+        if endpoint_reachable:
+            return _GatewayLease(runtime=runtime, owned=False, base_url=base_url)
+    elif endpoint_reachable:
+        raise TuiUnavailableError(
+            "the configured gateway port belongs to a different nanobot instance; "
+            "stop that instance or use `nanobot agent --classic`"
+        )
+
     result = runtime.start_background(
         GatewayStartOptions(
             port=config.gateway.port,
-            workspace=workspace,
+            workspace=workspace_override_path,
             config_path=str(config_path),
         )
     )
@@ -220,7 +263,10 @@ def _ensure_gateway(
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if _webui_endpoint_reachable(base_url):
-            return _GatewayLease(runtime=runtime, owned=owned, base_url=base_url)
+            current = runtime.status()
+            if current.running and current.port in {None, config.gateway.port}:
+                return _GatewayLease(runtime=runtime, owned=owned, base_url=base_url)
+            break
         if not runtime.status().running and not _gateway_health_ready(
             config.gateway.host,
             config.gateway.port,
