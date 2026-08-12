@@ -598,6 +598,24 @@ def test_cast_params_invalid_string_to_number() -> None:
     assert result["rate"] == "not_a_number"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "-Infinity"],
+)
+def test_cast_params_rejects_non_finite_numbers(value: float | str) -> None:
+    """JSON number parameters must remain finite after schema-driven casting."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"rate": {"type": "number"}},
+        }
+    )
+
+    result = tool.cast_params({"rate": value})
+
+    assert tool.validate_params(result) == ["rate must be finite"]
+
+
 def test_validate_params_bool_not_accepted_as_number() -> None:
     """Booleans should not pass number validation."""
     tool = CastTestTool(

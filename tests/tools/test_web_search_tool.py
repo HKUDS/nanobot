@@ -820,4 +820,6 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     tool = _tool(provider="olostep", api_key="olostep-key")
     result = await tool.execute(query="test query")
 
-    assert result == "Error: olostep package not installed. Run: pip install olostep"
+    assert result == (
+        "Error: Olostep support is not installed. Run `nanobot plugins enable olostep`."
+    )

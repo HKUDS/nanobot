@@ -191,6 +191,14 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
+    def restricted_default_scope(self) -> WorkspaceScope:
+        """Return the default workspace with access restricted for this request."""
+        return build_workspace_scope(
+            self._default_workspace,
+            "restricted",
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+
     def _scope_from_metadata_value(
         self,
         raw_scope: object,

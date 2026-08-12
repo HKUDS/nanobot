@@ -76,20 +76,34 @@ export function ThinkingReasoningShell({
             : "pointer-events-none grid-rows-[0fr] opacity-0",
         )}
       >
-        <div className="min-h-0 overflow-hidden">
+        <div className="relative min-h-0 overflow-hidden">
           <div
             ref={viewportRef}
             data-testid={expanded ? "agent-activity-scroll" : undefined}
             data-fade-top={fadeTop}
             data-fade-bottom={fadeBottom}
             onScroll={onScroll}
-            className="activity-scroll-fade mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             aria-hidden={!expanded}
           >
             <div ref={contentRef} className="flex flex-col gap-0.5">
               {children}
             </div>
           </div>
+          {fadeTop ? (
+            <span
+              data-testid="activity-scroll-fade-top"
+              className="pointer-events-none absolute inset-x-0 top-1.5 z-10 h-3.5 bg-gradient-to-b from-background to-transparent"
+              aria-hidden
+            />
+          ) : null}
+          {fadeBottom ? (
+            <span
+              data-testid="activity-scroll-fade-bottom"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3.5 bg-gradient-to-t from-background to-transparent"
+              aria-hidden
+            />
+          ) : null}
         </div>
       </div>
     </div>

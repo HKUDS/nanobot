@@ -52,6 +52,8 @@ import type {
 
 interface MessageBubbleProps {
   message: UIMessage;
+  /** Give temporary-chat user turns the dashed private-mode treatment. */
+  temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
   cliApps?: CliAppInfo[];
@@ -258,6 +260,7 @@ function UserDeliveryStatus({
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
+  temporary = false,
   showCopyAction = true,
   cliApps = [],
   mcpPresets = [],
@@ -326,9 +329,13 @@ export function MessageBubble({
         ) : null}
         {hasText ? (
           <p
+            data-temporary-message={temporary ? "true" : undefined}
             className={cn(
-              "ml-auto w-fit max-w-full min-w-0 rounded-[18px] bg-secondary/70 px-4 py-2",
+              "ml-auto w-fit max-w-full min-w-0 rounded-[18px] px-4 py-2",
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
+              temporary
+                ? "border border-dashed border-muted-foreground/40 bg-transparent"
+                : "bg-secondary/70",
             )}
           >
             {messageText}
@@ -724,8 +731,7 @@ function UserImageCell({
         aria-label={image.name ? `${openLabel}: ${image.name}` : openLabel}
         className={cn(
           tileClasses,
-          "block cursor-zoom-in p-0 transition-transform duration-150 motion-reduce:transition-none",
-          "hover:scale-[1.01] hover:ring-2 hover:ring-primary/25",
+          "block cursor-zoom-in p-0",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
         )}
       >

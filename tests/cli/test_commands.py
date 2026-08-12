@@ -85,6 +85,10 @@ class _GatewayAgentContractStub:
     tools = ToolRegistry()
 
     @staticmethod
+    def mcp_runtime_status() -> dict[str, str]:
+        return {}
+
+    @staticmethod
     def pending_cron_job_ids_for_session(_session_key: str) -> set[str]:
         return set()
 
@@ -686,7 +690,10 @@ def test_provider_login_openai_codex_handles_missing_oauth_symbol(monkeypatch):
     result = runner.invoke(app, ["provider", "login", "openai-codex"])
 
     assert result.exit_code == 1
-    assert "oauth_cli_kit not installed" in result.stdout
+    assert (
+        "This nanobot installation is missing the required oauth-cli-kit package. "
+        "Reinstall or upgrade nanobot-ai using the same installation method."
+    ) in re.sub(r"\s+", " ", result.stdout)
     assert result.exception is not None
 
 
@@ -1226,27 +1233,6 @@ def test_openai_compat_provider_passes_model_through():
         provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
-
-
-def test_make_provider_uses_github_copilot_backend():
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
-
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "github-copilot",
-                    "model": "github-copilot/gpt-4.1",
-                }
-            }
-        }
-    )
-
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = make_provider(config)
-
-    assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
 def test_openai_codex_proxy_config_affects_provider_and_signature():

@@ -334,6 +334,12 @@ def clear_websocket_turn_if_current(
     return False
 
 
+def clear_websocket_turns(chat_id: str) -> None:
+    """Forget every in-process turn projection for a discarded chat."""
+    _WEBSOCKET_ACTIVE_TURNS.pop(chat_id, None)
+    _sync_websocket_turn_projection(chat_id)
+
+
 def build_bus_progress_callback(
     bus: MessageBus,
     msg: InboundMessage,

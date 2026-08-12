@@ -31,11 +31,13 @@ import { cn } from "@/lib/utils";
 
 interface SidebarProps {
   sessions: ChatSummary[];
+  temporarySessions?: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
   newChatActive: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
+  onCloseTemporaryChat?: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
@@ -221,10 +223,12 @@ export function Sidebar(props: SidebarProps) {
         {!collapsed && (
           <ChatList
             sessions={props.sessions}
+            temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
             loading={props.loading}
             emptyLabel={t("chat.noSessions")}
             onSelect={props.onSelect}
+            onCloseTemporaryChat={props.onCloseTemporaryChat}
             onRequestDelete={props.onRequestDelete}
             onTogglePin={props.onTogglePin}
             onRequestRename={props.onRequestRename}

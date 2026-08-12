@@ -109,8 +109,9 @@ describe("useSessions", () => {
     ]);
     vi.mocked(api.deleteSession).mockResolvedValue({ deleted: true });
 
+    const client = fakeClient();
     const { result } = renderHook(() => useSessions(), {
-      wrapper: wrap(fakeClient()),
+      wrapper: wrap(client),
     });
 
     await waitFor(() => expect(result.current.sessions).toHaveLength(2));
@@ -119,7 +120,7 @@ describe("useSessions", () => {
       await result.current.deleteChat("websocket:chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a", undefined);
+    expect(api.deleteSession).toHaveBeenCalledWith(client, "websocket:chat-a", undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
   });
 

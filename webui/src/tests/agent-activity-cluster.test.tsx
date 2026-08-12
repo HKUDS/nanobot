@@ -288,16 +288,24 @@ describe("AgentActivityCluster", () => {
       });
       expect(scrollport).toHaveAttribute("data-fade-top", "true");
       expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      const topFade = screen.getByTestId("activity-scroll-fade-top");
+      expect(scrollport).not.toContainElement(topFade);
+      expect(scrollport).not.toHaveClass("activity-scroll-fade");
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
       scrollport.scrollTop = 440;
       fireEvent.scroll(scrollport);
       expect(scrollport).toHaveAttribute("data-fade-top", "true");
       expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.getByTestId("activity-scroll-fade-top")).toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
 
       scrollport.scrollTop = 0;
       fireEvent.scroll(scrollport);
       expect(scrollport).toHaveAttribute("data-fade-top", "false");
       expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
 
       setScrollGeometry(scrollport, {
         scrollHeight: 100,
@@ -307,6 +315,8 @@ describe("AgentActivityCluster", () => {
       fireEvent.scroll(scrollport);
       expect(scrollport).toHaveAttribute("data-fade-top", "false");
       expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
     } finally {
       raf.restore();
     }
