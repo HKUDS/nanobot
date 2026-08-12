@@ -530,6 +530,10 @@ class WebSocketChannel(BaseChannel):
         except Exception as e:
             self.logger.warning("failed to send {} event: {}", event, e)
 
+    async def _broadcast_webui_event(self, event: str, **fields: Any) -> None:
+        for connection in tuple(self._webui_connections):
+            await self._send_event(connection, event, **fields)
+
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
@@ -848,7 +852,7 @@ class WebSocketChannel(BaseChannel):
                 )
                 return
             try:
-                await asyncio.to_thread(
+                saved_state = await asyncio.to_thread(
                     write_webui_sidebar_state,
                     cast(dict[str, Any], state),
                 )
@@ -858,6 +862,11 @@ class WebSocketChannel(BaseChannel):
                     "error",
                     detail="invalid_sidebar_state",
                 )
+                return
+            await self._broadcast_webui_event(
+                "sidebar_state_updated",
+                state=saved_state,
+            )
             return
         if t == "set_workspace_scope":
             cid = envelope.get("chat_id")
@@ -1207,6 +1216,11 @@ class WebSocketChannel(BaseChannel):
                         message="WebUI mutation returned an invalid response",
                     )
                     return
+                if action == "sidebar.update" and isinstance(result, dict):
+                    await self._broadcast_webui_event(
+                        "sidebar_state_updated",
+                        state=result,
+                    )
                 await self._send_webui_response(
                     connection,
                     request_id,

@@ -5,6 +5,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
@@ -390,7 +391,7 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config)
+        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
     assert loop.model == "openai/gpt-4.1"
     assert loop.model_preset is None
     assert "default" in loop.model_presets
@@ -407,7 +408,7 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config)
+        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
         default_runtime = loop.runtime_resolver.runtime
         resolved = loop.runtime_resolver.resolve_preset("fast")
     assert resolved.model == "openai/gpt-4.1-mini"

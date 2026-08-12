@@ -56,7 +56,6 @@ _MCP_ATTACHMENT_KEYS = (
     "status",
     "configured",
 )
-_MAX_TEST_TOOLS = 16
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
@@ -1097,7 +1096,7 @@ async def mcp_presets_test_action(
     *,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Connect to an enabled MCP preset and report its tool surface."""
+    """Connect to an enabled MCP preset and report its complete tool surface."""
     from nanobot.agent.tools.mcp import connect_mcp_servers
 
     name = (_query_first(query, "name") or "").strip()
@@ -1157,9 +1156,10 @@ async def mcp_presets_test_action(
 
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
+    inspection_cfg = cfg.model_copy(update={"enabled_tools": ["*"]})
     try:
         stacks = await asyncio.wait_for(
-            connect_mcp_servers({name: cfg}, registry),
+            connect_mcp_servers({name: inspection_cfg}, registry),
             timeout=_test_timeout(cfg),
         )
         tool_prefix = f"mcp_{name}_"
@@ -1178,7 +1178,7 @@ async def mcp_presets_test_action(
                     else f"{display_name} connected, but reported no tools."
                 ),
                 "tool_count": len(tool_names),
-                "tool_names": tool_names[:_MAX_TEST_TOOLS],
+                "tool_names": tool_names,
                 "checked_at": _checked_at(),
             }
         else:

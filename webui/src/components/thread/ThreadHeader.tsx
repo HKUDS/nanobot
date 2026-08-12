@@ -17,8 +17,11 @@ interface ThreadHeaderProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hideSidebarToggle?: boolean;
   hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
+  hideTitle?: boolean;
+  actions?: ReactNode;
   minimal?: boolean;
   promptNavigatorAction?: ReactNode;
   sessionInfoAction?: ReactNode;
@@ -33,8 +36,11 @@ export function ThreadHeader({
   theme,
   onToggleTheme,
   hideSidebarToggleForHostChrome = false,
+  hideSidebarToggle = false,
   hostChromeTitleInset = false,
   hideThemeButton = false,
+  hideTitle = false,
+  actions,
   minimal = false,
   promptNavigatorAction,
   sessionInfoAction,
@@ -54,19 +60,21 @@ export function ThreadHeader({
       )}
     >
       <div className="relative flex min-w-0 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("thread.header.toggleSidebar")}
-          onClick={onToggleSidebar}
-          className={cn(
-            "h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
-            hideSidebarToggleForHostChrome && "lg:hidden",
-          )}
-        >
-          <Menu className="h-3.5 w-3.5" />
-        </Button>
-        {!minimal ? (
+        {!hideSidebarToggle ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("thread.header.toggleSidebar")}
+            onClick={onToggleSidebar}
+            className={cn(
+              "h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+              hideSidebarToggleForHostChrome && "lg:hidden",
+            )}
+          >
+            <Menu className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+        {!minimal && !hideTitle ? (
           <div className="flex min-w-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
             <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
           </div>
@@ -76,6 +84,7 @@ export function ThreadHeader({
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {sessionInfoAction}
         {promptNavigatorAction}
+        {actions}
         {onTemporaryChatEnabledChange ? (
           <TooltipProvider delayDuration={700} skipDelayDuration={0}>
             <Tooltip>

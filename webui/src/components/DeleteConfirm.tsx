@@ -18,6 +18,7 @@ import type { SessionAutomationJob } from "@/lib/types";
 interface DeleteConfirmProps {
   open: boolean;
   title: string;
+  count?: number;
   automations?: SessionAutomationJob[];
   onCancel: () => void;
   onConfirm: () => void;
@@ -26,6 +27,7 @@ interface DeleteConfirmProps {
 export function DeleteConfirm({
   open,
   title,
+  count = 1,
   automations = [],
   onCancel,
   onConfirm,
@@ -33,6 +35,7 @@ export function DeleteConfirm({
   const { t } = useTranslation();
   const locale = currentLocale();
   const hasAutomations = automations.length > 0;
+  const multiple = count > 1;
   const visibleAutomations = automations.slice(0, 4);
   const hiddenCount = Math.max(0, automations.length - visibleAutomations.length);
   return (
@@ -47,12 +50,25 @@ export function DeleteConfirm({
             </div>
           </div>
           <AlertDialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
-            {t("deleteConfirm.title", { title })}
+            {multiple
+              ? t("deleteConfirm.titleMany", {
+                  defaultValue: "Delete {{count}} conversations?",
+                  count,
+                })
+              : t("deleteConfirm.title", { title })}
           </AlertDialogTitle>
           <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-[14px] leading-6 text-muted-foreground">
             {hasAutomations
-              ? t("deleteConfirm.automationsDescription")
-              : t("deleteConfirm.description")}
+              ? multiple
+                ? t("deleteConfirm.automationsDescriptionMany", {
+                    defaultValue: "Linked automations will also be deleted.",
+                  })
+                : t("deleteConfirm.automationsDescription")
+              : multiple
+                ? t("deleteConfirm.descriptionMany", {
+                    defaultValue: "This action cannot be undone.",
+                  })
+                : t("deleteConfirm.description")}
           </AlertDialogDescription>
           {hasAutomations ? (
             <div className="mt-4 max-h-40 w-full overflow-y-auto rounded-2xl bg-muted/55 px-3 py-2 text-left">

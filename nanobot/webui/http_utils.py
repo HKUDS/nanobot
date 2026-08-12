@@ -100,6 +100,7 @@ def http_json_response(
     *,
     status: int = 200,
     accept_encoding: str | None = None,
+    extra_headers: list[tuple[str, str]] | None = None,
 ) -> Response:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     headers = [
@@ -112,6 +113,8 @@ def http_json_response(
         if len(body) >= _JSON_GZIP_MIN_BYTES and accepts_gzip(accept_encoding):
             body = gzip.compress(body, compresslevel=_JSON_GZIP_LEVEL, mtime=0)
             headers.append(("Content-Encoding", "gzip"))
+    if extra_headers:
+        headers.extend(extra_headers)
     headers.append(("Content-Length", str(len(body))))
     reason = http.HTTPStatus(status).phrase
     return Response(status, reason, Headers(headers), body)

@@ -16,7 +16,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { ChatList } from "@/components/ChatList";
+import {
+  ChatList,
+  type SidebarDeleteItem,
+  type SidebarPaneGroup,
+} from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
@@ -39,10 +43,20 @@ interface SidebarProps {
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
+  onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
-  onReorderSessions: (keys: string[]) => void;
+  paneGroups?: Record<string, SidebarPaneGroup>;
+  onSelectPane?: (tabKey: string, paneKey: string) => void;
+  onCreateTab?: (paneKey: string) => void;
+  onDetachPane?: (tabKey: string, paneKey: string) => void;
+  onDissolveTab?: (tabKey: string) => void;
+  onAttachPane?: (
+    paneKey: string,
+    tabKey: string,
+  ) => void;
   onToggleGroup: (groupId: string) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
@@ -60,6 +74,8 @@ interface SidebarProps {
   collapsed?: boolean;
   pinnedKeys?: string[];
   archivedKeys?: string[];
+  pinnedPaneKeys?: string[];
+  archivedPaneKeys?: string[];
   sessionOrder?: string[];
   titleOverrides?: Record<string, string>;
   projectNameOverrides?: Record<string, string>;
@@ -230,15 +246,24 @@ export function Sidebar(props: SidebarProps) {
             onSelect={props.onSelect}
             onCloseTemporaryChat={props.onCloseTemporaryChat}
             onRequestDelete={props.onRequestDelete}
+            onRequestDeleteMany={props.onRequestDeleteMany}
             onTogglePin={props.onTogglePin}
             onRequestRename={props.onRequestRename}
+            onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
-            onReorderSessions={props.onReorderSessions}
+            paneGroups={props.paneGroups}
+            onSelectPane={props.onSelectPane}
+            onCreateTab={props.onCreateTab}
+            onDetachPane={props.onDetachPane}
+            onDissolveTab={props.onDissolveTab}
+            onAttachPane={props.onAttachPane}
             onToggleGroup={props.onToggleGroup}
             onRequestRenameProject={props.onRequestRenameProject}
             onNewChatInProject={props.onNewChatInProject}
             pinnedKeys={props.pinnedKeys}
             archivedKeys={props.archivedKeys}
+            pinnedPaneKeys={props.pinnedPaneKeys}
+            archivedPaneKeys={props.archivedPaneKeys}
             sessionOrder={props.sessionOrder}
             titleOverrides={props.titleOverrides}
             projectNameOverrides={props.projectNameOverrides}

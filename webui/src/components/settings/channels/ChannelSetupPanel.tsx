@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
 import {
   Check,
   ChevronDown,
@@ -135,15 +141,17 @@ export function ChannelSetupPanel({
   const PluginPanel = uiContribution?.Panel;
   if (PluginPanel) {
     return (
-      <PluginPanel
-        token={token}
-        feature={feature}
-        actionKey={actionKey}
-        showBrandLogos={showBrandLogos}
-        chatAppsDocsUrl={chatAppsDocsUrl}
-        onAction={onAction}
-        onFeaturesUpdate={onFeaturesUpdate}
-      />
+      <Suspense fallback={<ChannelPluginLoading />}>
+        <PluginPanel
+          token={token}
+          feature={feature}
+          actionKey={actionKey}
+          showBrandLogos={showBrandLogos}
+          chatAppsDocsUrl={chatAppsDocsUrl}
+          onAction={onAction}
+          onFeaturesUpdate={onFeaturesUpdate}
+        />
+      </Suspense>
     );
   }
   if (feature.instances !== undefined) {
@@ -432,13 +440,15 @@ function ChannelSetupSurface({
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
         {mode === "connect" && ConnectFlow ? (
-          <ConnectFlow
-            token={token}
-            feature={feature}
-            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-            connectRequestId={connectRequestId}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
+          <Suspense fallback={<ChannelPluginLoading compact />}>
+            <ConnectFlow
+              token={token}
+              feature={feature}
+              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+              connectRequestId={connectRequestId}
+              onFeaturesUpdate={onFeaturesUpdate}
+            />
+          </Suspense>
         ) : mode === "connect" ? (
           <>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -564,5 +574,21 @@ function ChannelSetupSurface({
         </details>
       ) : null}
     </form>
+  );
+}
+
+function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-center justify-center gap-2 text-sm text-muted-foreground",
+        compact ? "min-h-12" : "min-h-48",
+      )}
+    >
+      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      {t("settings.status.loading")}
+    </div>
   );
 }

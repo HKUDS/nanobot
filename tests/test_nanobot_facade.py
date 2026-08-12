@@ -101,6 +101,19 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop.workspace == tmp_path
 
 
+def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        {"tools": {"mcpServers": {"demo": {"command": "fake-mcp"}}}},
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    assert bot._mcp_provider is not None
+    assert bot._mcp_provider.configured_server_names == {"demo"}
+    assert bot._mcp_provider._registry is bot._loop.tools
+
+
 def test_from_config_accepts_default_model_override(tmp_path):
     config_path = _write_config(tmp_path)
 
@@ -1637,37 +1650,40 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
+async def test_aclose_releases_loop_and_mcp_provider(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
+    assert bot._mcp_provider is not None
+    bot._mcp_provider.aclose = AsyncMock()
 
     await bot.aclose()
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
+    bot._mcp_provider.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_calls_aclose_on_exit(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     async with bot as b:
         assert b is bot
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_does_not_swallow_exceptions(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     with pytest.raises(ValueError):
         async with bot as b:
             assert b is bot
             raise ValueError("boom")
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()

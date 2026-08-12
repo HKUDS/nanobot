@@ -494,20 +494,6 @@ class TestModifyOpen:
         assert tool._runtime_control.snapshot().workspace == "/new/path"
 
     @pytest.mark.asyncio
-    async def test_modify_mcp_servers_blocked(self):
-        """_mcp_servers contains API credentials — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_mcp_servers", value={"evil": "leaked"})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_mcp_stacks_blocked(self):
-        """_mcp_stacks holds connection handles — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_mcp_stacks", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
     async def test_modify_pending_queues_blocked(self):
         """_pending_queues controls message routing — must be blocked."""
         tool = _make_tool()
@@ -534,13 +520,6 @@ class TestModifyOpen:
         tool = _make_tool()
         result = await tool.execute(action="set", key="_background_tasks", value=[])
         assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_mcp_servers_blocked(self):
-        """_mcp_servers contains credentials — check must be blocked too."""
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="_mcp_servers")
-        assert "not accessible" in result
 
     @pytest.mark.asyncio
     async def test_modify_wrapped_denied(self):

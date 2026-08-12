@@ -51,6 +51,13 @@ Main files:
 - feeds tool results back into the model;
 - stops when a final answer is produced or runtime limits are hit.
 
+MCP connections are application-owned infrastructure. Composition roots create
+an `MCPProvider`, share its `ToolRegistry` with `AgentLoop`, await `connect()`
+before use, and guarantee `aclose()` during shutdown; the loop does not manage
+that lifecycle. `AgentLoop.from_config()` therefore requires a caller-owned
+`ToolRegistry`; callers using MCP share it with their application-owned
+`MCPProvider`.
+
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
 
 ## Providers

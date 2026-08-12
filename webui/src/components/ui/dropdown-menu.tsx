@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Circle } from "lucide-react";
+import { ChevronRight, Circle } from "lucide-react";
 
 import {
   floatingItemClassName,
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 const DropdownMenu = DropdownMenuPrimitive.Root;
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
+const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
 const menuItemClassName =
   `${floatingItemClassName} ${floatingItemFocusClassName} cursor-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50`;
@@ -115,6 +116,41 @@ const DropdownMenuSeparator = React.forwardRef<
 ));
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
+const DropdownMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+    inset?: boolean;
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubTrigger
+    ref={ref}
+    className={cn(menuItemClassName, inset && "pl-8", className)}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+  </DropdownMenuPrimitive.SubTrigger>
+));
+DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
+
+const DropdownMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+>(({ className, sideOffset = 6, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubContent
+    ref={ref}
+    sideOffset={sideOffset}
+    className={cn(
+      floatingSurfaceClassName,
+      floatingSurfaceMotionClassName,
+      "max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
+      className,
+    )}
+    {...props}
+  />
+));
+DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
+
 export {
   DropdownMenu,
   DropdownMenuContent,
@@ -123,5 +159,8 @@ export {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 };

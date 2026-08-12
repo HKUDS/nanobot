@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
+import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
 import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
@@ -13,6 +14,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   project_name_overrides: {},
   tags_by_key: {},
   collapsed_groups: {},
+  workbench: { version: 1, tabs: {} },
   view: {
     density: "comfortable",
     show_previews: false,
@@ -93,6 +95,7 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
     collapsed_groups: boolMap(value.collapsed_groups),
+    workbench: normalizeWorkbenchState(value.workbench),
     view: {
       density,
       show_previews: Boolean(view.show_previews),
@@ -146,6 +149,8 @@ export function useSidebarState(
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
   const connectionOpenRef = useRef(client.status === "open");
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
+  const persistenceInFlightRef = useRef(false);
+  const flushPersistenceRef = useRef<() => void>(() => {});
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -173,27 +178,59 @@ export function useSidebarState(
     };
   }, []);
 
-  const persist = useCallback((next: SidebarStatePayload) => {
-    if (!connectionOpenRef.current) {
-      pendingPersistenceRef.current = next;
-      return;
-    }
-    void client.setSidebarState(next).catch(() => {
-      // Sidebar persistence is best-effort; the optimistic local state remains usable.
-    });
+  const flushPersistence = useCallback(() => {
+    if (
+      persistenceInFlightRef.current
+      || !connectionOpenRef.current
+      || pendingPersistenceRef.current === null
+    ) return;
+
+    const next = pendingPersistenceRef.current;
+    pendingPersistenceRef.current = null;
+    persistenceInFlightRef.current = true;
+    void client.setSidebarState(next)
+      .then((saved) => {
+        persistenceInFlightRef.current = false;
+        if (pendingPersistenceRef.current === null) {
+          const canonical = normalizeSidebarState(saved);
+          stateRef.current = canonical;
+          setState(canonical);
+        }
+        flushPersistenceRef.current();
+      })
+      .catch(() => {
+        persistenceInFlightRef.current = false;
+        if (pendingPersistenceRef.current === null) {
+          pendingPersistenceRef.current = next;
+        }
+      });
   }, [client]);
+  flushPersistenceRef.current = flushPersistence;
+
+  const persist = useCallback((next: SidebarStatePayload) => {
+    pendingPersistenceRef.current = next;
+    flushPersistence();
+  }, [flushPersistence]);
 
   useEffect(() => client.onStatus((status) => {
     connectionOpenRef.current = status === "open";
-    if (status !== "open" || pendingPersistenceRef.current === null) return;
-    const pending = pendingPersistenceRef.current;
-    pendingPersistenceRef.current = null;
-    persist(pending);
-  }), [client, persist]);
+    if (status === "open") flushPersistence();
+  }), [client, flushPersistence]);
+
+  useEffect(() => client.onSidebarStateUpdate((incoming) => {
+    if (
+      persistenceInFlightRef.current
+      || pendingPersistenceRef.current !== null
+    ) return;
+    const loaded = normalizeSidebarState(incoming);
+    stateRef.current = loaded;
+    setState(loaded);
+  }), [client]);
 
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
+      if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
       persist(next);
