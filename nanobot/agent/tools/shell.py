@@ -890,12 +890,27 @@ class ExecTool(Tool):
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
+                    # Python's expanduser() intentionally does not implement
+                    # shell directory-stack forms. ``~+`` is the active cwd,
+                    # while ``~-`` and indexed forms can resolve outside it;
+                    # normalize the former and fail closed on the latter.
+                    if expanded == "~+":
+                        p = cwd_path
+                    elif expanded.startswith("~+/"):
+                        p = (cwd_path / expanded[3:]).resolve()
+                    elif re.match(r"^~(?:-|[+-]\d+)(?:/|$)", expanded):
+                        return ToolResult.error(
+                            "Error: Command blocked by safety guard "
+                            "(path outside working dir)"
+                            + _WORKSPACE_BOUNDARY_NOTE
+                        )
+                    else:
+                        p = Path(expanded).expanduser().resolve()
                     # Match against the un-resolved path first.  On Linux,
                     # /dev/stderr is a symlink to /proc/self/fd/2 and
                     # ``Path.resolve()`` would mask the device-file intent.
                     if self._is_benign_device_path(expanded):
                         continue
-                    p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
 
@@ -1043,8 +1058,10 @@ class ExecTool(Tool):
         ``shlex`` separates real grouping/redirection operators while preserving
         parentheses and spaces that were quoted or escaped as part of a path.
         Embedded scripts (for example ``sh -c \"cat /tmp/x\"``) still need a
-        small boundary scan. Colons are deliberately not boundaries: treating
-        them as such misclassifies URLs, ``host:/remote`` and ``C:/Windows``.
+        small boundary scan. Colons are not general boundaries: treating them
+        as such misclassifies URLs, ``host:/remote`` and ``C:/Windows``. They
+        are considered only inside a syntactically valid assignment, where
+        shells expand each colon-delimited tilde component.
         """
         paths: list[str] = []
         for match in re.finditer(
@@ -1065,25 +1082,42 @@ class ExecTool(Tool):
         i = 0
         while i < len(token):
             is_posix = token[i] == "/"
-            is_home = token.startswith("~/", i) or token.startswith("~+/", i)
+            home_match = re.match(
+                r"~(?:[+-](?:\d+)?|[A-Za-z0-9_.@-]+)?(?=/|:|$)",
+                token[i:],
+            )
+            is_home = home_match is not None
             if not is_posix and not is_home:
                 i += 1
                 continue
 
             prefix = token[:i]
-            at_boundary = i == 0 or token[i - 1] in boundary_chars
             parameter_default = (
                 i >= 2 and token[i - 2] == ":" and token[i - 1] in "-+?="
             )
-            if not at_boundary and not parameter_default:
-                i += 1
-                continue
-
             word_start = max(
                 (prefix.rfind(char) for char in " \t\r\n<>|;&"),
                 default=-1,
             ) + 1
             word_prefix = prefix[word_start:]
+            assignment_component = bool(
+                re.fullmatch(
+                    r"(?:[A-Za-z_][A-Za-z0-9_]*|--?[A-Za-z0-9_.-]+)="
+                    r"(?:[^:=\s]*:)*",
+                    word_prefix,
+                )
+            )
+            at_boundary = i == 0 or token[i - 1] in boundary_chars
+            if is_home:
+                # A shell word beginning with ``~`` is a separate shlex token.
+                # Mid-token expansion is valid only after ``=`` or a colon in
+                # an assignment. This avoids PromQL/Loki ``=~`` and ``|~``
+                # match operators while covering PATH-like values.
+                at_boundary = i == 0 or assignment_component
+            if not at_boundary and not parameter_default:
+                i += 1
+                continue
+
             if re.search(r"[A-Za-z][A-Za-z0-9+.-]*://", word_prefix) or re.match(
                 r"(?:[^/:=\s]+@)?[^/:=\s]+:$",
                 word_prefix,
@@ -1095,11 +1129,13 @@ class ExecTool(Tool):
                 i += 1
                 continue
 
-            assignment_value = i > 0 and token[i - 1] == "=" and not any(
-                char.isspace() for char in prefix
-            )
+            assignment_value = assignment_component
             if i == 0 or assignment_value:
                 end = len(token)
+                if assignment_value:
+                    separator = token.find(":", i)
+                    if separator >= 0:
+                        end = separator
             elif token[i - 1] in {"'", '"'}:
                 quote = token[i - 1]
                 closing = token.find(quote, i)
