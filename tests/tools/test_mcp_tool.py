@@ -1380,6 +1380,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
 
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
     oauth_mod.MCPAuthorizationRequiredError = RuntimeError  # type: ignore[attr-defined]
+    oauth_mod.MCPAuthorizationStoreError = RuntimeError  # type: ignore[attr-defined]
     oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
 
