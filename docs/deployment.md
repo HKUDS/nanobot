@@ -11,7 +11,7 @@ Check these once before Render, Docker, systemd, or LaunchAgent:
 | `nanobot status` shows the expected config and workspace | Confirms the process will read the instance you meant to run |
 | `nanobot agent -m "Hello!"` works | Proves install, config, provider, model, and workspace writes before adding a service layer |
 | Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
-| `~/.nanobot/` (including `sessions/`) and any custom config/workspace paths are persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
+| The active config directory (including `sessions/`) and workspace are persistent | Sessions follow `--config`; memory, generated artifacts, and the workspace identity marker follow the workspace |
 | Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
 | Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
 | Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |

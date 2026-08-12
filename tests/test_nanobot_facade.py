@@ -46,7 +46,9 @@ def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
     }
     if overrides:
         data.update(overrides)
-    config_path = tmp_path / "config.json"
+    config_dir = tmp_path.parent / f"{tmp_path.name}-instance"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.json"
     config_path.write_text(json.dumps(data))
     return config_path
 
@@ -96,9 +98,11 @@ def test_from_config_missing_env_reports_explicit_config_path(
 
 def test_from_config_creates_instance(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    workspace = tmp_path / "workspace"
+    bot = Nanobot.from_config(config_path, workspace=workspace)
     assert bot._loop is not None
-    assert bot._loop.workspace == tmp_path
+    assert bot._loop.workspace == workspace
+    assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
 
 
 def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
