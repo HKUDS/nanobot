@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from pathlib import Path
 from typing import Any, cast
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
@@ -89,8 +90,8 @@ def _query_first(query: QueryParams, key: str) -> str | None:
     return values[0] if values else None
 
 
-def _manager() -> CliAppManager:
-    config = load_config()
+def _manager(config_path: Path | None = None) -> CliAppManager:
+    config = load_config(config_path) if config_path is not None else load_config()
     cli_cfg = config.tools.cli_apps
     return CliAppManager(
         workspace=config.workspace_path,
@@ -102,8 +103,12 @@ def _manager() -> CliAppManager:
     )
 
 
-async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
-    manager = _manager()
+async def cli_apps_payload(
+    *,
+    installed_only: bool = False,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    manager = _manager(config_path) if config_path is not None else _manager()
     if installed_only:
         return manager.installed_payload()
     payload = manager.payload(cache_only=True)
@@ -118,11 +123,16 @@ async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
     return payload
 
 
-def cli_apps_action(action: str, query: QueryParams) -> dict[str, Any]:
+def cli_apps_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise CliAppError("missing CLI app name")
-    manager = _manager()
+    manager = _manager(config_path) if config_path is not None else _manager()
     if action == "install":
         return manager.install(name)
     if action == "update":

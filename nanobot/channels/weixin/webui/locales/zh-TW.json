@@ -21,7 +21,21 @@
       "token": {
         "label": "權杖",
         "placeholder": "二維碼登入後自動儲存"
-      }
+      },
+      "sendProgress": { "label": "傳送進度訊息" },
+      "sendToolHints": { "label": "傳送工具提示" },
+      "streaming": { "label": "使用串流 API" },
+      "replyProgressMessages": { "label": "傳送結構化進度" },
+      "replyProgressMaxMessages": { "label": "結構化進度訊息上限" },
+      "contextMessageBudget": { "label": "上下文訊息預算" },
+      "blockStreaming": { "label": "分塊傳送回覆" },
+      "blockStreamingMinChars": { "label": "最小分塊字元數" },
+      "blockStreamingMaxMessages": { "label": "分塊訊息上限" },
+      "baseUrl": { "label": "API 位址" },
+      "cdnBaseUrl": { "label": "CDN 位址" },
+      "routeTag": { "label": "路由標籤" },
+      "stateDir": { "label": "狀態目錄" },
+      "pollTimeout": { "label": "輪詢逾時" }
     }
   },
   "custom": {
@@ -31,6 +45,13 @@
     "waiting": "正在等待微信掃碼...",
     "connected": "微信已連接。",
     "stopped": "微信登入已停止。",
-    "connecting": "正在連接..."
+    "connecting": "正在連接...",
+    "verifyTitle": "需要驗證",
+    "verifyDescription": "輸入手機微信中顯示的數字以繼續。",
+    "verifyMismatch": "驗證碼不符，請輸入微信中顯示的新數字。",
+    "expired": "微信登入已過期，請重新掃碼連線。",
+    "failed": "無法連接微信，請重試。",
+    "verifyPlaceholder": "驗證碼",
+    "verifySubmit": "驗證"
   }
 }

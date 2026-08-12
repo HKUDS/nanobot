@@ -17,6 +17,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.mattermost.runtime import MattermostChannel
 from nanobot.config.schema import Config
 
 
@@ -310,6 +311,38 @@ class TestProgressFiltering:
 
         assert manager._should_send_progress("mock", tool_hint=False) is False
         assert manager._should_send_progress("mock", tool_hint=True) is False
+
+    def test_channel_config_defaults_do_not_override_global_policy(self, bus):
+        manager = ChannelManager.__new__(ChannelManager)
+        manager.config = Config.model_validate({
+            "channels": {
+                "sendProgress": False,
+                "sendToolHints": False,
+            },
+        })
+        manager.bus = bus
+
+        channel = manager._build_channel(
+            "mattermost",
+            MattermostChannel,
+            {"enabled": True},
+        )
+
+        assert channel.send_progress is False
+        assert channel.send_tool_hints is False
+
+        opted_in = manager._build_channel(
+            "mattermost",
+            MattermostChannel,
+            {
+                "enabled": True,
+                "sendProgress": True,
+                "sendToolHints": True,
+            },
+        )
+
+        assert opted_in.send_progress is True
+        assert opted_in.send_tool_hints is True
 
     def test_progress_visibility_returns_false_for_missing_channel(self, manager):
         assert manager._should_send_progress("nonexistent", tool_hint=False) is False

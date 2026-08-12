@@ -36,6 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
@@ -94,7 +95,7 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.mcp import MCPConnection
+    from nanobot.agent.tools.mcp import MCPConnection, MCPRuntimeStatus
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
@@ -196,6 +197,11 @@ class AgentLoop:
     @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
+
+    @property
+    def last_usage(self) -> Mapping[str, int]:
+        """Latest aggregate usage exposed through the runtime-control snapshot."""
+        return self._last_usage
 
     @property
     def provider(self) -> LLMProvider:
@@ -395,9 +401,11 @@ class AgentLoop:
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, MCPConnection] = {}
+        self._mcp_runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
+        self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._close_mcp_lock = asyncio.Lock()
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
@@ -447,7 +455,6 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
-        self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -479,6 +486,8 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        from nanobot.agent.plugins import agent_plugin_mcp_servers
+
         return cls(
             bus=bus,
             provider=provider,
@@ -493,7 +502,7 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
+            mcp_servers=agent_plugin_mcp_servers(config.workspace_path, config.tools.mcp_servers),
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
@@ -622,10 +631,13 @@ class AgentLoop:
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
 
-        # MyTool needs runtime state reference — manual registration
+        # MyTool receives only the explicit runtime-control capability.
         if self.tools_config.my.enable:
             self.tools.register(
-                MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
+                MyTool(
+                    runtime_control=AgentRuntimeControl(self),
+                    modify_allowed=self.tools_config.my.allow_set,
+                )
             )
             registered.append("my")
 
@@ -634,6 +646,10 @@ class AgentLoop:
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
+
+    def mcp_runtime_status(self) -> dict[str, MCPRuntimeStatus]:
+        """Return connection state learned from real MCP runtime attempts."""
+        return agent_context.mcp_runtime_status(self)
 
     def register_runtime_context_provider(
         self,
@@ -721,6 +737,7 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
+            include_memory=ctx.session.policy.persist,
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
@@ -786,9 +803,9 @@ class AgentLoop:
             logger.warning("Command '{}' matched but dispatch returned None", raw)
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        """Cancel and await all active tasks and subagents for *key*.
+        """Cancel and await all active work for *key*.
 
-        Returns the total number of cancelled tasks + subagents.
+        Returns the total number of cancelled tasks, subagents, and exec sessions.
         """
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
@@ -796,7 +813,17 @@ class AgentLoop:
             with suppress(asyncio.CancelledError, Exception):
                 await t
         sub_cancelled = await self.subagents.cancel_by_session(key)
-        return cancelled + sub_cancelled
+        exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
+        return cancelled + sub_cancelled + exec_cancelled
+
+    async def discard_session(self, key: str) -> None:
+        """Stop active work for *key* and forget its cached session."""
+        self._discarding_sessions.add(key)
+        try:
+            self.sessions.invalidate(key)
+            await self._cancel_active_tasks(key)
+        finally:
+            self._discarding_sessions.discard(key)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -1161,6 +1188,11 @@ class AgentLoop:
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
+                if (
+                    msg.require_existing_session
+                    and self.sessions.get_cached(effective_key) is None
+                ):
+                    continue
                 if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
@@ -1279,6 +1311,8 @@ class AgentLoop:
                     # _emit_checkpoint during tool execution; materializing
                     # it into session history now makes it visible in the
                     # next conversation turn.
+                    if session_key in self._discarding_sessions:
+                        raise
                     try:
                         key = self._effective_session_key(msg)
                         session = self.sessions.get_or_create(key)
@@ -1556,6 +1590,7 @@ class AgentLoop:
         had_injections: bool,
         streamed_content: bool,
         *,
+        log_content: bool = True,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
@@ -1564,8 +1599,11 @@ class AgentLoop:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        if log_content:
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        else:
+            logger.info("Response to {}:{}: [content hidden]", msg.channel, msg.sender_id)
 
         event = None
         meta = dict(msg.metadata or {})
@@ -1594,17 +1632,33 @@ class AgentLoop:
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        if ctx.session is None:
+            if msg.require_existing_session:
+                ctx.session = self.sessions.get_cached(ctx.session_key)
+                if ctx.session is None:
+                    raise RuntimeError("required session is not active")
+            else:
+                ctx.session = self.sessions.get_or_create(ctx.session_key)
+        session = ctx.session
+        ctx.ephemeral = ctx.ephemeral or not session.policy.persist
+        tools = ctx.tools or self.tools
+        if session.policy.disabled_tools:
+            restricted = ToolRegistry()
+            for name in tools.tool_names:
+                tool = tools.get(name)
+                if name not in session.policy.disabled_tools and tool:
+                    restricted.register(tool)
+            tools = restricted
+        ctx.tools = tools
+
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        else:
+        elif session.policy.log_content:
+            preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        else:
+            logger.info("Processing message from {}:{}: [content hidden]", msg.channel, msg.sender_id)
 
-        # Session is already fetched by the caller (_process_message) but
-        # ensure it exists in case this handler is invoked independently.
-        if ctx.session is None:
-            ctx.session = self.sessions.get_or_create(ctx.session_key)
-        session = ctx.session
         self._remember_unified_session_route(
             session,
             msg,
@@ -1907,6 +1961,7 @@ class AgentLoop:
             ctx.stop_reason,
             ctx.had_injections,
             ctx.streamed_content,
+            log_content=ctx.require_session().policy.log_content,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         if ctx.ephemeral and ctx.outbound is not None:

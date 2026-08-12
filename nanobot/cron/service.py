@@ -26,9 +26,6 @@ from nanobot.cron.types import (
     CronStore,
 )
 from nanobot.utils.run_records import (
-    safe_run_record_name,
-)
-from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
 
@@ -439,10 +436,6 @@ class CronService:
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
-
-    @staticmethod
-    def _safe_run_record_name(run_id: str) -> str:
-        return safe_run_record_name(run_id)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""

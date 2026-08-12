@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type Ref,
 } from "react";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
@@ -105,6 +106,11 @@ import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
+import {
+  clearDraggedSession,
+  hasDraggedSession,
+  readDraggedSession,
+} from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 
@@ -173,7 +179,11 @@ function getVoiceShortcutLabel(): string {
 }
 
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
+  onSend: (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+  ) => boolean | void | Promise<boolean | void>;
   disabled?: boolean;
   placeholder?: string;
   isStreaming?: boolean;
@@ -194,12 +204,14 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
+  surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
+  workspaceControlsHidden?: boolean;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
@@ -316,6 +328,35 @@ type MentionCandidate = {
       initials: string;
     }
 );
+
+interface MentionInsertion {
+  value: string;
+  cursor: number;
+  tokenStart: number;
+  tokenEnd: number;
+}
+
+function mentionInsertion(
+  value: string,
+  name: string,
+  start: number,
+  end: number,
+): MentionInsertion {
+  const from = Math.min(Math.max(start, 0), value.length);
+  const to = Math.min(Math.max(end, from), value.length);
+  const prefix = value.slice(0, from);
+  const suffix = value.slice(to);
+  const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
+  const trailingSpace = /^\s/.test(suffix) ? "" : " ";
+  const tokenStart = prefix.length + leadingSpace.length;
+  const tokenEnd = tokenStart + name.length + 1;
+  return {
+    value: `${prefix}${leadingSpace}@${name}${trailingSpace}${suffix}`,
+    cursor: tokenEnd + trailingSpace.length,
+    tokenStart,
+    tokenEnd,
+  };
+}
 
 function sessionMentionBase(session: ChatSummary): string {
   const label = session.title?.trim() || session.preview.trim() || "session";
@@ -917,10 +958,12 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
+  surfaceRef,
   onTranscribeAudio,
   runStartedAt = null,
   goalState,
   workspaceScope = null,
+  workspaceControlsHidden = false,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
@@ -936,7 +979,14 @@ export function ThreadComposer({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
+  const [sessionDragPreview, setSessionDragPreview] = useState<{
+    mention: SessionMention;
+    start: number;
+    end: number;
+  } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [sendPending, setSendPending] = useState(false);
+  const interactionDisabled = !!disabled || sendPending;
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -966,17 +1016,18 @@ export function ThreadComposer({
     () => queuedPromptsStorageKey(pendingQueueKey),
     [pendingQueueKey],
   );
-  const showProjectPicker =
+  const projectPickerAvailable =
     isHero
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
+  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
     skipQueuedPromptPersistRef.current = true;
     setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
-  }, [queuedPromptStorageKey]);
+  }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!queuedPromptStorageKey) return;
@@ -1026,7 +1077,7 @@ export function ThreadComposer({
 
   const addFiles = useCallback(
     (files: File[]) => {
-      if (files.length === 0) return;
+      if (interactionDisabled || files.length === 0) return;
       secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
@@ -1035,7 +1086,7 @@ export function ThreadComposer({
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection],
+    [enqueue, formatRejection, interactionDisabled],
   );
 
   const {
@@ -1048,18 +1099,20 @@ export function ThreadComposer({
   } = useClipboardAndDrop(addFiles);
 
   useEffect(() => {
-    if (disabled || hasTouchPrimaryPointer) return;
+    if (interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
+      return;
+    }
     const el = textareaRef.current;
     if (!el) return;
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
-  }, [disabled, hasTouchPrimaryPointer]);
+  }, [hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
 
   useEffect(() => {
-    if (!focusRequest || disabled) return;
+    if (!focusRequest || interactionDisabled) return;
     const id = requestAnimationFrame(() => textareaRef.current?.focus());
     return () => cancelAnimationFrame(id);
-  }, [disabled, focusRequest]);
+  }, [focusRequest, interactionDisabled]);
 
   const normalizedQuotedContext = quotedContext?.trim().slice(0, QUEUED_PROMPT_MAX_CHARS) || null;
 
@@ -1073,15 +1126,17 @@ export function ThreadComposer({
 
   const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
-    !disabled
+    !interactionDisabled
     && !modelNeedsSetup
     && !encoding
     && !hasErrors
     && hasComposerContent;
-  const canOpenModelSettings = Boolean(modelNeedsSetup && onModelBadgeClick && !disabled);
+  const canOpenModelSettings = Boolean(
+    modelNeedsSetup && onModelBadgeClick && !interactionDisabled,
+  );
   const canQueueGuidance =
     isStreaming
-    && !disabled
+    && !interactionDisabled
     && !modelNeedsSetup
     && !encoding
     && !hasErrors
@@ -1089,14 +1144,14 @@ export function ThreadComposer({
     && !value.trimStart().startsWith("/");
 
   const slashQuery = useMemo(() => {
-    if (disabled || slashMenuDismissed || !value.startsWith("/")) return null;
+    if (interactionDisabled || slashMenuDismissed || !value.startsWith("/")) return null;
     const commandToken = value.slice(1);
     if (/\s/.test(commandToken)) return null;
     return commandToken.toLowerCase();
-  }, [disabled, slashMenuDismissed, value]);
+  }, [interactionDisabled, slashMenuDismissed, value]);
 
   const skillQuery = useMemo(() => {
-    if (disabled || slashMenuDismissed) return null;
+    if (interactionDisabled || slashMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
@@ -1106,7 +1161,7 @@ export function ThreadComposer({
       start: match.index,
       text: match[1].toLowerCase(),
     };
-  }, [cursorPosition, disabled, slashMenuDismissed, value]);
+  }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
     if (!(isStreaming && onStop)) return slashCommands;
@@ -1234,7 +1289,7 @@ export function ThreadComposer({
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
-    if (disabled || cliAppMenuDismissed) return null;
+    if (interactionDisabled || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
@@ -1245,7 +1300,7 @@ export function ThreadComposer({
       start: caret - query.length - 1,
       end: caret,
     };
-  }, [cliAppMenuDismissed, cursorPosition, disabled, value]);
+  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
 
   const availableSessionMentions = useMemo(
     () => sessionMentionOptions(
@@ -1263,6 +1318,22 @@ export function ThreadComposer({
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
     [cliApps, mcpPresets, selectedSessionMentions, value],
   );
+  const sessionDragInsertion = sessionDragPreview
+    ? mentionInsertion(
+        value,
+        sessionDragPreview.mention.name,
+        sessionDragPreview.start,
+        sessionDragPreview.end,
+      )
+    : null;
+  const displayMentionSegments = sessionDragInsertion && sessionDragPreview
+    ? splitCapabilityMentionSegments(
+        sessionDragInsertion.value,
+        cliApps,
+        mcpPresets,
+        [...selectedSessionMentions, sessionDragPreview.mention],
+      )
+    : mentionSegments;
   const activeSessionMentions = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1351,7 +1422,7 @@ export function ThreadComposer({
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
-  const hasMentionDecorations = mentionSegments.some(
+  const hasMentionDecorations = displayMentionSegments.some(
     (segment) => segment.kind !== "text",
   );
   const activeCliMentionApps = useMemo(() => {
@@ -1519,7 +1590,7 @@ export function ThreadComposer({
     }, VOICE_ERROR_VISIBLE_MS);
   }, [clearVoiceErrorTimers, t]);
   const voiceRecorder = useVoiceRecorder({
-    disabled,
+    disabled: interactionDisabled,
     onClearError: clearInlineError,
     onError: setVoiceError,
     onTranscript: appendTranscription,
@@ -1606,10 +1677,13 @@ export function ThreadComposer({
     [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
   );
 
-  const chooseMentionCandidate = useCallback(
-    (candidate: MentionCandidate) => {
-      if (!cliAppMention) return;
+  const insertMentionCandidate = useCallback(
+    (candidate: MentionCandidate, start: number, end: number) => {
       if (candidate.kind === "session") {
+        const alreadySelected = activeSessionMentions.some(
+          (mention) => mention.session_key === candidate.mention.session_key,
+        );
+        if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
         const name = candidate.name.toLowerCase();
         setSelectedSessionMentions([
           ...activeSessionMentions.filter((mention) => (
@@ -1619,12 +1693,9 @@ export function ThreadComposer({
           candidate.mention,
         ]);
       }
-      const suffix = value.slice(cliAppMention.end);
-      const mention = `@${candidate.name}${suffix.startsWith(" ") ? "" : " "}`;
-      const next = `${value.slice(0, cliAppMention.start)}${mention}${suffix}`;
-      const nextCursor = cliAppMention.start + mention.length;
-      setValue(next);
-      setCursorPosition(nextCursor);
+      const insertion = mentionInsertion(value, candidate.name, start, end);
+      setValue(insertion.value);
+      setCursorPosition(insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
@@ -1633,11 +1704,94 @@ export function ThreadComposer({
         const el = textareaRef.current;
         if (!el) return;
         el.focus();
-        el.setSelectionRange(nextCursor, nextCursor);
+        el.setSelectionRange(insertion.cursor, insertion.cursor);
       });
     },
-    [activeSessionMentions, cliAppMention, resizeTextarea, value],
+    [activeSessionMentions, resizeTextarea, value],
   );
+
+  const chooseMentionCandidate = useCallback(
+    (candidate: MentionCandidate) => {
+      if (!cliAppMention) return;
+      insertMentionCandidate(candidate, cliAppMention.start, cliAppMention.end);
+    },
+    [cliAppMention, insertMentionCandidate],
+  );
+
+  const handleSessionDrop = useCallback((event: React.DragEvent) => {
+    if (!hasDraggedSession(event.dataTransfer)) return false;
+    event.preventDefault();
+    clearDraggedSession();
+    const preview = sessionDragPreview;
+    setSessionDragPreview(null);
+    if (interactionDisabled) return true;
+    const sessionKey = readDraggedSession(event.dataTransfer);
+    const mention = availableSessionMentions.find(
+      (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
+    );
+    if (!mention) return true;
+    const caret = preview?.start ?? textareaRef.current?.selectionStart ?? value.length;
+    insertMentionCandidate(
+      {
+        kind: "session",
+        name: mention.name,
+        displayName: mention.title || mention.name,
+        mention,
+      },
+      caret,
+      preview?.end ?? textareaRef.current?.selectionEnd ?? caret,
+    );
+    return true;
+  }, [
+    availableSessionMentions,
+    insertMentionCandidate,
+    interactionDisabled,
+    sessionDragPreview,
+    value.length,
+  ]);
+
+  const previewSessionDrop = useCallback((event: React.DragEvent) => {
+    if (!hasDraggedSession(event.dataTransfer)) return false;
+    if (interactionDisabled) {
+      event.dataTransfer.dropEffect = "none";
+      setSessionDragPreview(null);
+      return true;
+    }
+    const sessionKey = readDraggedSession(event.dataTransfer);
+    const mention = availableSessionMentions.find(
+      (candidate) => candidate.session_key === sessionKey,
+    );
+    const alreadySelected = mention && activeSessionMentions.some(
+      (candidate) => candidate.session_key === mention.session_key,
+    );
+    if (!mention || (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT)) {
+      event.dataTransfer.dropEffect = "none";
+      setSessionDragPreview(null);
+      return true;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    const start = textareaRef.current?.selectionStart ?? value.length;
+    const end = textareaRef.current?.selectionEnd ?? start;
+    setSessionDragPreview((current) => (
+      current?.mention.session_key === mention.session_key
+      && current.start === start
+      && current.end === end
+        ? current
+        : { mention, start, end }
+    ));
+    return true;
+  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, value.length]);
+
+  useEffect(() => {
+    if (!sessionDragPreview) return;
+    const clearPreview = () => {
+      clearDraggedSession();
+      setSessionDragPreview(null);
+    };
+    document.addEventListener("dragend", clearPreview);
+    return () => document.removeEventListener("dragend", clearPreview);
+  }, [sessionDragPreview]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
@@ -1870,7 +2024,16 @@ export function ThreadComposer({
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
-    onSend(
+    const finishSend = () => {
+      if (hasTouchPrimaryPointer) textareaRef.current?.blur();
+      setQueuedPrompts([]);
+      // Bubble owns the data URL copy; safe to revoke every staged blob
+      // preview here without affecting the rendered message.
+      clear();
+      clearComposerText(!hasTouchPrimaryPointer);
+      onQuotedContextChange?.(null);
+    };
+    const result = onSend(
       content,
       payload,
       isSlashSideChannel
@@ -1881,13 +2044,19 @@ export function ThreadComposer({
           }
         : options,
     );
-    if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-    setQueuedPrompts([]);
-    // Bubble owns the data URL copy; safe to revoke every staged blob
-    // preview here without affecting the rendered message.
-    clear();
-    clearComposerText(!hasTouchPrimaryPointer);
-    onQuotedContextChange?.(null);
+    if (result instanceof Promise) {
+      setSendPending(true);
+      void result
+        .then((accepted) => {
+          if (accepted !== false) finishSend();
+        })
+        .catch((error: unknown) => {
+          console.error("Failed to send message", error);
+        })
+        .finally(() => setSendPending(false));
+      return;
+    }
+    if (result !== false) finishSend();
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
@@ -2030,7 +2199,7 @@ export function ThreadComposer({
     [removeChip],
   );
 
-  const attachButtonDisabled = disabled || full;
+  const attachButtonDisabled = interactionDisabled || full;
   const showVoiceButton = Boolean(onTranscribeAudio);
   const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
     time: voiceRecorder.elapsedLabel,
@@ -2067,10 +2236,25 @@ export function ThreadComposer({
         e.preventDefault();
         submit();
       }}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      onDragEnter={(event) => {
+        if (!previewSessionDrop(event)) onDragEnter(event);
+      }}
+      onDragOver={(event) => {
+        if (!previewSessionDrop(event)) onDragOver(event);
+      }}
+      onDragLeave={(event) => {
+        if (!hasDraggedSession(event.dataTransfer)) {
+          onDragLeave(event);
+          return;
+        }
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setSessionDragPreview(null);
+        }
+      }}
+      onDrop={(event) => {
+        if (!handleSessionDrop(event)) onDrop(event);
+      }}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
       {showSlashMenu ? (
@@ -2094,12 +2278,14 @@ export function ThreadComposer({
         />
       ) : null}
       <div
+        ref={surfaceRef}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
             ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
-          disabled && "opacity-60",
+          interactionDisabled && "opacity-60",
+          sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
           goalState?.active &&
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
@@ -2184,9 +2370,12 @@ export function ThreadComposer({
         <div className="relative">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
-              segments={mentionSegments}
+              segments={displayMentionSegments}
               isHero={isHero}
               className={inputTextClasses}
+              ghostRange={sessionDragInsertion
+                ? { start: sessionDragInsertion.tokenStart, end: sessionDragInsertion.tokenEnd }
+                : null}
             />
           ) : null}
           <textarea
@@ -2209,8 +2398,8 @@ export function ThreadComposer({
             onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onPaste={onPaste}
             rows={1}
-            placeholder={resolvedPlaceholder}
-            disabled={disabled}
+            placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
+            disabled={interactionDisabled}
             aria-label={t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
@@ -2225,8 +2414,8 @@ export function ThreadComposer({
           <div
             role="alert"
             className={cn(
-              "mx-3 mb-1 max-h-10 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] duration-500 ease-out",
+              "mx-3 mb-1 max-h-24 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
+              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
               voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
             )}
           >
@@ -2235,7 +2424,7 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "thread-composer-footer flex flex-nowrap items-center",
+            "thread-composer-footer flex flex-nowrap items-center motion-safe:transition-[padding-bottom] motion-safe:[transition-duration:220ms] motion-safe:ease-in-out",
             isHero
               ? cn(
                   "gap-x-1.5 px-3 sm:px-4",
@@ -2282,10 +2471,10 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : workspaceScope ? (
+            ) : workspaceScope && !workspaceControlsHidden ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
-                disabled={disabled || workspaceScopeDisabled}
+                disabled={interactionDisabled || workspaceScopeDisabled}
                 canUseFullAccess={workspaceControls?.can_use_full_access !== false}
                 isHero={isHero}
                 onChange={onWorkspaceScopeChange}
@@ -2363,7 +2552,7 @@ export function ThreadComposer({
             <Button
               type={showStopButton || modelNeedsSetup ? "button" : "submit"}
               size="icon"
-              disabled={showStopButton ? disabled : !canSend && !canOpenModelSettings}
+              disabled={showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
               aria-label={
                 showStopButton
                   ? t("thread.composer.stop")
@@ -2393,15 +2582,28 @@ export function ThreadComposer({
             </Button>
           </div>
         </div>
-        <WorkspaceProjectPicker
-          isHero={isHero}
-          disabled={disabled || workspaceScopeDisabled}
-          scope={workspaceScope}
-          defaultScope={workspaceDefaultScope}
-          controls={workspaceControls}
-          error={workspaceError}
-          onChange={onWorkspaceScopeChange}
-        />
+        {projectPickerAvailable ? (
+          <div
+            className="composer-workspace-drawer"
+            data-composer-workspace-drawer=""
+            data-state={showProjectPicker ? "open" : "closed"}
+            aria-hidden={showProjectPicker ? undefined : true}
+          >
+            <div className="composer-workspace-drawer-clip">
+              <div className="composer-workspace-drawer-content">
+                <WorkspaceProjectPicker
+                  isHero={isHero}
+                  disabled={interactionDisabled || workspaceScopeDisabled || !showProjectPicker}
+                  scope={workspaceScope}
+                  defaultScope={workspaceDefaultScope}
+                  controls={workspaceControls}
+                  error={workspaceError}
+                  onChange={onWorkspaceScopeChange}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </form>
   );
@@ -2596,11 +2798,14 @@ function ComposerCliMentionOverlay({
   segments,
   isHero,
   className,
+  ghostRange,
 }: {
   segments: CapabilityMentionSegment[];
   isHero: boolean;
   className: string;
+  ghostRange?: { start: number; end: number } | null;
 }) {
+  let offset = 0;
   return (
     <div
       aria-hidden
@@ -2610,16 +2815,24 @@ function ComposerCliMentionOverlay({
       )}
     >
       {segments.map((segment, index) => {
+        const start = offset;
+        offset += segment.text.length;
         if (segment.kind === "text") {
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
+        const isGhost = ghostRange?.start === start && ghostRange.end === offset;
         return (
-          <CapabilityMentionToken
+          <span
             key={`${segment.kind}-${index}`}
-            segment={segment}
-            variant="composer"
-            isHero={isHero}
-          />
+            data-testid={isGhost ? "composer-session-drag-preview" : undefined}
+            className={cn(isGhost && "opacity-45 transition-opacity duration-100")}
+          >
+            <CapabilityMentionToken
+              segment={segment}
+              variant="composer"
+              isHero={isHero}
+            />
+          </span>
         );
       })}
     </div>

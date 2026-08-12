@@ -20,7 +20,21 @@
       "token": {
         "label": "Jeton",
         "placeholder": "Enregistré après la connexion QR"
-      }
+      },
+      "sendProgress": { "label": "Envoyer la progression" },
+      "sendToolHints": { "label": "Envoyer les indications d’outils" },
+      "streaming": { "label": "Utiliser l’API de streaming" },
+      "replyProgressMessages": { "label": "Envoyer la progression structurée" },
+      "replyProgressMaxMessages": { "label": "Limite de progression structurée" },
+      "contextMessageBudget": { "label": "Budget de messages du contexte" },
+      "blockStreaming": { "label": "Envoyer la réponse par blocs" },
+      "blockStreamingMinChars": { "label": "Taille minimale d’un bloc" },
+      "blockStreamingMaxMessages": { "label": "Limite de messages par blocs" },
+      "baseUrl": { "label": "URL de l’API" },
+      "cdnBaseUrl": { "label": "URL du CDN" },
+      "routeTag": { "label": "Étiquette de routage" },
+      "stateDir": { "label": "Répertoire d’état" },
+      "pollTimeout": { "label": "Délai d’interrogation" }
     }
   },
   "custom": {
@@ -30,6 +44,13 @@
     "waiting": "En attente du scan WeChat...",
     "connected": "WeChat est connecté.",
     "stopped": "Connexion WeChat arrêtée.",
-    "connecting": "Connexion..."
+    "connecting": "Connexion...",
+    "verifyTitle": "Vérification requise",
+    "verifyDescription": "Saisissez le nombre affiché dans WeChat pour continuer.",
+    "verifyMismatch": "Le code ne correspond pas. Saisissez le nouveau nombre affiché dans WeChat.",
+    "expired": "La connexion WeChat a expiré. Scannez à nouveau pour vous reconnecter.",
+    "failed": "Impossible de connecter WeChat. Réessayez.",
+    "verifyPlaceholder": "Code",
+    "verifySubmit": "Vérifier"
   }
 }

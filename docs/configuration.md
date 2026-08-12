@@ -330,7 +330,11 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
+ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
+specially and appended after generated function tools. With Responses, configure it in Responses
+API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
+`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
 {
@@ -1979,15 +1983,52 @@ Add MCP servers to your `config.json`:
 }
 ```
 
-Two transport modes are supported:
+MCP servers can run locally over stdio or connect remotely over HTTP:
 
-| Mode | Config | Example |
+| Connection | Config | Example |
 |------|--------|---------|
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
-| **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
+| **Streamable HTTP / SSE** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/mcp`) |
+
+Remote HTTP servers may use browser OAuth instead of static headers. In the
+WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or
+SSE, and choose **OAuth** under **Authentication**. Save the server, then choose
+**Connect**. For manual configuration, add `auth: "oauth"` and open
+**Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add
+the config automatically on first click.
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "notion": {
+        "type": "streamableHttp",
+        "url": "https://mcp.notion.com/mcp",
+        "auth": "oauth"
+      }
+    }
+  }
+}
+```
+
+nanobot opens the server's authorization page and handles the callback through
+the gateway. The tools become available immediately when hot reload succeeds;
+otherwise the WebUI asks for a restart. OAuth tokens and dynamic client
+registration data are stored in the nanobot data directory under
+`auth/mcp.json`; they are not written to `config.json`. Removing the MCP server
+from Apps also removes its saved OAuth credentials. Normal gateway startup never
+opens a browser or registers a new OAuth client when credentials are
+missing—interactive authorization starts only after a user clicks **Connect**.
+
+For a remotely accessed WebUI, HTTPS is recommended. Configure
+`channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so
+nanobot can register the matching HTTPS callback and finish automatically. A
+loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP,
+nanobot instead registers a localhost callback and asks you to paste the complete
+callback URL from the browser address bar after authorization.
 
 > [!IMPORTANT]
-> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request is validated again before redirects are followed. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
+> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
 
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
@@ -2313,6 +2354,20 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+
+### Agent Plugins v1
+
+nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both. Agent Plugins are the common package and activation boundary for installable capabilities; they do not replace native providers, channels, tools, standalone workspace skills, or directly configured MCP servers.
+
+Directory presence means installed; activation is explicit in **Apps**. Skills use progressive loading and `$skill-name` invocation, with workspace > plugin > built-in precedence.
+Enabled `stdio` servers receive contained `PLUGIN_ROOT` and isolated `PLUGIN_DATA` paths; explicit
+`tools.mcpServers` entries win collisions. Invalid or escaping components are ignored.
+An enabled package is treated as immutable: changing any packaged file disables it until the user
+reviews and enables it again. Runtime state belongs under `PLUGIN_DATA`, not the package root.
+
+Enabled plugins run as the nanobot user; permissions are descriptive, not an OS sandbox. The optional `extensions.dev.nanobot.logo` accepts a contained PNG, JPEG, or WebP up to 256 KiB.
+
+CLI Apps use the same skills-only package layout while their installer manages executables, updates, and removal. Future catalogs can place packages before using this activation path.
 
 ## Tool Hint Max Length
 

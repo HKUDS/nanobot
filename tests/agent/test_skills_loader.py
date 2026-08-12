@@ -266,6 +266,7 @@ def test_disabled_skills_excluded_from_list(tmp_path: Path) -> None:
     assert len(entries) == 1
     assert entries[0]["name"] == "beta"
     assert entries[0]["path"] == str(beta_path)
+    assert loader.load_skill("alpha") is None
 
 
 def test_disabled_skills_empty_set_no_effect(tmp_path: Path) -> None:

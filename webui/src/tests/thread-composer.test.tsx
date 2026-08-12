@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
@@ -349,6 +350,30 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("locks an async send and keeps the draft when it is rejected", async () => {
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this pending draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => resolveSend(false));
+
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("keep this pending draft");
+  });
+
   it("dismisses the touch keyboard after a successful send", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query === "(hover: none) and (pointer: coarse)",
@@ -648,6 +673,49 @@ describe("ThreadComposer", () => {
     ));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("hello voice"));
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("explains the HTTPS requirement for voice input on an insecure origin", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", false);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText(
+        "Chrome and other browsers block microphone access on remote HTTP pages for security. "
+          + "Open this WebUI over HTTPS to use voice input.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("keeps the unsupported-browser error for secure origins without recording support", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("MediaRecorder", undefined);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText("Voice input is not supported in this browser."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
@@ -1067,6 +1135,85 @@ describe("ThreadComposer", () => {
       access_mode: "full",
       restrict_to_workspace: false,
     }));
+  });
+
+  it.each([
+    ["Windows", "D:\\Users\\test\\.nanobot\\workspace", "D:\\path\\to\\project"],
+    ["macOS", "/Users/test/.nanobot/workspace", "/Users/name/project"],
+    ["Linux", "/home/test/.nanobot/workspace", "/home/name/project"],
+  ])("uses a %s path example for the project picker", async (_, projectPath, placeholder) => {
+    const user = userEvent.setup();
+    const defaultScope = {
+      project_path: projectPath,
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByLabelText("Paste path")).toHaveAttribute("placeholder", placeholder);
+  });
+
+  it("slides project controls closed without offering a compact replacement", () => {
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    const composer = (workspaceControlsHidden: boolean) => (
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceControlsHidden={workspaceControlsHidden}
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />
+    );
+    const { container, rerender } = render(composer(false));
+    const drawer = container.querySelector("[data-composer-workspace-drawer]");
+
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("aria-hidden");
+    expect(container.querySelector("[data-composer-workspace-compact]")).not.toBeInTheDocument();
+
+    rerender(composer(true));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      hidden: true,
+      name: "Choose project",
+    })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Choose project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Workspace access mode: Full Access",
+    })).not.toBeInTheDocument();
+
+    rerender(composer(false));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      name: "Choose project",
+    })).toBeEnabled();
   });
 
   it("uses the native folder picker for project selection on native host", async () => {
@@ -1533,7 +1680,10 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Tab" });
 
     expect(input).toHaveValue("use @browserbase ");
-    expect(screen.getByTestId("composer-mcp-mention-browserbase")).toHaveTextContent("@browserbase");
+    const mention = screen.getByTestId("composer-mcp-mention-browserbase");
+    expect(mention).toHaveTextContent("@browserbase");
+    expect(mention).toHaveClass("font-normal");
+    expect(mention).not.toHaveClass("font-[550]");
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -1580,6 +1730,8 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("参考 @收费设计 ");
     const mention = screen.getByTestId("composer-session-mention-收费设计");
     expect(mention).toHaveTextContent("@收费设计");
+    expect(mention).toHaveClass("font-normal");
+    expect(mention).not.toHaveClass("font-[550]");
     expect(mention.closest("a")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -1591,6 +1743,81 @@ describe("ThreadComposer", () => {
         title: "收费设计",
       }],
     });
+  });
+
+  it("turns a dropped sidebar session into the shared structured mention", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        sessions={[session("pricing", "收费设计", "讨论云存储")]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Compare notes" } });
+    input.setSelectionRange(7, 7);
+    const dataTransfer = {
+      types: [SESSION_DRAG_TYPE],
+      effectAllowed: "copy",
+      dropEffect: "none",
+      files: [],
+      getData: (type: string) => (
+        type === SESSION_DRAG_TYPE ? "websocket:pricing" : ""
+      ),
+    };
+
+    fireEvent.dragEnter(input, { dataTransfer });
+    fireEvent.dragOver(input, { dataTransfer });
+
+    expect(input).toHaveValue("Compare notes");
+    expect(screen.getByTestId("composer-session-drag-preview"))
+      .toHaveTextContent("@收费设计");
+
+    fireEvent.dragEnd(document);
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+
+    fireEvent.dragEnter(input, { dataTransfer });
+    fireEvent.dragOver(input, { dataTransfer });
+
+    fireEvent.drop(input, { dataTransfer });
+
+    expect(input).toHaveValue("Compare @收费设计 notes");
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer-session-mention-收费设计"))
+      .toHaveTextContent("@收费设计");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("Compare @收费设计 notes", undefined, {
+      sessionMentions: [{
+        name: "收费设计",
+        session_key: "websocket:pricing",
+        title: "收费设计",
+      }],
+    });
+  });
+
+  it("rejects session drops that are unavailable to the composer", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        sessions={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Message input");
+    const dataTransfer = {
+      types: [SESSION_DRAG_TYPE],
+      effectAllowed: "copyMove",
+      dropEffect: "copy",
+      files: [],
+      getData: () => "websocket:current",
+    };
+
+    expect(fireEvent.dragEnter(input, { dataTransfer })).toBe(true);
+    expect(fireEvent.dragOver(input, { dataTransfer })).toBe(true);
+    expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
   });
 
   it("disambiguates duplicate and capability-colliding session names", () => {
@@ -1890,7 +2117,8 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("meeting in @gimp");
     const token = screen.getByTestId("composer-cli-mention-gimp");
     expect(token).toHaveTextContent("@gimp");
-    expect(token).toHaveClass("font-[550]");
+    expect(token).toHaveClass("font-normal");
+    expect(token).not.toHaveClass("font-[550]");
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
@@ -2804,6 +3032,50 @@ describe("ThreadComposer", () => {
     await waitFor(() => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps temporary chat guidance in memory only", async () => {
+    const onSend = vi.fn();
+    const view = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey={null}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "do not persist this" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("do not persist this")).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
+
+    view.unmount();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey={null}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("do not persist this")).not.toBeInTheDocument();
+    });
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
   });
 
 });

@@ -651,6 +651,7 @@ def test_plugin_setup_contract_drives_save_and_validation(
     from nanobot.channels.validation import validate_channel_config
     from nanobot.config import loader
     from nanobot.webui.settings_routes import WebUISettingsRouter
+    from nanobot.webui.settings_services import WebUISettingsServices
 
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -660,6 +661,7 @@ def test_plugin_setup_contract_drives_save_and_validation(
         _channel_plugin(_SetupPlugin, setup=_SETUP_PLUGIN_SPEC),
     )
     router = object.__new__(WebUISettingsRouter)
+    router.settings = WebUISettingsServices.create(config_path)
 
     saved = router._save_channel_config_values(
         "setupplugin",
@@ -738,6 +740,7 @@ def test_webui_save_rejects_duplicate_feishu_ids_without_writing(monkeypatch, tm
     from nanobot.config import loader
     from nanobot.webui.settings_api import WebUISettingsError
     from nanobot.webui.settings_routes import WebUISettingsRouter
+    from nanobot.webui.settings_services import WebUISettingsServices
 
     config_path = tmp_path / "config.json"
     config_path.write_text(
@@ -756,6 +759,7 @@ def test_webui_save_rejects_duplicate_feishu_ids_without_writing(monkeypatch, tm
     before = config_path.read_text(encoding="utf-8")
     monkeypatch.setattr(loader, "_current_config_path", config_path)
     router = object.__new__(WebUISettingsRouter)
+    router.settings = WebUISettingsServices.create(config_path)
 
     with pytest.raises(WebUISettingsError, match="duplicate Feishu instance id 'default'") as error:
         router._save_channel_config_values(

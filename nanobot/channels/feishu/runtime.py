@@ -470,15 +470,6 @@ def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]
     return "", []
 
 
-def _extract_post_text(content_json: dict[str, Any]) -> str:  # pyright: ignore[reportUnusedFunction]
-    """Extract plain text from Feishu post (rich text) message content.
-
-    Legacy wrapper for _extract_post_content, returns only text.
-    """
-    text, _ = _extract_post_content(content_json)
-    return text
-
-
 # =============================================================================
 # QR scan-to-create onboarding
 #

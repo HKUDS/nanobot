@@ -10,11 +10,12 @@
       "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
     "auth": {
-      "title": "Autenticación requerida",
-      "hint": "Introduce el secreto configurado como tokenIssueSecret en la configuración del gateway.",
-      "placeholder": "Contraseña",
+      "label": "Contraseña",
+      "showPassword": "Mostrar contraseña",
+      "hidePassword": "Ocultar contraseña",
       "submit": "Conectar",
-      "invalid": "Contraseña no válida. Inténtalo de nuevo."
+      "required": "Introduce la contraseña.",
+      "invalid": "Contraseña incorrecta. Inténtalo de nuevo."
     },
     "account": {
       "section": "Cuenta",
@@ -48,6 +49,15 @@
       "queueCount": "{{count}} pendientes",
       "noMatch": "No hay ninguna solicitud pendiente que coincida con este código."
     }
+  },
+  "temporaryChat": {
+    "title": "Chat temporal",
+    "retention": "No se guarda en el historial ni en la memoria.",
+    "expiration": "Recargar, cerrar o perder la conexión finaliza estos chats.",
+    "externalEffects": "Las solicitudes siguen llegando al proveedor del modelo y las herramientas pueden dejar cambios.",
+    "clear": "Borrar chat temporal",
+    "sectionTitle": "Chats temporales",
+    "closeAction": "Cerrar chat temporal: {{title}}"
   },
   "sidebar": {
     "navigation": "Navegación de la barra lateral",
@@ -494,8 +504,8 @@
       "filterInstalled": "Habilitados",
       "filterNotInstalled": "No habilitados",
       "searchPlaceholder": "Buscar preajustes MCP",
-      "moreOptions": "Más opciones de MCP",
-      "moreOptionsSubtitle": "Añade un servidor personalizado o importa mcp.json.",
+      "moreOptions": "Añadir servidor MCP",
+      "moreOptionsSubtitle": "Conecta un servidor MCP personalizado o importa una configuración existente.",
       "customTitle": "MCP personalizado",
       "customSubtitle": "Añade cualquier servidor MCP stdio, HTTP o SSE.",
       "customAction": "Personalizado",
@@ -503,9 +513,14 @@
       "serverName": "Nombre del servidor",
       "serverUrl": "URL",
       "transport": "Transporte",
+      "authentication": "Autenticación",
+      "authNone": "Ninguna",
+      "authHeaders": "Encabezados",
       "command": "Comando",
       "args": "Argumentos JSON",
       "headers": "Encabezados JSON",
+      "oauthAfterSave": "Guarda el servidor y selecciona Conectar para iniciar sesión.",
+      "headersHelp": "Añade los encabezados de solicitud que utiliza este servidor.",
       "env": "Entorno JSON",
       "timeout": "Tiempo límite de herramienta",
       "advancedOptions": "Opciones avanzadas",
@@ -524,7 +539,10 @@
       "enabled": "Habilitado",
       "setup": "Conectar",
       "configure": "Conectar",
+      "reconnect": "Reconectar",
       "connectTitle": "Conectar {{name}}",
+      "reconnectTitle": "Reconectar {{name}}",
+      "actionsTitle": "Acciones de {{name}}",
       "connectHint": "Añade la clave desde la configuración de tu cuenta.",
       "saveAndEnable": "Guardar y habilitar",
       "updateSetup": "Actualizar configuración",
@@ -532,6 +550,21 @@
       "keepExisting": "Déjalo en blanco para conservar el valor actual",
       "statusConfigured": "Configurado",
       "statusMissingCredentials": "Necesita clave",
+      "connectingAccount": "Conectando {{name}}",
+      "connectingLabel": "Conectando…",
+      "continueSignIn": "Continuar inicio de sesión",
+      "preparingSignIn": "Preparando un inicio de sesión seguro…",
+      "openSignInToContinue": "Abre la página de inicio de sesión para continuar.",
+      "finishSignInInBrowser": "Termina de iniciar sesión en la ventana del navegador.",
+      "manualCallbackRequired": "Termina de iniciar sesión y pega la URL de devolución en nanobot.",
+      "manualCallbackHelp": "Después de aprobar el acceso, la página de localhost no se cargará. Copia la URL completa de la barra de direcciones y pégala aquí.",
+      "finishingConnection": "Finalizando la conexión…",
+      "activatingTools": "Activando herramientas…",
+      "connected": "Conectado.",
+      "connectionFailed": "Error de conexión.",
+      "connectionCancelled": "Conexión cancelada.",
+      "reloadFailed": "Has iniciado sesión, pero nanobot no pudo conectar las herramientas. Prueba a reiniciar nanobot.",
+      "oauthFailed": "No se pudo conectar. Intenta iniciar sesión de nuevo.",
       "statusMissingDependency": "Necesita dependencia",
       "statusComingSoon": "Próximamente",
       "comingSoon": "Próximamente",
@@ -561,20 +594,28 @@
     "apps": {
       "description": "Añade herramientas a nanobot y luego úsalas con @ en el chat.",
       "cliLabel": "Aplicación",
-      "mcpLabel": "Integración",
+      "mcpLabel": "MCP",
       "channelLabel": "Canal",
       "featureLabel": "Función",
       "filterAll": "Listo",
       "filterPlugins": "Complementos",
       "filterCli": "Aplicaciones",
-      "filterMcp": "Integraciones",
+      "filterMcp": "MCP",
       "enabledSummary": "{{count}} listos",
-      "caption": "{{cli}} aplicaciones · {{mcp}} integraciones",
+      "caption": "{{cli}} aplicaciones · {{mcp}} herramientas MCP",
       "searchPlaceholder": "Buscar aplicaciones",
       "featured": "Herramientas",
+      "mcpTools": "Herramientas MCP",
       "loading": "Cargando aplicaciones...",
-      "empty": "Ninguna herramienta coincide con esta vista.",
-      "restartRequired": "Reinicia nanobot para aplicar las aplicaciones y funciones actualizadas."
+      "empty": "Ninguna herramienta coincide con tu búsqueda.",
+      "emptyApps": "No hay aplicaciones disponibles.",
+      "emptyIntegrations": "No hay herramientas MCP disponibles.",
+      "emptyReady": "Todavía no hay herramientas listas.",
+      "clearSearch": "Borrar búsqueda",
+      "browseApps": "Explorar aplicaciones",
+      "browseIntegrations": "Explorar herramientas MCP",
+      "emptyIntegrationsHint": "Añade un servidor MCP personalizado abajo.",
+      "restartRequired": "Reinicia nanobot para aplicar las aplicaciones y herramientas MCP actualizadas."
     },
     "channels": {
       "description": "Conecta nanobot con aplicaciones de chat. Instalar el soporte solo añade el paquete de integración; la mayoría de canales aún necesitan tokens o configuración del espacio de trabajo.",
@@ -676,7 +717,9 @@
       "loading": "Cargando automatizaciones...",
       "noMatches": "No hay automatizaciones que coincidan con esta vista.",
       "empty": "Aún no hay automatizaciones.",
-      "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
+      "emptyHint": "Crea automatizaciones en un chat para que conserven el contexto correcto.",
+      "emptyAction": "Abrir un chat",
+      "clearFilters": "Borrar filtros",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
       "localTrigger": "Activador local",
@@ -1125,6 +1168,7 @@
         "recordingStatus": "Grabando {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Por seguridad, Chrome y otros navegadores bloquean el acceso al micrófono en páginas HTTP remotas. Abre esta WebUI mediante HTTPS para usar la entrada de voz.",
         "unsupported": "Este navegador no admite entrada de voz.",
         "permission": "Permite el micrófono en la barra de direcciones y vuelve a intentarlo.",
         "notConfigured": "Configura primero un proveedor de transcripción.",
@@ -1358,7 +1402,7 @@
     },
     "workspaceScopeRejected": {
       "title": "El espacio de trabajo no cambió",
-      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
+      "body": "El gateway rechazó este proyecto o modo de acceso. Elige un proyecto existente u otro modo de acceso e inténtalo de nuevo."
     },
     "turnRejected": {
       "title": "El mensaje no se envió",

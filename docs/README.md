@@ -19,7 +19,7 @@ The recommended first-run path is:
 3. Configure a provider and model in **Settings → Models**.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
+Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for Agent Plugins, CLI Apps, and MCP integrations.
 
 ## Add One Capability
 
@@ -32,6 +32,7 @@ Pick the row that matches what you want to accomplish next:
 | Choose a hosted, OAuth, company, or local model | [Provider Cookbook](./provider-cookbook.md) |
 | Add model fallbacks | [Configure Model Fallback](./guides/configure-model-fallback.md) |
 | Enable web search | [Configure Web Search](./guides/configure-web-search.md) |
+| Manage Agent Plugins, CLI Apps, or MCP integrations | [WebUI Apps](./webui.md#apps) |
 | Add an MCP tool server | [Configure MCP Tools](./guides/configure-mcp-tools.md) |
 | Generate images | [Image Generation](./image-generation.md) |
 | Schedule work or create a local trigger | [Automations](./automations.md) |

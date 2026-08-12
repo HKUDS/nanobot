@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from loguru import logger
@@ -36,6 +36,7 @@ from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 FILE_MAX_MESSAGES = 2000
 SESSION_CACHE_MAX_SIZE = 128
 MIN_REPLAY_MAX_MESSAGES = 120
+MIN_COMPACTED_REPLAY_MESSAGES = 8
 REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
@@ -146,6 +147,15 @@ class RetentionResult:
     already_consolidated_count: int
 
 
+@dataclass(frozen=True)
+class SessionPolicy:
+    """Runtime rules that do not belong in durable session data."""
+
+    persist: bool = True
+    log_content: bool = True
+    disabled_tools: frozenset[str] = frozenset()
+
+
 @dataclass
 class Session:
     """A conversation session."""
@@ -157,6 +167,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -191,19 +202,37 @@ class Session:
         extend_to_user: bool = False,
         include_runtime_context: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input.
+        """Return recent replayable messages for LLM input.
 
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
         """
-        unconsolidated = self.messages[self.last_consolidated:]
+        replay_start = self.last_consolidated
+        if replay_start:
+            # ``last_consolidated`` is archive progress, not a replay boundary.
+            # Keep a small raw suffix for continuity, extending back to the user
+            # that started an assistant/tool sequence when necessary.
+            recent_start = recent_message_start_index(
+                self.messages,
+                MIN_COMPACTED_REPLAY_MESSAGES,
+                extend_to_user=True,
+            )
+            replay_start = min(replay_start, recent_start)
+
+        replayable = self.messages[replay_start:]
         max_messages = max_messages if max_messages > 0 else FILE_MAX_MESSAGES
-        start_idx = recent_message_start_index(
-            unconsolidated,
-            max_messages,
-            extend_to_user=extend_to_user,
-        )
-        sliced = unconsolidated[start_idx:]
+        unarchived_count = len(self.messages) - self.last_consolidated
+        if replay_start < self.last_consolidated and unarchived_count < max_messages:
+            # The archived replay suffix can exceed the nominal count when one
+            # tool-heavy turn spans the boundary. Preserve that complete turn.
+            start_idx = 0
+        else:
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
+        sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
         # assistant deliveries that the user may be replying to.
@@ -352,17 +381,24 @@ class Session:
 
         start_idx = max(0, len(self.messages) - max_messages)
         if extend_to_user:
-            start_idx = next(
+            recovered_user = next(
                 (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                start_idx,
+                None,
             )
+            if recovered_user is not None:
+                start_idx = recovered_user
+                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
+                    start_idx -= 1
 
         retained = self.messages[start_idx:]
 
-        # Prefer starting at a user turn when one exists within the retained window.
+        # Prefer starting at a user turn (or its preceding _channel_delivery) when one exists within the retained window.
         first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
         if first_user is not None:
-            retained = retained[first_user:]
+            if first_user > 0 and retained[first_user - 1].get("_channel_delivery"):
+                retained = retained[first_user - 1:]
+            else:
+                retained = retained[first_user:]
         elif not extend_to_user:
             # If the hard-capped tail is assistant/tool-only, anchor to the
             # latest user in the full session and take a capped forward window.
@@ -1053,6 +1089,24 @@ class SessionManager:
         self._remember(session)
         return session
 
+    def get_or_create_transient(
+        self,
+        key: str,
+        *,
+        disabled_tools: Collection[str] = (),
+    ) -> Session:
+        """Return a fresh, non-persistent session without loading history."""
+        policy = SessionPolicy(
+            persist=False,
+            log_content=False,
+            disabled_tools=frozenset(disabled_tools),
+        )
+        session = self.get_cached(key)
+        if session is None or session.policy != policy:
+            session = Session(key=key, policy=policy)
+            self._remember(session)
+        return session
+
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
 
@@ -1060,12 +1114,11 @@ class SessionManager:
         """Attempt to recover a session from a corrupt JSONL file."""
         return self._jsonl_store.repair(key, path=path)
 
-    @staticmethod
-    def _session_payload(session: Session) -> SessionPayload:
-        return JsonlSessionStore.session_payload(session)
-
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
+        if not session.policy.persist:
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(
