@@ -11,7 +11,7 @@ Check these once before Render, Docker, systemd, or LaunchAgent:
 | `nanobot status` shows the expected config and workspace | Confirms the process will read the instance you meant to run |
 | `nanobot agent -m "Hello!"` works | Proves install, config, provider, model, and workspace writes before adding a service layer |
 | Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
-| `~/.nanobot/` or your custom config/workspace path is persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
+| The active config directory (including `sessions/`) and workspace are persistent | Sessions follow `--config`; memory, generated artifacts, and the workspace identity marker follow the workspace |
 | Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
 | Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
 | Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
@@ -160,8 +160,11 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
-The default Compose file drops all Linux capabilities and keeps Docker's default
-AppArmor/seccomp profiles enabled. If you explicitly set
+The default Compose file drops all Linux capabilities except `CHOWN`, `SETUID`, and
+`SETGID`, which the root entrypoint needs to fix bind-mount ownership and become UID
+1000. It also enables `no-new-privileges`, so the non-root process cannot regain those
+bootstrap capabilities through setuid binaries or file capabilities. Docker's default
+AppArmor/seccomp profiles remain enabled. If you explicitly set
 `"tools.exec.sandbox": "bwrap"` in `~/.nanobot/config.json`, add the bwrap
 override file when starting containers:
 
@@ -170,8 +173,10 @@ docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-g
 docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobot-cli agent -m "Hello!"
 ```
 
-The override grants `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for
-the container so bubblewrap can create its nested namespaces. Use it only when the
+The override adds `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for the
+container so bubblewrap can create its nested namespaces. It preserves
+`no-new-privileges`. The host must also allow unprivileged user namespaces; the
+override cannot bypass a host-level namespace restriction. Use it only when the
 bwrap sandbox is enabled.
 
 ### Docker
@@ -197,6 +202,8 @@ vim ~/.nanobot/config.json
 # health endpoint on 18790.
 docker run \
   --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+  --security-opt no-new-privileges:true \
   -v ~/.nanobot:/home/nanobot/.nanobot \
   -p 18790:18790 -p 8765:8765 \
   nanobot gateway
@@ -205,7 +212,9 @@ docker run \
 # bubblewrap needs for nested namespaces. Without them, `bwrap` may exit with
 # `clone3: Operation not permitted`.
 docker run \
-  --cap-drop ALL --cap-add SYS_ADMIN \
+  --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID --cap-add SYS_ADMIN \
+  --security-opt no-new-privileges:true \
   --security-opt apparmor=unconfined \
   --security-opt seccomp=unconfined \
   -v ~/.nanobot:/home/nanobot/.nanobot \

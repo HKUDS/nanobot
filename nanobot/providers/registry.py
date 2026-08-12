@@ -112,8 +112,7 @@ class ProviderSpec:
     implicit_reasoning_models: tuple[str, ...] = ()
 
     # Models that expose the OpenAI Responses wire format.  This is model-level
-    # because providers may add Responses support incrementally (DeepSeek V4
-    # Flash is supported before V4 Pro).
+    # because providers may add Responses support incrementally.
     responses_models: tuple[str, ...] = ()
 
     # Provider-hosted Responses tools sent unless extraBody.tools explicitly
@@ -482,7 +481,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
-        responses_models=("deepseek-v4-flash",),
+        responses_models=("deepseek-v4-flash", "deepseek-v4-pro"),
         responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
