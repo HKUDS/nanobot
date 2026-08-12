@@ -641,10 +641,25 @@ if (process.platform !== "win32") {
       stdout: "pipe",
       stderr: "pipe",
     })
-    await Bun.sleep(250)
+    const decoder = new TextDecoder()
+    let output = ""
+    const collectOutput = (async () => {
+      const reader = child.stdout.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        output += decoder.decode(value, { stream: true })
+      }
+      output += decoder.decode()
+    })()
+
+    // Slow Intel runners can spend more than 250 ms importing OpenTUI. Wait
+    // for terminal setup, which happens after the signal handlers are
+    // registered, before exercising shutdown.
+    await waitUntil(() => output.includes("\x1b[?1049h"), 5_000)
     child.kill("SIGTERM")
     const exitCode = await child.exited
-    const output = await new Response(child.stdout).text()
+    await collectOutput
     const error = await new Response(child.stderr).text()
 
     expect(exitCode).toBe(0)

@@ -26,8 +26,6 @@ jobs:
             target: linux-arm64
           - os: windows-latest
             target: win32-x64
-          - os: windows-11-arm
-            target: win32-arm64
 
     steps:
       - uses: actions/checkout@v4
