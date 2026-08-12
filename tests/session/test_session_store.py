@@ -137,6 +137,7 @@ def test_save_discards_stale_reference_after_invalidate(tmp_path) -> None:
 def test_save_accepts_current_cached_object(tmp_path) -> None:
     """save() of the currently-cached object must proceed normally."""
     store = MagicMock(spec=SessionStore)
+    store.load.return_value = None
     manager = SessionManager(tmp_path, store=store)
 
     session = manager.get_or_create("test:current")
@@ -148,16 +149,17 @@ def test_save_accepts_current_cached_object(tmp_path) -> None:
     store.save.assert_called_once_with(session, fsync=False)
 
 
-def test_save_allows_object_after_invalidate_if_no_new_session_created(tmp_path) -> None:
-    """save() after invalidate is OK if nobody created a new session yet."""
+def test_save_discards_invalidated_reference_even_if_cache_is_empty(tmp_path) -> None:
+    """Invalidation must revoke the old object even before a replacement is loaded."""
     store = MagicMock(spec=SessionStore)
+    store.load.return_value = None
     manager = SessionManager(tmp_path, store=store)
 
     session = manager.get_or_create("test:orphan")
     manager.invalidate("test:orphan")
-    # No get_or_create after invalidate — cache is empty.
     store.save.reset_mock()
 
     manager.save(session)
 
-    store.save.assert_called_once_with(session, fsync=False)
+    store.save.assert_not_called()
+    assert manager.get_cached("test:orphan") is None

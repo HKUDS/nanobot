@@ -178,6 +178,12 @@ class Session:
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    _manager_generation: int | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -1523,9 +1529,12 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
+        self._generations: dict[str, int] = {}
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
+        if isinstance(session, Session) and session._manager_generation is None:
+            session._manager_generation = self._generations.get(session.key, 0)
         self._overflow_cache.pop(session.key, None)
         self._cache[session.key] = session
         self._cache.move_to_end(session.key)
@@ -1646,6 +1655,18 @@ class SessionManager:
         if not session.policy.persist:
             return
 
+        generation = self._generations.get(session.key, 0)
+        if (
+            isinstance(session, Session)
+            and session._manager_generation is not None
+            and session._manager_generation != generation
+        ):
+            logger.warning(
+                "Discarding stale save for invalidated session {}",
+                session.key,
+            )
+            return
+
         current = self.get_cached(session.key)
         if current is not None and current is not session:
             logger.warning(
@@ -1685,9 +1706,10 @@ class SessionManager:
         return flushed
 
     def invalidate(self, key: str) -> None:
-        """Remove a session from the in-memory cache."""
+        """Remove a session from the cache and revoke existing references."""
         self._cache.pop(key, None)
         self._overflow_cache.pop(key, None)
+        self._generations[key] = self._generations.get(key, 0) + 1
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
