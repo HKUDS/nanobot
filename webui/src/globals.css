@@ -724,6 +724,19 @@
   container-type: inline-size;
 }
 
+.auth-password-input:-webkit-autofill,
+.auth-password-input:-webkit-autofill:hover,
+.auth-password-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: hsl(var(--foreground));
+  caret-color: hsl(var(--foreground));
+  box-shadow: inset 0 0 0 1000px hsl(var(--background));
+}
+
+.auth-password-input:-webkit-autofill:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.5);
+  outline-offset: -2px;
+}
+
 .thread-composer-footer-actions {
   flex: 0 1 auto;
   max-width: 58%;

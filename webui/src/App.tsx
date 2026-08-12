@@ -11,6 +11,7 @@ import {
 import { Eye, EyeOff, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
+import { NanobotParticleMark } from "@/components/NanobotParticleMark";
 import { Sidebar } from "@/components/Sidebar";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
@@ -336,6 +337,7 @@ function AuthForm({
   onSecret: (secret: string) => void;
 }) {
   const { t } = useTranslation();
+  const { theme } = useTheme();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -358,67 +360,86 @@ function AuthForm({
   };
 
   return (
-    <div className="flex h-full w-full items-center justify-center px-6">
-      <form
-        onSubmit={handleSubmit}
-        className="flex w-full max-w-sm flex-col gap-4"
+    <main className="relative isolate grid h-full w-full place-items-center overflow-hidden px-6 py-8">
+      <section
+        aria-labelledby="webui-auth-title"
+        className="relative z-10 flex w-full max-w-[22rem] -translate-y-[1vh] flex-col items-center"
       >
-        <div className="space-y-2">
-          <h1 className="text-sm font-medium text-foreground">
-            <label htmlFor="webui-access-password">{t("app.auth.label")}</label>
-          </h1>
-          <div className="relative">
-            <Input
-              ref={inputRef}
-              id="webui-access-password"
-              name="webui-access-password"
-              type={passwordVisible ? "text" : "password"}
-              autoComplete="current-password"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                setValidationError(null);
-              }}
-              disabled={submitting}
-              aria-invalid={validationError ? true : undefined}
-              aria-describedby={validationError ? "webui-auth-error" : undefined}
-              className="pr-10"
-              autoFocus
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={submitting}
-              aria-label={t(
-                passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
-              )}
-              aria-controls="webui-access-password"
-              onClick={() => setPasswordVisible((visible) => !visible)}
-              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {passwordVisible ? (
-                <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              ) : (
-                <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              )}
-            </Button>
+        <header className="flex flex-col items-center">
+          <div
+            className="h-[clamp(13rem,36vh,18rem)] w-[min(30rem,94vw)] opacity-90"
+            aria-hidden="true"
+          >
+            <NanobotParticleMark theme={theme} />
           </div>
-          {errorMessage ? (
-            <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
-              {errorMessage}
-            </p>
-          ) : null}
-        </div>
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={submitting}
-        >
-          {t("app.auth.submit")}
-        </Button>
-      </form>
-    </div>
+          <h1
+            id="webui-auth-title"
+            className="-mt-16 text-lg font-semibold tracking-[-0.03em] text-foreground"
+          >
+            nanobot
+          </h1>
+        </header>
+        <form onSubmit={handleSubmit} className="mt-7 flex w-full flex-col gap-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="webui-access-password"
+              className="text-sm font-medium text-foreground"
+            >
+              {t("app.auth.label")}
+            </label>
+            <div className="relative">
+              <Input
+                ref={inputRef}
+                id="webui-access-password"
+                name="webui-access-password"
+                type={passwordVisible ? "text" : "password"}
+                autoComplete="current-password"
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  setValidationError(null);
+                }}
+                disabled={submitting}
+                aria-invalid={validationError ? true : undefined}
+                aria-describedby={validationError ? "webui-auth-error" : undefined}
+                className="auth-password-input h-11 rounded-lg bg-background pr-11 text-base shadow-none"
+                autoFocus
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={submitting}
+                aria-label={t(
+                  passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
+                )}
+                aria-controls="webui-access-password"
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                className="absolute right-1.5 top-1/2 h-8 w-8 -translate-y-1/2 rounded-md text-muted-foreground hover:text-foreground"
+              >
+                {passwordVisible ? (
+                  <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                ) : (
+                  <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                )}
+              </Button>
+            </div>
+            {errorMessage ? (
+              <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
+          </div>
+          <Button
+            type="submit"
+            className="h-11 w-full rounded-lg transition-transform active:scale-[0.98]"
+            disabled={submitting}
+          >
+            {t("app.auth.submit")}
+          </Button>
+        </form>
+      </section>
+    </main>
   );
 }
 

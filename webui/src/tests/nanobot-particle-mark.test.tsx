@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { NanobotParticleMark } from "@/components/thread/NanobotParticleMark";
+import { NanobotParticleMark } from "@/components/NanobotParticleMark";
 
 function stubViewport(compact: boolean) {
   vi.stubGlobal(
@@ -37,9 +37,10 @@ describe("NanobotParticleMark", () => {
       "data-particle-profile",
       "desktop",
     );
-    const source = mark.querySelector("img")?.getAttribute("src");
-    expect(source).toBe("/brand/nanobot_mark.svg");
-    expect(existsSync(resolve(process.cwd(), "public", source!.slice(1)))).toBe(true);
+    expect(mark.querySelector("img")).toBeNull();
+    expect(
+      existsSync(resolve(process.cwd(), "public", "brand", "nanobot_mark.svg")),
+    ).toBe(true);
   });
 
   it("uses the compact particle profile on mobile viewports", () => {

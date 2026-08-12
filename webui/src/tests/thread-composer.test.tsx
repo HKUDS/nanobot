@@ -476,7 +476,11 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("pt-[27px]");
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
-    expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
+    const surface = input.parentElement?.parentElement;
+    expect(surface?.className).toContain("max-w-[58rem]");
+    expect(surface?.className).toContain("bg-card");
+    expect(surface?.className).not.toContain("bg-muted/30");
+    expect(surface?.className).not.toContain("shadow-");
   });
 
   it("defers textarea autosizing until IME composition commits", () => {
