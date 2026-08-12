@@ -1812,6 +1812,22 @@ def test_sanitize_name_noop_for_already_clean_names() -> None:
     assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
 
 
+def test_sanitize_name_falls_back_to_hash_for_all_underscore_names() -> None:
+    # Fully non-ASCII names collapse to underscores; they must fall back to a
+    # deterministic hash-based name instead of silently colliding on "_".
+    import hashlib
+
+    name = "获取天气"
+    expected = f"tool_{hashlib.sha1(name.encode('utf-8')).hexdigest()[:8]}"
+    assert _sanitize_name(name) == expected
+
+
+def test_sanitize_name_keeps_distinct_non_ascii_names_unique() -> None:
+    # Two different non-ASCII names must sanitize to different results so they
+    # don't collide when registered.
+    assert _sanitize_name("获取天气") != _sanitize_name("日本語ツール")
+
+
 # ---------------------------------------------------------------------------
 # Wrapper sanitization tests
 # ---------------------------------------------------------------------------

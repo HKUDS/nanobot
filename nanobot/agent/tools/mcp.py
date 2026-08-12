@@ -173,13 +173,25 @@ def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: 
     return _MalformedProgressNotificationFilter(read_stream, server_name)
 
 
-def _sanitize_name(name: str) -> str:
-    """Sanitize an MCP-derived name for model API compatibility."""
-    return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
-
-
 _MAX_TOOL_NAME_LENGTH = 64
 _HASH_LENGTH = 8
+
+
+def _short_digest(value: str, length: int = _HASH_LENGTH) -> str:
+    """Return a truncated hex digest of ``value`` for naming purposes.
+
+    Not for security; just produces a stable, collision-resistant short suffix
+    when a name must be shortened or replaced.
+    """
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:length]
+
+
+def _sanitize_name(name: str) -> str:
+    """Sanitize an MCP-derived name for model API compatibility."""
+    sanitized = _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
+    if sanitized.strip("_") == "":
+        return f"tool_{_short_digest(name)}"
+    return sanitized
 
 
 def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
@@ -187,9 +199,8 @@ def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
     if len(name) <= max_length:
         return name
 
-    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
     prefix_length = max_length - _HASH_LENGTH - 1
-    return f"{name[:prefix_length]}_{digest}"
+    return f"{name[:prefix_length]}_{_short_digest(name)}"
 
 
 def _sanitize_mcp_tool_name(name: str) -> str:
