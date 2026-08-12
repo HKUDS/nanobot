@@ -251,7 +251,9 @@ want.
 Open **Skills → Discover** to browse or search skills from skills.sh and
 SkillHub. A marketplace skill is copied into the active agent workspace after
 you confirm the installation. skills.sh installation requires Node.js with
-`npx`; SkillHub installation does not.
+`npx`; SkillHub installation does not. Installing a marketplace skill with the
+same name as a built-in skill creates a workspace override; removing that
+workspace skill reveals the built-in version again.
 
 Marketplace skills are third-party instructions and may include executable
 scripts. Review the source and instructions before installing one, and enable
