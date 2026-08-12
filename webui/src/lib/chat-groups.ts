@@ -339,7 +339,7 @@ function sortProjectSessions(
   });
 }
 
-function sortSessions(
+export function sortSessions(
   sessions: ChatSummary[],
   sort: SidebarSortMode,
   titleOverrides: Record<string, string>,

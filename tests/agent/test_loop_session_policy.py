@@ -123,8 +123,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
             await asyncio.sleep(0)
 
     loop.provider.chat_with_retry = AsyncMock(side_effect=block_provider)
-    monkeypatch.setattr(loop, "_connect_mcp", AsyncMock())
-    monkeypatch.setattr(loop, "close_mcp", AsyncMock())
+    monkeypatch.setattr(loop, "aclose", AsyncMock())
     terminate_exec_sessions = AsyncMock(return_value=1)
     monkeypatch.setattr(
         loop._exec_session_manager,

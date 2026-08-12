@@ -186,6 +186,7 @@ interface ThreadComposerProps {
   ) => boolean | void | Promise<boolean | void>;
   disabled?: boolean;
   placeholder?: string;
+  inputAriaLabel?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
   modelDetail?: string | null;
@@ -940,6 +941,7 @@ export function ThreadComposer({
   onSend,
   disabled,
   placeholder,
+  inputAriaLabel,
   isStreaming = false,
   modelLabel = null,
   modelDetail = null,
@@ -2400,7 +2402,7 @@ export function ThreadComposer({
             rows={1}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
-            aria-label={t("thread.composer.inputAria")}
+            aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
               "relative z-10 caret-foreground placeholder:text-muted-foreground/70",

@@ -209,7 +209,11 @@ class _ExecSession:
                     timeout=2.0,
                 )
             # Safety-net reap after normal exit.
-            from nanobot.agent.tools.shell import _reap_pid  # pyright: ignore[reportPrivateUsage]
+            from nanobot.agent.tools.shell import (  # pyright: ignore[reportPrivateUsage]
+                ExecTool,
+                _reap_pid,  # pyright: ignore[reportPrivateUsage]
+            )
+            ExecTool._release_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
             _reap_pid(self.process.pid)  # pyright: ignore[reportPrivateUsage]
         elif yield_time_ms > 0:
             await self._wait_for_buffered_output()

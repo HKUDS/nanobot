@@ -49,6 +49,8 @@ from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.agent.tools.mcp import MCPProvider  # noqa: E402
+from nanobot.agent.tools.registry import ToolRegistry  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
@@ -351,12 +353,15 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(runtime_config, tools)
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
+            tool_registry=tools,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -378,13 +383,17 @@ def serve(
     api_app = create_app(
         agent_loop, model_name=model_name, request_timeout=timeout,
         api_key=api_key,
+        prepare_agent=mcp_provider.connect,
     )
 
     async def on_startup(_app: Any) -> None:
-        await agent_loop._connect_mcp()
+        await mcp_provider.connect()
 
     async def on_cleanup(_app: Any) -> None:
-        await agent_loop.close_mcp()
+        try:
+            await agent_loop.aclose()
+        finally:
+            await mcp_provider.aclose()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)

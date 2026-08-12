@@ -2,7 +2,7 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import "./globals.css";
-import "./i18n";
+import { initializeI18n } from "./i18n";
 import { initializeLoopbackRuntimeHost } from "./lib/runtime";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -26,8 +26,13 @@ if (!root) throw new Error("root element missing");
 
 initializeLoopbackRuntimeHost();
 
-/* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
-ReactDOM.createRoot(root).render(<App />);
+async function renderWebui(container: HTMLElement) {
+  await initializeI18n();
+  /* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
+  ReactDOM.createRoot(container).render(<App />);
+}
+
+void renderWebui(root);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

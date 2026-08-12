@@ -10,7 +10,7 @@ from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_config, save_config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -452,6 +452,46 @@ def test_test_mcp_preset_connects_and_reports_tools(
     assert payload["last_action"]["ok"] is True
     assert payload["last_action"]["tool_count"] == 1
     assert payload["last_action"]["tool_names"] == ["mcp_playwright_browser_navigate"]
+
+
+def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    mcp_presets_action("enable", {"name": ["playwright"]})
+    config = load_config()
+    config.tools.mcp_servers["playwright"].enabled_tools = [
+        "mcp_playwright_browser_navigate",
+    ]
+    save_config(config)
+
+    class FakeStack:
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_connect(servers, registry):
+        assert servers["playwright"].enabled_tools == ["*"]
+
+        class FakeTool:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def to_schema(self):
+                return {"name": self.name, "description": "", "parameters": {}}
+
+        for index in range(20):
+            registry.register(FakeTool(f"mcp_playwright_tool_{index:02d}"))
+        return {"playwright": FakeStack()}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+
+    payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
+
+    assert payload["last_action"]["tool_count"] == 20
+    assert len(payload["last_action"]["tool_names"]) == 20
+    row = next(item for item in payload["presets"] if item["name"] == "playwright")
+    assert row["enabled_tools"] == ["mcp_playwright_browser_navigate"]
 
 
 def test_test_mcp_preset_scrubs_connection_errors(

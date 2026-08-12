@@ -1206,6 +1206,7 @@ describe("NanobotClient", () => {
       project_name_overrides: {},
       tags_by_key: {},
       collapsed_groups: {},
+      workbench: { version: 1, tabs: {} },
       view: {
         density: "comfortable",
         show_previews: false,
@@ -1241,6 +1242,51 @@ describe("NanobotClient", () => {
       result: state,
     });
     await expect(pending).resolves.toEqual(state);
+  });
+
+  it("delivers backend sidebar state updates to every subscriber", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    const state: SidebarStatePayload = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      session_order: [],
+      title_overrides: {},
+      project_name_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      workbench: {
+        version: 1,
+        tabs: {
+          "tab:websocket:a": {
+            explicit: true,
+            title: "Research",
+            paneKeys: ["websocket:a", "websocket:b"],
+            layout: "columns",
+          },
+        },
+      },
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "updated_desc",
+      },
+      updated_at: "2026-08-11T08:00:00Z",
+    };
+
+    client.onSidebarStateUpdate(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "sidebar_state_updated", state });
+
+    expect(handler).toHaveBeenCalledWith(state);
   });
 
   it("does not correlate a new-chat scope rejection to an unrelated sent turn", async () => {
