@@ -1,5 +1,6 @@
 const CACHE_NAME = "nanobot-static-v1";
-const PRECACHE = ["/", "/manifest.json"];
+const ASSET_MANIFEST_PATH = "/asset-manifest.json";
+const PRECACHE = ["/", "/manifest.json", ASSET_MANIFEST_PATH];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -20,6 +21,42 @@ function referencedAssetPaths(html) {
   return refs;
 }
 
+// Vite's build manifest contains every emitted entry, static dependency, and
+// lazy chunk. The HTML alone only references the entry chunk, so pruning from
+// its tags can delete a current build's not-yet-requested dynamic imports.
+async function manifestedAssetPaths(cache) {
+  const response = await cache.match(ASSET_MANIFEST_PATH);
+  if (!response) return new Set();
+  try {
+    const manifest = await response.json();
+    const refs = new Set();
+    for (const entry of Object.values(manifest)) {
+      if (!entry || typeof entry !== "object") continue;
+      for (const file of [entry.file, ...(entry.css ?? []), ...(entry.assets ?? [])]) {
+        if (typeof file !== "string") continue;
+        const url = new URL(file, self.location.origin);
+        if (url.origin === self.location.origin) refs.add(url.pathname + url.search);
+      }
+    }
+    return refs;
+  } catch {
+    return new Set();
+  }
+}
+
+async function refreshAssetManifest(cache) {
+  const response = await fetch(ASSET_MANIFEST_PATH, { cache: "no-store" });
+  if (!response.ok) return false;
+  try {
+    const manifest = await response.clone().json();
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return false;
+  } catch {
+    return false;
+  }
+  await cache.put(ASSET_MANIFEST_PATH, response);
+  return true;
+}
+
 // Drop cached entries that the current index.html no longer references.
 // CACHE_NAME is stable across deployments, so without this, hashed assets from
 // previous builds would pile up in the same cache forever. The cached
@@ -31,11 +68,16 @@ async function pruneStaleEntries() {
   const cachedIndex = await cache.match("/");
   if (!cachedIndex) return;
   const refs = referencedAssetPaths(await cachedIndex.text());
+  for (const path of await manifestedAssetPaths(cache)) refs.add(path);
   const keys = await cache.keys();
   await Promise.all(
     keys.map(async (request) => {
       const url = new URL(request.url);
-      if (url.pathname === "/" || url.pathname === "/manifest.json") return;
+      if (
+        url.pathname === "/"
+        || url.pathname === "/manifest.json"
+        || url.pathname === ASSET_MANIFEST_PATH
+      ) return;
       if (refs.has(url.pathname + url.search)) return;
       await cache.delete(request);
     })
@@ -108,19 +150,28 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Everything else: network-first (index.html, manifest, brand assets, etc.)
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(request, clone));
-          // The shell just changed; prune entries the new index.html no longer
-          // references so hashed assets from old builds do not accumulate even
-          // when sw.js itself is unchanged between deployments.
-          if (path === "/") pruneStaleEntries();
+  const networkResponse = fetch(request);
+  event.waitUntil(
+    networkResponse
+      .then(async (response) => {
+        if (!response.ok) return;
+        // Clone before the first await. The original response is also handed
+        // to respondWith(), which may lock its body as soon as this callback
+        // yields to the event loop.
+        const cachedResponse = response.clone();
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, cachedResponse);
+        // Refresh the complete build graph before pruning. A deployment can
+        // change index.html without changing sw.js, so this cannot rely only
+        // on the manifest cached when the worker was installed.
+        if (path === "/") {
+          if (await refreshAssetManifest(cache)) await pruneStaleEntries();
         }
-        return response;
       })
+      .catch(() => undefined)
+  );
+  event.respondWith(
+    networkResponse
       .catch(() => {
         // Offline: serve the app shell for navigations (deep links resolve
         // client-side), the last cached copy for everything else.

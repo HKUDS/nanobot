@@ -126,6 +126,7 @@ describe("service worker", () => {
     expect(sw.skipWaitingMock).toHaveBeenCalledTimes(1);
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
   });
 
   it("removes stale cache names and prunes unreferenced static entries on activate", async () => {
@@ -135,8 +136,16 @@ describe("service worker", () => {
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js", "/assets/index-v2.css"]));
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v2.css`, new Response("v2 css"));
+    await sw.store.put(`${ORIGIN}/assets/lazy-v2.js`, new Response("lazy v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.css`, new Response("v1 css"));
+    await sw.store.put(`${ORIGIN}/asset-manifest.json`, new Response(JSON.stringify({
+      "src/main.tsx": {
+        file: "assets/index-v2.js",
+        css: ["assets/index-v2.css"],
+      },
+      "src/lazy.tsx": { file: "assets/lazy-v2.js", isDynamicEntry: true },
+    })));
 
     await sw.fire("activate");
 
@@ -144,8 +153,10 @@ describe("service worker", () => {
     expect(sw.claimMock).toHaveBeenCalledTimes(1);
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.css`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/lazy-v2.js`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.css`)).toBe(false);
   });
@@ -235,6 +246,31 @@ describe("service worker", () => {
     expect(sw.store.entries.has(iconUrl)).toBe(true);
   });
 
+  it("clones network responses before yielding their body to the browser", async () => {
+    const sw = loadSw();
+    const request = new Request(`${ORIGIN}/brand/nanobot_icon_192.png`);
+    let browserOwnsBody = false;
+    let clonedBeforeBrowser = false;
+    const response = {
+      ok: true,
+      clone: vi.fn(() => {
+        clonedBeforeBrowser = !browserOwnsBody;
+        return new Response("cached png bytes");
+      }),
+    } as unknown as Response;
+    sw.fetchMock.mockResolvedValue(response);
+    const respondWith = vi.fn((pending: Promise<Response>) => {
+      void pending.then(() => {
+        browserOwnsBody = true;
+      });
+    });
+
+    await sw.fire("fetch", { request, respondWith });
+
+    expect(clonedBeforeBrowser).toBe(true);
+    expect(response.clone).toHaveBeenCalledTimes(1);
+  });
+
   it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
     const sw = loadSw();
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
@@ -255,7 +291,15 @@ describe("service worker", () => {
     // Online: network response wins, refreshes the cached shell, and prunes
     // entries the new index.html no longer references.
     const freshShell = indexHtml(["/assets/index-v3.js"]);
-    sw.fetchMock.mockResolvedValue(freshShell);
+    sw.fetchMock.mockImplementation((input: Request | string) => {
+      const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);
+      if (url.pathname === "/asset-manifest.json") {
+        return Promise.resolve(new Response(JSON.stringify({
+          "src/main.tsx": { file: "assets/index-v3.js" },
+        })));
+      }
+      return Promise.resolve(freshShell.clone());
+    });
     const onlineEvent = {
       request: new Request(`${ORIGIN}/`),
       respondWith: vi.fn(),

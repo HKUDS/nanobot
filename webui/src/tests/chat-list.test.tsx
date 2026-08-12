@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import { readDraggedSession, SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -24,7 +25,7 @@ describe("ChatList", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps tabs and panes outside every drag-and-drop protocol", () => {
+  it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
     render(
       <ChatList
         sessions={[session({ chatId: "root", title: "Root topic" })]}
@@ -33,7 +34,7 @@ describe("ChatList", () => {
           "websocket:root": {
             tabKey: "websocket:root",
             title: "Root topic",
-            activePaneKey: "websocket:child",
+            activePaneKey: "websocket:root",
             panes: [
               { key: "websocket:root", chatId: "root", title: "Root topic" },
               { key: "websocket:child", chatId: "child", title: "Research pane" },
@@ -50,8 +51,22 @@ describe("ChatList", () => {
 
     expect(screen.getByRole("button", { name: "Tab: Root topic" }))
       .toHaveAttribute("draggable", "false");
-    expect(screen.getByRole("button", { name: "Research pane" }))
-      .toHaveAttribute("draggable", "false");
+    const pane = screen.getByRole("button", { name: "Research pane" });
+    expect(pane).toHaveAttribute("draggable", "true");
+    const dataTransfer = {
+      effectAllowed: "none",
+      setData: vi.fn(),
+      getData: vi.fn(() => ""),
+      types: [],
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(pane, { dataTransfer });
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      SESSION_DRAG_TYPE,
+      "websocket:child",
+    );
+    expect(readDraggedSession(dataTransfer)).toBe("websocket:child");
+    fireEvent.dragEnd(pane, { dataTransfer });
+    expect(readDraggedSession(dataTransfer)).toBeNull();
     expect(document.querySelector("[data-pane-drag-overlay]")).not.toBeInTheDocument();
     expect(document.querySelector("[data-pane-snap-slot]")).not.toBeInTheDocument();
   });

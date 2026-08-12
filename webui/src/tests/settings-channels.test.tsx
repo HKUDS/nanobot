@@ -270,7 +270,11 @@ describe("Settings channels", () => {
 
     expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
     expect(screen.queryByText("nanobot channels login feishu")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: "nanobot" },
+      { timeout: 3_000 },
+    ));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
@@ -324,7 +328,11 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: "nanobot" },
+      { timeout: 3_000 },
+    ));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
@@ -1158,9 +1166,13 @@ describe("Settings channels", () => {
     for (const [, displayName, guideLabel] of channels) {
       fireEvent.click(await screen.findByRole("button", { name: `View ${displayName} settings` }));
       if (displayName === "Feishu") {
-        fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+        fireEvent.click(await screen.findByRole(
+          "button",
+          { name: "nanobot" },
+          { timeout: 3_000 },
+        ));
       }
-      const guide = screen.getByRole("link", { name: guideLabel });
+      const guide = await screen.findByRole("link", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
       expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
     }

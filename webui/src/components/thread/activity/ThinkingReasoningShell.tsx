@@ -69,6 +69,8 @@ export function ThinkingReasoningShell({
       </button>
 
       <div
+        {...(!expanded ? { inert: "" } : {})}
+        aria-hidden={!expanded}
         className={cn(
           "grid transition-[grid-template-rows,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
           expanded
@@ -84,7 +86,6 @@ export function ThinkingReasoningShell({
             data-fade-bottom={fadeBottom}
             onScroll={onScroll}
             className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            aria-hidden={!expanded}
           >
             <div ref={contentRef} className="flex flex-col gap-0.5">
               {children}

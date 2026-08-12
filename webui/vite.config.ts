@@ -130,6 +130,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
+      manifest: "asset-manifest.json",
       sourcemap: false,
       rollupOptions: {
         output: {

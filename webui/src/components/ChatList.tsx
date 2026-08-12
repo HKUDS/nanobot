@@ -55,6 +55,7 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
+import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -616,6 +617,7 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !topicActive
                         ? "updated"
                         : null;
+                    const canDragSession = !topicActive && !deleteSelectionMode;
                     return (
                       <li
                         key={s.key}
@@ -648,12 +650,21 @@ export const ChatList = memo(function ChatList({
                               }
                               if (!topicActive) onSelect(s.key);
                             }}
-                            draggable={false}
+                            draggable={canDragSession}
+                            onDragStart={(event) => {
+                              if (!canDragSession) {
+                                event.preventDefault();
+                                return;
+                              }
+                              writeDraggedSession(event.dataTransfer, s.key);
+                            }}
+                            onDragEnd={clearDraggedSession}
                             aria-current={topicActive ? "page" : undefined}
                             aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                             title={tooltipTitle}
                             className={cn(
                               "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
+                              canDragSession && "cursor-grab active:cursor-grabbing",
                               deleteSelectionMode && "cursor-default",
                               compact ? "py-1" : "py-1.5",
                               projectMode && "pl-7",
@@ -1050,6 +1061,7 @@ function ActivePaneRows({
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
         const isArchived = archived.has(pane.key);
+        const canDragSession = !active && !deleteSelectionMode;
 
         return (
           <li
@@ -1079,12 +1091,21 @@ function ActivePaneRows({
                   }
                   onSelectPane?.(group.tabKey, pane.key);
                 }}
-                draggable={false}
+                draggable={canDragSession}
+                onDragStart={(event) => {
+                  if (!canDragSession) {
+                    event.preventDefault();
+                    return;
+                  }
+                  writeDraggedSession(event.dataTransfer, pane.key);
+                }}
+                onDragEnd={clearDraggedSession}
                 aria-current={active ? "true" : undefined}
                 aria-pressed={deleteSelectionMode ? selected : undefined}
                 title={pane.title}
                 className={cn(
                   "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-medium leading-5",
+                  canDragSession && "cursor-grab active:cursor-grabbing",
                   compact ? "py-1" : "py-1.5",
                   deleteSelectionMode && "cursor-default",
                 )}
