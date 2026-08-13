@@ -2199,7 +2199,8 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
     "heartbeat": {
       "enabled": true,
       "intervalS": 1800,
-      "keepRecentMessages": 8
+      "keepRecentMessages": 8,
+      "modelOverride": "openai/gpt-4o-mini"
     }
   }
 }
@@ -2216,6 +2217,7 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
+| `gateway.heartbeat.modelOverride` | `null` | Optional model used for heartbeat execution and its notification evaluation. The main agent model remains unchanged. |
 | `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 ### Custom heartbeat evaluator prompt
