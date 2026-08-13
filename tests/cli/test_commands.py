@@ -2000,13 +2000,15 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
-def test_heartbeat_empty_response_still_retains_recent_messages(
-    monkeypatch, tmp_path: Path,
+@pytest.mark.parametrize("response_content", ["", "Actionable heartbeat result"])
+def test_heartbeat_model_override_is_scoped_to_the_heartbeat_run(
+    monkeypatch, tmp_path: Path, response_content: str,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     config.agents.defaults.dream.enabled = True
+    config.gateway.heartbeat.model_override = "openai/gpt-4o-mini"
     config.workspace_path.mkdir(parents=True)
     (config.workspace_path / "HEARTBEAT.md").write_text(
         "## Active Tasks\n\n- Check repository health\n",
@@ -2014,13 +2016,23 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     )
 
     provider = _fake_provider()
+    heartbeat_provider = object()
+    heartbeat_runtime = SimpleNamespace(
+        provider=heartbeat_provider,
+        model="openai/gpt-4o-mini",
+    )
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
+    session_keys: list[str] = []
+    evaluator_args: dict[str, object] = {}
 
     class _FakeSession:
         def retain_recent_legal_suffix(self, limit: int) -> None:
             seen["retained_limit"] = limit
+
+        def add_message(self, *_args, **_kwargs) -> None:
+            return None
 
     class _FakeSessionManager:
         def __init__(self, _workspace: Path) -> None:
@@ -2028,7 +2040,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
             seen["heartbeat_session"] = self.session
 
         def get_or_create(self, key: str) -> _FakeSession:
-            seen["session_key"] = key
+            session_keys.append(key)
             return self.session
 
         def save(self, session: _FakeSession) -> None:
@@ -2058,9 +2070,13 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
             self.provider = kwargs.get("provider", object())
             self.sessions = kwargs["session_manager"]
             self.tools = {}
+            self.runtime_resolver = SimpleNamespace(
+                resolve_override=MagicMock(return_value=heartbeat_runtime)
+            )
 
-        async def process_direct(self, *_args, **_kwargs):
-            return SimpleNamespace(content="")
+        async def process_direct(self, *_args, **kwargs):
+            seen["turn_runtime"] = kwargs.get("runtime")
+            return SimpleNamespace(content=response_content)
 
         async def aclose(self) -> None:
             return None
@@ -2075,8 +2091,9 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         def __init__(self, *_args, **_kwargs) -> None:
             self.enabled_channels = ["telegram"]
 
-    async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
-        raise AssertionError("empty heartbeat response must not be evaluated")
+    async def _capture_evaluator(*_args, **kwargs) -> bool:
+        evaluator_args.update(kwargs)
+        return True
 
     _patch_cli_command_runtime(
         monkeypatch,
@@ -2089,7 +2106,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _capture_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -2097,10 +2114,16 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     cron = seen["cron"]
     response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
 
-    assert response is None
-    assert seen["session_key"] == "heartbeat"
+    assert response == (response_content or None)
+    assert session_keys[0] == "heartbeat"
     assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
     assert seen["saved_session"] is seen["heartbeat_session"]
+    assert seen["turn_runtime"] is heartbeat_runtime
+    if response_content:
+        assert evaluator_args["provider"] is heartbeat_provider
+        assert evaluator_args["model"] == "openai/gpt-4o-mini"
+    else:
+        assert evaluator_args == {}
 
 
 def test_webui_yes_creates_config_and_enables_local_websocket(
