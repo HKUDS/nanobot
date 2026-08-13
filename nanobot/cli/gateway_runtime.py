@@ -585,6 +585,12 @@ def _run_gateway(
             if channel == "cli":
                 return None
 
+            heartbeat_session_key = (
+                "heartbeat"
+                if hb_cfg.isolated_session
+                else _channel_session_key(channel, chat_id)
+            )
+
             prompt = (
                 _HEARTBEAT_PREAMBLE
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
@@ -599,7 +605,7 @@ def _run_gateway(
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
-                    session_key="heartbeat",
+                    session_key=heartbeat_session_key,
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
@@ -608,10 +614,12 @@ def _run_gateway(
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
                     message_tool.reset_suppress_delivery(suppress_token)
 
-            # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
+            # Bound only the dedicated heartbeat session. A shared target session
+            # follows its normal retention policy and must not be truncated here.
+            if hb_cfg.isolated_session:
+                session = agent.sessions.get_or_create(heartbeat_session_key)
+                session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+                agent.sessions.save(session)
 
             if not resp or not resp.content:
                 return
@@ -634,7 +642,9 @@ def _run_gateway(
                 logger.info("Heartbeat: completed, delivering response")
                 await _deliver_to_channel(
                     OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
+                    # An isolated run needs its proactive response mirrored into
+                    # the target session. A shared run already persisted it there.
+                    record=hb_cfg.isolated_session,
                 )
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
