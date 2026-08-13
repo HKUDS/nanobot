@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -48,6 +50,20 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:unique-index-temp")
+    session.add_message("user", "hello")
+    manager.save(session)
+    stale_shared_tmp = manager.sessions_dir / ".webui_session_index.json.tmp"
+    stale_shared_tmp.write_text("stale", encoding="utf-8")
+
+    assert list_webui_sessions(manager)[0]["preview"] == "hello"
+
+    assert stale_shared_tmp.read_text(encoding="utf-8") == "stale"
+    assert not list(manager.sessions_dir.glob(".webui_session_index.json.*.tmp"))
 
 
 def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
@@ -131,6 +147,88 @@ def test_webui_session_list_does_not_cache_old_snapshot_with_new_signature(
 
     assert session_list_index.indexed_workspace_scope(first)[1]["access_mode"] == "full"
     assert session_list_index.indexed_workspace_scope(second)[1]["access_mode"] == "restricted"
+
+
+def test_webui_session_scan_does_not_overlap_session_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "runtime",
+    )
+    session = manager.get_or_create("websocket:windows-reader")
+    session.add_message("user", "before")
+    manager.save(session)
+    session_path = manager._get_session_path(session.key)
+    session.messages[0]["content"] = "after"
+
+    reader_open = threading.Event()
+    release_reader = threading.Event()
+    save_started = threading.Event()
+    save_lock_attempted = threading.Event()
+    write_entered = threading.Event()
+    original_open = open
+    store = manager._jsonl_store
+    original_acquire = store._session_files_lock.acquire
+    original_save_unlocked = store._save_unlocked
+
+    class BlockingReader:
+        def __init__(self, file):
+            self.file = file
+
+        def __enter__(self):
+            entered = self.file.__enter__()
+            reader_open.set()
+            if not release_reader.wait(5):
+                raise AssertionError("timed out waiting to release the session reader")
+            return entered
+
+        def __exit__(self, *args):
+            try:
+                return self.file.__exit__(*args)
+            finally:
+                reader_open.clear()
+
+    def blocking_open(path, *args, **kwargs):
+        file = original_open(path, *args, **kwargs)
+        if Path(path) == session_path:
+            return BlockingReader(file)
+        return file
+
+    def observed_acquire(*args, **kwargs):
+        if save_started.is_set():
+            save_lock_attempted.set()
+        return original_acquire(*args, **kwargs)
+
+    def observed_save_unlocked(session, *, fsync=False):
+        write_entered.set()
+        assert not reader_open.is_set(), "save entered while the canonical file was open"
+        return original_save_unlocked(session, fsync=fsync)
+
+    monkeypatch.setattr(session_list_index, "open", blocking_open, raising=False)
+    monkeypatch.setattr(store._session_files_lock, "acquire", observed_acquire)
+    monkeypatch.setattr(store, "_save_unlocked", observed_save_unlocked)
+
+    def save_session() -> None:
+        save_started.set()
+        manager.save(session)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list_future = executor.submit(list_webui_sessions, manager)
+        try:
+            assert reader_open.wait(5)
+            save_future = executor.submit(save_session)
+            assert save_lock_attempted.wait(5)
+            assert not write_entered.is_set()
+        finally:
+            release_reader.set()
+
+        assert list_future.result(timeout=5)[0]["preview"] == "before"
+        save_future.result(timeout=5)
+
+    assert write_entered.is_set()
+    assert list_webui_sessions(manager)[0]["preview"] == "after"
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(

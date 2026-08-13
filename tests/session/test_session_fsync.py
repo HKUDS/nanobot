@@ -6,7 +6,7 @@ import errno
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -76,7 +76,7 @@ class TestSaveFsync:
 
         assert manager._get_session_path(session.key).exists()
         open_dir.assert_called_once_with(str(manager.sessions_dir), os.O_RDONLY)
-        close_dir.assert_called_once_with(directory_fd)
+        assert close_dir.call_args_list.count(call(directory_fd)) == 1
 
     def test_save_propagates_other_directory_fsync_errors(
         self, manager: SessionManager
@@ -95,7 +95,7 @@ class TestSaveFsync:
         ):
             manager.save(session, fsync=True)
 
-        close_dir.assert_called_once_with(directory_fd)
+        assert close_dir.call_args_list.count(call(directory_fd)) == 1
 
 
 class TestFlushAll:
