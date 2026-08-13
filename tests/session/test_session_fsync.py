@@ -65,6 +65,7 @@ class TestSaveFsync:
         session.add_message("user", "hello")
         directory_fd = 987654
         with (
+            manager.locked_session_files(),
             patch("nanobot.session.manager.os.open", return_value=directory_fd) as open_dir,
             patch(
                 "nanobot.session.manager.os.fsync",
@@ -85,6 +86,7 @@ class TestSaveFsync:
         session = manager.get_or_create("test:directory-fsync-io-error")
         directory_fd = 987654
         with (
+            manager.locked_session_files(),
             patch("nanobot.session.manager.os.open", return_value=directory_fd),
             patch(
                 "nanobot.session.manager.os.fsync",
