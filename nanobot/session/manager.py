@@ -8,6 +8,8 @@ import os
 import re
 import secrets
 import stat
+import sys
+import time
 from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
@@ -49,6 +51,8 @@ _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
+_REPLACE_RETRY_ATTEMPTS = 5
+_REPLACE_RETRY_BASE_DELAY_S = 0.05
 _PROVIDER_STATE_RECORD_TYPE = "provider_state"
 _PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
     r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
@@ -66,6 +70,31 @@ _WORKSPACE_ID_FILE = "workspace-id"
 _WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS = 30
 _COPY_CHUNK_SIZE = 1024 * 1024
+
+
+def _replace_with_retry(tmp_path: Path, path: Path) -> None:
+    """os.replace() wrapper that retries transient Windows PermissionErrors.
+
+    On Windows, os.replace() (MoveFileExW) can raise PermissionError when
+    another process briefly holds a handle on the target file (AV scanner,
+    indexer, a concurrent reader) -- there is no OS-level retry, and a single
+    unlucky rename previously crashed the whole session-save call with no
+    recovery. POSIX rename() has no such transient-lock behavior, so the
+    retry only applies on win32; elsewhere this is a single unconditional
+    os.replace() call.
+    """
+    if sys.platform != "win32":
+        os.replace(tmp_path, path)
+        return
+
+    for attempt in range(_REPLACE_RETRY_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_RETRY_BASE_DELAY_S * (2**attempt))
 
 
 def _json_object(value: object) -> dict[str, Any]:
@@ -1214,7 +1243,7 @@ class JsonlSessionStore:
                     f.flush()
                     os.fsync(f.fileno())
 
-            os.replace(tmp_path, path)
+            _replace_with_retry(tmp_path, path)
 
             if fsync:
                 with suppress(PermissionError):
