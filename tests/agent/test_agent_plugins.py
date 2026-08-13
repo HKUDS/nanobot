@@ -256,6 +256,43 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     assert resource.read_text(encoding="utf-8") == "plugin reference"
 
 
+@pytest.mark.asyncio
+async def test_restricted_project_revokes_cached_plugin_read_after_replacement(
+    tmp_path: Path,
+) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    plugin = _plugin(agent_workspace)
+    skill = _skill(plugin / "skills", "demo-skill")
+    resource = skill / "reference.md"
+    resource.write_text("trusted plugin reference", encoding="utf-8")
+    read_tool = ReadFileTool.create(
+        ToolContext(
+            config=ToolsConfig(restrict_to_workspace=True),
+            workspace=str(agent_workspace),
+        )
+    )
+    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        trusted_result = await read_tool.execute(path=str(resource))
+        resource.write_text("replacement plugin reference", encoding="utf-8")
+        replacement_result = await read_tool.execute(path=str(resource))
+    finally:
+        reset_workspace_scope(token)
+
+    assert "trusted plugin reference" in trusted_result
+    assert "outside allowed directory" in replacement_result
+    assert discover_agent_plugins(agent_workspace)[0].enabled is False
+
+
 def test_plugin_state_symlink_cannot_escape_config_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

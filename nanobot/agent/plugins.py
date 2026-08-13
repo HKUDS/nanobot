@@ -23,7 +23,33 @@ AGENT_PLUGIN_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.js
 _PLUGIN_NAME = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 _MCP_SERVER_FIELDS = {"type", "command", "args", "env", "cwd"}
 _MAX_LOGO_BYTES = 256 * 1024
-_SKILL_CACHE: dict[tuple[Path, Path], tuple[tuple[str, Path], ...]] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class _PackageEntry:
+    path: str
+    mode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    device: int
+    inode: int
+    link_target: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _PackageSnapshot:
+    root: Path
+    entries: tuple[_PackageEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SkillCacheEntry:
+    skills: tuple[tuple[str, Path], ...]
+    packages: tuple[_PackageSnapshot, ...]
+
+
+_SKILL_CACHE: dict[tuple[Path, Path], _SkillCacheEntry] = {}
 
 
 @dataclass(frozen=True)
@@ -66,22 +92,42 @@ def _installed_plugins(workspace: Path) -> list[AgentPlugin]:
 
 def enabled_agent_plugin_skills(workspace: Path) -> list[tuple[str, Path]]:
     """Verify and return skills from plugins the user has explicitly enabled."""
-    skills = [
-        skill
-        for plugin in _installed_plugins(workspace)
-        if _enabled(workspace, plugin)
-        for skill in _discover_plugin_skills(plugin.name, plugin.root)
-    ]
-    _SKILL_CACHE[_skill_cache_key(workspace)] = tuple(skills)
+    skills: list[tuple[str, Path]] = []
+    packages: list[_PackageSnapshot] = []
+    cacheable = True
+    for plugin in _installed_plugins(workspace):
+        before = _package_snapshot(plugin.root)
+        if before is None:
+            cacheable = False
+            continue
+        if not _enabled(workspace, plugin):
+            continue
+        plugin_skills = _discover_plugin_skills(plugin.name, plugin.root)
+        after = _package_snapshot(plugin.root)
+        if after is None or after != before:
+            cacheable = False
+            continue
+        skills.extend(plugin_skills)
+        packages.append(after)
+
+    key = _skill_cache_key(workspace)
+    if cacheable:
+        _SKILL_CACHE[key] = _SkillCacheEntry(tuple(skills), tuple(packages))
+    else:
+        _SKILL_CACHE.pop(key, None)
     return skills
 
 
 def enabled_agent_plugin_skill_dirs(workspace: Path) -> tuple[Path, ...]:
-    """Return the last verified skill roots, verifying once on a cache miss."""
+    """Return verified skill roots, revalidating packages when they change."""
     key = _skill_cache_key(workspace)
-    skills = _SKILL_CACHE.get(key)
-    if skills is None:
+    cached = _SKILL_CACHE.get(key)
+    if cached is None or any(
+        _package_snapshot(package.root) != package for package in cached.packages
+    ):
         skills = tuple(enabled_agent_plugin_skills(workspace))
+    else:
+        skills = cached.skills
     return tuple(path.parent for _name, path in skills)
 
 
@@ -94,6 +140,34 @@ def _skill_cache_key(workspace: Path) -> tuple[Path, Path]:
 
 def _invalidate_skill_cache(workspace: Path) -> None:
     _SKILL_CACHE.pop(_skill_cache_key(workspace), None)
+
+
+def _package_snapshot(root: Path) -> _PackageSnapshot | None:
+    """Capture cheap package metadata used to guard cached authorization."""
+    try:
+        candidates = [root, *sorted(root.rglob("*"))]
+        entries: list[_PackageEntry] = []
+        for candidate in candidates:
+            stat = candidate.lstat()
+            entries.append(
+                _PackageEntry(
+                    path="." if candidate == root else candidate.relative_to(root).as_posix(),
+                    mode=stat.st_mode,
+                    size=stat.st_size,
+                    mtime_ns=stat.st_mtime_ns,
+                    ctime_ns=stat.st_ctime_ns,
+                    device=stat.st_dev,
+                    inode=stat.st_ino,
+                    link_target=(
+                        candidate.readlink().as_posix()
+                        if candidate.is_symlink()
+                        else None
+                    ),
+                )
+            )
+    except OSError:
+        return None
+    return _PackageSnapshot(root=root, entries=tuple(entries))
 
 
 def _load_manifest(plugin_root: Path) -> AgentPlugin | None:
