@@ -472,13 +472,28 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
+        original_messages = self.messages
+        original_last_consolidated = self.last_consolidated
+        original_provider_state = self.provider_state
+        original_updated_at = self.updated_at
         result = self.retain_recent_legal_suffix(limit)
         if not result.dropped:
             return
 
         archive_chunk = result.dropped[result.already_consolidated_count:]
         if archive_chunk and on_archive:
-            on_archive(archive_chunk)
+            try:
+                on_archive(archive_chunk)
+            except BaseException:
+                # Retention runs before the archive callback so the callback can
+                # receive the exact dropped prefix. Restore the in-memory session
+                # if archival fails; otherwise a later save would persist the
+                # trimmed state and make that prefix impossible to retry.
+                self.messages = original_messages
+                self.last_consolidated = original_last_consolidated
+                self.provider_state = original_provider_state
+                self.updated_at = original_updated_at
+                raise
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
