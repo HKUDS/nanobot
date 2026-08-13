@@ -3266,6 +3266,85 @@ async def _webui_mutate(
     )
 
 
+@pytest.mark.asyncio
+async def test_workspace_folder_picker_is_local_authenticated_mutation(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    selected = tmp_path / "project"
+    selected.mkdir()
+    pick_folder = AsyncMock(return_value=str(selected))
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.native_folder_picker_available",
+        lambda: True,
+    )
+    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
+    channel = _ch(bus)
+
+    response = await _webui_mutate(channel, "workspace.pick_folder")
+
+    assert response.status_code == 200
+    assert response.json() == {"path": str(selected)}
+    pick_folder.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_workspace_folder_picker_rejects_direct_http(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pick_folder = AsyncMock(return_value="/tmp")
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.native_folder_picker_available",
+        lambda: True,
+    )
+    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
+    channel = _ch(bus)
+
+    response = await channel.gateway.http.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {"Host": "127.0.0.1:8765"},
+            path="/api/workspaces/pick-folder",
+        ),
+    )
+
+    assert response is not None
+    assert response.status_code == 405
+    assert b"authenticated WebSocket" in response.body
+    pick_folder.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("connection", "host"),
+    [(_REMOTE, "127.0.0.1"), (_LOCAL, "0.0.0.0")],
+)
+async def test_workspace_folder_picker_rejects_nonlocal_surfaces(
+    bus: MagicMock,
+    monkeypatch,
+    connection: _FakeConn,
+    host: str,
+) -> None:
+    pick_folder = AsyncMock(return_value="/tmp")
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.native_folder_picker_available",
+        lambda: True,
+    )
+    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
+    channel = _ch(bus, host=host, token="test-token" if host == "0.0.0.0" else "")
+
+    response = await _webui_mutate(
+        channel,
+        "workspace.pick_folder",
+        connection=connection,
+    )
+
+    assert response.status_code == 403
+    pick_folder.assert_not_awaited()
+
+
 def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:
     from nanobot.webui.http_utils import is_local_browser_request
 

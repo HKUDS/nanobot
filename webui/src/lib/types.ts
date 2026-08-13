@@ -363,6 +363,7 @@ export interface WorkspacesPayload {
   controls: {
     can_change_project: boolean;
     can_use_full_access: boolean;
+    can_pick_folder?: boolean;
   };
 }
 
