@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "임시 채팅",
+    "sideTitle": "사이드 채팅",
+    "sideTitleNumbered": "사이드 채팅 {{number}}",
+    "sideDescription": "사이드 채팅은 임시 채팅이며 앱을 닫으면 사라집니다.",
+    "closeSide": "사이드 채팅 닫기",
+    "closeSideNamed": "{{title}} 닫기",
+    "sideTabs": "사이드 채팅 탭",
+    "newSide": "새 사이드 채팅",
+    "backToSource": "기본 대화로 돌아가기",
+    "openSide": "사이드 채팅 열기",
     "retention": "기록이나 메모리에 저장되지 않습니다.",
     "expiration": "새로고침, 페이지 닫기 또는 연결 끊김 시 임시 채팅이 종료됩니다.",
     "externalEffects": "요청은 계속 모델 제공업체로 전송되며 도구 작업의 변경 사항은 남을 수 있습니다.",
@@ -1233,6 +1242,10 @@
           "new": {
             "title": "새 채팅",
             "description": "이 채팅을 초기화하고 새 대화를 시작합니다."
+          },
+          "side": {
+            "title": "사이드 채팅",
+            "description": "현재 채팅 컨텍스트로 임시 대화를 시작합니다."
           },
           "stop": {
             "title": "현재 작업 중지",

@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "Chat temporário",
+    "sideTitle": "Conversa lateral",
+    "sideTitleNumbered": "Conversa lateral {{number}}",
+    "sideDescription": "As conversas laterais são temporárias e desaparecem ao fechar o aplicativo.",
+    "closeSide": "Fechar conversa lateral",
+    "closeSideNamed": "Fechar {{title}}",
+    "sideTabs": "Abas de conversas laterais",
+    "newSide": "Nova conversa lateral",
+    "backToSource": "Voltar à conversa principal",
+    "openSide": "Abrir conversas laterais",
     "retention": "Não é salvo no histórico nem na memória.",
     "expiration": "Recarregar, fechar ou perder a conexão encerra estes chats.",
     "externalEffects": "As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
@@ -1257,6 +1266,10 @@
           "new": {
             "title": "Nova conversa",
             "description": "Reinicia esta conversa e inicia uma conversa nova."
+          },
+          "side": {
+            "title": "Conversa lateral",
+            "description": "Inicia uma conversa temporária com o contexto atual."
           },
           "stop": {
             "title": "Parar tarefa atual",
