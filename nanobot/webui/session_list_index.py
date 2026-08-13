@@ -496,14 +496,17 @@ def _transcript_preview(record: dict[str, Any]) -> tuple[str, str]:
     text = record.get("text")
     if not isinstance(text, str) or not text.strip():
         return "", ""
+    preview = _message_preview_text({"content": text})
+    if not preview:
+        return "", ""
     event = record.get("event")
     if event == "user" or record.get("role") == "user":
-        return text, ""
+        return preview, ""
     if (
         event == "message"
         and record.get("kind") not in _TRANSCRIPT_NON_ANSWER_KINDS
     ) or record.get("role") == "assistant":
-        return "", text
+        return "", preview
     return "", ""
 
 

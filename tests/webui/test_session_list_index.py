@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +265,28 @@ def test_webui_session_list_recovers_colon_chat_id_from_transcript(
 
     assert row["key"] == key
     assert row["preview"] == "scoped history"
+
+
+def test_webui_session_list_normalizes_transcript_preview(tmp_path: Path) -> None:
+    key = "websocket:long-preview"
+    transcript = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "event": "user",
+                "chat_id": "long-preview",
+                "text": "first\n\n" + "word " * 100,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    [row] = list_webui_sessions(SessionManager(tmp_path / "workspace"))
+
+    assert row["preview"].startswith("first word")
+    assert "\n" not in row["preview"]
+    assert row["preview"].endswith("…")
 
 
 def test_webui_session_list_tolerates_invalid_transcript_timestamp(
