@@ -1,0 +1,56 @@
+{
+  "description": "Utilisez nanobot depuis les conversations WeChat.",
+  "requirements": "Configuration du canal WeChat et passerelle",
+  "setup": {
+    "primaryAction": "Connecter WeChat",
+    "docsLabel": "Ouvrir le guide WeChat",
+    "officialLabel": "Ouvrir WeChat",
+    "tryIt": "Après la connexion par QR code, envoyez un message privé au compte connecté.",
+    "summary": "WeChat se connecte par QR code et enregistre localement l’état du compte.",
+    "steps": [
+      "Cliquez sur Connecter et scannez le QR code avec WeChat.",
+      "Gardez la passerelle locale active pendant la réception des messages.",
+      "Envoyez un message privé test pour confirmer la connexion."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "token": {
+        "label": "Jeton",
+        "placeholder": "Enregistré après la connexion QR"
+      },
+      "sendProgress": { "label": "Envoyer la progression" },
+      "sendToolHints": { "label": "Envoyer les indications d’outils" },
+      "streaming": { "label": "Utiliser l’API de streaming" },
+      "replyProgressMessages": { "label": "Envoyer la progression structurée" },
+      "replyProgressMaxMessages": { "label": "Limite de progression structurée" },
+      "contextMessageBudget": { "label": "Budget de messages du contexte" },
+      "blockStreaming": { "label": "Envoyer la réponse par blocs" },
+      "blockStreamingMinChars": { "label": "Taille minimale d’un bloc" },
+      "blockStreamingMaxMessages": { "label": "Limite de messages par blocs" },
+      "baseUrl": { "label": "URL de l’API" },
+      "cdnBaseUrl": { "label": "URL du CDN" },
+      "routeTag": { "label": "Étiquette de routage" },
+      "stateDir": { "label": "Répertoire d’état" },
+      "pollTimeout": { "label": "Délai d’interrogation" }
+    }
+  },
+  "custom": {
+    "qrAlt": "QR code de connexion WeChat",
+    "scanTitle": "Scanner avec WeChat",
+    "scanDescription": "Scannez ce code avec WeChat. nanobot enregistre localement l’état du compte après la connexion.",
+    "waiting": "En attente du scan WeChat...",
+    "connected": "WeChat est connecté.",
+    "stopped": "Connexion WeChat arrêtée.",
+    "connecting": "Connexion...",
+    "verifyTitle": "Vérification requise",
+    "verifyDescription": "Saisissez le nombre affiché dans WeChat pour continuer.",
+    "verifyMismatch": "Le code ne correspond pas. Saisissez le nouveau nombre affiché dans WeChat.",
+    "expired": "La connexion WeChat a expiré. Scannez à nouveau pour vous reconnecter.",
+    "failed": "Impossible de connecter WeChat. Réessayez.",
+    "verifyPlaceholder": "Code",
+    "verifySubmit": "Vérifier"
+  }
+}

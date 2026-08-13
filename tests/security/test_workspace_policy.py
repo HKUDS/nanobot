@@ -53,6 +53,38 @@ def test_resolve_allowed_path_blocks_parent_traversal(tmp_path: Path) -> None:
         resolve_allowed_path("../secret.txt", workspace=workspace, allowed_root=workspace)
 
 
+def test_resolve_allowed_path_blocks_traversal_shapes(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+
+    traversal_shapes: list[str | Path] = [
+        "../secret.txt",
+        "src/../../secret.txt",
+        Path("..") / "secret.txt",
+        workspace / "src" / ".." / ".." / "secret.txt",
+    ]
+    if os.name == "nt":
+        traversal_shapes.append("src\\..\\..\\secret.txt")
+
+    for candidate in traversal_shapes:
+        with pytest.raises(WorkspaceBoundaryError, match="outside allowed directory"):
+            resolve_allowed_path(candidate, workspace=workspace, allowed_root=workspace)
+
+
+def test_resolve_allowed_path_blocks_prefix_sibling(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sibling = tmp_path / "workspace-other"
+    sibling.mkdir()
+    secret = sibling / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+
+    with pytest.raises(WorkspaceBoundaryError, match="outside allowed directory"):
+        resolve_allowed_path(secret, workspace=workspace, allowed_root=workspace)
+
+
 def test_resolve_allowed_path_blocks_symlink_escape(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

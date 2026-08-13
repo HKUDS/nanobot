@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
@@ -58,12 +59,14 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
     """Sanitize structured CLI app mentions sent by the WebUI."""
     if not isinstance(raw, list):
         return []
+    raw_items = cast(list[Any], raw)
     out: list[dict[str, str]] = []
     seen: set[str] = set()
-    for item in raw[:8]:
+    for item in raw_items[:8]:
         if not isinstance(item, dict):
             continue
-        name = _clip_ws_string(item.get("name"), 64)
+        app_data = cast(dict[str, Any], item)
+        name = _clip_ws_string(app_data.get("name"), 64)
         if not name or _CLI_APP_NAME_RE.match(name) is None:
             continue
         key = name.lower()
@@ -72,7 +75,10 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
         seen.add(key)
         row: dict[str, str] = {"name": key}
         for field in _CLI_APP_ATTACHMENT_KEYS[1:]:
-            value = _clip_ws_string(item.get(field), 512 if field == "logo_url" else 160)
+            value = _clip_ws_string(
+                app_data.get(field),
+                512 if field == "logo_url" else 160,
+            )
             if value:
                 row[field] = value
         out.append(row)
@@ -84,8 +90,8 @@ def _query_first(query: QueryParams, key: str) -> str | None:
     return values[0] if values else None
 
 
-def _manager() -> CliAppManager:
-    config = load_config()
+def _manager(config_path: Path | None = None) -> CliAppManager:
+    config = load_config(config_path) if config_path is not None else load_config()
     cli_cfg = config.tools.cli_apps
     return CliAppManager(
         workspace=config.workspace_path,
@@ -97,8 +103,12 @@ def _manager() -> CliAppManager:
     )
 
 
-async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
-    manager = _manager()
+async def cli_apps_payload(
+    *,
+    installed_only: bool = False,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    manager = _manager(config_path) if config_path is not None else _manager()
     if installed_only:
         return manager.installed_payload()
     payload = manager.payload(cache_only=True)
@@ -113,11 +123,16 @@ async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
     return payload
 
 
-def cli_apps_action(action: str, query: QueryParams) -> dict[str, Any]:
+def cli_apps_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise CliAppError("missing CLI app name")
-    manager = _manager()
+    manager = _manager(config_path) if config_path is not None else _manager()
     if action == "install":
         return manager.install(name)
     if action == "update":

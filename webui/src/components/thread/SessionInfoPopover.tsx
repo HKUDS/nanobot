@@ -10,10 +10,10 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { currentLocale } from "@/i18n";
 import { fmtDateTime } from "@/lib/format";
@@ -63,8 +63,8 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
   );
 
   return (
-    <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
@@ -76,11 +76,11 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
         >
           <ListTodo className="h-4 w-4 stroke-[1.75]" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-[min(23rem,calc(100vw-1.5rem))] rounded-[24px] p-0"
+        className="w-[min(23rem,calc(100vw-1.5rem))] p-0"
       >
         <div className="space-y-3 px-4 py-3.5">
           <div className="min-w-0">
@@ -108,8 +108,8 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
 
           {automationContent}
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -152,6 +152,9 @@ function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number })
 
 function formatSchedule(job: SessionAutomationJob, t: TFunction) {
   const locale = currentLocale();
+  if (isLocalTriggerAutomation(job)) {
+    return t("thread.sessionInfo.schedule.local");
+  }
   if (job.schedule.kind === "at" && job.schedule.at_ms) {
     return t("thread.sessionInfo.schedule.at", { time: fmtDateTime(job.schedule.at_ms, locale) });
   }
@@ -179,6 +182,9 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
   if (job.state.pending) {
     return { label: t("thread.sessionInfo.next.pending"), title: "" };
   }
+  if (isLocalTriggerAutomation(job)) {
+    return { label: t("thread.sessionInfo.next.local"), title: "" };
+  }
   const next = job.state.next_run_at_ms;
   if (!next) {
     return { label: t("thread.sessionInfo.next.none"), title: "" };
@@ -187,6 +193,12 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
     label: t("thread.sessionInfo.next.label", { time: relativeTimeFrom(next, now, locale) }),
     title: fmtDateTime(next, locale),
   };
+}
+
+function isLocalTriggerAutomation(job: SessionAutomationJob): boolean {
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
 }
 
 function relativeTimeFrom(value: number, now: number, locale: string): string {

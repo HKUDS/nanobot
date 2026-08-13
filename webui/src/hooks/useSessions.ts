@@ -20,9 +20,20 @@ import type {
 } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-const INITIAL_HISTORY_PAGE_LIMIT = 160;
+const INITIAL_HISTORY_PAGE_LIMIT = 80;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "name" in error
+    && error.name === "AbortError"
+  );
+}
+
+export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
 
 function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
   return messages.map((m, idx) => ({
@@ -30,6 +41,63 @@ function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
     id: m.id ?? `hist-${idx}`,
     createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
   }));
+}
+
+function sameSemanticMessage(a: UIMessage, b: UIMessage): boolean {
+  return (
+    a.role === b.role
+    && (a.kind ?? "") === (b.kind ?? "")
+    && a.content === b.content
+    && (!a.turnId || !b.turnId || a.turnId === b.turnId)
+  );
+}
+
+function longestSemanticOverlap(previous: UIMessage[], latest: UIMessage[]): number {
+  const maxOverlap = Math.min(previous.length, latest.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const previousStart = previous.length - overlap;
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (!sameSemanticMessage(previous[previousStart + index], latest[index])) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return overlap;
+  }
+  return 0;
+}
+
+function mergeLatestHistory(
+  previous: UIMessage[],
+  latest: UIMessage[],
+  initial: boolean,
+): {
+  continuity: SessionHistoryContinuity;
+  messages: UIMessage[];
+  retainedPrefixLength: number;
+} {
+  if (initial) {
+    return {
+      continuity: "initial",
+      messages: latest,
+      retainedPrefixLength: 0,
+    };
+  }
+  const overlapLength = longestSemanticOverlap(previous, latest);
+  if (overlapLength === 0) {
+    return {
+      continuity: "reset",
+      messages: latest,
+      retainedPrefixLength: 0,
+    };
+  }
+  const retainedPrefixLength = previous.length - overlapLength;
+  return {
+    continuity: "overlap",
+    messages: [...previous.slice(0, retainedPrefixLength), ...latest],
+    retainedPrefixLength,
+  };
 }
 
 function hasPendingToolCallsFromThread(
@@ -40,6 +108,17 @@ function hasPendingToolCallsFromThread(
     return body.has_pending_tool_calls;
   }
   return hasPendingAgentActivity(messages);
+}
+
+function completedTurnIdsFromThread(
+  body: Awaited<ReturnType<typeof fetchWebuiThread>>,
+): string[] {
+  if (!Array.isArray(body?.completed_turn_ids)) return [];
+  return Array.from(new Set(
+    body.completed_turn_ids.filter(
+      (turnId): turnId is string => typeof turnId === "string" && turnId.length > 0,
+    ),
+  ));
 }
 
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
@@ -62,32 +141,46 @@ export function useSessions(): {
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
+  const refreshPendingRef = useRef(false);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
 
-  const refresh = useCallback(async () => {
-    try {
+  const refresh = useCallback((): Promise<void> => {
+    refreshPendingRef.current = true;
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    const request = (async () => {
       setLoading(true);
-      const rows = await listSessions(tokenRef.current);
-      const serverKeys = new Set(rows.map((row) => row.key));
-      setSessions((prev) => [
-        ...rows,
-        ...prev.filter(
-          (session) =>
-            optimisticKeysRef.current.has(session.key) &&
-            !serverKeys.has(session.key),
-        ),
-      ]);
-      for (const key of Array.from(optimisticKeysRef.current)) {
-        if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
+      try {
+        while (refreshPendingRef.current) {
+          refreshPendingRef.current = false;
+          try {
+            const rows = await listSessions(tokenRef.current);
+            const serverKeys = new Set(rows.map((row) => row.key));
+            setSessions((prev) => [
+              ...rows,
+              ...prev.filter(
+                (session) =>
+                  optimisticKeysRef.current.has(session.key)
+                  && !serverKeys.has(session.key),
+              ),
+            ]);
+            for (const key of Array.from(optimisticKeysRef.current)) {
+              if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
+            }
+            setError(null);
+          } catch (e) {
+            const msg =
+              e instanceof ApiError ? `HTTP ${e.status}` : (e as Error).message;
+            setError(msg);
+          }
+        }
+      } finally {
+        refreshInFlightRef.current = null;
+        setLoading(false);
       }
-      setError(null);
-    } catch (e) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status}` : (e as Error).message;
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    refreshInFlightRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -95,9 +188,20 @@ export function useSessions(): {
   }, [refresh]);
 
   useEffect(() => {
-    return client.onSessionUpdate(() => {
-      void refresh();
+    let disposed = false;
+    let refreshQueued = false;
+    const unsubscribe = client.onSessionUpdate(() => {
+      if (refreshQueued) return;
+      refreshQueued = true;
+      queueMicrotask(() => {
+        refreshQueued = false;
+        if (!disposed) void refresh();
+      });
     });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, [client, refresh]);
 
   const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
@@ -153,13 +257,13 @@ export function useSessions(): {
 
   const deleteChat = useCallback(
     async (key: string, options?: { deleteAutomations?: boolean }) => {
-      const result = await apiDeleteSession(tokenRef.current, key, options);
+      const result = await apiDeleteSession(client, key, options);
       if (!result.deleted) return result;
       optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
       return result;
     },
-    [],
+    [client],
   );
 
   const getSessionAutomations = useCallback(async (key: string) => {
@@ -191,11 +295,21 @@ export function useSessionHistory(key: string | null): {
   userMessageOffset: number;
   version: number;
   forkBoundaryMessageCount: number | null;
-  /** ``true`` when the replayed transcript ends with a trace row (turn still in flight). */
+  /** ``true`` when the server reports that the turn is still in flight. */
   hasPendingToolCalls: boolean;
+  /** Turn identities backed by explicit persisted completion events. */
+  completedTurnIds: string[];
+  /** Relationship between the latest canonical page and its predecessor. */
+  continuity: SessionHistoryContinuity;
+  /** Stable across overlapping latest pages; changes on initial load or reset. */
+  lineage: number;
+  /** Exact active turn when supplied by a current gateway. */
+  activeTurnId: string | null;
 } {
-  const { token } = useClient();
+  const { getToken } = useClient();
   const loadingOlderRef = useRef(false);
+  const olderRequestAbortRef = useRef<AbortController | null>(null);
+  const historyVersionRef = useRef(0);
   const [refreshSeq, setRefreshSeq] = useState(0);
   const refresh = useCallback(() => {
     setRefreshSeq((value) => value + 1);
@@ -207,11 +321,15 @@ export function useSessionHistory(key: string | null): {
     loadingOlder: boolean;
     error: string | null;
     hasPendingToolCalls: boolean;
+    completedTurnIds: string[];
     forkBoundaryMessageCount: number | null;
     beforeCursor: string | null;
     hasMoreBefore: boolean;
     userMessageOffset: number;
     version: number;
+    continuity: SessionHistoryContinuity;
+    lineage: number;
+    activeTurnId: string | null;
   }>({
     key: null,
     messages: [],
@@ -219,15 +337,28 @@ export function useSessionHistory(key: string | null): {
     loadingOlder: false,
     error: null,
     hasPendingToolCalls: false,
+    completedTurnIds: [],
     forkBoundaryMessageCount: null,
     beforeCursor: null,
     hasMoreBefore: false,
     userMessageOffset: 0,
     version: 0,
+    continuity: "initial",
+    lineage: 0,
+    activeTurnId: null,
   });
+
+  useEffect(() => () => {
+    olderRequestAbortRef.current?.abort();
+    olderRequestAbortRef.current = null;
+    loadingOlderRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (!key) {
+      olderRequestAbortRef.current?.abort();
+      olderRequestAbortRef.current = null;
+      loadingOlderRef.current = false;
       setState({
         key: null,
         messages: [],
@@ -235,15 +366,23 @@ export function useSessionHistory(key: string | null): {
         loadingOlder: false,
         error: null,
         hasPendingToolCalls: false,
+        completedTurnIds: [],
         forkBoundaryMessageCount: null,
         beforeCursor: null,
         hasMoreBefore: false,
         userMessageOffset: 0,
         version: 0,
+        continuity: "initial",
+        lineage: 0,
+        activeTurnId: null,
       });
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
+    olderRequestAbortRef.current?.abort();
+    olderRequestAbortRef.current = null;
+    loadingOlderRef.current = false;
     // Mark the new key as loading immediately so callers never see stale
     // messages from the previous session during the render right after a switch.
     setState((prev) => prev.key === key
@@ -255,69 +394,101 @@ export function useSessionHistory(key: string | null): {
           loadingOlder: false,
           error: null,
           hasPendingToolCalls: false,
+          completedTurnIds: [],
           forkBoundaryMessageCount: null,
           beforeCursor: null,
           hasMoreBefore: false,
           userMessageOffset: 0,
           version: 0,
+          continuity: "initial",
+          lineage: 0,
+          activeTurnId: null,
         });
     (async () => {
       try {
-        const body = await fetchWebuiThread(token, key, {
+        const body = await fetchWebuiThread(getToken(), key, {
           limit: INITIAL_HISTORY_PAGE_LIMIT,
           direction: "latest",
+          signal: controller.signal,
         });
         if (cancelled) return;
-        if (!body?.messages?.length) {
-          setState((prev) => ({
-            key,
-            messages: [],
-            loading: false,
-            loadingOlder: false,
-            error: null,
-            hasPendingToolCalls: false,
-            forkBoundaryMessageCount: null,
-            beforeCursor: null,
-            hasMoreBefore: false,
-            userMessageOffset: 0,
-            version: prev.key === key ? prev.version + 1 : 1,
-          }));
-          return;
-        }
-        const ui = persistedMessagesToUi(body.messages);
+        historyVersionRef.current += 1;
+        const responseVersion = historyVersionRef.current;
+        const completedTurnIds = completedTurnIdsFromThread(body);
+        const ui = persistedMessagesToUi(body?.messages ?? []);
         const hasPending = hasPendingToolCallsFromThread(body, ui);
-        const forkBoundary = typeof body.fork_boundary_message_count === "number"
+        const forkBoundary = typeof body?.fork_boundary_message_count === "number"
           ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
           : null;
-        setState((prev) => ({
-          key,
-          messages: ui,
-          loading: false,
-          loadingOlder: false,
-          error: null,
-          hasPendingToolCalls: hasPending,
-          forkBoundaryMessageCount: forkBoundary,
-          beforeCursor: body.page?.before_cursor ?? null,
-          hasMoreBefore: body.page?.has_more_before === true,
-          userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
-          version: prev.key === key ? prev.version + 1 : 1,
-        }));
-      } catch (e) {
-        if (cancelled) return;
-        if (e instanceof ApiError && e.status === 404) {
-          setState((prev) => ({
+        setState((prev) => {
+          const merged = prev.key === key
+            ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
+            : mergeLatestHistory([], ui, true);
+          const retainedPrefix = merged.retainedPrefixLength > 0;
+          const retainedForkBoundary = (
+            retainedPrefix
+            && prev.forkBoundaryMessageCount !== null
+            && prev.forkBoundaryMessageCount <= merged.retainedPrefixLength
+          )
+            ? prev.forkBoundaryMessageCount
+            : null;
+          return {
             key,
-            messages: [],
+            messages: merged.messages,
             loading: false,
             loadingOlder: false,
             error: null,
-            hasPendingToolCalls: false,
-            forkBoundaryMessageCount: null,
-            beforeCursor: null,
-            hasMoreBefore: false,
-            userMessageOffset: 0,
-            version: prev.key === key ? prev.version + 1 : 1,
-          }));
+            hasPendingToolCalls: hasPending,
+            completedTurnIds,
+            forkBoundaryMessageCount: forkBoundary === null
+              ? retainedForkBoundary
+              : forkBoundary + merged.retainedPrefixLength,
+            beforeCursor: retainedPrefix
+              ? prev.beforeCursor
+              : body?.page?.before_cursor ?? null,
+            hasMoreBefore: retainedPrefix
+              ? prev.hasMoreBefore
+              : body?.page?.has_more_before === true,
+            userMessageOffset: retainedPrefix
+              ? prev.userMessageOffset
+              : Math.max(0, body?.page?.user_message_offset ?? 0),
+            version: responseVersion,
+            continuity: merged.continuity,
+            lineage: merged.continuity === "overlap"
+              ? prev.lineage
+              : responseVersion,
+            activeTurnId: typeof body?.active_turn_id === "string"
+              ? body.active_turn_id
+              : null,
+          };
+        });
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return;
+        if (e instanceof ApiError && e.status === 404) {
+          historyVersionRef.current += 1;
+          const responseVersion = historyVersionRef.current;
+          setState((prev) => {
+            const continuity = prev.key === key && prev.lineage > 0
+              ? "reset"
+              : "initial";
+            return {
+              key,
+              messages: [],
+              loading: false,
+              loadingOlder: false,
+              error: null,
+              hasPendingToolCalls: false,
+              completedTurnIds: [],
+              forkBoundaryMessageCount: null,
+              beforeCursor: null,
+              hasMoreBefore: false,
+              userMessageOffset: 0,
+              version: responseVersion,
+              continuity,
+              lineage: responseVersion,
+              activeTurnId: null,
+            };
+          });
         } else {
           setState((prev) => ({
             key,
@@ -326,33 +497,50 @@ export function useSessionHistory(key: string | null): {
             loadingOlder: false,
             error: (e as Error).message,
             hasPendingToolCalls: false,
+            completedTurnIds: [],
             forkBoundaryMessageCount: null,
             beforeCursor: null,
             hasMoreBefore: false,
             userMessageOffset: 0,
             version: prev.key === key ? prev.version : 0,
+            continuity: prev.key === key ? prev.continuity : "initial",
+            lineage: prev.key === key ? prev.lineage : 0,
+            activeTurnId: prev.key === key ? prev.activeTurnId : null,
           }));
         }
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [key, token, refreshSeq]);
+  }, [getToken, key, refreshSeq]);
 
   const loadOlder = useCallback(async () => {
     if (!key || loadingOlderRef.current) return;
-    const before = state.key === key ? state.beforeCursor : null;
-    if (!before || !state.hasMoreBefore) return;
+    const requestKey = key;
+    const requestLineage = state.key === requestKey ? state.lineage : 0;
+    const beforeCursor = state.key === requestKey ? state.beforeCursor : null;
+    if (!beforeCursor || !state.hasMoreBefore || requestLineage === 0) return;
+    const matchesRequest = (candidate: typeof state) => (
+      candidate.key === requestKey
+      && candidate.lineage === requestLineage
+      && candidate.beforeCursor === beforeCursor
+    );
     loadingOlderRef.current = true;
-    setState((prev) => prev.key === key ? { ...prev, loadingOlder: true, error: null } : prev);
+    const controller = new AbortController();
+    olderRequestAbortRef.current = controller;
+    setState((prev) => matchesRequest(prev)
+      ? { ...prev, loadingOlder: true, error: null }
+      : prev);
     try {
-      const body = await fetchWebuiThread(token, key, {
+      const body = await fetchWebuiThread(getToken(), requestKey, {
         limit: OLDER_HISTORY_PAGE_LIMIT,
-        before,
+        before: beforeCursor,
+        signal: controller.signal,
       });
       setState((prev) => {
-        if (prev.key !== key) return prev;
+        if (!matchesRequest(prev)) return prev;
         if (!body?.messages?.length) {
           return {
             ...prev,
@@ -369,21 +557,22 @@ export function useSessionHistory(key: string | null): {
           ? null
           : prev.forkBoundaryMessageCount + older.length;
         const nextMessages = [...older, ...prev.messages];
+        // An older page cannot change the authoritative latest-turn lifecycle
+        // state or masquerade as a completed latest-page refresh.
         return {
           ...prev,
           messages: nextMessages,
           loadingOlder: false,
           error: null,
-          hasPendingToolCalls: hasPendingAgentActivity(nextMessages),
           forkBoundaryMessageCount: olderBoundary ?? shiftedBoundary,
           beforeCursor: body.page?.before_cursor ?? null,
           hasMoreBefore: body.page?.has_more_before === true,
           userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
-          version: prev.version + 1,
         };
       });
     } catch (e) {
-      setState((prev) => prev.key === key
+      if (isAbortError(e)) return;
+      setState((prev) => matchesRequest(prev)
         ? {
             ...prev,
             loadingOlder: false,
@@ -391,14 +580,18 @@ export function useSessionHistory(key: string | null): {
           }
         : prev);
     } finally {
-      loadingOlderRef.current = false;
+      if (olderRequestAbortRef.current === controller) {
+        olderRequestAbortRef.current = null;
+        loadingOlderRef.current = false;
+      }
     }
   }, [
     key,
     state.beforeCursor,
     state.hasMoreBefore,
     state.key,
-    token,
+    state.lineage,
+    getToken,
   ]);
 
   if (!key) {
@@ -414,6 +607,10 @@ export function useSessionHistory(key: string | null): {
       version: 0,
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
+      completedTurnIds: [],
+      continuity: "initial",
+      lineage: 0,
+      activeTurnId: null,
     };
   }
 
@@ -432,6 +629,10 @@ export function useSessionHistory(key: string | null): {
       version: 0,
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
+      completedTurnIds: [],
+      continuity: "initial",
+      lineage: 0,
+      activeTurnId: null,
     };
   }
 
@@ -447,6 +648,10 @@ export function useSessionHistory(key: string | null): {
     version: state.version,
     forkBoundaryMessageCount: state.forkBoundaryMessageCount,
     hasPendingToolCalls: state.hasPendingToolCalls,
+    completedTurnIds: state.completedTurnIds,
+    continuity: state.continuity,
+    lineage: state.lineage,
+    activeTurnId: state.activeTurnId,
   };
 }
 

@@ -87,7 +87,7 @@ export function FileReferenceChip({
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 max-w-full truncate",
+                  "min-w-0 max-w-full [overflow-wrap:anywhere] sm:truncate",
                   active && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
@@ -111,9 +111,8 @@ export function FileReferenceChip({
           collisionPadding={12}
           className={cn(
             "max-w-[min(38rem,calc(100vw-2rem))] rounded-[10px]",
-            "border-border/60 bg-popover/95 px-2.5 py-1.5",
+            "px-2.5 py-1.5",
             "break-all font-mono text-[11px] leading-snug text-popover-foreground",
-            "shadow-lg backdrop-blur",
           )}
         >
           {fullPath}

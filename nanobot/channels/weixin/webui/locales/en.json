@@ -1,0 +1,56 @@
+{
+  "description": "Use nanobot from WeChat conversations.",
+  "requirements": "WeChat channel setup and gateway",
+  "setup": {
+    "primaryAction": "Connect WeChat",
+    "docsLabel": "Open WeChat setup",
+    "officialLabel": "Open WeChat",
+    "tryIt": "After the QR login finishes, send a WeChat DM to the connected account.",
+    "summary": "WeChat signs in with a QR code and saves the account state locally.",
+    "steps": [
+      "Click Connect and scan the QR code with WeChat on your phone.",
+      "Keep the local gateway running while WeChat receives messages.",
+      "Send a direct test message to confirm the account is connected."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Saved by QR login"
+      },
+      "sendProgress": { "label": "Send progress" },
+      "sendToolHints": { "label": "Send tool hints" },
+      "streaming": { "label": "Use streaming API" },
+      "replyProgressMessages": { "label": "Send structured progress" },
+      "replyProgressMaxMessages": { "label": "Structured progress limit" },
+      "contextMessageBudget": { "label": "Context message budget" },
+      "blockStreaming": { "label": "Send response blocks" },
+      "blockStreamingMinChars": { "label": "Minimum block size" },
+      "blockStreamingMaxMessages": { "label": "Block message limit" },
+      "baseUrl": { "label": "API URL" },
+      "cdnBaseUrl": { "label": "CDN URL" },
+      "routeTag": { "label": "Route tag" },
+      "stateDir": { "label": "State directory" },
+      "pollTimeout": { "label": "Poll timeout" }
+    }
+  },
+  "custom": {
+    "qrAlt": "WeChat login QR code",
+    "scanTitle": "Scan with WeChat",
+    "scanDescription": "Use WeChat on your phone to scan this code. nanobot saves the account state locally after login.",
+    "waiting": "Waiting for WeChat scan...",
+    "connected": "WeChat is connected.",
+    "stopped": "WeChat login stopped.",
+    "connecting": "Connecting...",
+    "verifyTitle": "Verification required",
+    "verifyDescription": "Enter the number shown in WeChat to continue.",
+    "verifyMismatch": "That code did not match. Enter the new number shown in WeChat.",
+    "expired": "WeChat login expired. Scan again to reconnect.",
+    "failed": "Unable to connect WeChat. Try again.",
+    "verifyPlaceholder": "Code",
+    "verifySubmit": "Verify"
+  }
+}

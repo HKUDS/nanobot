@@ -1,0 +1,39 @@
+{
+  "description": "在 Microsoft Teams 会话中使用 nanobot。",
+  "requirements": "Azure 机器人应用凭据和公网回调地址",
+  "setup": {
+    "docsLabel": "打开 Teams 配置指南",
+    "officialLabel": "打开 Teams 开发者后台",
+    "tryIt": "安装 Teams 应用并发送一条测试消息。",
+    "summary": "Teams 通过 Bot Framework 回调地址接收消息；生产环境需要可访问的 HTTPS 端点。",
+    "steps": [
+      "创建 Azure Bot 或 Teams 应用，并复制 App ID 和客户端密钥。",
+      "通过 HTTPS 暴露回调路径，并将其设为机器人的消息端点。",
+      "保存并启用 Teams，然后安装应用并发送一条测试消息。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID",
+        "help": "从 Azure Bot 或 Teams 应用注册页面复制。"
+      },
+      "appPassword": {
+        "label": "客户端密钥",
+        "placeholder": "••••••",
+        "help": "为 Microsoft 应用创建客户端密钥。"
+      },
+      "tenantId": {
+        "label": "租户 ID",
+        "placeholder": "可选的租户 ID"
+      },
+      "path": {
+        "label": "回调路径",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "Teams 用户 ID，用逗号分隔"
+      }
+    }
+  }
+}

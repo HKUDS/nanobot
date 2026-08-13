@@ -2,12 +2,26 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
+from nanobot.agent.tools import mcp as mcp_mod
 from nanobot.agent.tools.mcp import _probe_http_url, connect_mcp_servers
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import MCPServerConfig
+from nanobot.security.network import configure_ssrf_whitelist
+
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
 
 # ---------------------------------------------------------------------------
 # _probe_http_url unit tests
@@ -22,9 +36,11 @@ async def test_probe_returns_true_for_open_port(tmp_path):
 
     server = await asyncio.start_server(_close_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
+    configure_ssrf_whitelist(["127.0.0.1/32"])
     try:
         assert await _probe_http_url(f"http://127.0.0.1:{port}/mcp") is True
     finally:
+        configure_ssrf_whitelist([])
         server.close()
         await server.wait_closed()
 
@@ -36,9 +52,81 @@ async def test_probe_returns_false_for_closed_port():
 
 
 @pytest.mark.asyncio
-async def test_probe_uses_default_port_for_http():
-    """When no port in URL, should default to 80 (will fail -> False)."""
+async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch):
+    """When no port is present, probe the validated address on port 80."""
+    attempts: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.resolve_url_target",
+        lambda _url: (True, "", ("93.184.216.34",)),
+    )
+
+    async def _open_connection(host: str, port: int):
+        attempts.append((host, port))
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+
     assert await _probe_http_url("http://unreachable-host.test/mcp") is False
+    assert attempts == [("93.184.216.34", 80)]
+
+
+@pytest.mark.asyncio
+async def test_probe_rejects_public_name_resolving_to_loopback():
+    def _resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
+        assert await _probe_http_url("http://example.com:8765/mcp") is False
+
+
+@pytest.mark.asyncio
+async def test_probe_skips_direct_tcp_when_global_proxy_env_is_set(monkeypatch):
+    def _resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+
+    async def _open_connection(*args, **kwargs):
+        raise AssertionError("global proxy env should skip direct TCP probe")
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
+        assert await _probe_http_url("https://mcp.example.com/mcp") is True
+
+
+@pytest.mark.asyncio
+async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypatch):
+    attempts: list[tuple[str, int]] = []
+
+    class FakeWriter:
+        def close(self):
+            return None
+
+        async def wait_closed(self):
+            return None
+
+    def _resolver(hostname, port, family=0, type_=0):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.35", 0)),
+        ]
+
+    async def _open_connection(host: str, port: int):
+        attempts.append((host, port))
+        if host == "93.184.216.34":
+            raise OSError("first address unreachable")
+        return object(), FakeWriter()
+
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _resolver)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+
+    assert await _probe_http_url("http://mcp.example:8765/mcp") is True
+    assert attempts == [
+        ("93.184.216.34", 8765),
+        ("93.184.216.35", 8765),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +172,58 @@ async def test_connect_skips_unreachable_sse():
         stacks = await connect_mcp_servers(servers, registry)
     assert stacks == {}
     assert len(registry._tools) == 0
+
+
+@pytest.mark.asyncio
+async def test_connect_isolates_streamable_http_status_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reachable endpoint returning HTTP 530 must not poison the event loop."""
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _return_http_530(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(530, text="cloudflare error 1033", request=request)
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(_return_http_530),
+    )
+
+    loop = asyncio.get_running_loop()
+    previous_exception_handler = loop.get_exception_handler()
+    unhandled: list[BaseException] = []
+
+    def _capture_unhandled(_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        if isinstance(context.get("exception"), BaseException):
+            unhandled.append(context["exception"])
+
+    loop.set_exception_handler(_capture_unhandled)
+    try:
+        registry = ToolRegistry()
+        stacks = await asyncio.wait_for(
+            connect_mcp_servers(
+                {
+                    "cloudflare": MCPServerConfig(
+                        type="streamableHttp",
+                        url="https://mcp.example.com/mcp",
+                    )
+                },
+                registry,
+            ),
+            timeout=5.0,
+        )
+        await asyncio.sleep(0)
+
+        assert stacks == {}
+        assert registry.tool_names == []
+        assert unhandled == []
+        assert not any(task.get_name() == "mcp:cloudflare" for task in asyncio.all_tasks())
+    finally:
+        loop.set_exception_handler(previous_exception_handler)
 
 
 @pytest.mark.asyncio

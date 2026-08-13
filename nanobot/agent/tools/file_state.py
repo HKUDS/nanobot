@@ -125,6 +125,10 @@ class FileStates:
         """Return the raw ReadState entry for a path, or None."""
         return self._state.get(str(Path(path).resolve()))
 
+    def raw_state(self) -> dict[str, ReadState]:
+        """Return the mutable backing map for legacy compatibility."""
+        return self._state
+
     def clear(self) -> None:
         """Clear all tracked state (useful for testing)."""
         self._state.clear()
@@ -201,5 +205,5 @@ def clear() -> None:
 # so existing imports keep working.
 def __getattr__(name: str):
     if name == "_state":
-        return _default._state
+        return _default.raw_state()
     raise AttributeError(name)

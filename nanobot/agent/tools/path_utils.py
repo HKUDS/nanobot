@@ -3,15 +3,7 @@
 from pathlib import Path
 
 from nanobot.config.paths import get_media_dir
-from nanobot.security.workspace_policy import (
-    is_path_within,
-    resolve_allowed_path,
-)
-
-
-def is_under(path: Path, directory: Path) -> bool:
-    """Return True when path resolves under directory."""
-    return is_path_within(path, directory)
+from nanobot.security.workspace_policy import resolve_allowed_path
 
 
 def resolve_workspace_path(
