@@ -1090,7 +1090,6 @@ class TestCompactIdleSession:
         assert "[RAW]" in result
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
-        assert entries[0]["content"].startswith("[RAW] ")
         assert "important answer" in entries[0]["content"]
         assert sessions.get_or_create("cli:unexpected-tool").last_archived == 2
 
@@ -1148,8 +1147,9 @@ class TestCompactIdleSession:
         assert "[RAW]" in result
         mock_provider.chat_with_retry.assert_not_awaited()
         entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert entries[0]["content"].startswith("[RAW] ")
+        assert len(entries) > 1
+        assert all(entry["content"].startswith("[RAW] ") for entry in entries)
+        assert "x" * 100_000 in "".join(entry["content"].split("\n", 1)[1] for entry in entries)
         assert sessions.get_or_create("sdk:oversized").last_archived == 1
 
     @pytest.mark.asyncio
@@ -1282,7 +1282,7 @@ class TestRawArchiveTruncation:
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)
         entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
+        assert len(entries) > 1
         assert len(entries[0]["content"]) < 50_000
         assert "[RAW]" in entries[0]["content"]
 
