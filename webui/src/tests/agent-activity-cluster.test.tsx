@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
@@ -139,6 +140,77 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("updates existing activity when the language changes without altering raw values", async () => {
+    const query = "release notes";
+    const path = "src/app.tsx";
+    const cliLine = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "localized-activity",
+            role: "tool",
+            kind: "trace",
+            content: cliLine,
+            traces: [
+              `grep(${JSON.stringify({ pattern: query })})`,
+              `read_file(${JSON.stringify({ path })})`,
+              cliLine,
+              'mcp_browserbase_browser_navigate({"url":"https://example.com"})',
+              "edit_file()",
+            ],
+            toolEvents: [{
+              phase: "start",
+              call_id: "localized-browserbase",
+              name: "mcp_browserbase_browser_navigate",
+              arguments: { url: "https://example.com" },
+            }],
+            fileEdits: [{
+              call_id: "localized-file-edit",
+              tool: "edit_file",
+              path,
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+            }],
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+        mcpPresets={[BROWSERBASE_MCP]}
+      />,
+    );
+
+    expect(screen.getByText(`Searched files “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
+    expect(screen.getByText("Using Blender · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("Opening example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
+
+    await act(async () => setAppLanguage("zh-CN"));
+
+    expect(screen.getByText(`已搜索文件 “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
+    expect(screen.getByText("正在使用 Blender · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("正在打开 example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByText("已编辑")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
+
+    await act(async () => setAppLanguage("ja"));
+
+    expect(screen.getByText(`“${query}” · ファイルを検索しました`)).toBeInTheDocument();
+    expect(screen.getByText(`${path} · ファイルを読み取り中`)).toBeInTheDocument();
+    expect(screen.getByText("Blender を使用中 · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("example.com · 開いています · Browserbase")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
+      .toHaveTextContent(`${path} · 編集しました`);
+  });
+
   it("jumps to the latest activity when opened", () => {
     const raf = installAnimationFrameQueue();
     try {
