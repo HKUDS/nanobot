@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type RefObject,
   useCallback,
   useEffect,
@@ -6,12 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
+import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
   findPromptElement,
-  jumpToPrompt,
   type PromptAnchor,
   promptTop,
   userPromptAnchors,
@@ -20,6 +23,7 @@ import {
 interface PromptRailProps {
   bottomOffset: number;
   messages: UIMessage[];
+  onJumpToPrompt: (promptId: string) => void;
   scrollRef: RefObject<HTMLDivElement>;
 }
 
@@ -29,6 +33,7 @@ interface MeasuredPrompt extends PromptAnchor {
 }
 
 interface PromptMarker {
+  answerPreview: string;
   count: number;
   ids: string[];
   label: string;
@@ -43,37 +48,32 @@ const DENSE_BUCKET_HEIGHT_PX = 12;
 const DENSE_BUCKET_FALLBACK_COUNT = 32;
 const DENSE_BUCKET_MAX_COUNT = 42;
 const MARKER_MIN_GAP_PX = 9;
-const MARKER_BASE_WIDTH_PX = 16;
-const MARKER_MAX_WIDTH_PX = 28;
+const MARKER_BASE_WIDTH_PX = 9;
+const MARKER_STACK_GAP_PX = 16;
+const RAIL_FALLBACK_HEIGHT_PX = 300;
 const MEASURE_RETRY_FRAMES = 4;
-const RAIL_REVEAL_MS = 1400;
+const HOVER_MARKER_WIDTHS_PX = [28, 22, 16, 11];
 
 export function PromptRail({
   bottomOffset,
   messages,
+  onJumpToPrompt,
   scrollRef,
 }: PromptRailProps) {
+  const { t } = useTranslation();
   const railRef = useRef<HTMLDivElement>(null);
+  const measuredPromptsRef = useRef<MeasuredPrompt[]>([]);
   const promptAnchors = useMemo(() => userPromptAnchors(messages), [messages]);
   const [markers, setMarkers] = useState<PromptMarker[]>([]);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState(false);
-  const revealTimeoutRef = useRef<number | null>(null);
-
-  const revealTemporarily = useCallback(() => {
-    setRevealed(true);
-    if (revealTimeoutRef.current !== null) {
-      window.clearTimeout(revealTimeoutRef.current);
-    }
-    revealTimeoutRef.current = window.setTimeout(() => {
-      setRevealed(false);
-      revealTimeoutRef.current = null;
-    }, RAIL_REVEAL_MS);
-  }, []);
+  const [focusedMarkerIndex, setFocusedMarkerIndex] = useState<number | null>(null);
 
   const updateMarkers = useCallback(() => {
     const scrollEl = scrollRef.current;
+    const nextRailHeight = railRef.current?.clientHeight ?? 0;
+
     if (!scrollEl || promptAnchors.length < MIN_PROMPTS_FOR_RAIL) {
+      measuredPromptsRef.current = [];
       setMarkers([]);
       setActivePromptId(null);
       return;
@@ -81,15 +81,25 @@ export function PromptRail({
 
     const scrollRange = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (scrollRange < RAIL_MIN_SCROLL_RANGE_PX) {
+      measuredPromptsRef.current = [];
       setMarkers([]);
       setActivePromptId(null);
       return;
     }
 
     const measured = measurePrompts(scrollEl, promptAnchors, scrollRange);
-    setMarkers(groupPromptMarkers(measured, railRef.current?.clientHeight ?? 0));
+    measuredPromptsRef.current = measured;
+    const grouped = groupPromptMarkers(measured, nextRailHeight);
+    setMarkers(distributeMarkerPositions(grouped, nextRailHeight));
     setActivePromptId(activePromptForScroll(measured, scrollEl.scrollTop));
   }, [promptAnchors, scrollRef]);
+
+  const updateActivePrompt = useCallback(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    const next = activePromptForScroll(measuredPromptsRef.current, scrollEl.scrollTop);
+    setActivePromptId((current) => current === next ? current : next);
+  }, [scrollRef]);
 
   useEffect(() => {
     let frame = 0;
@@ -109,21 +119,26 @@ export function PromptRail({
     const scrollEl = scrollRef.current;
     if (!scrollEl) return undefined;
 
-    let frame = 0;
-    const schedule = () => {
-      window.cancelAnimationFrame(frame);
-      revealTemporarily();
-      frame = window.requestAnimationFrame(updateMarkers);
+    let scrollFrame = 0;
+    let resizeFrame = 0;
+    const scheduleActivePrompt = () => {
+      window.cancelAnimationFrame(scrollFrame);
+      scrollFrame = window.requestAnimationFrame(updateActivePrompt);
+    };
+    const scheduleMeasurement = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(updateMarkers);
     };
 
-    scrollEl.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
+    scrollEl.addEventListener("scroll", scheduleActivePrompt, { passive: true });
+    window.addEventListener("resize", scheduleMeasurement);
     return () => {
-      window.cancelAnimationFrame(frame);
-      scrollEl.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
+      window.cancelAnimationFrame(scrollFrame);
+      window.cancelAnimationFrame(resizeFrame);
+      scrollEl.removeEventListener("scroll", scheduleActivePrompt);
+      window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [revealTemporarily, scrollRef, updateMarkers]);
+  }, [scrollRef, updateActivePrompt, updateMarkers]);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -134,83 +149,100 @@ export function PromptRail({
     return () => observer.disconnect();
   }, [scrollRef, updateMarkers]);
 
-  useEffect(() => {
-    return () => {
-      if (revealTimeoutRef.current !== null) {
-        window.clearTimeout(revealTimeoutRef.current);
-      }
-    };
-  }, []);
-
   if (markers.length === 0) return null;
-
-  const maxMarkerCount = Math.max(...markers.map((marker) => marker.count));
-  const activeMarkerIndex = markers.findIndex((marker) =>
-    marker.ids.includes(activePromptId ?? ""),
-  );
 
   return (
     <div
       ref={railRef}
-      aria-label="User prompt navigation"
+      aria-label={t("thread.promptNavigator.railAria")}
       className={cn(
-        "group pointer-events-auto absolute right-4 top-14 z-20 hidden w-8 opacity-70 md:block",
-        "transition-opacity duration-200 hover:opacity-100",
+        "thread-prompt-rail group pointer-events-auto absolute top-3 z-20 w-9 opacity-100",
+        "transition-opacity duration-200",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}
+      onPointerLeave={() => setFocusedMarkerIndex(null)}
       style={{ bottom: Math.max(80, bottomOffset) }}
     >
       {markers.map((marker, index) => {
         const active = marker.ids.includes(activePromptId ?? "");
-        const nearActive = activeMarkerIndex < 0 || Math.abs(index - activeMarkerIndex) <= 1;
+        const previewVisible = focusedMarkerIndex === index;
+        const hoverDistance =
+          focusedMarkerIndex === null ? null : Math.abs(index - focusedMarkerIndex);
         return (
-          <button
-            key={marker.ids.join("|")}
-            type="button"
-            aria-label={`Jump to prompt: ${marker.label}`}
-            onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
-            className={cn(
-              "group/marker absolute right-0 h-5 -translate-y-1/2 overflow-visible rounded-full",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
-            )}
-            style={{
-              top: `${marker.topPercent}%`,
-              width: markerWidth(marker.count, maxMarkerCount, active),
-            }}
-          >
-            <span
-              aria-hidden
+          <Fragment key={marker.ids.join("|")}>
+            <button
+              type="button"
+              aria-label={t("thread.promptNavigator.jumpTo", { label: marker.label })}
+              onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
+              onBlur={() => setFocusedMarkerIndex(null)}
+              onFocus={() => setFocusedMarkerIndex(index)}
+              onPointerEnter={() => setFocusedMarkerIndex(index)}
+              onPointerLeave={() => setFocusedMarkerIndex(null)}
               className={cn(
-                "absolute right-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full",
-                "bg-foreground/20 transition-[background-color,opacity,transform,height] duration-200",
-                "group-hover/marker:bg-blue-500/70 group-hover/marker:opacity-100 group-hover/marker:scale-x-110",
-                "group-focus-visible/marker:bg-blue-500 group-focus-visible/marker:opacity-100 group-focus-visible/marker:scale-x-110",
-                marker.count > 1 && "bg-foreground/30",
-                active && "h-1 bg-foreground/65 opacity-80 shadow-sm",
-                !active && nearActive && "opacity-25 group-hover:opacity-55",
-                !active && !nearActive && !revealed && "opacity-0 group-hover:opacity-40",
-                !active && !nearActive && revealed && "opacity-35",
+                "absolute left-0 h-4 w-9 -translate-y-1/2 overflow-visible rounded-sm",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
               )}
-            />
-            <span
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute right-9 top-1/2 z-30 w-64 -translate-y-1/2 rounded-lg px-3 py-2 text-left",
-                "bg-background/95 text-xs leading-5 text-foreground shadow-lg ring-1 ring-border/80 backdrop-blur",
-                "opacity-0 translate-x-1 transition-[opacity,transform] duration-150",
-                "group-hover/marker:opacity-100 group-hover/marker:translate-x-0",
-                "group-focus-visible/marker:opacity-100 group-focus-visible/marker:translate-x-0",
-              )}
+              style={{ top: `${marker.topPercent}%` }}
             >
-              <span className="block max-h-24 overflow-hidden whitespace-pre-wrap break-words">
-                {marker.preview}
-              </span>
-            </span>
-          </button>
+              <span
+                aria-hidden
+                data-testid="prompt-rail-marker"
+                className={cn(
+                  "absolute left-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full",
+                  "transition-[width,background-color,opacity,height] duration-150",
+                  railMarkerTone(hoverDistance, active),
+                )}
+                style={{
+                  height: markerHeight(hoverDistance),
+                  width: markerWidth(hoverDistance),
+                }}
+              />
+            </button>
+            <div
+              ref={makeInert}
+              aria-hidden
+              data-testid={previewVisible ? "prompt-rail-preview" : undefined}
+              className={cn(
+                "pointer-events-none absolute left-10 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
+                floatingSurfaceElevationClassName,
+                "transition-[opacity,transform] duration-150",
+                previewVisible
+                  ? "translate-x-0 scale-100 opacity-100"
+                  : "-translate-x-2 scale-[0.98] opacity-0",
+              )}
+              style={{ top: `${marker.topPercent}%` }}
+            >
+              {previewVisible ? (
+                <>
+                  <div className="line-clamp-2 whitespace-pre-wrap break-words text-[15px] font-semibold leading-6">
+                    {marker.preview}
+                  </div>
+                  {marker.answerPreview ? (
+                    <div className="mt-1.5 max-h-[4.5rem] overflow-hidden break-words text-[14px] leading-6 text-muted-foreground dark:text-white/55">
+                      <MarkdownText
+                        className={cn(
+                          "max-w-none text-[14px] leading-6 text-inherit",
+                          "[--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor]",
+                          "prose-headings:my-0 prose-h1:text-[14px] prose-h2:text-[14px] prose-h3:text-[14px] prose-h4:text-[14px]",
+                          "prose-p:my-0 prose-ul:my-0 prose-ol:my-0 prose-li:my-0",
+                        )}
+                      >
+                        {marker.answerPreview}
+                      </MarkdownText>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          </Fragment>
         );
       })}
     </div>
   );
+}
+
+function makeInert(node: HTMLDivElement | null): void {
+  if (node) node.inert = true;
 }
 
 function measurePrompts(
@@ -250,10 +282,12 @@ function groupPromptMarkers(
       last.count += 1;
       last.ids.push(prompt.id);
       last.label = groupedPromptLabel(last.count, prompt.label);
-      last.preview = groupedPromptPreview(last.count, prompt.preview);
+      last.answerPreview = prompt.answerPreview;
+      last.preview = prompt.preview;
       continue;
     }
     groups.push({
+      answerPreview: prompt.answerPreview,
       count: 1,
       ids: [prompt.id],
       label: prompt.label,
@@ -298,12 +332,28 @@ function bucketPromptMarkers(
       label: bucket.length === 1
         ? latest.label
         : groupedPromptLabel(bucket.length, latest.label),
-      preview: bucket.length === 1
-        ? latest.preview
-        : groupedPromptPreview(bucket.length, latest.preview),
+      answerPreview: latest.answerPreview,
+      preview: latest.preview,
       topPercent,
     }];
   });
+}
+
+function distributeMarkerPositions(markers: PromptMarker[], railHeight: number): PromptMarker[] {
+  const height = railHeight > 0 ? railHeight : RAIL_FALLBACK_HEIGHT_PX;
+  if (markers.length <= 1) {
+    return markers.map((marker) => ({ ...marker, topPercent: 50 }));
+  }
+
+  const availableHeight = Math.max(0, height - MARKER_STACK_GAP_PX);
+  const stepPx = Math.min(MARKER_STACK_GAP_PX, availableHeight / (markers.length - 1));
+  const stackHeight = stepPx * (markers.length - 1);
+  const firstMarkerPx = (height - stackHeight) / 2;
+
+  return markers.map((marker, index) => ({
+    ...marker,
+    topPercent: ((firstMarkerPx + stepPx * index) / height) * 100,
+  }));
 }
 
 function activePromptForScroll(
@@ -311,32 +361,46 @@ function activePromptForScroll(
   scrollTop: number,
 ): string | null {
   if (measured.length === 0) return null;
-  let active = measured[0];
   const cursor = scrollTop + 96;
-  for (const prompt of measured) {
-    if (prompt.top <= cursor) {
-      active = prompt;
-      continue;
+  let lower = 0;
+  let upper = measured.length - 1;
+  let activeIndex = 0;
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    if (measured[middle].top <= cursor) {
+      activeIndex = middle;
+      lower = middle + 1;
+    } else {
+      upper = middle - 1;
     }
-    break;
   }
-  return active.id;
+  return measured[activeIndex].id;
 }
 
 function groupedPromptLabel(count: number, latestLabel: string): string {
   return `${count} prompts, latest: ${latestLabel}`;
 }
 
-function groupedPromptPreview(count: number, latestPreview: string): string {
-  return `${count} prompts\n\n${latestPreview}`;
+function markerWidth(hoverDistance: number | null): number {
+  if (hoverDistance === null) return MARKER_BASE_WIDTH_PX;
+  return HOVER_MARKER_WIDTHS_PX[hoverDistance] ?? MARKER_BASE_WIDTH_PX;
 }
 
-function markerWidth(count: number, maxCount: number, active: boolean): number {
-  if (maxCount <= 1) return active ? 34 : MARKER_BASE_WIDTH_PX;
-  const density = Math.log2(count + 1) / Math.log2(maxCount + 1);
-  const width = MARKER_BASE_WIDTH_PX
-    + (MARKER_MAX_WIDTH_PX - MARKER_BASE_WIDTH_PX) * density;
-  return Math.round(active ? width + 4 : width);
+function markerHeight(hoverDistance: number | null): number {
+  return hoverDistance === 0 ? 3 : 2;
+}
+
+function railMarkerTone(hoverDistance: number | null, active: boolean): string {
+  if (hoverDistance === 0) {
+    return "bg-[#222222] opacity-100 dark:bg-white";
+  }
+  if (hoverDistance !== null && hoverDistance < HOVER_MARKER_WIDTHS_PX.length) {
+    return "bg-[#d0d0d0] opacity-100 dark:bg-white/35";
+  }
+  if (active) {
+    return "bg-[#6f6f6f] opacity-100 dark:bg-white/55";
+  }
+  return "bg-[#d8d8d8] opacity-100 dark:bg-white/25";
 }
 
 function clamp(value: number, min: number, max: number): number {

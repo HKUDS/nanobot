@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -12,25 +12,21 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"cli_apps": cli_apps} if isinstance(cli_apps, list) and cli_apps else {}
 
 
-def runtime_lines(message: Any, workspace: Path, *, skip: bool = False) -> list[str]:
-    """Return model-visible CLI app annotations for the current turn."""
-    if skip:
-        return []
-    text = message.content if isinstance(getattr(message, "content", None), str) else ""
-    metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
-    return _cli_app_runtime_lines(text, metadata, workspace)
-
-
-def _cli_app_runtime_lines(
+def runtime_lines_for_request(
     text: str,
     metadata: Mapping[str, Any] | None,
     workspace: Path,
 ) -> list[str]:
+    """Return CLI App annotations from an immutable request snapshot."""
     structured = metadata.get("cli_apps") if isinstance(metadata, Mapping) else None
     if isinstance(structured, list):
+        from nanobot.apps.cli.service import cli_app_skill_relative_path
+
+        structured_items = cast(list[Any], structured)
         mentions = [
-            item for item in structured
-            if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+            cast(Mapping[str, Any], item) for item in structured_items
+            if isinstance(item, Mapping)
+            and isinstance(cast(Mapping[str, Any], item).get("name"), str)
         ]
         if mentions:
             return [
@@ -38,7 +34,7 @@ def _cli_app_runtime_lines(
                 f"@{str(item['name']).strip().lower()} "
                 f"(installed; tool=run_cli_app; "
                 f"entry_point={str(item.get('entry_point') or 'unknown')}; "
-                f"skill=skills/cli-app-{str(item['name']).strip().lower()}/SKILL.md). "
+                f"skill={cli_app_skill_relative_path(workspace, str(item['name']))}). "
                 "Read the skill when useful, then run this app with `run_cli_app`; do not bypass it with shell."
                 for item in mentions
                 if str(item.get("name") or "").strip()
@@ -48,7 +44,10 @@ def _cli_app_runtime_lines(
     try:
         from nanobot.apps.cli import CliAppManager
 
-        mentions = CliAppManager(workspace=workspace).mentioned_installed_apps(text)
+        mentions = cast(
+            list[dict[str, Any]],
+            CliAppManager(workspace=workspace).mentioned_installed_apps(text),
+        )
     except Exception:
         return []
     return [

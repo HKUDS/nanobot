@@ -1,6 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
+import errno
 import json
 import os
 import time
@@ -9,6 +10,7 @@ from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from types import EllipsisType
 from typing import Any, Callable, Coroutine, Literal
 
 from filelock import FileLock
@@ -22,6 +24,9 @@ from nanobot.cron.types import (
     CronRunRecord,
     CronSchedule,
     CronStore,
+)
+from nanobot.utils.run_records import (
+    write_run_record as write_automation_run_record,
 )
 
 
@@ -67,13 +72,22 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
 
-    if schedule.kind == "cron" and schedule.tz:
+    if schedule.kind == "cron":
+        if not schedule.expr or not schedule.expr.strip():
+            raise ValueError("cron schedule requires a non-empty 'expr'")
         try:
-            from zoneinfo import ZoneInfo
+            from croniter import croniter
 
-            ZoneInfo(schedule.tz)
-        except Exception:
-            raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+            croniter(schedule.expr)
+        except Exception as exc:
+            raise ValueError(f"invalid cron expression '{schedule.expr}': {exc}") from None
+        if schedule.tz:
+            try:
+                from zoneinfo import ZoneInfo
+
+                ZoneInfo(schedule.tz)
+            except Exception:
+                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
 def _has_legacy_delivery_context(payload: CronPayload) -> bool:
@@ -153,10 +167,14 @@ class CronService:
         self._lock = FileLock(str(self._action_path.parent) + ".lock")
         self.on_job = on_job
         self._store: CronStore | None = None
-        self._timer_task: asyncio.Task | None = None
+        self._timer_task: asyncio.Task[None] | None = None
         self._running = False
-        self._timer_active = False
+        self._active_executions = 0
         self.max_sleep_ms = max_sleep_ms
+
+    def _should_persist_store(self) -> bool:
+        """Return whether this instance currently owns the live store."""
+        return self._running or self._active_executions > 0
 
     def _is_unbound_agent_job(self, job: CronJob) -> bool:
         return job.payload.kind == "agent_turn" and not is_bound_cron_job(job)
@@ -215,62 +233,7 @@ class CronService:
                 jobs = []
                 version = data.get("version", 1)
                 for j in data.get("jobs", []):
-                    job = CronJob(
-                        id=j["id"],
-                        name=j["name"],
-                        enabled=j.get("enabled", True),
-                        schedule=CronSchedule(
-                            kind=j["schedule"]["kind"],
-                            at_ms=j["schedule"].get("atMs"),
-                            every_ms=j["schedule"].get("everyMs"),
-                            expr=j["schedule"].get("expr"),
-                            tz=j["schedule"].get("tz"),
-                        ),
-                        payload=CronPayload(
-                            kind=j["payload"].get("kind", "agent_turn"),
-                            message=j["payload"].get("message", ""),
-                            deliver=j["payload"].get("deliver", False),
-                            channel=j["payload"].get("channel"),
-                            to=j["payload"].get("to"),
-                            channel_meta=(
-                                j["payload"].get("channelMeta")
-                                or j["payload"].get("channel_meta")
-                                or {}
-                            ),
-                            session_key=j["payload"].get("sessionKey") or j["payload"].get("session_key"),
-                            origin_channel=(
-                                j["payload"].get("originChannel")
-                                or j["payload"].get("origin_channel")
-                            ),
-                            origin_chat_id=(
-                                j["payload"].get("originChatId")
-                                or j["payload"].get("origin_chat_id")
-                            ),
-                            origin_metadata=(
-                                j["payload"].get("originMetadata")
-                                or j["payload"].get("origin_metadata")
-                                or {}
-                            ),
-                        ),
-                        state=CronJobState(
-                            next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
-                            last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
-                            last_status=j.get("state", {}).get("lastStatus"),
-                            last_error=j.get("state", {}).get("lastError"),
-                            run_history=[
-                                CronRunRecord(
-                                    run_at_ms=r["runAtMs"],
-                                    status=r["status"],
-                                    duration_ms=r.get("durationMs", 0),
-                                    error=r.get("error"),
-                                )
-                                for r in j.get("state", {}).get("runHistory", [])
-                            ],
-                        ),
-                        created_at_ms=j.get("createdAtMs", 0),
-                        updated_at_ms=j.get("updatedAtMs", 0),
-                        delete_after_run=j.get("deleteAfterRun", False),
-                    )
+                    job = CronJob.from_store_dict(j)
                     _normalize_agent_turn_job(job)
                     jobs.append(job)
             except Exception:
@@ -291,19 +254,21 @@ class CronService:
                 return None
         return jobs, version
 
-    def _merge_action(self):
+    def _merge_action(self) -> None:
         if not self._action_path.exists():
             return
 
-        jobs_map = {j.id: j for j in self._store.jobs}
-        def _update(params: dict):
+        jobs_map = {job.id: job for job in self._store.jobs}  # pyright: ignore[reportOptionalMemberAccess]
+
+        def _update(params: dict[str, Any]) -> None:
             j = CronJob.from_dict(params)
             _normalize_agent_turn_job(j)
             jobs_map[j.id] = j
 
-        def _del(params: dict):
-            if job_id := params.get("job_id"):
-                jobs_map.pop(job_id)
+        def _del(params: dict[str, Any]) -> None:
+            job_id = params.get("job_id")
+            if isinstance(job_id, str) and job_id:
+                jobs_map.pop(job_id, None)
 
         with self._lock:
             with open(self._action_path, "r", encoding="utf-8") as f:
@@ -322,24 +287,25 @@ class CronService:
                     except Exception:
                         logger.exception("load action line error")
                         continue
-            self._store.jobs = list(jobs_map.values())
-            if self._running and changed:
+            self._store.jobs = list(jobs_map.values())  # pyright: ignore[reportOptionalMemberAccess]
+            if self._should_persist_store() and changed:
                 self._action_path.write_text("", encoding="utf-8")
                 self._save_store()
         return
 
-    def _load_store(self) -> CronStore | None:
+    def _load_store(self, *, reload_during_execution: bool = False) -> CronStore | None:
         """Load jobs from disk. Reloads automatically if file was modified externally.
         - Reload every time because it needs to merge operations on the jobs object from other instances.
-        - During _on_timer execution, return the existing store to prevent concurrent
+        - During job execution, return the existing store to prevent concurrent
           _load_store calls (e.g. from list_jobs polling) from replacing it mid-execution.
+          The first execution explicitly reloads once when it takes ownership.
         - When the on-disk store exists but is unreadable: keep using the
           previous in-memory ``self._store`` if we already have one (so a
           transient corruption does not drop live jobs); only the very first
           load (during ``start``) can return ``None`` to signal an unrecoverable
           state to the caller.
         """
-        if self._timer_active and self._store:
+        if self._active_executions > 0 and self._store and not reload_during_execution:
             return self._store
         loaded = self._load_jobs()
         if loaded is None:
@@ -352,10 +318,29 @@ class CronService:
         jobs, version = loaded
         self._store = CronStore(version=version, jobs=jobs)
         self._merge_action()
-        if self._enforce_store_agent_bindings() and self._running:
+        if self._enforce_store_agent_bindings() and self._should_persist_store():
             self._save_store()
 
         return self._store
+
+    def _require_store(self, *, reload_during_execution: bool = False) -> CronStore:
+        """Return a usable store or raise a clear error.
+
+        ``_load_store`` deliberately returns ``None`` when the first load sees
+        a corrupt on-disk store and no previous in-memory snapshot exists.  The
+        public API requires a concrete store object before touching
+        ``store.jobs``; raising here keeps callers from seeing an accidental
+        ``AttributeError`` and, more importantly, prevents follow-up saves from
+        treating a corrupt store as an empty one.
+        """
+        store = self._load_store(reload_during_execution=reload_during_execution)
+        if store is None:
+            raise RuntimeError(
+                f"cron store at {self.store_path} could not be loaded and was preserved "
+                "as a .corrupt-<ts> backup; refusing to operate to avoid overwriting "
+                "scheduled jobs. Inspect the corrupt backup and restore jobs.json manually."
+            )
+        return store
 
     def _save_store(self) -> None:
         """Save jobs to disk."""
@@ -437,33 +422,24 @@ class CronService:
             os.replace(tmp_path, path)
             # fsync the parent directory so the rename itself is durable.
             # Skip on Windows where opening a directory raises PermissionError;
-            # NTFS journals metadata synchronously so this is a no-op there.
+            # some shared filesystems reject directory fsync with EINVAL.
             with suppress(PermissionError):
                 fd = os.open(str(path.parent), os.O_RDONLY)
                 try:
-                    os.fsync(fd)
+                    try:
+                        os.fsync(fd)
+                    except OSError as exc:
+                        if exc.errno != errno.EINVAL:
+                            raise
                 finally:
                     os.close(fd)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
 
-    @staticmethod
-    def _safe_run_record_name(run_id: str) -> str:
-        return "".join(c if c.isalnum() or c in "._-" else "_" for c in run_id)
-
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""
-        name = self._safe_run_record_name(run_id)
-        if not name:
-            name = str(uuid.uuid4())
-        path = self._run_records_dir / f"{name}.json"
-        payload = {
-            **record,
-            "run_id": run_id,
-            "updated_at_ms": _now_ms(),
-        }
-        self._atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False))
+        write_automation_run_record(self._run_records_dir, run_id, record)
 
     async def start(self) -> None:
         """Start the cron service."""
@@ -535,19 +511,20 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
-        self._load_store()
-        # If a hot reload found a corrupt store on disk, ``self._store`` may
-        # still hold the previous, known-good in-memory snapshot.  Keep using
-        # it rather than crashing the timer or wiping live jobs.
-        if not self._store:
-            self._arm_timer()
-            return
-
-        self._timer_active = True
+        reload_store = self._active_executions == 0
+        self._active_executions += 1
         try:
+            store = self._load_store(reload_during_execution=reload_store)
+            # If a hot reload found a corrupt store on disk, ``self._store`` may
+            # still hold the previous, known-good in-memory snapshot.  Keep using
+            # it rather than crashing the timer or wiping live jobs.
+            if store is None:
+                self._arm_timer()
+                return
+
             now = _now_ms()
             due_jobs = [
-                j for j in self._store.jobs
+                j for j in store.jobs
                 if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
             ]
 
@@ -556,7 +533,7 @@ class CronService:
 
             self._save_store()
         finally:
-            self._timer_active = False
+            self._active_executions -= 1
         self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
@@ -603,7 +580,8 @@ class CronService:
         # Handle one-shot jobs
         if job.schedule.kind == "at":
             if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+                store = self._require_store()
+                store.jobs = [item for item in store.jobs if item.id != job.id]
             else:
                 job.enabled = False
                 job.state.next_run_at_ms = None
@@ -611,7 +589,11 @@ class CronService:
             # Compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
-    def _append_action(self, action: Literal["add", "del", "update"], params: dict):
+    def _append_action(
+        self,
+        action: Literal["add", "del", "update"],
+        params: dict[str, Any],
+    ) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             with open(self._action_path, "a", encoding="utf-8") as f:
@@ -622,7 +604,7 @@ class CronService:
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""
-        store = self._load_store()
+        store = self._require_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
 
@@ -649,11 +631,11 @@ class CronService:
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
-        channel_meta: dict | None = None,
+        channel_meta: dict[str, Any] | None = None,
         session_key: str | None = None,
         origin_channel: str | None = None,
         origin_chat_id: str | None = None,
-        origin_metadata: dict | None = None,
+        origin_metadata: dict[str, Any] | None = None,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -683,8 +665,8 @@ class CronService:
         )
         _normalize_agent_turn_job(job)
         self._enforce_agent_binding(job)
-        if self._running:
-            store = self._load_store()
+        if self._should_persist_store():
+            store = self._require_store()
             store.jobs.append(job)
             self._save_store()
             self._arm_timer()
@@ -696,7 +678,7 @@ class CronService:
 
     def register_system_job(self, job: CronJob) -> CronJob:
         """Register an internal system job (idempotent on restart)."""
-        store = self._load_store()
+        store = self._require_store()
         now = _now_ms()
         job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
         job.created_at_ms = now
@@ -710,7 +692,7 @@ class CronService:
 
     def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
         """Remove a job by ID, unless it is a protected system job."""
-        store = self._load_store()
+        store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -723,7 +705,7 @@ class CronService:
         removed = len(store.jobs) < before
 
         if removed:
-            if self._running:
+            if self._should_persist_store():
                 self._save_store()
                 self._arm_timer()
             else:
@@ -735,7 +717,7 @@ class CronService:
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""
-        store = self._load_store()
+        store = self._require_store()
         for job in store.jobs:
             if job.id == job_id:
                 job.enabled = enabled
@@ -745,7 +727,7 @@ class CronService:
                     job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
                 else:
                     job.state.next_run_at_ms = None
-                if self._running:
+                if self._should_persist_store():
                     self._save_store()
                     self._arm_timer()
                 else:
@@ -761,8 +743,8 @@ class CronService:
         schedule: CronSchedule | None = None,
         message: str | None = None,
         deliver: bool | None = None,
-        channel: str | None = ...,
-        to: str | None = ...,
+        channel: str | None | EllipsisType = ...,
+        to: str | None | EllipsisType = ...,
         delete_after_run: bool | None = None,
     ) -> CronJob | Literal["not_found", "protected"]:
         """Update mutable fields of an existing job. System jobs cannot be updated.
@@ -770,7 +752,7 @@ class CronService:
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
         to update; omit (sentinel ``...``) to leave unchanged.
         """
-        store = self._load_store()
+        store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -801,7 +783,7 @@ class CronService:
         else:
             job.state.next_run_at_ms = None
 
-        if self._running:
+        if self._should_persist_store():
             self._save_store()
             self._arm_timer()
         else:
@@ -812,10 +794,10 @@ class CronService:
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job without disturbing the service's running state."""
-        was_running = self._running
-        self._running = True
+        reload_store = self._active_executions == 0
+        self._active_executions += 1
         try:
-            store = self._load_store()
+            store = self._require_store(reload_during_execution=reload_store)
             for job in store.jobs:
                 if job.id == job_id:
                     if self._is_unbound_agent_job(job):
@@ -829,18 +811,18 @@ class CronService:
                     return True
             return False
         finally:
-            self._running = was_running
-            if was_running:
+            self._active_executions -= 1
+            if self._running and self._active_executions == 0:
                 self._arm_timer()
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""
-        store = self._load_store()
+        store = self._require_store()
         return next((j for j in store.jobs if j.id == job_id), None)
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, object]:
         """Get service status."""
-        store = self._load_store()
+        store = self._require_store()
         return {
             "enabled": self._running,
             "jobs": len(store.jobs),

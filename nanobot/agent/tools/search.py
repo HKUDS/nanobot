@@ -1,5 +1,7 @@
 """Search tools: file discovery and grep."""
 
+# pyright: reportIncompatibleMethodOverride=false, reportPrivateUsage=false
+
 from __future__ import annotations
 
 import fnmatch
@@ -9,6 +11,7 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
 
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
 
 _DEFAULT_HEAD_LIMIT = 250
@@ -218,12 +221,12 @@ class FindFilesTool(_SearchTool):
         try:
             target = self._resolve(path or ".")
             if not target.exists():
-                return f"Error: Path not found: {path}"
+                return ToolResult.error(f"Error: Path not found: {path}")
             if not (target.is_dir() or target.is_file()):
-                return f"Error: Unsupported path: {path}"
+                return ToolResult.error(f"Error: Unsupported path: {path}")
 
             if sort not in {"path", "modified"}:
-                return "Error: sort must be 'path' or 'modified'"
+                return ToolResult.error("Error: sort must be 'path' or 'modified'")
 
             limit = (
                 _DEFAULT_FILE_HEAD_LIMIT
@@ -271,9 +274,9 @@ class FindFilesTool(_SearchTool):
                 result += "\n\n" + note
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error finding files: {e}"
+            return ToolResult.error(f"Error finding files: {e}")
 
 
 class GrepTool(_SearchTool):
@@ -282,6 +285,7 @@ class GrepTool(_SearchTool):
 
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
+    _MAX_EXPLICIT_FILE_BYTES = 100_000_000
 
     @property
     def name(self) -> str:
@@ -294,7 +298,8 @@ class GrepTool(_SearchTool):
             "Default output_mode is files_with_matches (file paths only); "
             "use content mode for matching lines with context. Prefer this "
             "over shell grep for ordinary workspace searches. "
-            "Skips binary and files >2 MB. Supports glob/type filtering."
+            "Binary and file-size limits are enforced by the tool; explicit file paths "
+            "use a larger bounded limit than directory searches. Supports glob/type filtering."
         )
 
     @property
@@ -425,16 +430,16 @@ class GrepTool(_SearchTool):
         try:
             target = self._resolve(path or ".")
             if not target.exists():
-                return f"Error: Path not found: {path}"
+                return ToolResult.error(f"Error: Path not found: {path}")
             if not (target.is_dir() or target.is_file()):
-                return f"Error: Unsupported path: {path}"
+                return ToolResult.error(f"Error: Unsupported path: {path}")
 
             flags = re.IGNORECASE if case_insensitive else 0
             try:
                 needle = re.escape(pattern) if fixed_strings else pattern
                 regex = re.compile(needle, flags)
             except re.error as e:
-                return f"Error: invalid regex pattern: {e}"
+                return ToolResult.error(f"Error: invalid regex pattern: {e}")
 
             if head_limit is not None:
                 limit = None if head_limit == 0 else head_limit
@@ -455,6 +460,9 @@ class GrepTool(_SearchTool):
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
             root = target if target.is_dir() else target.parent
+            max_file_bytes = (
+                self._MAX_EXPLICIT_FILE_BYTES if target.is_file() else self._MAX_FILE_BYTES
+            )
 
             for file_path in self._iter_files(target):
                 rel_path = file_path.relative_to(root).as_posix()
@@ -463,8 +471,9 @@ class GrepTool(_SearchTool):
                 if not _matches_type(file_path.name, type):
                     continue
 
-                raw = file_path.read_bytes()
-                if len(raw) > self._MAX_FILE_BYTES:
+                with file_path.open("rb") as file:
+                    raw = file.read(max_file_bytes + 1)
+                if len(raw) > max_file_bytes:
                     skipped_large += 1
                     continue
                 if _is_binary(raw):
@@ -579,6 +588,6 @@ class GrepTool(_SearchTool):
                 result += "\n\n" + "\n".join(notes)
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error searching files: {e}"
+            return ToolResult.error(f"Error searching files: {e}")

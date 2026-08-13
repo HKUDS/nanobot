@@ -1,0 +1,56 @@
+{
+  "description": "Gunakan nanobot dari percakapan WeChat.",
+  "requirements": "Setup channel WeChat dan gateway",
+  "setup": {
+    "primaryAction": "Hubungkan WeChat",
+    "docsLabel": "Buka panduan WeChat",
+    "officialLabel": "Buka WeChat",
+    "tryIt": "Setelah login QR, kirim DM ke akun yang terhubung.",
+    "summary": "WeChat login dengan kode QR dan menyimpan status akun secara lokal.",
+    "steps": [
+      "Klik Hubungkan dan pindai QR dengan WeChat.",
+      "Biarkan gateway lokal berjalan saat WeChat menerima pesan.",
+      "Kirim pesan langsung uji untuk memastikan akun terhubung."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Disimpan saat login QR"
+      },
+      "sendProgress": { "label": "Kirim progres" },
+      "sendToolHints": { "label": "Kirim petunjuk alat" },
+      "streaming": { "label": "Gunakan API streaming" },
+      "replyProgressMessages": { "label": "Kirim progres terstruktur" },
+      "replyProgressMaxMessages": { "label": "Batas progres terstruktur" },
+      "contextMessageBudget": { "label": "Anggaran pesan konteks" },
+      "blockStreaming": { "label": "Kirim respons per blok" },
+      "blockStreamingMinChars": { "label": "Ukuran blok minimum" },
+      "blockStreamingMaxMessages": { "label": "Batas pesan blok" },
+      "baseUrl": { "label": "URL API" },
+      "cdnBaseUrl": { "label": "URL CDN" },
+      "routeTag": { "label": "Tag rute" },
+      "stateDir": { "label": "Direktori status" },
+      "pollTimeout": { "label": "Batas waktu polling" }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kode QR login WeChat",
+    "scanTitle": "Pindai dengan WeChat",
+    "scanDescription": "Pindai dengan WeChat di ponsel. nanobot menyimpan status akun secara lokal setelah login.",
+    "waiting": "Menunggu pemindaian WeChat...",
+    "connected": "WeChat sudah terhubung.",
+    "stopped": "Login WeChat dihentikan.",
+    "connecting": "Menghubungkan...",
+    "verifyTitle": "Verifikasi diperlukan",
+    "verifyDescription": "Masukkan angka yang ditampilkan di WeChat untuk melanjutkan.",
+    "verifyMismatch": "Kode tidak cocok. Masukkan angka baru yang ditampilkan di WeChat.",
+    "expired": "Login WeChat telah kedaluwarsa. Pindai lagi untuk menghubungkan kembali.",
+    "failed": "Tidak dapat menghubungkan WeChat. Coba lagi.",
+    "verifyPlaceholder": "Kode",
+    "verifySubmit": "Verifikasi"
+  }
+}

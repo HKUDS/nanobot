@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
+
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +9,11 @@ import { describe, expect, it, vi } from "vitest";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { resources } from "@/i18n";
-import { LOCALE_STORAGE_KEY, resolveInitialLocale } from "@/i18n/config";
+import {
+  LOCALE_STORAGE_KEY,
+  resolveInitialLocale,
+  supportedLocales,
+} from "@/i18n/config";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
@@ -20,7 +28,9 @@ const SLASH_COMMAND_KEYS = [
   "dream",
   "dream_log",
   "dream_restore",
+  "dream_prompt",
   "goal",
+  "trigger",
   "help",
   "pairing",
 ];
@@ -62,11 +72,93 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.webuiSafety",
   "settings.sections.capabilities",
   "settings.sections.apps",
+  "settings.apps.description",
+  "settings.apps.caption",
+  "settings.apps.restartRequired",
+  "settings.mcp.connectingAccount",
+  "settings.mcp.continueSignIn",
+  "settings.mcp.preparingSignIn",
+  "settings.mcp.openSignInToContinue",
+  "settings.mcp.finishSignInInBrowser",
+  "settings.mcp.finishingConnection",
+  "settings.mcp.activatingTools",
+  "settings.mcp.connected",
+  "settings.mcp.connectionFailed",
+  "settings.mcp.connectionCancelled",
+  "settings.mcp.reloadFailed",
+  "settings.mcp.oauthFailed",
+  "settings.skills.views",
+  "settings.skills.installedTab",
+  "settings.skills.discoverTab",
+  "settings.skills.customGroup",
+  "settings.skills.builtinGroup",
+  "settings.skills.otherGroup",
+  "settings.skills.searchInstalled",
+  "settings.skills.filterAll",
+  "settings.skills.filterEnabled",
+  "settings.skills.filterDisabled",
+  "settings.skills.noMatching",
+  "settings.skills.statusDisabled",
+  "settings.skills.statusEnabled",
+  "settings.skills.statusNeedsSetup",
+  "settings.skills.showLess",
+  "settings.skills.showMore",
+  "settings.skills.enabledControl",
+  "settings.skills.enabledDescription",
+  "settings.skills.enableSkill",
+  "settings.skills.disableSkill",
+  "settings.skills.updateFailed",
+  "settings.skills.deleteTitle",
+  "settings.skills.deleteDescription",
+  "settings.skills.deleteAction",
+  "settings.skills.deleteFailed",
+  "settings.skills.deleteConfirmTitle",
+  "settings.skills.deleteConfirmDescription",
+  "settings.skills.deleteConfirmAction",
+  "settings.skills.instructionsTitle",
+  "settings.skills.setupRequired",
+  "settings.skills.setupDescription",
+  "settings.skills.copySetupCommand",
+  "settings.skills.checkAgain",
+  "settings.skills.marketplaceSearchFailed",
+  "settings.skills.marketplaceInstallFailed",
+  "settings.skills.marketplaceSearchPlaceholder",
+  "settings.skills.marketplaceSearchLabel",
+  "settings.skills.marketplaceSearching",
+  "settings.skills.marketplaceProviderFilter",
+  "settings.skills.marketplaceProviderAll",
+  "settings.skills.marketplaceTrendingTitle",
+  "settings.skills.marketplaceTrendingDescription",
+  "settings.skills.marketplaceViewAll",
+  "settings.skills.marketplaceTrendingUnavailable",
+  "settings.skills.marketplaceEmpty",
+  "settings.skills.marketplaceConfirmTitle",
+  "settings.skills.marketplaceConfirmDescription",
+  "settings.skills.marketplaceConfirmInstall",
+  "settings.skills.marketplaceOpen",
+  "settings.skills.marketplaceOpenProvider",
+  "settings.skills.marketplaceInstalls24h",
+  "settings.skills.marketplaceInstalls",
+  "settings.skills.marketplaceNpxRequired",
+  "settings.skills.marketplaceInstalling",
+  "settings.skills.marketplaceInstalled",
+  "settings.skills.marketplaceInstall",
+  "settings.skills.marketplaceNoTrend",
+  "settings.skills.marketplaceTrendLabel",
+  "settings.nanobotFeatures.disable",
+  "settings.nanobotFeatures.ready",
+  "settings.nanobotFeatures.missingDependency",
+  "settings.nanobotFeatures.installConfirmTitle",
+  "settings.nanobotFeatures.installConfirmDescription",
+  "settings.nanobotFeatures.installConfirmAction",
+  "settings.nanobotFeatures.channelDisabled",
+  "settings.nanobotFeatures.notEnabled",
   "settings.sections.about",
   "settings.rows.theme",
   "settings.rows.language",
   "settings.rows.density",
   "settings.rows.activityMode",
+  "settings.rows.fileEditDisplay",
   "settings.rows.codeWrap",
   "settings.rows.brandLogos",
   "settings.rows.currentModel",
@@ -77,6 +169,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.language",
   "settings.help.density",
   "settings.help.activityMode",
+  "settings.help.fileEditDisplay",
   "settings.help.codeWrap",
   "settings.help.brandLogos",
   "settings.help.currentModel",
@@ -103,6 +196,164 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.about.upToDate",
   "settings.about.updateAvailable",
 ];
+const LOCALIZED_WORKSPACE_COPY_KEYS = [
+  "thread.composer.workspace.accessAria",
+  "thread.composer.workspace.default",
+  "thread.composer.workspace.full",
+  "errors.workspaceScopeRejected.title",
+  "errors.workspaceScopeRejected.body",
+  "workspace.dialog.defaultProject",
+  "workspace.dialog.usePath",
+  "workspace.dialog.absolutePathRequired",
+];
+const LOCALIZED_CHANNEL_SHELL_KEYS = [
+  "settings.channels.advanced",
+  "settings.channels.checkAndEnable",
+  "settings.channels.checkConnection",
+  "settings.channels.checkedAndEnabled",
+  "settings.channels.checking",
+  "settings.channels.checkOnly",
+  "settings.channels.commandCopied",
+  "settings.channels.commandCopyFailed",
+  "settings.channels.configuredInstances",
+  "settings.channels.connectPreview",
+  "settings.channels.copyCommand",
+  "settings.channels.filterAll",
+  "settings.channels.filterOff",
+  "settings.channels.filterOn",
+  "settings.channels.helperCopied",
+  "settings.channels.helperCopyFailed",
+  "settings.channels.hideSecret",
+  "settings.channels.instanceConfigured",
+  "settings.channels.instanceNeedsSetup",
+  "settings.channels.managedByWebui",
+  "settings.channels.officialGuide",
+  "settings.channels.optional",
+  "settings.channels.providerPreset",
+  "settings.channels.requiredSetup",
+  "settings.channels.savedSecret",
+  "settings.channels.savedSecretPlaceholder",
+  "settings.channels.savedSettings",
+  "settings.channels.saveSettings",
+  "settings.channels.selectChannel",
+  "settings.channels.setupSteps",
+  "settings.channels.showSecret",
+  "settings.channels.toggleChannel",
+  "settings.channels.toggleInstance",
+  "settings.channels.tryIt",
+  "settings.channels.validation.connected",
+  "settings.channels.validation.configured",
+  "settings.channels.validation.invalid",
+  "settings.channels.validation.needs_setup",
+  "settings.channels.validation.unsupported",
+  "settings.channels.validationFailed",
+];
+const LOCALIZED_NEW_SURFACE_KEYS = [
+  "chat.activity.running",
+  "chat.activity.complete",
+  "chat.activity.updated",
+  "chat.pin",
+  "chat.unpin",
+  "chat.rename",
+  "chat.renameProjectTitle",
+  "chat.renameProjectDescription",
+  "chat.renameProjectPlaceholder",
+  "chat.renameSave",
+  "chat.archive",
+  "chat.unarchive",
+  "chat.showArchived",
+  "chat.hideArchived",
+  "chat.groups.pinned",
+  "chat.groups.projects",
+  "chat.groups.today",
+  "chat.groups.yesterday",
+  "chat.groups.earlier",
+  "chat.groups.archived",
+  "thread.promptNavigator.railAria",
+  "thread.composer.mentions.cliTitle",
+  "thread.composer.mentions.mcpTitle",
+  "message.openLink",
+  "message.openAttachment",
+  "message.skill",
+  "settings.channels.connectionChecks",
+  "settings.channels.open",
+];
+const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
+  "settings.help.provider",
+  "settings.help.configPath",
+  "settings.help.selectedPreset",
+  "settings.help.maxResults",
+  "settings.help.timeout",
+  "settings.help.jinaReader",
+  "settings.help.imageGeneration",
+  "settings.help.imageProvider",
+  "settings.help.imageProviderStatus",
+  "settings.help.imageModel",
+  "settings.help.defaultAspectRatio",
+  "settings.help.timezone",
+  "settings.help.securityManagedControls",
+  "settings.help.selectedModelProvider",
+  "settings.help.selectedModelValue",
+  "settings.help.cliAppsCatalog",
+  "settings.help.cliAppsFilter",
+  "settings.help.logs",
+  "settings.help.diagnostics",
+  "settings.help.localServiceAccessNative",
+  "settings.help.webuiDefaultAccessNative",
+  "settings.status.savedRestart",
+  "settings.status.restartAfterSaving",
+  "settings.status.savedRestartApply",
+  "settings.status.imageProviderRestart",
+  "settings.status.hostRestartAfterSaving",
+  "settings.status.hostRestartPending",
+  "settings.status.hostApiUnavailable",
+  "settings.status.logsOpened",
+  "settings.status.logsOpenFailed",
+  "settings.status.diagnosticsExported",
+  "settings.status.diagnosticsExportFailed",
+  "settings.image.missingCredential",
+  "settings.oauth.signInHelp",
+];
+const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+const PREBOOT_SCRIPT = INDEX_HTML.match(
+  /<script>\s*(\(function \(\) \{\s*var localeKey = "nanobot\.locale";[\s\S]*?\}\)\(\);)\s*<\/script>/,
+)?.[1];
+const BOOT_COPY_MARKUP = '<span data-boot-copy>Loading nanobot…</span>';
+
+function runPrebootLocale(storedLocale: string) {
+  if (!PREBOOT_SCRIPT) throw new Error("Could not find the preboot locale script in index.html");
+
+  const documentElement = { lang: "" };
+  const meta = {
+    content: "",
+    setAttribute(name: string, value: string) {
+      if (name === "content") this.content = value;
+    },
+  };
+  const boot = { textContent: "" };
+
+  runInNewContext(PREBOOT_SCRIPT, {
+    localStorage: {
+      getItem: (key: string) => key === LOCALE_STORAGE_KEY ? storedLocale : null,
+    },
+    navigator: { languages: [], language: "en" },
+    document: {
+      documentElement,
+      querySelector: (selector: string) => {
+        if (selector === '[data-i18n-meta="description"]') return meta;
+        if (selector === "[data-boot-copy]") return boot;
+        return null;
+      },
+    },
+  });
+
+  return {
+    lang: documentElement.lang,
+    boot: boot.textContent,
+    description: meta.content,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -131,6 +382,39 @@ function interpolationKeys(value: unknown): string[] {
 }
 
 describe("webui i18n", () => {
+  it("runs preboot localization after the splash copy exists", () => {
+    expect(INDEX_HTML.indexOf(BOOT_COPY_MARKUP)).toBeGreaterThan(-1);
+    expect(INDEX_HTML.indexOf(PREBOOT_SCRIPT ?? "")).toBeGreaterThan(
+      INDEX_HTML.indexOf(BOOT_COPY_MARKUP),
+    );
+  });
+
+  it("keeps preboot copy aligned with every registered locale", () => {
+    for (const { code } of supportedLocales) {
+      const result = runPrebootLocale(code);
+      const expected = resources[code].common.app;
+
+      expect({ code, ...result }).toEqual({
+        code,
+        lang: code,
+        boot: expected.loading.boot,
+        description: expected.meta.description,
+      });
+    }
+  });
+
+  it("normalizes Portuguese locales before the app bundle loads", () => {
+    const expected = resources["pt-BR"].common.app;
+
+    for (const locale of ["pt", "pt-PT"]) {
+      expect(runPrebootLocale(locale)).toEqual({
+        lang: "pt-BR",
+        boot: expected.loading.boot,
+        description: expected.meta.description,
+      });
+    }
+  });
+
   it("defaults to English until the user chooses another language", () => {
     localStorage.removeItem(LOCALE_STORAGE_KEY);
     expect(resolveInitialLocale()).toBe("en");
@@ -269,7 +553,12 @@ describe("webui i18n", () => {
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
       const current = flattenResource(resource.common);
-      const leaked = LOCALIZED_SETTINGS_COPY_KEYS.filter(
+      const leaked = [
+        ...LOCALIZED_SETTINGS_COPY_KEYS,
+        ...LOCALIZED_WORKSPACE_COPY_KEYS,
+        ...LOCALIZED_CHANNEL_SHELL_KEYS,
+        ...LOCALIZED_NEW_SURFACE_KEYS,
+      ].filter(
         (key) => current.get(key) === english.get(key),
       );
 
@@ -280,10 +569,42 @@ describe("webui i18n", () => {
   it("keeps Simplified Chinese settings overview copy localized", () => {
     const settings = resources["zh-CN"].common.settings;
 
-    expect(settings.nav.browser).toBe("网页");
-    expect(settings.sections.webSearch).toBe("网页搜索");
-    expect(settings.byok.tabs.webSearch).toBe("网页搜索");
-    expect(settings.overview.webSearch).toBe("网页搜索");
+    expect(settings.nav.browser).toBe("网络");
+    expect(settings.sections.webSearch).toBe("网络搜索");
+    expect(settings.byok.tabs.webSearch).toBe("网络搜索");
+    expect(settings.overview.webSearch).toBe("网络搜索");
     expect(settings.overview.workspace).toBe("工作区");
+    expect(settings.skills.installedTab).toBe("已安装");
+    expect(settings.skills.discoverTab).toBe("发现");
+    expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
+    expect(settings.skills.marketplaceProviderAll).toBe("全部");
+    expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
+    expect(settings.skills.marketplaceTrendingTitle).toBe("各市场热门技能");
+  });
+
+  it("keeps Indonesian and Vietnamese settings free of copied Spanish help text", () => {
+    const spanish = flattenResource(resources.es.common);
+
+    for (const locale of ["id", "vi"] as const) {
+      const current = flattenResource(resources[locale].common);
+      const copied = ACCIDENTALLY_SPANISH_SETTINGS_KEYS.filter(
+        (key) => current.get(key) === spanish.get(key),
+      );
+      expect({ locale, copied }).toEqual({ locale, copied: [] });
+    }
+  });
+
+  it("keeps Brazilian Portuguese settings overview copy localized", () => {
+    const settings = resources["pt-BR"].common.settings;
+    const sidebar = resources["pt-BR"].common.sidebar;
+    const chat = resources["pt-BR"].common.chat;
+
+    expect(sidebar.settings).toBe("Configurações");
+    expect(chat.newChat).toBe("Novo tópico");
+    expect(settings.nav.browser).toBe("Web");
+    expect(settings.sections.webSearch).toBe("Busca na web");
+    expect(settings.byok.tabs.webSearch).toBe("Busca na web");
+    expect(settings.overview.webSearch).toBe("Busca na web");
+    expect(settings.overview.workspace).toBe("Espaço de trabalho");
   });
 });

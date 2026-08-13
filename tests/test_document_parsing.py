@@ -1,37 +1,16 @@
 """Tests for document text extraction utilities."""
 
 from pathlib import Path
+from zipfile import ZipFile
+
+import pytest
 
 from nanobot.utils.document import (
-    SUPPORTED_EXTENSIONS,
+    PdfSafetyError,
     _is_text_extension,
+    extract_pdf_pages,
     extract_text,
 )
-
-
-class TestSupportedExtensions:
-    """Test the SUPPORTED_EXTENSIONS constant."""
-
-    def test_supported_extensions_include_common_formats(self):
-        """Test that common document formats are included."""
-        # Document formats
-        assert ".pdf" in SUPPORTED_EXTENSIONS
-        assert ".docx" in SUPPORTED_EXTENSIONS
-        assert ".xlsx" in SUPPORTED_EXTENSIONS
-        assert ".pptx" in SUPPORTED_EXTENSIONS
-
-        # Text formats
-        assert ".txt" in SUPPORTED_EXTENSIONS
-        assert ".md" in SUPPORTED_EXTENSIONS
-        assert ".csv" in SUPPORTED_EXTENSIONS
-        assert ".json" in SUPPORTED_EXTENSIONS
-        assert ".yaml" in SUPPORTED_EXTENSIONS
-        assert ".yml" in SUPPORTED_EXTENSIONS
-
-        # Image formats
-        assert ".png" in SUPPORTED_EXTENSIONS
-        assert ".jpg" in SUPPORTED_EXTENSIONS
-        assert ".jpeg" in SUPPORTED_EXTENSIONS
 
 
 class TestExtractText:
@@ -61,6 +40,13 @@ class TestExtractText:
 
         result = extract_text(txt_file)
         assert result == content
+
+    def test_extract_text_accepts_string_path(self, tmp_path: Path):
+        """String paths retain the compatibility behavior of Path inputs."""
+        txt_file = tmp_path / "string-path.txt"
+        txt_file.write_text("string path", encoding="utf-8")
+
+        assert extract_text(str(txt_file)) == "string path"
 
     def test_extract_text_txt_file_with_truncation(self, tmp_path: Path):
         """Test that large text files are truncated."""
@@ -169,6 +155,130 @@ class TestExtractText:
         assert "This is paragraph one." in result
         assert "This is paragraph two." in result
 
+    def test_extract_text_docx_preserves_paragraph_and_table_order(self, tmp_path: Path):
+        """DOCX forms commonly keep nearly all meaningful content in tables."""
+        from docx import Document
+
+        docx_file = tmp_path / "form.docx"
+        doc = Document()
+        doc.add_paragraph("Applicant details")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Name"
+        table.cell(0, 1).text = "Ada Lovelace"
+        table.cell(1, 0).text = "Project"
+        table.cell(1, 1).text = "Analytical Engine"
+        doc.add_paragraph("End of form")
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Name\tAda Lovelace" in result
+        assert "Project\tAnalytical Engine" in result
+        assert result.index("Applicant details") < result.index("Name\tAda Lovelace")
+        assert result.index("Analytical Engine") < result.index("End of form")
+
+    def test_extract_text_docx_preserves_nested_table_text(self, tmp_path: Path):
+        """Nested layout tables must not silently drop form fields."""
+        from docx import Document
+
+        docx_file = tmp_path / "nested-form.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_paragraph("Contact")
+        nested = outer_cell.add_table(rows=1, cols=2)
+        nested.cell(0, 0).text = "Email"
+        nested.cell(0, 1).text = "ada@example.com"
+        outer_cell.add_paragraph("Preferred contact")
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Contact" in result
+        assert "Email" in result
+        assert "ada@example.com" in result
+        assert "Preferred contact" in result
+        assert (
+            result.index("Contact")
+            < result.index("Email")
+            < result.index("ada@example.com")
+            < result.index("Preferred contact")
+        )
+
+    def test_extract_text_docx_does_not_expand_grid_spans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Physical cells avoid python-docx's eager gridSpan expansion."""
+        from docx import Document
+        from docx.table import _Row
+
+        docx_file = tmp_path / "merged.docx"
+        doc = Document()
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).merge(table.cell(0, 1)).text = "Only once"
+        doc.save(docx_file)
+
+        def fail_on_expansion(_row: _Row):
+            pytest.fail("row.cells expands gridSpan before extraction can apply a bound")
+
+        monkeypatch.setattr(_Row, "cells", property(fail_on_expansion))
+
+        assert extract_text(docx_file) == "Only once"
+
+    def test_extract_text_docx_keeps_vertical_merges_compact(self, tmp_path: Path):
+        """Vertically merged labels appear once without shifting later columns."""
+        from docx import Document
+
+        docx_file = tmp_path / "vertical-merge.docx"
+        doc = Document()
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).merge(table.cell(1, 0)).text = "Group"
+        table.cell(0, 1).text = "First"
+        table.cell(1, 1).text = "Second"
+        doc.save(docx_file)
+
+        assert extract_text(docx_file) == "Group\tFirst\n\tSecond"
+
+    def test_extract_text_docx_bounds_physical_table_cells(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Large tables fail safely even when their text output would be empty."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "too-many-cells.docx"
+        doc = Document()
+        doc.add_table(rows=1, cols=2)
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_CELLS", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
+
+    def test_extract_text_docx_bounds_table_nesting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Deeply nested tables fail safely instead of recursing without a bound."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "nested-too-deep.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_table(rows=1, cols=1).cell(0, 0).text = "Nested"
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_DEPTH", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
+
     def test_extract_text_docx_empty(self, tmp_path: Path):
         """Test extracting text from an empty .docx file."""
         from docx import Document
@@ -251,6 +361,76 @@ class TestExtractText:
         result = extract_text(pptx_file)
         assert result is not None
         assert "Inside group" in result
+
+    def test_extract_text_rejects_oversized_office_archive(self, tmp_path, monkeypatch):
+        office_file = tmp_path / "oversized.docx"
+        with ZipFile(office_file, "w") as archive:
+            archive.writestr("word/document.xml", "x" * 32)
+
+        monkeypatch.setattr("nanobot.utils.document._MAX_OFFICE_UNCOMPRESSED_SIZE", 16)
+
+        assert "Office document expands beyond" in (extract_text(office_file) or "")
+
+    def test_extract_text_stops_streaming_xlsx_at_text_limit(self, tmp_path, monkeypatch):
+        from openpyxl import Workbook, load_workbook
+
+        xlsx_file = tmp_path / "large.xlsx"
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet()
+        for index in range(100):
+            ws.append([f"row-{index}-" + "x" * 20])
+        wb.save(xlsx_file)
+
+        visited = 0
+        real_load_workbook = load_workbook
+
+        def tracked_load_workbook(*args, **kwargs):
+            workbook = real_load_workbook(*args, **kwargs)
+            worksheet = workbook[workbook.sheetnames[0]]
+            original_iter_rows = worksheet.iter_rows
+
+            def tracked_rows(*row_args, **row_kwargs):
+                nonlocal visited
+                for row in original_iter_rows(*row_args, **row_kwargs):
+                    visited += 1
+                    yield row
+
+            worksheet.iter_rows = tracked_rows
+            return workbook
+
+        monkeypatch.setattr("openpyxl.load_workbook", tracked_load_workbook)
+        monkeypatch.setattr("nanobot.utils.document._MAX_TEXT_LENGTH", 80)
+
+        result = extract_text(xlsx_file)
+
+        assert result is not None
+        assert "truncated at 80 chars" in result
+        assert visited < 100
+
+    def test_extract_pdf_pages_rejects_large_content_stream(self, tmp_path, monkeypatch):
+        class _Contents:
+            @staticmethod
+            def get_data():
+                return b"x" * 17
+
+        class _Page:
+            @staticmethod
+            def get_contents():
+                return _Contents()
+
+            @staticmethod
+            def extract_text():
+                return "should not be reached"
+
+        class _Reader:
+            def __init__(self, *_args, **_kwargs):
+                self.pages = [_Page()]
+
+        monkeypatch.setattr("pypdf.PdfReader", _Reader)
+        monkeypatch.setattr("nanobot.utils.document._MAX_PDF_CONTENT_STREAM_SIZE", 16)
+
+        with pytest.raises(PdfSafetyError, match="content stream exceeds"):
+            extract_pdf_pages(tmp_path / "large.pdf")
 
     def test_extract_text_pdf_not_found(self, tmp_path: Path):
         """Test that missing PDF files return error string."""

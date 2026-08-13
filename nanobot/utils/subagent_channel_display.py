@@ -3,14 +3,13 @@
 Persisted subagent announcements mirror ``agent/subagent_announce.md``: header,
 full ``Task:`` assignment (model context), ``Result:``, and a trailing model-only
 ``Summarize…`` instruction. External channels (embedded WebUI, session previews)
-should show only the header plus a truncated result body."""
+should show only the header plus a truncated result body.
+"""
 
 from __future__ import annotations
 
-from typing import Any
-
-# Cap Result section length so WebSocket session replay stays readable; full text
-# remains on disk for LLM replay (we only mutate outgoing API copies in websocket).
+# Cap the Result section so session previews stay readable; full text remains on
+# disk for LLM replay.
 _SUBAGENT_CHANNEL_RESULT_MAX_CHARS = 800
 
 
@@ -44,16 +43,3 @@ def scrub_subagent_announce_body(content: str) -> str:
     if header and body:
         return f"{header}\n\n{body}"
     return header or body or stripped
-
-
-def scrub_subagent_messages_for_channel(messages: list[dict[str, Any]]) -> None:
-    """Mutate message dicts in place when they carry ``subagent_result`` inject."""
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        if msg.get("injected_event") != "subagent_result":
-            continue
-        raw = msg.get("content")
-        if not isinstance(raw, str) or not raw.strip():
-            continue
-        msg["content"] = scrub_subagent_announce_body(raw)

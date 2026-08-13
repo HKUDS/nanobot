@@ -24,6 +24,9 @@ except ImportError:
 
 pytest_plugins = ("pytest_asyncio",)
 
+API_KEY = "secret"
+AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
 
 # ---------------------------------------------------------------------------
 # Unit tests for SSE helpers
@@ -61,8 +64,7 @@ def test_sse_done_format() -> None:
 def _make_streaming_agent(tokens: list[str]) -> MagicMock:
     """Create a mock agent that streams tokens via on_stream callback."""
     agent = MagicMock()
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
 
     async def fake_process_direct(*, content="", media=None, session_key="",
                                   channel="", chat_id="", on_stream=None,
@@ -101,11 +103,12 @@ async def aiohttp_client():
 async def test_stream_true_returns_sse(aiohttp_client) -> None:
     """stream=true should return text/event-stream with SSE chunks."""
     agent = _make_streaming_agent(["Hello", " world"])
-    app = create_app(agent, model_name="test-model")
+    app = create_app(agent, model_name="test-model", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
     )
     assert resp.status == 200
@@ -132,15 +135,15 @@ async def test_stream_false_returns_json(aiohttp_client) -> None:
     """stream=false should still return regular JSON response."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="normal reply")
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}], "stream": False},
     )
     assert resp.status == 200
@@ -155,15 +158,15 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
     """Omitting stream should behave like stream=false."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="default reply")
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}]},
     )
     assert resp.status == 200
@@ -176,11 +179,12 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
 async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
     """All SSE chunks in a single stream should share the same id."""
     agent = _make_streaming_agent(["A", "B", "C"])
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "go"}], "stream": True},
     )
     body = await resp.text()
@@ -210,15 +214,15 @@ async def test_stream_passes_on_stream_callbacks(aiohttp_client) -> None:
 
     agent = MagicMock()
     agent.process_direct = fake_process_direct
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
     )
     assert resp.status == 200
@@ -243,15 +247,15 @@ async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
         return "planning final"
 
     agent.process_direct = fake_process_direct
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "use a tool"}], "stream": True},
     )
 
@@ -282,15 +286,15 @@ async def test_stream_uses_final_response_when_no_deltas(aiohttp_client) -> None
         return "plain final"
 
     agent.process_direct = fake_process_direct
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
     )
 
@@ -324,15 +328,15 @@ async def test_stream_with_session_id(aiohttp_client) -> None:
 
     agent = MagicMock()
     agent.process_direct = fake_process_direct
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
@@ -353,15 +357,15 @@ async def test_streaming_backend_failure_does_not_emit_success_terminator(aiohtt
         raise RuntimeError("backend blew up")
 
     agent.process_direct = boom
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
+    agent.aclose = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
     resp = await client.post(
         "/v1/chat/completions",
+        headers=AUTH_HEADERS,
         json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
     )
 

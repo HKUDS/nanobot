@@ -17,12 +17,32 @@ function googleFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 }
 
+function faviconImUrl(domain: string): string {
+  return `https://favicon.im/${encodeURIComponent(domain)}?larger=true`;
+}
+
 export function faviconUrls(domain: string): string[] {
   const faviconDomain = faviconDomainFromValue(domain);
   return [
     officialFaviconUrl(faviconDomain),
     duckDuckGoFaviconUrl(faviconDomain),
     googleFaviconUrl(domain),
+  ];
+}
+
+/**
+ * Cross-origin page favicons commonly opt into same-origin resource policy.
+ * Prefer image proxies for arbitrary links while retaining the official icon
+ * as a final fallback. Explicit first-party brand assets remain first when a
+ * provider supplies them.
+ */
+export function browserSafeFaviconUrls(domain: string): string[] {
+  const faviconDomain = faviconDomainFromValue(domain);
+  return [
+    faviconImUrl(faviconDomain),
+    googleFaviconUrl(domain),
+    duckDuckGoFaviconUrl(faviconDomain),
+    officialFaviconUrl(faviconDomain),
   ];
 }
 
@@ -33,7 +53,7 @@ function brand(
   logoOverrides: string[] = [],
 ): ProviderBrand {
   const logoUrls = [...logoOverrides];
-  faviconUrls(domain).forEach((url) => addUniqueLogoUrl(logoUrls, url));
+  browserSafeFaviconUrls(domain).forEach((url) => addUniqueLogoUrl(logoUrls, url));
   return {
     logoUrl: logoUrls[0],
     logoUrls,
@@ -60,10 +80,25 @@ function domainFromLogoUrl(url: string): string | null {
       const match = parsed.pathname.match(/^\/ip3\/(.+)\.ico$/);
       return match ? decodeURIComponent(match[1]) : null;
     }
+    if (host === "favicon.im") {
+      return decodeURIComponent(parsed.pathname.replace(/^\//, "")) || null;
+    }
     return host.replace(/^www\./, "");
   } catch {
     return null;
   }
+}
+
+/**
+ * A repository favicon identifies the hosting service, not the app itself.
+ * Apps backed by GitHub repositories should keep their distinct initials
+ * instead of appearing to share one GitHub identity.
+ */
+export function isGenericRepositoryLogoUrl(logoUrl: string | null | undefined): boolean {
+  const value = logoUrl?.trim();
+  if (!value) return false;
+  const domain = domainFromLogoUrl(value)?.toLowerCase();
+  return domain === "github.com" || domain?.startsWith("github.com/") === true;
 }
 
 function faviconDomainFromValue(value: string): string {
@@ -96,6 +131,8 @@ export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   minimaxAnthropic: "minimax",
   minimax_anthropic: "minimax",
   openai_codex: "openai",
+  "xai-grok": "xai",
+  xai_grok: "xai",
   xiaomi: "xiaomi_mimo",
   volcengine_coding_plan: "volcengine",
 };
@@ -106,6 +143,8 @@ export const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   minimaxAnthropic: "MiniMax",
   minimax_anthropic: "MiniMax",
   openai_codex: "OpenAI",
+  "xai-grok": "xAI",
+  xai_grok: "xAI",
   volcengine_coding_plan: "Volcengine",
 };
 
@@ -137,6 +176,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   ]),
   minimax: brand("minimax.io", "#111827", "MM"),
   mistral: brand("mistral.ai", "#FA520F", "M"),
+  modelscope: brand("modelscope.cn", "#5B5BF6", "MS"),
   moonshot: brand("moonshot.ai", "#111827", "MS"),
   novita: brand("novita.ai", "#7C3AED", "N"),
   olostep: brand("olostep.com", "#111827", "O"),
@@ -158,6 +198,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   xiaomi_mimo: brand("mimo.xiaomi.com", "#FF6900", "MI", [
     "https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg",
   ]),
+  xai: brand("x.ai", "#111827", "xAI"),
   zhipu: brand("z.ai", "#155EEF", "Z", [
     "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
     "https://www.google.com/s2/favicons?domain=z.ai&sz=64",
@@ -189,6 +230,7 @@ export function inferProviderFromModelName(modelName: string | null | undefined)
   if (/gpt-|^o\d|chatgpt|openai/.test(normalized)) return "openai";
   if (/deepseek/.test(normalized)) return "deepseek";
   if (/gemini/.test(normalized)) return "gemini";
+  if (/modelscope/.test(normalized)) return "modelscope";
   if (/qwen|dashscope/.test(normalized)) return "dashscope";
   if (/kimi|moonshot/.test(normalized)) return "moonshot";
   if (/minimax/.test(normalized)) return "minimax";

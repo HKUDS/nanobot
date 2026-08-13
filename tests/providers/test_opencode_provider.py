@@ -8,6 +8,7 @@ from nanobot.providers.registry import PROVIDERS, find_by_name
 def test_opencode_config_fields_exist() -> None:
     config = ProvidersConfig()
 
+    assert hasattr(config, "opencode")
     assert hasattr(config, "opencode_zen")
     assert hasattr(config, "opencode_go")
 
@@ -15,7 +16,7 @@ def test_opencode_config_fields_exist() -> None:
 def test_opencode_specs_use_openai_compatible_gateways() -> None:
     specs = {spec.name: spec for spec in PROVIDERS}
 
-    zen = specs["opencode_zen"]
+    zen = specs["opencode"]
     assert zen.backend == "openai_compat"
     assert zen.env_key == "OPENCODE_API_KEY"
     assert zen.display_name == "OpenCode Zen"
@@ -23,6 +24,10 @@ def test_opencode_specs_use_openai_compatible_gateways() -> None:
     assert zen.detect_by_base_keyword == "opencode.ai/zen"
     assert zen.default_api_base == "https://opencode.ai/zen/v1"
     assert "opencode" in zen.strip_model_prefixes
+
+    zen_compat = specs["opencode_zen"]
+    assert zen_compat.env_key == "OPENCODE_API_KEY"
+    assert zen_compat.default_api_base == zen.default_api_base
 
     go = specs["opencode_go"]
     assert go.backend == "openai_compat"
@@ -35,6 +40,10 @@ def test_opencode_specs_use_openai_compatible_gateways() -> None:
 
 
 def test_find_by_name_opencode_providers() -> None:
+    canonical = find_by_name("opencode")
+    assert canonical is not None
+    assert canonical.name == "opencode"
+
     zen = find_by_name("opencode_zen")
     assert zen is not None
     assert zen.name == "opencode_zen"
@@ -47,14 +56,25 @@ def test_find_by_name_opencode_providers() -> None:
 def test_opencode_forced_providers_use_default_api_base() -> None:
     zen_config = Config.model_validate(
         {
+            "providers": {"opencode": {"apiKey": "opencode-key"}},
+            "agents": {"defaults": {"provider": "opencode", "model": "opencode/o3"}},
+        }
+    )
+
+    assert zen_config.get_provider_name() == "opencode"
+    assert zen_config.get_api_key() == "opencode-key"
+    assert zen_config.get_api_base() == "https://opencode.ai/zen/v1"
+
+    legacy_zen_config = Config.model_validate(
+        {
             "providers": {"opencodeZen": {"apiKey": "opencode-key"}},
             "agents": {"defaults": {"provider": "opencode_zen", "model": "opencode/o3"}},
         }
     )
 
-    assert zen_config.get_provider_name() == "opencode_zen"
-    assert zen_config.get_api_key() == "opencode-key"
-    assert zen_config.get_api_base() == "https://opencode.ai/zen/v1"
+    assert legacy_zen_config.get_provider_name() == "opencode_zen"
+    assert legacy_zen_config.get_api_key() == "opencode-key"
+    assert legacy_zen_config.get_api_base() == "https://opencode.ai/zen/v1"
 
     go_config = Config.model_validate(
         {
@@ -72,7 +92,7 @@ def test_opencode_prefixes_are_stripped_before_request() -> None:
     zen_provider = OpenAICompatProvider(
         api_key=None,
         default_model="opencode/o3",
-        spec=find_by_name("opencode_zen"),
+        spec=find_by_name("opencode"),
     )
     zen_kwargs = zen_provider._build_kwargs(
         messages=[{"role": "user", "content": "hi"}],

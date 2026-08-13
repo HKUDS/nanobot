@@ -1,0 +1,92 @@
+{
+  "description": "Permettez à nanobot de recevoir et répondre aux e-mails.",
+  "requirements": "Boîte IMAP, envoi SMTP, mot de passe d’application et consentement explicite",
+  "setup": {
+    "docsLabel": "Ouvrir le guide Email",
+    "officialLabel": "Ouvrir le guide des mots de passe d’application",
+    "tryIt": "Envoyez un e-mail test à la boîte connectée.",
+    "summary": "Email lit les messages via IMAP et répond via SMTP. Utilisez une boîte dédiée et accordez votre consentement avant l’activation.",
+    "steps": [
+      "Créez une boîte dédiée et, si nécessaire, un mot de passe d’application.",
+      "Choisissez un fournisseur ou saisissez les paramètres IMAP et SMTP.",
+      "Accordez le consentement, enregistrez et activez Email, puis envoyez un message test."
+    ],
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud",
+      "custom": "Personnalisé"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Consentement accordé",
+        "help": "Sécurité obligatoire. N’activez qu’après avoir choisi de connecter cette boîte au bot.",
+        "choices": {
+          "true": "Accordé",
+          "false": "Non accordé"
+        }
+      },
+      "imapHost": {
+        "label": "Hôte IMAP",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "Nom d’utilisateur IMAP",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "Mot de passe IMAP",
+        "placeholder": "Mot de passe d’application",
+        "help": "Utilisez un mot de passe d’application si le fournisseur l’exige."
+      },
+      "smtpHost": {
+        "label": "Hôte SMTP",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "Nom d’utilisateur SMTP",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "Mot de passe SMTP",
+        "placeholder": "Mot de passe d’application",
+        "help": "Généralement identique à celui d’IMAP."
+      },
+      "imapPort": {
+        "label": "Port IMAP",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "Port SMTP",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "Adresse d’envoi",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Intervalle de relève",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Expéditeurs autorisés",
+        "placeholder": "Adresses séparées par des virgules",
+        "help": "Laissez vide pour imposer l’association avant utilisation."
+      },
+      "verifyDkim": {
+        "label": "Vérifier DKIM",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "verifySpf": {
+        "label": "Vérifier SPF",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      }
+    }
+  }
+}

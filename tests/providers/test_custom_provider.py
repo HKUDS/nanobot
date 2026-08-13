@@ -49,11 +49,72 @@ def test_custom_provider_parse_accepts_dict_response() -> None:
     assert result.usage["total_tokens"] == 3
 
 
+def test_custom_provider_parse_normalizes_text_tool_call() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse({
+        "choices": [{
+            "message": {
+                "content": (
+                    "I'll inspect it.\n"
+                    '<tool_call>{"name":"read_file","arguments":{"path":"README.md"}}'
+                    "</tool_call>"
+                ),
+            },
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.content == "I'll inspect it."
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "read_file"
+    assert result.tool_calls[0].arguments == {"path": "README.md"}
+
+
+def test_custom_provider_parse_keeps_structured_tool_call_over_text_markup() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse({
+        "choices": [{
+            "message": {
+                "content": '<tool_call>{"name":"ignored","arguments":{}}</tool_call>',
+                "tool_calls": [{
+                    "id": "call_structured",
+                    "function": {"name": "list_dir", "arguments": '{"path":"."}'},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+    })
+
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].id == "call_structured"
+    assert result.tool_calls[0].name == "list_dir"
+
+
 def test_custom_provider_parse_chunks_accepts_plain_text_chunks() -> None:
     result = OpenAICompatProvider._parse_chunks(["hello ", "world"])
 
     assert result.finish_reason == "stop"
     assert result.content == "hello world"
+
+
+def test_custom_provider_parse_chunks_normalizes_split_text_tool_call() -> None:
+    chunks = [
+        {"choices": [{"delta": {"content": "<tool_call>"}}]},
+        {"choices": [{"delta": {"content": '{"name":"list_dir",'}}]},
+        {"choices": [{"delta": {"content": '"arguments":{"path":"."}}</tool_call>'}}]},
+        {"choices": [{"finish_reason": "stop", "delta": {}}]},
+    ]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert result.content is None
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "list_dir"
+    assert result.tool_calls[0].arguments == {"path": "."}
 
 
 def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> None:

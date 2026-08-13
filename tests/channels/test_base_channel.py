@@ -84,6 +84,49 @@ async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dm_during_transient_store_failure_keeps_approvals(
+    tmp_path, monkeypatch
+) -> None:
+    """An unapproved DM while pairing.json is unreadable must not wipe approvals.
+
+    The pairing store treated a transient OSError like corruption and returned
+    an empty store; the DM pairing path then persisted that empty view,
+    erasing every approved sender.
+    """
+    import builtins
+    from pathlib import Path
+
+    from nanobot.pairing import store
+
+    path = tmp_path / "pairing.json"
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    code = store.generate_code("dummy", "friend")
+    store.approve_code(code)
+
+    channel = _DummyChannel({"allowFrom": []}, MessageBus())
+
+    real_open = builtins.open
+
+    def flaky_open(file, mode="r", *args, **kwargs):
+        try:
+            same = Path(file) == path
+        except TypeError:
+            same = False
+        if same and "r" in mode and "+" not in mode:
+            raise PermissionError(13, "temporarily locked", str(path))
+        return real_open(file, mode, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(builtins, "open", flaky_open)
+        await channel._handle_message(
+            sender_id="stranger", chat_id="chat1", content="hello", is_dm=True
+        )
+
+    assert channel._sent == []
+    assert store.is_approved("dummy", "friend") is True
+
+
+@pytest.mark.asyncio
 async def test_handle_message_group_ignores_unknown() -> None:
     channel = _DummyChannel({"allowFrom": []}, MessageBus())
 
@@ -92,4 +135,36 @@ async def test_handle_message_group_ignores_unknown() -> None:
     )
 
     assert channel._sent == []
+
+
+@pytest.mark.asyncio
+async def test_handle_message_uses_authorization_id_without_changing_sender() -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["group@g.us"]}, bus)
+
+    await channel._handle_message(
+        sender_id="member-lid",
+        authorization_id="group@g.us",
+        chat_id="group@g.us",
+        content="hello",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "member-lid"
+    assert msg.chat_id == "group@g.us"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_rejects_when_authorization_id_is_not_allowed() -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["member-lid"]}, bus)
+
+    await channel._handle_message(
+        sender_id="member-lid",
+        authorization_id="other-group@g.us",
+        chat_id="other-group@g.us",
+        content="hello",
+    )
+
+    assert bus.inbound_size == 0
 

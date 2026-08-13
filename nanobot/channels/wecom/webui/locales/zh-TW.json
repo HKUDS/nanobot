@@ -1,0 +1,32 @@
+{
+  "displayName": "企業微信",
+  "description": "在企業微信工作對話中使用 nanobot。",
+  "requirements": "企業微信應用程式憑證和回呼設定",
+  "setup": {
+    "docsLabel": "開啟企業微信設定指南",
+    "officialLabel": "開啟企業微信管理後台",
+    "tryIt": "向企業微信機器人傳送一則測試訊息。",
+    "summary": "企業微信需要管理後台中 AI 機器人的 Bot ID 和 Secret。",
+    "steps": [
+      "在企業微信中建立 AI 機器人並選擇 API 模式。",
+      "將 Bot ID 和 Secret 複製到 nanobot。",
+      "儲存並啟用企業微信，然後傳送一則測試訊息。"
+    ],
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "企業微信 Bot ID",
+        "help": "從企業微信 AI 機器人 API 模式頁面複製。"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "請妥善保管企業微信機器人 Secret。"
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "使用者 ID，以逗號分隔"
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+"""Personal WeChat channel package."""

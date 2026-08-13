@@ -1,0 +1,39 @@
+{
+  "description": "在 Discord 服务器和私信中使用 nanobot。",
+  "requirements": "Discord 机器人令牌、权限和网关",
+  "setup": {
+    "docsLabel": "打开 Discord 配置指南",
+    "officialLabel": "打开 Discord 开发者后台",
+    "tryIt": "在服务器中提及机器人，或向它发送私信。",
+    "summary": "启用只会打开 Discord 支持；还需要机器人令牌和服务器权限。",
+    "steps": [
+      "在 Discord Developer Portal 中创建机器人并复制令牌。",
+      "将机器人邀请到服务器，并授予读取/发送消息及斜杠命令权限。",
+      "保存并启用 Discord，然后提及机器人或发送私信。"
+    ],
+    "fields": {
+      "token": {
+        "label": "机器人令牌",
+        "placeholder": "Discord 机器人令牌",
+        "help": "从 Discord Developer Portal 的 Bot 页面创建。"
+      },
+      "allowChannels": {
+        "label": "允许的频道",
+        "placeholder": "频道 ID，用逗号分隔",
+        "help": "留空则允许机器人可读取的所有频道。"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      }
+    }
+  }
+}
