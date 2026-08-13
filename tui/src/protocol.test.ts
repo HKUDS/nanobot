@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NanobotClient,
   fetchHistory,
+  fetchSessions,
   fetchSlashCommands,
   type InboundEvent,
 } from "./protocol"
@@ -70,12 +71,16 @@ describe("gateway protocol", () => {
       })
       socket.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "terminal" }) })
       client.send("hello")
+      client.attach("other-chat")
+      client.newChat()
 
       const outbound = socket.sent.map((value) => JSON.parse(value) as Record<string, unknown>)
       expect(outbound[0]).toEqual({ type: "attach", chat_id: "terminal" })
       expect(outbound[1]?.type).toBe("message")
       expect(outbound[1]?.chat_id).toBe("terminal")
       expect(outbound[1]?.content).toBe("hello")
+      expect(outbound[2]).toEqual({ type: "attach", chat_id: "other-chat" })
+      expect(outbound[3]).toEqual({ type: "new_chat" })
       expect(events.map((event) => event.event)).toEqual(["ready", "attached"])
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
@@ -236,6 +241,37 @@ describe("gateway protocol", () => {
         acceptsArgs: true,
       }])
       expect(authorization).toBe("Bearer secret")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads and normalizes WebUI sessions", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
+      sessions: [
+        {
+          key: "websocket:chat-1",
+          title: "Release plan",
+          preview: "Prepare the release",
+          created_at: "2026-08-12T10:00:00Z",
+          updated_at: "2026-08-13T10:00:00Z",
+          run_started_at: 123,
+        },
+        { key: "cli:direct", title: "Not a WebUI session" },
+        { key: 42 },
+      ],
+    })))) as unknown as typeof fetch
+
+    try {
+      expect(await fetchSessions("http://nanobot.test", "secret")).toEqual([{
+        chatId: "chat-1",
+        title: "Release plan",
+        preview: "Prepare the release",
+        createdAt: "2026-08-12T10:00:00Z",
+        updatedAt: "2026-08-13T10:00:00Z",
+        runStartedAt: 123,
+      }])
     } finally {
       globalThis.fetch = original
     }

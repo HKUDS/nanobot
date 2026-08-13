@@ -15,3 +15,6 @@ The renderer uses OpenTUI's retained full-screen layout: the transcript reflows 
 
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
+
+Use `/sessions` or `/resume` to search and switch persisted conversations without leaving the
+terminal. `/new` starts a separate conversation while preserving the current one in history.

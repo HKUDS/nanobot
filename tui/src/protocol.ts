@@ -95,6 +95,15 @@ export interface SlashCommand {
   acceptsArgs: boolean
 }
 
+export interface SessionSummary {
+  chatId: string
+  title: string
+  preview: string
+  createdAt: string | null
+  updatedAt: string | null
+  runStartedAt: number | null
+}
+
 const SLASH_COMMAND_LIFECYCLES = new Set([
   "side_channel",
   "finalize_active_turn",
@@ -271,6 +280,33 @@ export async function fetchSlashCommands(
   })
 }
 
+export async function fetchSessions(
+  apiUrl: string,
+  apiToken: string,
+): Promise<SessionSummary[]> {
+  if (!apiUrl || !apiToken) return []
+  const response = await fetch(`${apiUrl}/api/sessions`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+  })
+  if (!response.ok) throw new Error(`session request failed: HTTP ${response.status}`)
+  const payload = await response.json() as { sessions?: unknown[] }
+  return (payload.sessions || []).flatMap((value) => {
+    if (!isRecord(value) || typeof value.key !== "string" || !value.key.startsWith("websocket:")) {
+      return []
+    }
+    const chatId = value.key.slice("websocket:".length)
+    if (!chatId) return []
+    return [{
+      chatId,
+      title: typeof value.title === "string" ? value.title : "",
+      preview: typeof value.preview === "string" ? value.preview : "",
+      createdAt: typeof value.created_at === "string" ? value.created_at : null,
+      updatedAt: typeof value.updated_at === "string" ? value.updated_at : null,
+      runStartedAt: typeof value.run_started_at === "number" ? value.run_started_at : null,
+    }]
+  })
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
@@ -336,6 +372,15 @@ export class NanobotClient {
       webui: true,
     })
     return turnId
+  }
+
+  attach(chatId: string): void {
+    if (!chatId) throw new Error("chat id is required")
+    this.write({ type: "attach", chat_id: chatId })
+  }
+
+  newChat(): void {
+    this.write({ type: "new_chat" })
   }
 
   private handleMessage(raw: string): void {

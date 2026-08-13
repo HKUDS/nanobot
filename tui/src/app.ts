@@ -16,11 +16,14 @@ import {
 import {
   NanobotClient,
   fetchHistory,
+  fetchSessions,
   fetchSlashCommands,
   type ConnectionStatus,
   type InboundEvent,
+  type SlashCommand,
 } from "./protocol"
 import { CommandMenu, type CommandMenuTheme } from "./command-menu"
+import { SessionMenu } from "./session-menu"
 import { Transcript, type TranscriptTheme } from "./transcript"
 
 interface AppOptions {
@@ -40,6 +43,8 @@ interface ChatClient {
   connect(): void
   close(): void
   send(content: string): string
+  attach(chatId: string): void
+  newChat(): void
 }
 
 interface Palette {
@@ -85,6 +90,29 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
+const LOCAL_COMMANDS: SlashCommand[] = [
+  {
+    command: "/sessions",
+    title: "Sessions",
+    description: "Find and switch conversations",
+    argHint: "",
+    acceptsArgs: false,
+  },
+  {
+    command: "/resume",
+    title: "Resume",
+    description: "Find and switch conversations",
+    argHint: "",
+    acceptsArgs: false,
+  },
+  {
+    command: "/new",
+    title: "New chat",
+    description: "Start a separate conversation",
+    argHint: "",
+    acceptsArgs: false,
+  },
+]
 
 function syntaxStyle(palette: Palette): SyntaxStyle {
   const color = (value: string) => {
@@ -161,6 +189,7 @@ export class NanobotTui {
   private readonly renderer: CliRenderer
   private readonly transcript: Transcript
   private readonly commandMenu: CommandMenu
+  private readonly sessionMenu: SessionMenu
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: TextRenderable
@@ -190,6 +219,8 @@ export class NanobotTui {
   private historyDraft = ""
   private modelName: string
   private quitting = false
+  private sessionLoadId = 0
+  private sessionLoading = false
 
   private constructor(
     renderer: CliRenderer,
@@ -203,6 +234,7 @@ export class NanobotTui {
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
+    this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
     this.client = client || new NanobotClient({
       url: options.wsUrl,
       chatId: options.chatId,
@@ -262,7 +294,8 @@ export class NanobotTui {
       ],
       onContentChange: () => {
         this.syncComposerPlaceholder()
-        this.syncCommandMenu()
+        if (this.sessionMenu.visible) this.syncSessionMenu()
+        else this.syncCommandMenu()
         this.resizeComposer()
       },
       // IMEs may commit their final composed glyph after Enter. Matching the
@@ -302,6 +335,7 @@ export class NanobotTui {
     statusRow.add(this.meta)
     this.shell.add(this.transcript.root)
     this.shell.add(this.commandMenu.root)
+    this.shell.add(this.sessionMenu.root)
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
@@ -372,12 +406,29 @@ export class NanobotTui {
   private submit(): void {
     if (this.quitting || this.composer.isDestroyed) return
     const content = this.composer.plainText.trim()
+    if (this.sessionLoading) {
+      this.status.content = "Loading sessions…"
+      return
+    }
+    if (this.sessionMenu.visible) {
+      const session = this.sessionMenu.choose()
+      if (session) this.switchSession(session.chatId)
+      return
+    }
     if (!content) return
     const completion = this.commandMenu.completion(content)
     if (completion) {
       this.setComposer(completion)
       this.commandMenu.hide()
       this.updateMeta()
+      return
+    }
+    if (["/sessions", "/resume", "/continue"].includes(content.toLocaleLowerCase())) {
+      void this.openSessions()
+      return
+    }
+    if (content.toLocaleLowerCase() === "/new") {
+      this.startNewChat()
       return
     }
     if (!this.ready) {
@@ -596,6 +647,24 @@ export class NanobotTui {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.sessionLoading && key.name === "escape") {
+      this.closeSessions()
+      this.status.content = "Ready"
+      key.preventDefault()
+      return
+    }
+    if (this.sessionMenu.visible) {
+      if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
+        this.sessionMenu.move(key.name === "up" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
+      if (key.name === "escape") {
+        this.closeSessions()
+        key.preventDefault()
+        return
+      }
+    }
     if (this.commandMenu.visible) {
       if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
         this.commandMenu.move(key.name === "up" ? -1 : 1)
@@ -710,6 +779,7 @@ export class NanobotTui {
     this.palette = mode === "light" ? LIGHT : DARK
     this.transcript.setTheme(transcriptTheme(this.palette))
     this.commandMenu.setTheme(commandMenuTheme(this.palette))
+    this.sessionMenu.setTheme(commandMenuTheme(this.palette))
     this.composerFrame.borderColor = this.palette.border
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
@@ -736,6 +806,12 @@ export class NanobotTui {
         : "tab complete · esc close"
       return
     }
+    if (this.sessionMenu.visible) {
+      this.meta.content = this.renderer.width >= 64
+        ? "type to filter · ↑↓ choose · enter open · esc close"
+        : "enter open · esc close"
+      return
+    }
     this.meta.content = this.renderer.width >= 112
       ? "enter send · alt+enter newline · pgup/pgdn scroll · ctrl+o tools · ctrl+c stop"
       : this.renderer.width >= 72
@@ -760,7 +836,9 @@ export class NanobotTui {
     // OpenTUI normally suppresses placeholder glyphs while the editor is not
     // empty. Explicitly removing them also invalidates their old cells, which
     // prevents stale placeholder text in differential/embedded terminals.
-    const placeholder = this.composer.plainText ? null : COMPOSER_PLACEHOLDER
+    const placeholder = this.composer.plainText
+      ? null
+      : this.sessionMenu.visible ? "Search sessions" : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 
@@ -770,22 +848,104 @@ export class NanobotTui {
     this.updateMeta()
   }
 
+  private syncSessionMenu(): void {
+    const limit = this.renderer.height >= 20 ? 8 : 4
+    this.sessionMenu.update(this.composer.plainText, limit)
+    this.updateMeta()
+  }
+
   private setComposer(content: string): void {
     this.composer.setText(content)
     this.composer.cursorOffset = content.length
   }
 
   private async loadCommands(): Promise<void> {
+    let discovered: SlashCommand[] = []
     try {
-      this.commandMenu.setCommands(await fetchSlashCommands(
+      discovered = await fetchSlashCommands(
         this.options.apiUrl,
         this.options.apiToken,
-      ))
-      this.syncCommandMenu()
+      )
     } catch {
-      // Command discovery is an enhancement; chat stays usable if the
-      // version-matched gateway does not expose the catalog yet.
+      // Local navigation remains available against older gateways.
     }
+    const commands = new Map(discovered.map((command) => [command.command, command]))
+    for (const command of LOCAL_COMMANDS) commands.set(command.command, command)
+    this.commandMenu.setCommands([...commands.values()])
+    this.syncCommandMenu()
+  }
+
+  private async openSessions(): Promise<void> {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    this.commandMenu.hide()
+    this.composer.setText("")
+    this.sessionLoading = true
+    const loadId = ++this.sessionLoadId
+    this.status.content = "Loading sessions…"
+    try {
+      const sessions = await fetchSessions(this.options.apiUrl, this.options.apiToken)
+      if (this.quitting || loadId !== this.sessionLoadId) return
+      this.sessionLoading = false
+      const limit = this.renderer.height >= 20 ? 8 : 4
+      this.sessionMenu.open(sessions, this.client.activeChatId, limit)
+      this.syncComposerPlaceholder()
+      this.updateMeta()
+      this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
+    } catch (error) {
+      if (loadId !== this.sessionLoadId) return
+      this.sessionLoading = false
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private switchSession(chatId: string): void {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    this.closeSessions()
+    if (chatId === this.client.activeChatId) {
+      this.status.content = "Ready"
+      return
+    }
+    try {
+      this.ready = false
+      this.status.content = "Opening session…"
+      this.client.attach(chatId)
+    } catch (error) {
+      this.ready = true
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private startNewChat(): void {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    this.commandMenu.hide()
+    this.sessionMenu.hide()
+    this.composer.setText("")
+    try {
+      this.ready = false
+      this.status.content = "Starting a new chat…"
+      this.client.newChat()
+    } catch (error) {
+      this.ready = true
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private closeSessions(): void {
+    this.sessionLoadId += 1
+    this.sessionLoading = false
+    this.sessionMenu.hide()
+    this.composer.setText("")
+    this.syncComposerPlaceholder()
+    this.updateMeta()
   }
 
   private async copySelection(text: string): Promise<void> {

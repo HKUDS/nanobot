@@ -41,7 +41,7 @@ async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<voi
   if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
-function client(sent: string[] = []) {
+function client(sent: string[] = [], attached: string[] = [], newChats: string[] = []) {
   return {
     activeChatId: "chat",
     connect() {},
@@ -49,6 +49,12 @@ function client(sent: string[] = []) {
     send(content: string) {
       sent.push(content)
       return "turn"
+    },
+    attach(chatId: string) {
+      attached.push(chatId)
+    },
+    newChat() {
+      newChats.push("new")
     },
   }
 }
@@ -229,6 +235,105 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("/history ")
     expect(ui.commandMenu.visible).toBe(false)
     expect(sent).toEqual([])
+  })
+
+  test("switches and creates gateway chats without sending agent commands", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
+      sessions: [
+        {
+          key: "websocket:chat",
+          title: "Current chat",
+          preview: "Current work",
+          updated_at: "2026-08-13T10:00:00Z",
+        },
+        {
+          key: "websocket:other",
+          title: "Release checklist",
+          preview: "Prepare stable release",
+          updated_at: "2026-08-12T10:00:00Z",
+        },
+      ],
+    })))) as unknown as typeof fetch
+    const attached: string[] = []
+    const newChats: string[] = []
+    const transport = client([], attached, newChats)
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean }
+    }
+
+    try {
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+      await waitUntil(() => ui.sessionMenu.visible)
+      expect(ui.composer.placeholder).toBe("Search sessions")
+
+      ui.composer.setText("release")
+      ui.composer.submit()
+      await waitUntil(() => attached.length === 1)
+      expect(attached).toEqual(["other"])
+
+      app.accept({ event: "attached", chat_id: "other" })
+      await Bun.sleep(1)
+      ui.composer.setText("/new")
+      ui.composer.submit()
+      await waitUntil(() => newChats.length === 1)
+      expect(newChats).toEqual(["new"])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("blocks sends and ignores late session results after closing the picker", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let resolveFetch: ((response: Response) => void) | undefined
+    globalThis.fetch = (() => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })) as unknown as typeof fetch
+    const sent: string[] = []
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean }
+      sessionLoading: boolean
+    }
+
+    try {
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+      await waitUntil(() => ui.sessionLoading)
+      ui.composer.setText("do not send")
+      ui.composer.submit()
+      await Bun.sleep(10)
+      expect(sent).toEqual([])
+
+      setup.mockInput.pressEscape()
+      await Bun.sleep(10)
+      resolveFetch?.(new Response(JSON.stringify({ sessions: [] })))
+      await Bun.sleep(10)
+      expect(ui.sessionMenu.visible).toBe(false)
+      expect(ui.composer.plainText).toBe("")
+    } finally {
+      globalThis.fetch = original
+    }
   })
 
   test("survives rapid narrow resizes with long CJK and code", async () => {
