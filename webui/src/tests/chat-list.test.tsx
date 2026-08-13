@@ -49,8 +49,9 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Tab: Root topic" }))
-      .toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Tab: Root topic" }).closest(
+      "[data-workbench-tab]",
+    )).toHaveAttribute("draggable", "false");
     const pane = screen.getByRole("button", { name: "Research pane" });
     expect(pane).toHaveAttribute("draggable", "true");
     const dataTransfer = {
@@ -279,12 +280,15 @@ describe("ChatList", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(child).toHaveAttribute("draggable", "true");
-    expect(screen.getByRole("button", { name: "Tab: Target tab" }))
-      .toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Tab: Target tab" }).closest(
+      "[data-workbench-tab]",
+    )).toHaveAttribute("draggable", "false");
   });
 
   it("reorders sessions with an insertion line and groups them through drag targets", async () => {
     const onReorderSession = vi.fn();
+    const onReorderPane = vi.fn();
+    const onReorderGroup = vi.fn();
     const onGroupSessions = vi.fn();
     const onAttachPane = vi.fn();
     const createDataTransfer = () => {
@@ -344,6 +348,8 @@ describe("ChatList", () => {
           },
         }}
         onReorderSession={onReorderSession}
+        onReorderPane={onReorderPane}
+        onReorderGroup={onReorderGroup}
         onGroupSessions={onGroupSessions}
         onAttachPane={onAttachPane}
         onSelect={vi.fn()}
@@ -438,9 +444,37 @@ describe("ChatList", () => {
     const attachTransfer = createDataTransfer();
     fireEvent.dragStart(source, { dataTransfer: attachTransfer });
     const groupSurface = document.querySelector("[data-workbench-tab-surface]")!;
+    const groupHeader = screen.getByRole("button", { name: "Tab: Existing group" });
+    expect(groupHeader).toHaveAttribute("draggable", "true");
     fireEvent.dragOver(groupSurface, { dataTransfer: attachTransfer });
     fireEvent.drop(groupSurface, { dataTransfer: attachTransfer });
     expect(onAttachPane).toHaveBeenCalledWith("websocket:source", "tab:group");
+
+    const paneReorderTransfer = createDataTransfer();
+    const secondPane = screen.getByRole("button", { name: "Group B" });
+    const firstPaneItem = screen.getByRole("button", { name: "Group A" }).closest("li")!;
+    vi.spyOn(firstPaneItem, "getBoundingClientRect").mockReturnValue({
+      top: 50,
+      bottom: 82,
+      left: 0,
+      right: 200,
+      width: 200,
+      height: 32,
+      x: 0,
+      y: 50,
+      toJSON: () => ({}),
+    });
+    fireEvent.dragStart(secondPane, { dataTransfer: paneReorderTransfer });
+    fireEvent.dragOver(firstPaneItem, { dataTransfer: paneReorderTransfer, clientY: 52 });
+    expect(firstPaneItem.querySelector('[data-session-drop-line="before"]'))
+      .toBeInTheDocument();
+    fireEvent.drop(firstPaneItem, { dataTransfer: paneReorderTransfer, clientY: 52 });
+    expect(onReorderPane).toHaveBeenCalledWith(
+      "tab:group",
+      "websocket:group-b",
+      "websocket:group-a",
+      "before",
+    );
 
     const groupBeforeZones = document.querySelectorAll(
       '[data-sidebar-tab-group] [data-session-block-drop-zone="before"]',
@@ -458,6 +492,27 @@ describe("ChatList", () => {
       "websocket:source",
       "websocket:group-a",
       "before",
+    );
+
+    const groupMoveTransfer = createDataTransfer();
+    fireEvent.dragStart(groupHeader, { dataTransfer: groupMoveTransfer });
+    const targetItemForGroup = targetRow.closest("li")!;
+    const groupMoveOver = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(groupMoveOver, {
+      clientY: { value: 41 },
+      dataTransfer: { value: groupMoveTransfer },
+    });
+    fireEvent(targetItemForGroup, groupMoveOver);
+    const groupMoveDrop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(groupMoveDrop, {
+      clientY: { value: 41 },
+      dataTransfer: { value: groupMoveTransfer },
+    });
+    fireEvent(targetItemForGroup, groupMoveDrop);
+    expect(onReorderGroup).toHaveBeenCalledWith(
+      "tab:group",
+      "websocket:target",
+      "after",
     );
 
     const firstPane = screen.getByRole("button", { name: "Group A" });

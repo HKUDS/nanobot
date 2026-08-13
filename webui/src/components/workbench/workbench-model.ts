@@ -485,6 +485,86 @@ export function moveSessionBesideWorkbenchBlock(
   return withoutSource;
 }
 
+export function moveWorkbenchTabBlock(
+  state: WorkbenchState,
+  orderedSessionKeys: readonly string[],
+  sourceTabKey: string,
+  targetPaneKey: string,
+  edge: "before" | "after",
+): string[] {
+  const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
+  const sourceTab = state.tabs[sourceTabKey];
+  if (!sourceTab || !contiguousOrder.includes(targetPaneKey)) return contiguousOrder;
+
+  const targetTab = workbenchTabForPane(state, targetPaneKey);
+  if (targetTab.tabKey === sourceTabKey) return contiguousOrder;
+  const sourceKeys = new Set(sourceTab.paneKeys);
+  const sourceBlock = contiguousOrder.filter((key) => sourceKeys.has(key));
+  const withoutSource = contiguousOrder.filter((key) => !sourceKeys.has(key));
+  const targetBlock = targetTab.tab.paneKeys.filter((key) => withoutSource.includes(key));
+  const targetIndexes = targetBlock
+    .map((key) => withoutSource.indexOf(key))
+    .filter((index) => index >= 0);
+  if (sourceBlock.length === 0 || targetIndexes.length === 0) return contiguousOrder;
+  const insertIndex = edge === "before"
+    ? Math.min(...targetIndexes)
+    : Math.max(...targetIndexes) + 1;
+  withoutSource.splice(insertIndex, 0, ...sourceBlock);
+  return withoutSource;
+}
+
+export function reorderWorkbenchPane(
+  state: WorkbenchState,
+  tabKey: string,
+  sourcePaneKey: string,
+  targetPaneKey: string,
+  edge: "before" | "after",
+): WorkbenchState {
+  const tab = state.tabs[tabKey];
+  if (
+    !tab
+    || sourcePaneKey === targetPaneKey
+    || !tab.paneKeys.includes(sourcePaneKey)
+    || !tab.paneKeys.includes(targetPaneKey)
+  ) return state;
+
+  const paneKeys = tab.paneKeys.filter((key) => key !== sourcePaneKey);
+  const targetIndex = paneKeys.indexOf(targetPaneKey);
+  paneKeys.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourcePaneKey);
+  if (paneKeys.every((key, index) => key === tab.paneKeys[index])) return state;
+  return {
+    version: 1,
+    tabs: {
+      ...state.tabs,
+      [tabKey]: { ...tab, paneKeys },
+    },
+  };
+}
+
+export function moveSessionWithinWorkbenchTab(
+  state: WorkbenchState,
+  orderedSessionKeys: readonly string[],
+  tabKey: string,
+  sourcePaneKey: string,
+  targetPaneKey: string,
+  edge: "before" | "after",
+): string[] {
+  const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
+  const tab = state.tabs[tabKey];
+  if (
+    !tab
+    || sourcePaneKey === targetPaneKey
+    || !tab.paneKeys.includes(sourcePaneKey)
+    || !tab.paneKeys.includes(targetPaneKey)
+  ) return contiguousOrder;
+
+  const withoutSource = contiguousOrder.filter((key) => key !== sourcePaneKey);
+  const targetIndex = withoutSource.indexOf(targetPaneKey);
+  if (targetIndex < 0) return contiguousOrder;
+  withoutSource.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourcePaneKey);
+  return withoutSource;
+}
+
 function dateToTime(value: string | null | undefined): number {
   const timestamp = Date.parse(value ?? "");
   return Number.isFinite(timestamp) ? timestamp : 0;

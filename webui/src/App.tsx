@@ -25,7 +25,10 @@ import {
   dissolveWorkbenchTab,
   orderWorkbenchTabs,
   moveSessionBesideWorkbenchBlock,
+  moveSessionWithinWorkbenchTab,
+  moveWorkbenchTabBlock,
   reconcileWorkbench,
+  reorderWorkbenchPane,
   renameWorkbenchTab,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
@@ -2534,6 +2537,73 @@ function Shell({
     });
   }, [sessions, updateSidebarState]);
 
+  const onReorderSidebarPane = useCallback((
+    tabKey: string,
+    sourcePaneKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => {
+    if (sourcePaneKey === targetPaneKey) return;
+    void updateSidebarState((current) => {
+      const tab = workbenchTab(current.workbench, tabKey);
+      if (!tab?.paneKeys.includes(sourcePaneKey) || !tab.paneKeys.includes(targetPaneKey)) {
+        return current;
+      }
+      const orderedKeys = sortSessions(
+        sessions,
+        current.view.sort,
+        current.title_overrides,
+        current.session_order,
+      ).map((session) => session.key);
+      return {
+        ...current,
+        session_order: moveSessionWithinWorkbenchTab(
+          current.workbench,
+          orderedKeys,
+          tabKey,
+          sourcePaneKey,
+          targetPaneKey,
+          edge,
+        ),
+        workbench: reorderWorkbenchPane(
+          current.workbench,
+          tabKey,
+          sourcePaneKey,
+          targetPaneKey,
+          edge,
+        ),
+        view: { ...current.view, sort: "manual" },
+      };
+    });
+  }, [sessions, updateSidebarState]);
+
+  const onReorderSidebarGroup = useCallback((
+    sourceTabKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => {
+    void updateSidebarState((current) => {
+      if (!workbenchTab(current.workbench, sourceTabKey)) return current;
+      const orderedKeys = sortSessions(
+        sessions,
+        current.view.sort,
+        current.title_overrides,
+        current.session_order,
+      ).map((session) => session.key);
+      return {
+        ...current,
+        session_order: moveWorkbenchTabBlock(
+          current.workbench,
+          orderedKeys,
+          sourceTabKey,
+          targetPaneKey,
+          edge,
+        ),
+        view: { ...current.view, sort: "manual" },
+      };
+    });
+  }, [sessions, updateSidebarState]);
+
   useEffect(() => {
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
@@ -2612,6 +2682,8 @@ function Shell({
     onAttachPane: mobileWorkbench ? undefined : onAttachWorkbenchPane,
     onGroupSessions: mobileWorkbench ? undefined : onGroupSidebarSessions,
     onReorderSession: mobileWorkbench ? undefined : onReorderSidebarSession,
+    onReorderPane: onReorderSidebarPane,
+    onReorderGroup: onReorderSidebarGroup,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,

@@ -57,9 +57,13 @@ import {
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
 import {
+  clearDraggedWorkbenchGroup,
   clearDraggedSession,
+  hasDraggedWorkbenchGroup,
   hasDraggedSession,
+  readDraggedWorkbenchGroup,
   readDraggedSession,
+  writeDraggedWorkbenchGroup,
   writeDraggedSession,
 } from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
@@ -147,6 +151,17 @@ interface ChatListProps {
     targetPaneKey: string,
     edge: "before" | "after",
   ) => void;
+  onReorderPane?: (
+    tabKey: string,
+    sourcePaneKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => void;
+  onReorderGroup?: (
+    sourceTabKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => void;
   onToggleGroup?: (groupId: string) => void;
   onRequestRenameProject?: (projectKey: string, label: string) => void;
   onNewChatInProject?: (projectPath: string, projectName: string) => void;
@@ -191,6 +206,8 @@ export const ChatList = memo(function ChatList({
   onAttachPane,
   onGroupSessions,
   onReorderSession,
+  onReorderPane,
+  onReorderGroup,
   onToggleGroup,
   onRequestRenameProject,
   onNewChatInProject,
@@ -228,13 +245,18 @@ export const ChatList = memo(function ChatList({
   );
   const [draggedPaneKey, setDraggedPaneKey] = useState<string | null>(null);
   const draggedPaneKeyRef = useRef<string | null>(null);
+  const draggedGroupKeyRef = useRef<string | null>(null);
   const [sessionDropTarget, setSessionDropTargetState] = useState<{
     key: string;
     edge: "before" | "after";
+    mode: "top-level" | "pane";
+    tabKey?: string;
   } | null>(null);
   const sessionDropTargetRef = useRef<{
     key: string;
     edge: "before" | "after";
+    mode: "top-level" | "pane";
+    tabKey?: string;
   } | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
   const [tailDropSuppressed, setTailDropSuppressed] = useState(false);
@@ -264,6 +286,11 @@ export const ChatList = memo(function ChatList({
         atCapacity: group.panes.length >= MAX_WORKBENCH_PANES,
       }]),
   ).values()), [paneGroups]);
+  const paneGroupTabKeyByPane = useMemo(() => new Map(
+    Object.values(paneGroups).flatMap((group) => (
+      group.panes.map((pane) => [pane.key, group.tabKey] as const)
+    )),
+  ), [paneGroups]);
   const labels = useMemo<ChatGroupLabels>(() => ({
     pinned: t("chat.groups.pinned"),
     all: t("chat.groups.all"),
@@ -326,32 +353,53 @@ export const ChatList = memo(function ChatList({
   const setSessionDropTarget = useCallback((target: {
     key: string;
     edge: "before" | "after";
+    mode: "top-level" | "pane";
+    tabKey?: string;
   } | null) => {
     sessionDropTargetRef.current = target;
     setSessionDropTargetState(target);
   }, []);
   const clearSessionDrag = useCallback(() => {
     clearDraggedSession();
+    clearDraggedWorkbenchGroup();
     draggedPaneKeyRef.current = null;
+    draggedGroupKeyRef.current = null;
     setDraggedPaneKey(null);
     setSessionDropTarget(null);
     setGroupDropTarget(null);
     setTailDropSuppressed(false);
   }, [setSessionDropTarget]);
   const beginSessionDrag = useCallback((paneKey: string) => {
+    clearDraggedWorkbenchGroup();
+    draggedGroupKeyRef.current = null;
     draggedPaneKeyRef.current = paneKey;
     setSessionDropTarget(null);
     setGroupDropTarget(null);
     setTailDropSuppressed(false);
     setDraggedPaneKey(paneKey);
   }, [setSessionDropTarget]);
+  const beginGroupDrag = useCallback((tabKey: string) => {
+    clearDraggedSession();
+    draggedPaneKeyRef.current = null;
+    draggedGroupKeyRef.current = tabKey;
+    setSessionDropTarget(null);
+    setGroupDropTarget(null);
+    setTailDropSuppressed(false);
+    setDraggedPaneKey(null);
+  }, [setSessionDropTarget]);
   const previewSessionReorder = useCallback((
     event: DragEvent<HTMLElement>,
     targetPaneKey: string,
   ) => {
-    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourceGroupKey = readDraggedWorkbenchGroup(event.dataTransfer)
+      ?? draggedGroupKeyRef.current;
     const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
-    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    if ((!sourceGroupKey && !onReorderSession) || (!sourceGroupKey && !sourcePaneKey)) return;
+    if (sourceGroupKey && paneGroupTabKeyByPane.get(targetPaneKey) === sourceGroupKey) {
+      setSessionDropTarget(null);
+      return;
+    }
+    if (sourcePaneKey === targetPaneKey) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
@@ -369,51 +417,122 @@ export const ChatList = memo(function ChatList({
             ? "after"
             : "before";
     setGroupDropTarget(null);
-    setSessionDropTarget({ key: targetPaneKey, edge });
-  }, [draggedKeyForEvent, onReorderSession, setSessionDropTarget]);
+    setSessionDropTarget({ key: targetPaneKey, edge, mode: "top-level" });
+  }, [draggedKeyForEvent, onReorderSession, paneGroupTabKeyByPane, setSessionDropTarget]);
   const dropSessionAt = useCallback((
     event: DragEvent<HTMLElement>,
     targetPaneKey: string,
   ) => {
-    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourceGroupKey = readDraggedWorkbenchGroup(event.dataTransfer)
+      ?? draggedGroupKeyRef.current;
     const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
-    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    if ((!sourceGroupKey && !onReorderSession) || (!sourceGroupKey && !sourcePaneKey)) return;
+    if (sourceGroupKey && paneGroupTabKeyByPane.get(targetPaneKey) === sourceGroupKey) return;
+    if (sourcePaneKey === targetPaneKey) return;
     event.preventDefault();
     event.stopPropagation();
     const edge = sessionDropTarget?.key === targetPaneKey
+      && sessionDropTarget.mode === "top-level"
       ? sessionDropTarget.edge
       : "before";
-    onReorderSession(sourcePaneKey, targetPaneKey, edge);
+    if (sourceGroupKey) onReorderGroup?.(sourceGroupKey, targetPaneKey, edge);
+    else if (sourcePaneKey) onReorderSession?.(sourcePaneKey, targetPaneKey, edge);
     clearSessionDrag();
-  }, [clearSessionDrag, draggedKeyForEvent, onReorderSession, sessionDropTarget]);
+  }, [
+    clearSessionDrag,
+    draggedKeyForEvent,
+    onReorderGroup,
+    onReorderSession,
+    paneGroupTabKeyByPane,
+    sessionDropTarget,
+  ]);
   const previewSessionAtEnd = useCallback((
     event: DragEvent<HTMLElement>,
     targetPaneKey: string,
   ) => {
-    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourceGroupKey = readDraggedWorkbenchGroup(event.dataTransfer)
+      ?? draggedGroupKeyRef.current;
     const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
-    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    if ((!sourceGroupKey && !onReorderSession) || (!sourceGroupKey && !sourcePaneKey)) return;
+    if (sourceGroupKey && paneGroupTabKeyByPane.get(targetPaneKey) === sourceGroupKey) {
+      setSessionDropTarget(null);
+      return;
+    }
+    if (sourcePaneKey === targetPaneKey) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     setTailDropSuppressed(false);
     setGroupDropTarget(null);
-    setSessionDropTarget({ key: targetPaneKey, edge: "after" });
-  }, [draggedKeyForEvent, onReorderSession, setSessionDropTarget]);
+    setSessionDropTarget({ key: targetPaneKey, edge: "after", mode: "top-level" });
+  }, [draggedKeyForEvent, onReorderSession, paneGroupTabKeyByPane, setSessionDropTarget]);
   const previewSessionBefore = useCallback((
     event: DragEvent<HTMLElement>,
     targetPaneKey: string,
   ) => {
-    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourceGroupKey = readDraggedWorkbenchGroup(event.dataTransfer)
+      ?? draggedGroupKeyRef.current;
     const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
-    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    if ((!sourceGroupKey && !onReorderSession) || (!sourceGroupKey && !sourcePaneKey)) return;
+    if (sourceGroupKey && paneGroupTabKeyByPane.get(targetPaneKey) === sourceGroupKey) {
+      setSessionDropTarget(null);
+      return;
+    }
+    if (sourcePaneKey === targetPaneKey) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     setTailDropSuppressed(false);
     setGroupDropTarget(null);
-    setSessionDropTarget({ key: targetPaneKey, edge: "before" });
-  }, [draggedKeyForEvent, onReorderSession, setSessionDropTarget]);
+    setSessionDropTarget({ key: targetPaneKey, edge: "before", mode: "top-level" });
+  }, [draggedKeyForEvent, onReorderSession, paneGroupTabKeyByPane, setSessionDropTarget]);
+
+  const previewPaneReorder = useCallback((
+    event: DragEvent<HTMLElement>,
+    tabKey: string,
+    targetPaneKey: string,
+  ) => {
+    if (!onReorderPane || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    const memberKeys = paneGroups[targetPaneKey]?.panes.map((pane) => pane.key)
+      ?? Object.values(paneGroups).find((group) => group.tabKey === tabKey)?.panes
+        .map((pane) => pane.key)
+      ?? [];
+    if (!memberKeys.includes(sourcePaneKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    const hysteresis = rect.height * SESSION_DROP_EDGE_HYSTERESIS_RATIO;
+    const previousTarget = sessionDropTargetRef.current;
+    const edge = event.clientY <= midpoint - hysteresis
+      ? "before"
+      : event.clientY >= midpoint + hysteresis
+        ? "after"
+        : previousTarget?.mode === "pane" && previousTarget.key === targetPaneKey
+          ? previousTarget.edge
+          : event.clientY >= midpoint ? "after" : "before";
+    setGroupDropTarget(null);
+    setSessionDropTarget({ key: targetPaneKey, edge, mode: "pane", tabKey });
+  }, [draggedKeyForEvent, onReorderPane, paneGroups, setSessionDropTarget]);
+
+  const dropPaneAt = useCallback((
+    event: DragEvent<HTMLElement>,
+    tabKey: string,
+    targetPaneKey: string,
+  ) => {
+    if (!onReorderPane || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    const target = sessionDropTargetRef.current;
+    if (!sourcePaneKey || sourcePaneKey === targetPaneKey
+      || target?.mode !== "pane" || target.tabKey !== tabKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onReorderPane(tabKey, sourcePaneKey, targetPaneKey, target.edge);
+    clearSessionDrag();
+  }, [clearSessionDrag, draggedKeyForEvent, onReorderPane]);
   const previewGroupDrop = useCallback((
     event: DragEvent<HTMLElement>,
     targetKey: string,
@@ -479,19 +598,36 @@ export const ChatList = memo(function ChatList({
   useEffect(() => {
     const keepSessionDragEnabled = (event: globalThis.DragEvent) => {
       if (!event.dataTransfer) return;
-      if (!draggedPaneKeyRef.current && !hasDraggedSession(event.dataTransfer)) return;
+      if (
+        !draggedPaneKeyRef.current
+        && !draggedGroupKeyRef.current
+        && !hasDraggedSession(event.dataTransfer)
+        && !hasDraggedWorkbenchGroup(event.dataTransfer)
+      ) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
     };
     const finishVisibleSessionDrop = (event: globalThis.DragEvent) => {
       const target = sessionDropTargetRef.current;
-      if (!target || !onReorderSession || !event.dataTransfer) return;
+      if (!target || !event.dataTransfer) return;
       const sourcePaneKey = readDraggedSession(event.dataTransfer)
         ?? draggedPaneKeyRef.current;
-      if (!sourcePaneKey || sourcePaneKey === target.key) return;
+      const sourceGroupKey = readDraggedWorkbenchGroup(event.dataTransfer)
+        ?? draggedGroupKeyRef.current;
+      if (target.mode === "pane") {
+        if (!onReorderPane || !target.tabKey || !sourcePaneKey
+          || sourcePaneKey === target.key) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onReorderPane(target.tabKey, sourcePaneKey, target.key, target.edge);
+        clearSessionDrag();
+        return;
+      }
+      if ((!sourceGroupKey && !onReorderSession) || sourcePaneKey === target.key) return;
       event.preventDefault();
       event.stopPropagation();
-      onReorderSession(sourcePaneKey, target.key, target.edge);
+      if (sourceGroupKey) onReorderGroup?.(sourceGroupKey, target.key, target.edge);
+      else if (sourcePaneKey) onReorderSession?.(sourcePaneKey, target.key, target.edge);
       clearSessionDrag();
     };
     document.addEventListener("dragenter", keepSessionDragEnabled, true);
@@ -502,7 +638,7 @@ export const ChatList = memo(function ChatList({
       document.removeEventListener("dragover", keepSessionDragEnabled, true);
       document.removeEventListener("drop", finishVisibleSessionDrop, true);
     };
-  }, [clearSessionDrag, onReorderSession]);
+  }, [clearSessionDrag, onReorderGroup, onReorderPane, onReorderSession]);
 
   useEffect(() => {
     if (!deleteSelectionMode) return;
@@ -653,13 +789,15 @@ export const ChatList = memo(function ChatList({
       data-chat-list-content
       className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent"
       onDragOverCapture={(event) => {
-        if (!hasDraggedSession(event.dataTransfer)) return;
+        if (!hasDraggedSession(event.dataTransfer)
+          && !hasDraggedWorkbenchGroup(event.dataTransfer)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
       }}
       onDragOver={(event) => {
           if (event.target !== event.currentTarget) return;
-          if (!hasDraggedSession(event.dataTransfer)) return;
+          if (!hasDraggedSession(event.dataTransfer)
+            && !hasDraggedWorkbenchGroup(event.dataTransfer)) return;
           const tailZones = event.currentTarget.querySelectorAll<HTMLElement>(
             "[data-session-tail-drop-zone]",
           );
@@ -681,7 +819,8 @@ export const ChatList = memo(function ChatList({
       }}
       onDropCapture={(event) => {
           if (event.target !== event.currentTarget) return;
-          if (!hasDraggedSession(event.dataTransfer)) return;
+          if (!hasDraggedSession(event.dataTransfer)
+            && !hasDraggedWorkbenchGroup(event.dataTransfer)) return;
           const tailZones = event.currentTarget.querySelectorAll<HTMLElement>(
             "[data-session-tail-drop-zone]",
           );
@@ -813,7 +952,8 @@ export const ChatList = memo(function ChatList({
                           >
                             <SessionDropLine
                               visible={sessionDropTarget?.key === groupReorderTargetKey
-                                && sessionDropTarget.edge === "before"}
+                                && sessionDropTarget.edge === "before"
+                                && sessionDropTarget.mode === "top-level"}
                               edge="before"
                               position="center"
                             />
@@ -859,6 +999,15 @@ export const ChatList = memo(function ChatList({
                                   : undefined}
                                 onRequestDelete={() => requestDeleteKeys(tabDeleteKeys)}
                                 actionMenuPortalContainer={actionMenuPortalContainer}
+                                draggable={!deleteSelectionMode && Boolean(onReorderGroup)}
+                                onDragStart={(event) => {
+                                  writeDraggedWorkbenchGroup(
+                                    event.dataTransfer,
+                                    resolvedPaneGroup.tabKey,
+                                  );
+                                  beginGroupDrag(resolvedPaneGroup.tabKey);
+                                }}
+                                onDragEnd={clearSessionDrag}
                               />
                               {!paneGroupCollapsed ? (
                                 <ActivePaneRows
@@ -888,6 +1037,9 @@ export const ChatList = memo(function ChatList({
                                   actionMenuPortalContainer={actionMenuPortalContainer}
                                   onSessionDragStart={beginSessionDrag}
                                   onSessionDragEnd={clearSessionDrag}
+                                  onPaneDragOver={previewPaneReorder}
+                                  onPaneDrop={dropPaneAt}
+                                  sessionDropTarget={sessionDropTarget}
                                 />
                               ) : null}
                             </div>
@@ -936,14 +1088,16 @@ export const ChatList = memo(function ChatList({
                         >
                           <SessionDropLine
                             visible={sessionDropTarget?.key === s.key
-                              && sessionDropTarget.edge === "before"}
+                              && sessionDropTarget.edge === "before"
+                              && sessionDropTarget.mode === "top-level"}
                             edge="before"
                             position="center"
                           />
                         </div>
                         <SessionDropLine
                           visible={sessionDropTarget?.key === s.key
-                            && sessionDropTarget.edge === "after"}
+                            && sessionDropTarget.edge === "after"
+                            && sessionDropTarget.mode === "top-level"}
                           edge="after"
                         />
                         <div
@@ -1153,6 +1307,7 @@ export const ChatList = memo(function ChatList({
                       <SessionDropLine
                         visible={sessionDropTarget?.key === tailReorderTargetKey
                           && sessionDropTarget.edge === "after"
+                          && sessionDropTarget.mode === "top-level"
                           && !tailDropSuppressed}
                         edge="after"
                         position="top"
@@ -1236,6 +1391,9 @@ function WorkbenchTabHeader({
   onDissolve,
   onRequestDelete,
   actionMenuPortalContainer,
+  draggable,
+  onDragStart,
+  onDragEnd,
 }: {
   title: string;
   controlsId: string;
@@ -1249,6 +1407,9 @@ function WorkbenchTabHeader({
   onDissolve?: () => void;
   onRequestDelete: () => void;
   actionMenuPortalContainer?: HTMLElement | null;
+  draggable: boolean;
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
 }) {
   const { t } = useTranslation();
   const disclosureLabel = t(
@@ -1259,15 +1420,19 @@ function WorkbenchTabHeader({
   return (
     <div
       data-workbench-tab
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={cn(
         "group/tab flex min-w-0 items-center gap-0.5 rounded-[0.65rem] px-1.5 text-sidebar-foreground/85",
         collapsed ? "min-h-6" : "min-h-7",
+        draggable && "cursor-grab active:cursor-grabbing",
       )}
     >
       <button
         type="button"
         onClick={deleteSelectionMode ? onToggleSelection : onToggle}
-        draggable={false}
+        draggable={draggable}
         aria-label={t("workbench.tabAria", { title })}
         aria-expanded={deleteSelectionMode ? undefined : !collapsed}
         aria-controls={deleteSelectionMode ? undefined : controlsId}
@@ -1382,6 +1547,9 @@ function ActivePaneRows({
   actionMenuPortalContainer,
   onSessionDragStart,
   onSessionDragEnd,
+  onPaneDragOver,
+  onPaneDrop,
+  sessionDropTarget,
 }: {
   id: string;
   group: SidebarPaneGroup;
@@ -1410,6 +1578,22 @@ function ActivePaneRows({
   actionMenuPortalContainer?: HTMLElement | null;
   onSessionDragStart: (paneKey: string) => void;
   onSessionDragEnd: () => void;
+  onPaneDragOver: (
+    event: DragEvent<HTMLElement>,
+    tabKey: string,
+    targetPaneKey: string,
+  ) => void;
+  onPaneDrop: (
+    event: DragEvent<HTMLElement>,
+    tabKey: string,
+    targetPaneKey: string,
+  ) => void;
+  sessionDropTarget: {
+    key: string;
+    edge: "before" | "after";
+    mode: "top-level" | "pane";
+    tabKey?: string;
+  } | null;
 }) {
   const { t } = useTranslation();
   const panes = group.panes;
@@ -1442,7 +1626,18 @@ function ActivePaneRows({
           <li
             key={pane.key}
             className="relative min-w-0"
+            onDragOver={(event) => onPaneDragOver(event, group.tabKey, pane.key)}
+            onDrop={(event) => onPaneDrop(event, group.tabKey, pane.key)}
           >
+            <SessionDropLine
+              visible={sessionDropTarget?.mode === "pane"
+                && sessionDropTarget.tabKey === group.tabKey
+                && sessionDropTarget.key === pane.key}
+              edge={sessionDropTarget?.mode === "pane"
+                && sessionDropTarget.key === pane.key
+                ? sessionDropTarget.edge
+                : undefined}
+            />
             <div
               data-chat-row={pane.key}
               data-sidebar-pane={pane.key}

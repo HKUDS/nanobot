@@ -12,8 +12,11 @@ import {
   orderWorkbenchTabs,
   contiguousWorkbenchSessionOrder,
   moveSessionBesideWorkbenchBlock,
+  moveSessionWithinWorkbenchTab,
+  moveWorkbenchTabBlock,
   reconcileWorkbench,
   renameWorkbenchTab,
+  reorderWorkbenchPane,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
   setWorkbenchSplitRatios,
@@ -208,6 +211,44 @@ describe("workbench model", () => {
       "group-c",
       "after",
     )).toEqual(["group-a", "solo", "group-c", "group-d", "group-b"]);
+  });
+
+  it("moves a whole group as one top-level block", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "group-a", "group-b");
+    state = addWorkbenchPane(state, "other-a", "other-b");
+    const sourceTabKey = workbenchTabForPane(state, "group-a").tabKey;
+
+    expect(moveWorkbenchTabBlock(
+      state,
+      ["group-a", "group-b", "solo", "other-a", "other-b"],
+      sourceTabKey,
+      "other-a",
+      "after",
+    )).toEqual(["solo", "other-a", "other-b", "group-a", "group-b"]);
+    expect(moveWorkbenchTabBlock(
+      state,
+      ["group-a", "group-b", "solo", "other-a", "other-b"],
+      sourceTabKey,
+      "group-b",
+      "after",
+    )).toEqual(["group-a", "group-b", "solo", "other-a", "other-b"]);
+  });
+
+  it("reorders panes inside their group without dissolving it", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-b");
+    state = addWorkbenchPane(state, "pane-a", "pane-c");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+
+    state = reorderWorkbenchPane(state, tabKey, "pane-c", "pane-a", "before");
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual(["pane-c", "pane-a", "pane-b"]);
+    expect(moveSessionWithinWorkbenchTab(
+      state,
+      ["pane-a", "pane-b", "pane-c", "solo"],
+      tabKey,
+      "pane-c",
+      "pane-a",
+      "before",
+    )).toEqual(["pane-c", "pane-a", "pane-b", "solo"]);
   });
 
   it("caps a group at four panes", () => {
