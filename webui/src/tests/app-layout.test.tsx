@@ -3246,6 +3246,15 @@ describe("App layout", () => {
         }),
       }),
     ));
+
+    fireEvent.pointerDown(within(tabGroup).getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+
+    const renameDialog = await screen.findByRole("dialog", { name: "Rename group" });
+    expect(within(renameDialog).getByText("Give this group a name.")).toBeInTheDocument();
+    expect(within(renameDialog).getByPlaceholderText("Group name")).toHaveValue("Solo pane");
   });
 
   it("restores a created pane group from gateway state after remount", async () => {

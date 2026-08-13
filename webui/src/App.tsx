@@ -2892,9 +2892,9 @@ function Shell({
             <RenameChatDialog
               open
               title={pendingTabRename.label}
-              dialogTitle={t("workbench.renameTabTitle")}
-              description={t("workbench.renameTabDescription")}
-              placeholder={t("workbench.renameTabPlaceholder")}
+              dialogTitle={t("workbench.renameGroupTitle")}
+              description={t("workbench.renameGroupDescription")}
+              placeholder={t("workbench.renameGroupPlaceholder")}
               onCancel={() => setPendingTabRename(null)}
               onConfirm={onConfirmTabRename}
             />
