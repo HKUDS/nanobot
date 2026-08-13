@@ -1444,6 +1444,7 @@
     "expandTabGroup": "Expandir los paneles de {{title}}",
     "dropPane": "Mover {{pane}} a {{tab}}",
     "createGroup": "Crear grupo",
+    "groupWith": "Agrupar con {{title}}",
     "moveTo": "Mover a",
     "renameTabTitle": "Renombrar pestaña",
     "renameTabDescription": "Ponle un nombre a esta pestaña para organizar sus paneles.",

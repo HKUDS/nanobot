@@ -24,6 +24,7 @@ import {
   detachWorkbenchPane,
   dissolveWorkbenchTab,
   orderWorkbenchTabs,
+  moveSessionBesideWorkbenchBlock,
   reconcileWorkbench,
   renameWorkbenchTab,
   setWorkbenchLayout,
@@ -2444,25 +2445,59 @@ function Shell({
     paneKey: string,
     tabKey: string,
   ) => {
-    updateWorkbenchState((current) => {
-      const target = workbenchTab(current, tabKey);
+    void updateSidebarState((current) => {
+      const target = workbenchTab(current.workbench, tabKey);
       if (
         !target
         || (!target.explicit && target.paneKeys.length < 2)
         || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
       ) return current;
-      return attachWorkbenchPane(current, tabKey, paneKey);
+      const orderedKeys = sortSessions(
+        sessions,
+        current.view.sort,
+        current.title_overrides,
+        current.session_order,
+      ).map((session) => session.key);
+      return {
+        ...current,
+        session_order: moveSessionBesideWorkbenchBlock(
+          current.workbench,
+          orderedKeys,
+          paneKey,
+          target.paneKeys.at(-1) ?? target.paneKeys[0],
+          "after",
+        ),
+        workbench: attachWorkbenchPane(current.workbench, tabKey, paneKey),
+        view: { ...current.view, sort: "manual" },
+      };
     });
-  }, [updateWorkbenchState]);
+  }, [sessions, updateSidebarState]);
 
   const onGroupSidebarSessions = useCallback((
     sourcePaneKey: string,
     targetPaneKey: string,
   ) => {
-    updateWorkbenchState((current) => (
-      addWorkbenchPane(current, targetPaneKey, sourcePaneKey)
-    ));
-  }, [updateWorkbenchState]);
+    void updateSidebarState((current) => {
+      const orderedKeys = sortSessions(
+        sessions,
+        current.view.sort,
+        current.title_overrides,
+        current.session_order,
+      ).map((session) => session.key);
+      return {
+        ...current,
+        session_order: moveSessionBesideWorkbenchBlock(
+          current.workbench,
+          orderedKeys,
+          sourcePaneKey,
+          targetPaneKey,
+          "after",
+        ),
+        workbench: addWorkbenchPane(current.workbench, targetPaneKey, sourcePaneKey),
+        view: { ...current.view, sort: "manual" },
+      };
+    });
+  }, [sessions, updateSidebarState]);
 
   const onReorderSidebarSession = useCallback((
     sourcePaneKey: string,
@@ -2480,17 +2515,19 @@ function Shell({
       if (!orderedKeys.includes(sourcePaneKey) || !orderedKeys.includes(targetPaneKey)) {
         return current;
       }
-      const withoutSource = orderedKeys.filter((key) => key !== sourcePaneKey);
-      const targetIndex = withoutSource.indexOf(targetPaneKey);
-      withoutSource.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourcePaneKey);
-
       const sourceTab = workbenchTabForPane(current.workbench, sourcePaneKey);
       const nextWorkbench = current.workbench.tabs[sourceTab.tabKey]
         ? detachWorkbenchPane(current.workbench, sourceTab.tabKey, sourcePaneKey)
         : current.workbench;
       return {
         ...current,
-        session_order: withoutSource,
+        session_order: moveSessionBesideWorkbenchBlock(
+          current.workbench,
+          orderedKeys,
+          sourcePaneKey,
+          targetPaneKey,
+          edge,
+        ),
         workbench: nextWorkbench,
         view: { ...current.view, sort: "manual" },
       };

@@ -10,6 +10,8 @@ import {
   dissolveWorkbenchTab,
   normalizeWorkbenchState,
   orderWorkbenchTabs,
+  contiguousWorkbenchSessionOrder,
+  moveSessionBesideWorkbenchBlock,
   reconcileWorkbench,
   renameWorkbenchTab,
   setWorkbenchLayout,
@@ -178,6 +180,34 @@ describe("workbench model", () => {
     );
 
     expect(tabs.map(({ tabKey }) => tabKey)).toEqual([betaTabKey, alphaTabKey]);
+  });
+
+  it("keeps grouped sessions contiguous and moves sessions beside whole groups", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "group-a", "group-b");
+    state = addWorkbenchPane(state, "group-c", "group-d");
+    const interleaved = ["group-a", "solo", "group-c", "group-b", "group-d"];
+
+    expect(contiguousWorkbenchSessionOrder(state, interleaved)).toEqual([
+      "group-a",
+      "group-b",
+      "solo",
+      "group-c",
+      "group-d",
+    ]);
+    expect(moveSessionBesideWorkbenchBlock(
+      state,
+      interleaved,
+      "solo",
+      "group-c",
+      "before",
+    )).toEqual(["group-a", "group-b", "solo", "group-c", "group-d"]);
+    expect(moveSessionBesideWorkbenchBlock(
+      state,
+      interleaved,
+      "group-b",
+      "group-c",
+      "after",
+    )).toEqual(["group-a", "solo", "group-c", "group-d", "group-b"]);
   });
 
   it("caps a group at four panes", () => {

@@ -427,6 +427,64 @@ export function orderWorkbenchTabs(
   });
 }
 
+export function contiguousWorkbenchSessionOrder(
+  state: WorkbenchState,
+  orderedSessionKeys: readonly string[],
+): string[] {
+  const rank = new Map(orderedSessionKeys.map((key, index) => [key, index]));
+  const validKeys = new Set(orderedSessionKeys);
+  const tabKeyByPane = new Map<string, string>();
+  for (const [tabKey, tab] of Object.entries(state.tabs)) {
+    for (const paneKey of tab.paneKeys) tabKeyByPane.set(paneKey, tabKey);
+  }
+
+  const emittedTabs = new Set<string>();
+  const result: string[] = [];
+  for (const sessionKey of orderedSessionKeys) {
+    const tabKey = tabKeyByPane.get(sessionKey);
+    if (!tabKey) {
+      result.push(sessionKey);
+      continue;
+    }
+    if (emittedTabs.has(tabKey)) continue;
+    emittedTabs.add(tabKey);
+    result.push(...state.tabs[tabKey].paneKeys
+      .filter((key) => validKeys.has(key))
+      .sort((left, right) => (rank.get(left) ?? Infinity) - (rank.get(right) ?? Infinity)));
+  }
+  return result;
+}
+
+export function moveSessionBesideWorkbenchBlock(
+  state: WorkbenchState,
+  orderedSessionKeys: readonly string[],
+  sourcePaneKey: string,
+  targetPaneKey: string,
+  edge: "before" | "after",
+): string[] {
+  const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
+  if (
+    sourcePaneKey === targetPaneKey
+    || !contiguousOrder.includes(sourcePaneKey)
+    || !contiguousOrder.includes(targetPaneKey)
+  ) return contiguousOrder;
+
+  const targetTab = workbenchTabForPane(state, targetPaneKey);
+  const targetBlock = targetTab.tab.paneKeys.filter((key) => (
+    key !== sourcePaneKey && contiguousOrder.includes(key)
+  ));
+  const withoutSource = contiguousOrder.filter((key) => key !== sourcePaneKey);
+  const targetIndexes = targetBlock
+    .map((key) => withoutSource.indexOf(key))
+    .filter((index) => index >= 0);
+  if (targetIndexes.length === 0) return contiguousOrder;
+  const insertIndex = edge === "before"
+    ? Math.min(...targetIndexes)
+    : Math.max(...targetIndexes) + 1;
+  withoutSource.splice(insertIndex, 0, sourcePaneKey);
+  return withoutSource;
+}
+
 function dateToTime(value: string | null | undefined): number {
   const timestamp = Date.parse(value ?? "");
   return Number.isFinite(timestamp) ? timestamp : 0;

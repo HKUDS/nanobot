@@ -1443,6 +1443,7 @@
     "expandTabGroup": "Luaskan panel di {{title}}",
     "dropPane": "Pindahkan {{pane}} ke {{tab}}",
     "createGroup": "Buat grup",
+    "groupWith": "Kelompokkan dengan {{title}}",
     "moveTo": "Pindahkan ke",
     "renameTabTitle": "Ganti nama tab",
     "renameTabDescription": "Beri nama tab ini untuk mengatur panelnya.",

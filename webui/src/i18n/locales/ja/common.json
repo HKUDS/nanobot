@@ -1443,6 +1443,7 @@
     "expandTabGroup": "{{title}} のペインを展開する",
     "dropPane": "{{pane}} を {{tab}} に移動",
     "createGroup": "グループを作成",
+    "groupWith": "{{title}} とグループ化",
     "moveTo": "移動先",
     "renameTabTitle": "タブ名を変更",
     "renameTabDescription": "ペインを整理するため、このタブに名前を付けます。",

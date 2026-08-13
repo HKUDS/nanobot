@@ -1457,6 +1457,7 @@
     "expandTabGroup": "Expandir os painéis em {{title}}",
     "dropPane": "Mover {{pane}} para {{tab}}",
     "createGroup": "Criar grupo",
+    "groupWith": "Agrupar com {{title}}",
     "moveTo": "Mover para",
     "renameTabTitle": "Renomear aba",
     "renameTabDescription": "Dê um nome a esta aba para organizar seus painéis.",

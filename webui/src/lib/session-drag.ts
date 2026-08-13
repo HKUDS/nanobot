@@ -20,6 +20,6 @@ export function writeDraggedSession(
   sessionKey: string,
 ): void {
   activeSessionKey = sessionKey;
-  dataTransfer.effectAllowed = "copyMove";
+  dataTransfer.effectAllowed = "move";
   dataTransfer.setData(SESSION_DRAG_TYPE, sessionKey);
 }
