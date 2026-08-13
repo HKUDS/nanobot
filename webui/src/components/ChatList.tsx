@@ -76,6 +76,7 @@ const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[11rem] min-w-[11rem] whitespace-nowrap";
 const COLLAPSED_PANE_GROUPS_STORAGE_KEY = "nanobot-webui.collapsed-pane-groups.v1";
+const DETACH_PANE_DROP_TARGET = "__sidebar-standalone__";
 
 interface SidebarActionMenuController {
   openId: string | null;
@@ -176,6 +177,25 @@ function droppablePaneKey(
   const paneKey = readDraggedSession(dataTransfer);
   if (!paneKey || group.panes.some((pane) => pane.key === paneKey)) return null;
   return paneKey;
+}
+
+function detachablePaneSource(
+  dataTransfer: DataTransfer,
+  groups: Record<string, SidebarPaneGroup>,
+): { paneKey: string; tabKey: string } | null {
+  if (!hasDraggedSession(dataTransfer)) return null;
+  const paneKey = readDraggedSession(dataTransfer);
+  if (!paneKey) return null;
+  const source = Object.values(groups).find((group) => (
+    (group.visible ?? group.panes.length > 1)
+    && group.panes.some((pane) => pane.key === paneKey)
+  ));
+  return source ? { paneKey, tabKey: source.tabKey } : null;
+}
+
+function isWorkbenchTabSurface(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest("[data-workbench-tab-surface]") !== null;
 }
 
 interface ChatListProps {
@@ -550,7 +570,63 @@ export const ChatList = memo(function ChatList({
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
       <div
         data-chat-list-content
-        className="relative min-w-0 space-y-3 px-2 py-1.5"
+        data-pane-detach-target={
+          paneDropTarget === DETACH_PANE_DROP_TARGET ? "true" : undefined
+        }
+        onDragEnter={(event) => {
+          if (isWorkbenchTabSurface(event.target)) {
+            setPaneDropTarget((current) => (
+              current === DETACH_PANE_DROP_TARGET ? null : current
+            ));
+            return;
+          }
+          const source = onDetachPane && !deleteSelectionMode
+            ? detachablePaneSource(event.dataTransfer, paneGroups)
+            : null;
+          if (!source) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setPaneDropTarget(DETACH_PANE_DROP_TARGET);
+        }}
+        onDragOver={(event) => {
+          if (isWorkbenchTabSurface(event.target)) {
+            setPaneDropTarget((current) => (
+              current === DETACH_PANE_DROP_TARGET ? null : current
+            ));
+            return;
+          }
+          const source = onDetachPane && !deleteSelectionMode
+            ? detachablePaneSource(event.dataTransfer, paneGroups)
+            : null;
+          if (!source) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setPaneDropTarget(DETACH_PANE_DROP_TARGET);
+        }}
+        onDragLeave={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+          setPaneDropTarget((current) => (
+            current === DETACH_PANE_DROP_TARGET ? null : current
+          ));
+        }}
+        onDrop={(event) => {
+          if (isWorkbenchTabSurface(event.target)) return;
+          const source = onDetachPane && !deleteSelectionMode
+            ? detachablePaneSource(event.dataTransfer, paneGroups)
+            : null;
+          if (!source || !onDetachPane) return;
+          event.preventDefault();
+          setPaneDropTarget(null);
+          clearDraggedSession();
+          onDetachPane(source.tabKey, source.paneKey);
+        }}
+        className={cn(
+          "relative min-w-0 space-y-3 rounded-panel px-2 py-1.5",
+          "transition-[background-color,box-shadow]",
+          paneDropTarget === DETACH_PANE_DROP_TARGET
+            && "bg-primary/[0.05] ring-1 ring-inset ring-primary/25",
+        )}
       >
         {temporarySessions.length > 0 ? (
           <TemporaryChatSection

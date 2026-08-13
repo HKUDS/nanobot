@@ -321,6 +321,73 @@ describe("ChatList", () => {
     expect(targetGroup).not.toHaveAttribute("data-pane-drop-target");
   });
 
+  it("detaches a grouped pane when it is dropped back into the standalone list", () => {
+    const onDetachPane = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "solo", title: "Solo topic" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "tab:root",
+            title: "Root group",
+            activePaneKey: "websocket:root",
+            visible: true,
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo topic",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo topic" }],
+          },
+        }}
+        onDetachPane={onDetachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+      types: [SESSION_DRAG_TYPE],
+    } as unknown as DataTransfer;
+    const source = screen.getByRole("button", { name: "Research pane" });
+    const sourceSurface = screen.getByRole("button", { name: "Tab: Root topic" })
+      .closest("[data-workbench-tab-surface]")!;
+    const standaloneList = document.querySelector("[data-chat-list-content]")!;
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(sourceSurface, { dataTransfer });
+    fireEvent.drop(sourceSurface, { dataTransfer });
+    expect(onDetachPane).not.toHaveBeenCalled();
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(standaloneList, { dataTransfer });
+    fireEvent.dragOver(standaloneList, { dataTransfer });
+    expect(standaloneList).toHaveAttribute("data-pane-detach-target", "true");
+    expect(standaloneList).toHaveClass("ring-1", "ring-primary/25");
+
+    fireEvent.drop(standaloneList, { dataTransfer });
+    expect(onDetachPane).toHaveBeenCalledOnce();
+    expect(onDetachPane).toHaveBeenCalledWith("tab:root", "websocket:child");
+    expect(standaloneList).not.toHaveAttribute("data-pane-detach-target");
+  });
+
   it("shows every tab's pane membership in a sidebar tab group", async () => {
     const onSelect = vi.fn();
     const onSelectPane = vi.fn();
