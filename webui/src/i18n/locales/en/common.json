@@ -1458,6 +1458,8 @@
     "dropPane": "Move {{pane}} into {{tab}}",
     "createGroup": "Create group",
     "groupWith": "Group with {{title}}",
+    "groupAction": "Group",
+    "releaseToGroup": "Release to group",
     "moveTo": "Move to",
     "renameTabTitle": "Rename tab",
     "renameTabDescription": "Give this tab a name for organizing its panes.",

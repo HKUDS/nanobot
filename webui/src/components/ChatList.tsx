@@ -1207,12 +1207,23 @@ export const ChatList = memo(function ChatList({
                               }}
                               onDrop={(event) => dropToCreateGroup(event, s.key)}
                               className={cn(
-                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                                "text-muted-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                                groupDropTarget === s.key && "bg-primary/15 text-primary ring-1 ring-primary/50",
+                                "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg px-2",
+                                "text-[11px] font-medium text-muted-foreground/80 transition-[background-color,color,box-shadow]",
+                                "bg-sidebar-foreground/[0.055] hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                                groupDropTarget === s.key
+                                  && "bg-primary/15 text-primary ring-1 ring-primary/55 shadow-sm",
                               )}
                             >
                               <PanelsTopLeft className="h-3.5 w-3.5" aria-hidden />
+                              <span className="whitespace-nowrap">
+                                {groupDropTarget === s.key
+                                  ? t("workbench.releaseToGroup", {
+                                    defaultValue: "Release",
+                                  })
+                                  : t("workbench.groupAction", {
+                                    defaultValue: "Group",
+                                  })}
+                              </span>
                             </button>
                           ) : null}
                           {!deleteSelectionMode ? (

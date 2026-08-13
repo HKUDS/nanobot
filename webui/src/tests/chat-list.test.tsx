@@ -434,7 +434,9 @@ describe("ChatList", () => {
     const groupTransfer = createDataTransfer();
     fireEvent.dragStart(source, { dataTransfer: groupTransfer });
     const groupIcon = screen.getByRole("button", { name: "Group with Target topic" });
+    expect(groupIcon).toHaveTextContent("Group");
     fireEvent.dragOver(groupIcon, { dataTransfer: groupTransfer });
+    expect(groupIcon).toHaveTextContent("Release to group");
     fireEvent.drop(groupIcon, { dataTransfer: groupTransfer });
     expect(onGroupSessions).toHaveBeenCalledWith(
       "websocket:source",
