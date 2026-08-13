@@ -11,6 +11,48 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _PICKER_TIMEOUT_SECONDS = 300
+_COMMON_ENV_KEYS = (
+    "HOME",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TMPDIR",
+    "USER",
+)
+_LINUX_GUI_ENV_KEYS = (
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DESKTOP_SESSION",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_RUNTIME_DIR",
+)
+_MACOS_GUI_ENV_KEYS = ("SECURITYSESSIONID", "__CF_USER_TEXT_ENCODING")
+_WINDOWS_GUI_ENV_KEYS = (
+    "APPDATA",
+    "COMSPEC",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOCALAPPDATA",
+    "PATHEXT",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "SESSIONNAME",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USERDOMAIN",
+    "USERNAME",
+    "USERPROFILE",
+)
 
 
 class NativeFolderPickerError(RuntimeError):
@@ -94,6 +136,22 @@ def native_folder_picker_available() -> bool:
     return _picker_command() is not None
 
 
+def _picker_environment() -> dict[str, str]:
+    """Pass only host UI/runtime variables, never provider or gateway secrets."""
+    keys: list[str] = list(_COMMON_ENV_KEYS)
+    if sys.platform == "darwin":
+        keys.extend(_MACOS_GUI_ENV_KEYS)
+    elif sys.platform == "win32":
+        keys.extend(_WINDOWS_GUI_ENV_KEYS)
+    elif sys.platform.startswith("linux"):
+        keys.extend(_LINUX_GUI_ENV_KEYS)
+    return {
+        key: value
+        for key in keys
+        if (value := os.environ.get(key)) is not None
+    }
+
+
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
@@ -113,11 +171,15 @@ async def pick_native_folder() -> str | None:
     if command is None:
         raise NativeFolderPickerError("native folder picker is unavailable on this host")
 
-    process = await asyncio.create_subprocess_exec(
-        *command.argv,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command.argv,
+            env=_picker_environment(),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise NativeFolderPickerError("native folder picker failed to start") from exc
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),

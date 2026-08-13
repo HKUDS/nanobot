@@ -133,7 +133,8 @@ or a result you must retain.
 
 Use the workspace picker before starting project-specific work. This gives the
 agent the right project context for file paths, shell commands, and session
-metadata.
+metadata. A locally hosted WebUI opens the operating system's folder chooser
+when one is available; remote deployments keep the manual absolute path entry.
 
 Selecting a project does not replace the configured agent workspace. The two
 paths have different responsibilities:
