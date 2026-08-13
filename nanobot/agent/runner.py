@@ -33,6 +33,7 @@ from nanobot.llm_usage.context import (
     reset_llm_usage_source,
     source_from_session_key,
 )
+from nanobot.agent.tool_schema_selection import select_model_visible_tools
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -104,6 +105,7 @@ class AgentRunSpec:
     workspace: Path | None = None
     session_key: str | None = None
     context_block_limit: int | None = None
+    mcp_schema_budget_bytes: int = 0
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
@@ -412,6 +414,11 @@ class AgentRunner:
             state=spec.provider_state,
             session_id=spec.session_key,
         )
+        model_visible_tools = select_model_visible_tools(
+            spec.tools.get_definitions(),
+            spec.initial_messages,
+            spec.mcp_schema_budget_bytes,
+        )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -449,6 +456,7 @@ class AgentRunner:
                 context,
                 request_state=request_state,
                 transcript=messages,
+                model_visible_tools=model_visible_tools,
             )
             assert request_state.messages is not None
             messages_for_model = request_state.messages
@@ -861,6 +869,7 @@ class AgentRunner:
         context: AgentHookContext,
         *,
         request_state: ModelRequestState,
+        model_visible_tools: list[dict[str, Any]],
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> LLMResponse:
@@ -876,7 +885,7 @@ class AgentRunner:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=tool_definitions,
+            tools=model_visible_tools,
         )
         wants_streaming = hook.wants_streaming()
 
@@ -1061,6 +1070,7 @@ class AgentRunner:
             return await self._request_model(
                 spec, retry_messages, hook, context,
                 request_state=request_state,
+                model_visible_tools=model_visible_tools,
                 malformed_retry=True,
                 transcript=None,
             )

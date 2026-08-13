@@ -2069,10 +2069,30 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 - Set `enabledTools` to `[]` to register no tools from that server. Resources and prompts are also skipped, since they have no per-name filter.
 - Set `enabledTools` to a non-empty list of names to register only those tools — resources and prompts are not registered.
 
+Large MCP setups can optionally limit the schemas sent to the model for each request:
+
+```json
+{
+  "tools": {
+    "mcpSchemaBudgetBytes": 12000,
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      }
+    }
+  }
+}
+```
+
+`mcpSchemaBudgetBytes` counts compact JSON schema bytes and is disabled by default (`0`).
+When enabled, all built-in tools remain visible. If the registered MCP schemas exceed the
+budget, nanobot chooses a deterministic subset from the latest user request and keeps that
+view stable until another user message arrives. If relevance is unclear or the strongest
+match cannot fit, it sends the full MCP schema set instead of hiding a potentially required
+tool. This affects only model-visible definitions; all registered MCP tools remain executable.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-
-
-
 
 ## Security
 
