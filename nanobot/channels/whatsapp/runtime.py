@@ -21,6 +21,10 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.whatsapp.state import (
+    WhatsAppDatabaseRecoveryRequiredError,
+    ensure_database_ready,
+)
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
 from nanobot.security.network import PinnedDNSAsyncTransport
@@ -301,6 +305,11 @@ class WhatsAppChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WhatsAppConfig().model_dump(by_alias=True)
 
+    def start_error_message(self, error: Exception) -> str | None:
+        if isinstance(error, WhatsAppDatabaseRecoveryRequiredError):
+            return str(error)
+        return super().start_error_message(error)
+
     def __init__(self, config: Any, bus: MessageBus):
         legacy_bridge_fields = (
             _legacy_bridge_config_fields(cast(dict[str, Any], config))
@@ -339,8 +348,9 @@ class WhatsAppChannel(BaseChannel):
         return mapping
 
     def _new_client(self) -> Any:
-        api = _load_neonize()
         db_path = self._database_path()
+        ensure_database_ready(db_path)
+        api = _load_neonize()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return api.NewAClient(str(db_path))
 
@@ -389,9 +399,9 @@ class WhatsAppChannel(BaseChannel):
                 await client.stop()
 
     async def start(self) -> None:
+        client = self._new_client()
         self._running = True
         self._started_at = time.time()
-        client = self._new_client()
         self._client = client
         self._register_handlers(client, handle_messages=True)
 

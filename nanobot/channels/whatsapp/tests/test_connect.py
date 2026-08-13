@@ -12,6 +12,7 @@ from nanobot.channels.whatsapp.connect import (
     WhatsAppConnectStore,
     WhatsAppDatabaseRecoveryError,
 )
+from nanobot.channels.whatsapp.state import recovery_marker_path
 
 
 class _FakeClient:
@@ -228,6 +229,28 @@ async def test_whatsapp_connect_reuses_active_session_for_same_target(
 
 
 @pytest.mark.asyncio
+async def test_whatsapp_connect_replays_durable_recovery_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    target.write_bytes(b"mixed-session")
+    recovery_marker_path(target).touch()
+    channel = _FakeChannel(complete=False)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+
+    recovered = await store.start(force=True)
+
+    assert recovered["status"] == "failed"
+    assert recovered["recovery_required"] is True
+    assert recovered["restart_blocked"] is True
+    assert recovered["_recovery_required"] is True
+    assert "database recovery is required" in recovered["message"]
+    assert channel.client.connect_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_whatsapp_connect_finalize_wins_over_queued_cancel(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -366,6 +389,7 @@ def test_whatsapp_database_promotion_rolls_back_entire_file_family(
     assert pending.read_bytes() == b"new-main"
     assert pending.with_name(pending.name + "-wal").read_bytes() == b"new-wal"
     assert not any(".backup" in path.name for path in tmp_path.iterdir())
+    assert not recovery_marker_path(target).exists()
 
 
 def test_whatsapp_database_incomplete_rollback_preserves_both_generations(
@@ -413,6 +437,7 @@ def test_whatsapp_database_incomplete_rollback_preserves_both_generations(
     assert main_backups[0].read_bytes() == b"old-main"
     assert pending.with_name(pending.name + "-wal").read_bytes() == b"new-wal"
     assert target.with_name(target.name + "-wal").read_bytes() == b"old-wal"
+    assert recovery_marker_path(target).is_file()
 
 
 @pytest.mark.asyncio
@@ -429,7 +454,8 @@ async def test_whatsapp_recovery_session_and_artifacts_do_not_expire(
     pending_path = Path(channel.config.database_path)
     assert (await store.poll(started["session_id"]))["status"] == "prepared"
 
-    def require_recovery(_pending: Path, _target: Path) -> None:
+    def require_recovery(_pending: Path, destination: Path) -> None:
+        recovery_marker_path(destination).touch()
         raise WhatsAppDatabaseRecoveryError("manual database recovery required")
 
     monkeypatch.setattr(store, "_commit_database", require_recovery)
@@ -442,6 +468,7 @@ async def test_whatsapp_recovery_session_and_artifacts_do_not_expire(
     assert failed["requires_restart"] is False
     assert started["session_id"] in store._sessions
     assert pending_path.read_bytes() == b"new-session"
+    assert recovery_marker_path(target).is_file()
     retry = await store.poll(started["session_id"])
     assert retry["recovery_required"] is True
     assert retry["_recovery_required"] is True
@@ -461,3 +488,4 @@ def test_whatsapp_database_promotion_removes_stale_target_sidecars(tmp_path: Pat
     assert not target.with_name(target.name + "-shm").exists()
     assert not target.with_name(target.name + "-wal").exists()
     assert not any(".backup" in path.name for path in tmp_path.iterdir())
+    assert not recovery_marker_path(target).exists()

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot.channels.connect import ChannelConnectError, QueryParams, query_first
+from nanobot.channels.whatsapp.state import recovery_marker_path, recovery_required_message
 from nanobot.config.loader import load_config
 
 if TYPE_CHECKING:
@@ -83,6 +84,16 @@ class WhatsAppConnectStore:
         async with self._lock:
             await self._cleanup_locked()
             channel, target_path = self._build_channel()
+            if recovery_message := recovery_required_message(target_path):
+                return {
+                    "session_id": "",
+                    "status": "failed",
+                    "message": recovery_message,
+                    "recovery_required": True,
+                    "restart_blocked": True,
+                    "requires_restart": False,
+                    "_recovery_required": True,
+                }
             active = next(
                 (
                     session
@@ -429,6 +440,20 @@ class WhatsAppConnectStore:
         if not cls._local_state_present(pending):
             raise RuntimeError("WhatsApp connected but did not create a local session database")
         target.parent.mkdir(parents=True, exist_ok=True)
+        recovery_marker = recovery_marker_path(target)
+        try:
+            with recovery_marker.open("x", encoding="utf-8") as marker_file:
+                marker_file.write(
+                    "WhatsApp database promotion was interrupted. Reconcile the preserved "
+                    "SQLite files before removing this marker.\n"
+                )
+                marker_file.flush()
+                os.fsync(marker_file.fileno())
+        except FileExistsError as exc:
+            raise WhatsAppDatabaseRecoveryError(
+                recovery_required_message(target)
+                or "WhatsApp database recovery is already required."
+            ) from exc
         backup = target.with_name(f".{target.name}.{secrets.token_urlsafe(8)}.backup")
         backups: list[tuple[Path, Path]] = []
         promoted: list[tuple[Path, Path]] = []
@@ -466,11 +491,25 @@ class WhatsAppConnectStore:
                     "WhatsApp session database promotion and rollback failed. "
                     f"Preserved recovery files beside {target}: {rollback_errors[0]}"
                 ) from exc
+            try:
+                recovery_marker.unlink()
+            except OSError as marker_exc:
+                raise WhatsAppDatabaseRecoveryError(
+                    "WhatsApp session database rollback completed, but its recovery marker "
+                    f"could not be cleared: {marker_exc}"
+                ) from marker_exc
             raise
         else:
             for _target_file, backup_file in backups:
                 with suppress(OSError):
                     backup_file.unlink()
+            try:
+                recovery_marker.unlink()
+            except OSError as exc:
+                raise WhatsAppDatabaseRecoveryError(
+                    "WhatsApp session database was promoted, but its recovery marker "
+                    f"could not be cleared: {exc}"
+                ) from exc
 
     @classmethod
     def _remove_database(cls, path: Path) -> None:

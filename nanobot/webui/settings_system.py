@@ -370,6 +370,7 @@ class SystemSettingsHandler:
         self.logger = logger
         self._channel_connectors: dict[str, Any] = {}
         self._channel_mutation_locks: dict[str, asyncio.Lock] = {}
+        self._channel_recovery_blocks: dict[str, str] = {}
 
     async def _run_channel_mutation(
         self,
@@ -544,6 +545,18 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        install_only = (
+            action == "enable"
+            and (query_first(request.query, "install_only") or "").strip().lower()
+            in {"1", "true", "yes"}
+        )
+        channel_name = (query_first(request.query, "name") or "").strip()
+        if (
+            action == "enable"
+            and not install_only
+            and (message := self._channel_recovery_blocks.get(channel_name))
+        ):
+            return SettingsRouteResult.failure(409, message)
         try:
             payload = await asyncio.to_thread(
                 self._nanobot_features_action,
@@ -566,11 +579,6 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
-        install_only = (
-            action == "enable"
-            and (query_first(request.query, "install_only") or "").strip().lower()
-            in {"1", "true", "yes"}
-        )
         if not install_only:
             payload = await self._apply_feature_runtime_change(
                 action,
@@ -713,6 +721,8 @@ class SystemSettingsHandler:
             "true",
             "yes",
         }
+        if enable and (message := self._channel_recovery_blocks.get(name)):
+            return SettingsRouteResult.failure(409, message)
         try:
             saved = await asyncio.to_thread(
                 self._save_channel_config_values,
@@ -913,7 +923,7 @@ class SystemSettingsHandler:
         if terminal_replay:
             return SettingsRouteResult.success(payload)
         if recovery_required:
-            payload = self._channel_connect_recovery_payload(payload)
+            payload = self._channel_connect_recovery_payload(channel_name, payload)
             return SettingsRouteResult.success(
                 payload,
                 clear_restart_section="runtime",
@@ -1007,6 +1017,9 @@ class SystemSettingsHandler:
             if stop_payload is not None and stop_payload.get("requires_restart"):
                 retry["requires_restart"] = True
             return self._channel_connect_retry_result(retry, runtime_safe=True)
+        runtime_was_stopped = (
+            stop_payload is None or stop_payload.get("stopped") is not False
+        )
 
         try:
             finalized = finalize(session_id)
@@ -1021,6 +1034,7 @@ class SystemSettingsHandler:
                 channel_name,
                 instance_id,
                 operations,
+                runtime_was_stopped=runtime_was_stopped,
             )
             retry = dict(prepared)
             retry.pop("_requires_finalize", None)
@@ -1038,7 +1052,7 @@ class SystemSettingsHandler:
             # The target SQLite family may contain a promoted generation while
             # the old generation survives in backup files. Starting either
             # runtime could make manual recovery destructive.
-            payload = self._channel_connect_recovery_payload(payload)
+            payload = self._channel_connect_recovery_payload(channel_name, payload)
             return SettingsRouteResult.success(
                 payload,
                 clear_restart_section="runtime",
@@ -1048,6 +1062,7 @@ class SystemSettingsHandler:
                 channel_name,
                 instance_id,
                 operations,
+                runtime_was_stopped=runtime_was_stopped,
             )
             return self._channel_connect_retry_result(payload, runtime_safe=restored)
         if terminal_replay:
@@ -1055,6 +1070,7 @@ class SystemSettingsHandler:
                 channel_name,
                 instance_id,
                 operations,
+                runtime_was_stopped=runtime_was_stopped,
             )
             if restored:
                 return SettingsRouteResult.success(payload)
@@ -1073,6 +1089,7 @@ class SystemSettingsHandler:
                 channel_name,
                 instance_id,
                 operations,
+                runtime_was_stopped=runtime_was_stopped,
             )
             payload.update(
                 status="failed",
@@ -1085,6 +1102,7 @@ class SystemSettingsHandler:
                 channel_name,
                 instance_id,
                 operations,
+                runtime_was_stopped=runtime_was_stopped,
             )
             return self._channel_connect_retry_result(payload, runtime_safe=restored)
 
@@ -1160,7 +1178,11 @@ class SystemSettingsHandler:
         channel_name: str,
         instance_id: str | None,
         operations: SystemSettingsOperations,
+        *,
+        runtime_was_stopped: bool,
     ) -> bool:
+        if not runtime_was_stopped:
+            return True
         restored, _payload = await self._run_channel_runtime_action(
             "enable",
             channel_name,
@@ -1174,8 +1196,11 @@ class SystemSettingsHandler:
             )
         return restored
 
-    @staticmethod
-    def _channel_connect_recovery_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    def _channel_connect_recovery_payload(
+        self,
+        channel_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         updated = dict(payload)
         warning = (
             "Do not restart or enable this channel until its database files "
@@ -1190,6 +1215,7 @@ class SystemSettingsHandler:
             restart_blocked=True,
             requires_restart=False,
         )
+        self._channel_recovery_blocks[channel_name] = message
         return updated
 
     @staticmethod

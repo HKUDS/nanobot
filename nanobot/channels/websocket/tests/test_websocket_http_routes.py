@@ -1677,6 +1677,79 @@ async def test_channel_connect_finalize_failure_restores_previous_runtime(
 
 
 @pytest.mark.asyncio
+async def test_channel_connect_finalize_failure_does_not_restore_absent_runtime(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class PreparedConnector:
+        async def handle(
+            self,
+            _action: str,
+            _query: dict[str, list[str]],
+        ) -> dict[str, Any]:
+            return {
+                "session_id": "session-1",
+                "status": "prepared",
+                "_requires_finalize": True,
+            }
+
+        async def finalize(self, _session_id: str) -> dict[str, Any]:
+            events.append("finalize")
+            return {"session_id": "session-1", "status": "failed", "message": "commit failed"}
+
+    connector = PreparedConnector()
+
+    class FakePlugin:
+        dependencies: tuple[str, ...] = ()
+
+        @staticmethod
+        def load_connector() -> PreparedConnector:
+            return connector
+
+    async def runtime_action(
+        action: str,
+        _name: str,
+        _instance_id: str | None,
+    ) -> dict[str, Any]:
+        events.append(action)
+        if action == "enable":
+            pytest.fail("a runtime that was not stopped must not be restored")
+        return {
+            "handled": True,
+            "ok": True,
+            "stopped": False,
+            "requires_restart": False,
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin",
+        lambda _name: FakePlugin(),
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=_free_port(),
+        channel_feature_action=runtime_action,
+    )
+
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.connect.poll",
+        {"channel": "whatsapp", "session_id": "session-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["retryable"] is True
+    assert response.json().get("runtime_restore_failed") is None
+    assert response.json().get("requires_restart", False) is False
+    assert events == ["disable", "finalize"]
+
+
+@pytest.mark.asyncio
 async def test_channel_connect_retries_promoted_activation_before_terminal_replay(
     bus: MagicMock,
     tmp_path: Path,
@@ -1984,6 +2057,7 @@ async def test_channel_connect_recovery_required_does_not_restart_mixed_database
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime_actions: list[str] = []
+    feature_actions: list[str] = []
 
     class RecoveryConnector:
         async def handle(
@@ -2021,9 +2095,26 @@ async def test_channel_connect_recovery_required_does_not_restart_mixed_database
         runtime_actions.append(action)
         return {"handled": True, "ok": True, "requires_restart": False}
 
+    def feature_action(
+        action: str,
+        _query: dict[str, list[str]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        feature_actions.append(action)
+        return {
+            "features": [],
+            "enabled_count": int(action == "enable"),
+            "requires_restart": True,
+            "last_action": {"ok": True, "message": f"{action}d WhatsApp"},
+        }
+
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.load_channel_plugin",
         lambda _name: FakePlugin(),
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.nanobot_features_action",
+        feature_action,
     )
     channel = _ch(
         bus,
@@ -2044,6 +2135,27 @@ async def test_channel_connect_recovery_required_does_not_restart_mixed_database
     assert response.json()["requires_restart"] is False
     assert response.json().get("restart_required_sections", []) == []
     assert "Do not restart or enable" in response.json()["message"]
+    assert runtime_actions == ["disable"]
+
+    enable_response = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "whatsapp"},
+    )
+
+    assert enable_response.status_code == 409
+    assert "recovery" in enable_response.text.lower()
+    assert feature_actions == []
+    assert runtime_actions == ["disable"]
+
+    configure_response = await _webui_mutate(
+        channel,
+        "settings.channel.configure",
+        {"name": "whatsapp", "enable": True, "values": {}},
+    )
+
+    assert configure_response.status_code == 409
+    assert feature_actions == []
     assert runtime_actions == ["disable"]
 
 

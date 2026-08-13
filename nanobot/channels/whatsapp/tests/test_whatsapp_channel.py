@@ -4,6 +4,7 @@ import asyncio
 import mimetypes
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,6 +19,7 @@ from nanobot.channels.whatsapp.runtime import (
     _legacy_bridge_config_fields,
     _NeonizeAPI,
 )
+from nanobot.channels.whatsapp.state import recovery_marker_path
 
 
 class _Proto:
@@ -168,6 +170,26 @@ def test_default_config_has_no_bridge_fields() -> None:
 def test_legacy_bridge_config_fields_are_detected() -> None:
     assert _legacy_bridge_config_fields({"bridgeUrl": "ws://localhost:3001"}) == ["bridgeUrl"]
     assert _legacy_bridge_config_fields({"bridgeToken": "secret"}) == ["bridgeToken"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_marker_blocks_runtime_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "neonize.db"
+    recovery_marker_path(database_path).touch()
+    channel = _make_channel({"databasePath": str(database_path)})
+    load_neonize = MagicMock()
+    monkeypatch.setattr(whatsapp_module, "_load_neonize", load_neonize)
+
+    with pytest.raises(RuntimeError, match="database recovery is required") as exc_info:
+        await channel.start()
+
+    assert channel.start_error_message(exc_info.value) == str(exc_info.value)
+    assert channel.is_running is False
+    assert channel._client is None
+    load_neonize.assert_not_called()
 
 
 @pytest.mark.asyncio
