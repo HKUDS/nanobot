@@ -138,6 +138,7 @@ class SessionClient:
 
     def clear(self, session_key: str) -> SessionSnapshot:
         """Clear one session and persist the empty session."""
+        self._loop.discard_session_file_state(session_key)
         session = self._loop.sessions.get_or_create(session_key)
         session.clear()
         self._loop.sessions.save(session)
@@ -145,6 +146,7 @@ class SessionClient:
 
     def delete(self, session_key: str) -> bool:
         """Delete one session from disk and cache."""
+        self._loop.discard_session_file_state(session_key)
         return self._loop.sessions.delete_session(session_key)
 
     def flush(self) -> int:
