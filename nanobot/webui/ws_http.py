@@ -855,9 +855,9 @@ class GatewayHTTPHandler:
                         self.local_trigger_store.delete(job.id)
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
-        deleted = self.session_manager.delete_session(decoded_key)
-        delete_webui_thread(decoded_key)
-        return _http_json_response({"deleted": bool(deleted)})
+        session_deleted = self.session_manager.delete_session(decoded_key)
+        transcript_deleted = delete_webui_thread(decoded_key)
+        return _http_json_response({"deleted": bool(session_deleted or transcript_deleted)})
 
     # -- Automation routes --------------------------------------------------
 

@@ -31,6 +31,11 @@ from .ws_test_client import http_get as _http_get
 _PORT = 29900
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runtime_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+
 class _MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
@@ -278,6 +283,53 @@ async def test_sessions_list_requires_bearer_token(
         # Server stays an opaque source: filesystem paths must not leak to the wire.
         assert all("path" not in s for s in listing.json()["sessions"])
 
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_and_thread_restore_transcript_without_canonical_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = SessionManager(tmp_path / "workspace")
+    from nanobot.webui.transcript import append_transcript_object
+
+    key = "websocket:restored-history"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "restored-history", "text": "original question"},
+    )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "restored-history", "text": "original answer"},
+    )
+    assert not sm._get_session_path(key).exists()
+
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        listing = await _http_get(f"http://127.0.0.1:{port}/api/sessions", headers=auth)
+        thread = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/"
+            "websocket%3Arestored-history/webui-thread",
+            headers=auth,
+        )
+
+        assert listing.status_code == 200
+        assert [row["key"] for row in listing.json()["sessions"]] == [key]
+        assert listing.json()["sessions"][0]["preview"] == "original question"
+        assert thread.status_code == 200
+        assert [message["content"] for message in thread.json()["messages"]] == [
+            "original question",
+            "original answer",
+        ]
+        assert not sm._get_session_path(key).exists()
     finally:
         await channel.stop()
         await server_task
@@ -2261,6 +2313,40 @@ async def test_session_delete_removes_file(
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
+        assert not webui_path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_removes_transcript_without_canonical_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = SessionManager(tmp_path / "workspace")
+    from nanobot.webui.transcript import append_transcript_object
+
+    key = "websocket:transcript-only"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "transcript-only", "text": "recover me"},
+    )
+    assert not sm._get_session_path(key).exists()
+    webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
+    assert webui_path.is_file()
+
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    server_task = asyncio.create_task(channel.start())
+    try:
+        response = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": key},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] is True
         assert not webui_path.exists()
     finally:
         await channel.stop()
