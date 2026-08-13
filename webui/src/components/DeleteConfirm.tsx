@@ -44,11 +44,11 @@ export function DeleteConfirm({
         className="w-[min(calc(100vw-2rem),24rem)] gap-0 p-5 text-center"
       >
         <AlertDialogHeader className="items-center space-y-0 text-center">
-          <div className="mb-5 grid h-16 w-16 place-items-center rounded-full bg-destructive/10 text-destructive">
-            <div className="grid h-9 w-9 place-items-center rounded-full border border-destructive/20 bg-destructive/5">
-              <Trash2 className="h-5 w-5" strokeWidth={2.4} aria-hidden />
-            </div>
-          </div>
+          <Trash2
+            className="mb-4 h-6 w-6 text-destructive"
+            strokeWidth={1.8}
+            aria-hidden
+          />
           <AlertDialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
             {multiple
               ? t("deleteConfirm.titleMany", {
