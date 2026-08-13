@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "Ruang kerja percakapan",
     "panes": "Panel",
-    "tabAria": "Tab: {{title}}",
+    "tabAria": "Grup: {{title}}",
     "panesInTab": "Panel di {{title}}",
     "collapseTabGroup": "Ciutkan panel di {{title}}",
     "expandTabGroup": "Luaskan panel di {{title}}",

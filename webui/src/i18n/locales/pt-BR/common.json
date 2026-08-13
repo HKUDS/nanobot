@@ -1451,7 +1451,7 @@
   "workbench": {
     "aria": "Área de conversas",
     "panes": "Painéis",
-    "tabAria": "Aba: {{title}}",
+    "tabAria": "Grupo: {{title}}",
     "panesInTab": "Painéis em {{title}}",
     "collapseTabGroup": "Recolher os painéis em {{title}}",
     "expandTabGroup": "Expandir os painéis em {{title}}",

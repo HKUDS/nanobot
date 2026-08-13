@@ -1438,7 +1438,7 @@
   "workbench": {
     "aria": "Área de conversaciones",
     "panes": "Paneles",
-    "tabAria": "Pestaña: {{title}}",
+    "tabAria": "Grupo: {{title}}",
     "panesInTab": "Paneles de {{title}}",
     "collapseTabGroup": "Contraer los paneles de {{title}}",
     "expandTabGroup": "Expandir los paneles de {{title}}",

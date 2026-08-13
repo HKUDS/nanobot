@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "대화 워크벤치",
     "panes": "창",
-    "tabAria": "탭: {{title}}",
+    "tabAria": "그룹: {{title}}",
     "panesInTab": "{{title}}의 창",
     "collapseTabGroup": "{{title}}의 창 접기",
     "expandTabGroup": "{{title}}의 창 펼치기",

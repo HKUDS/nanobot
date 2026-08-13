@@ -1451,7 +1451,7 @@
   "workbench": {
     "aria": "Conversation workbench",
     "panes": "Panes",
-    "tabAria": "Tab: {{title}}",
+    "tabAria": "Group: {{title}}",
     "panesInTab": "Panes in {{title}}",
     "collapseTabGroup": "Collapse panes in {{title}}",
     "expandTabGroup": "Expand panes in {{title}}",

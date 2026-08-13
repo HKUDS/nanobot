@@ -2718,7 +2718,6 @@ function Shell({
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 addPaneDisabledLabel={activePaneLimitReached
                   ? t("workbench.paneLimit", {
-                      defaultValue: "Maximum {{count}} panes",
                       count: MAX_WORKBENCH_PANES,
                     })
                   : undefined}
@@ -2812,7 +2811,6 @@ function Shell({
                       composerPortalTarget={context.composerPortalTarget}
                       composerActive={context.active}
                       composerInputAriaLabel={t("workbench.composerAria", {
-                        defaultValue: "Message {{title}}",
                         title: pane.title,
                       })}
                       emptyComposerVariant="thread"

@@ -3099,7 +3099,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const alphaTab = await within(sidebar).findByRole("button", { name: "Tab: Alpha tab" });
+    const alphaTab = await within(sidebar).findByRole("button", { name: "Group: Alpha tab" });
     const betaTab = within(sidebar).getByRole("button", { name: "Beta tab" });
     expect(alphaTab.compareDocumentPosition(betaTab) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
@@ -3218,7 +3218,7 @@ describe("App layout", () => {
       statusHandlers.forEach((handler) => handler("open"));
     });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    expect(within(sidebar).queryByRole("button", { name: "Tab: Solo pane" }))
+    expect(within(sidebar).queryByRole("button", { name: "Group: Solo pane" }))
       .not.toBeInTheDocument();
     setSidebarStateSpy.mockClear();
 
@@ -3228,14 +3228,14 @@ describe("App layout", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Create group" }));
 
     const tabButton = await within(sidebar).findByRole("button", {
-      name: "Tab: Solo pane",
+      name: "Group: Solo pane",
     });
     const tabGroup = tabButton.closest("[data-sidebar-tab-group]") as HTMLElement;
     expect(within(tabGroup).getByRole("list", { name: "Panes in Solo pane" }))
       .toBeInTheDocument();
     expect(within(tabGroup).getAllByRole("button", { name: "Solo pane" }))
       .toHaveLength(1);
-    expect(within(sidebar).queryByRole("button", { name: "Tab: Other pane" }))
+    expect(within(sidebar).queryByRole("button", { name: "Group: Other pane" }))
       .not.toBeInTheDocument();
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3312,7 +3312,7 @@ describe("App layout", () => {
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const secondSidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    expect(await within(secondSidebar).findByRole("button", { name: "Tab: Solo pane" }))
+    expect(await within(secondSidebar).findByRole("button", { name: "Group: Solo pane" }))
       .toBeInTheDocument();
   });
 

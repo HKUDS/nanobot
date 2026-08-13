@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "会話ワークベンチ",
     "panes": "ペイン",
-    "tabAria": "タブ：{{title}}",
+    "tabAria": "グループ：{{title}}",
     "panesInTab": "{{title}} のペイン",
     "collapseTabGroup": "{{title}} のペインを折りたたむ",
     "expandTabGroup": "{{title}} のペインを展開する",

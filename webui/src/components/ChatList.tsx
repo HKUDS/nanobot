@@ -1013,9 +1013,7 @@ export const ChatList = memo(function ChatList({
                               {paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
-                                  {t("workbench.createGroup", {
-                                    defaultValue: "Create group",
-                                  })}
+                                  {t("workbench.createGroup")}
                                 </DropdownMenuItem>
                               ) : null}
                               {paneGroup && onAttachPane ? (
@@ -1220,7 +1218,7 @@ function WorkbenchTabHeader({
               {onDissolve ? (
                 <DropdownMenuItem onSelect={onDissolve}>
                   <Ungroup className="h-4 w-4 shrink-0" />
-                  {t("workbench.dissolveTab", { defaultValue: "Dissolve group" })}
+                  {t("workbench.dissolveTab")}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem
@@ -1229,9 +1227,7 @@ function WorkbenchTabHeader({
                 className="whitespace-nowrap"
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
-                {t("workbench.deleteConversations", {
-                  defaultValue: "Delete all chats",
-                })}
+                {t("workbench.deleteConversations")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1322,10 +1318,7 @@ function ActivePaneRows({
   return (
     <ul
       id={id}
-      aria-label={t("workbench.panesInTab", {
-        defaultValue: "Panes in {{title}}",
-        title: tabTitle,
-      })}
+      aria-label={t("workbench.panesInTab", { title: tabTitle })}
       className="mt-0.5 space-y-0.5 rounded-es-[14px] border-s-2 border-sidebar-foreground/25 pb-1"
     >
       {panes.map((pane) => {
@@ -1335,10 +1328,7 @@ function ActivePaneRows({
           : updated.has(pane.chatId) && !active
             ? "updated"
             : null;
-        const paneActionsLabel = t("workbench.paneActions", {
-          defaultValue: "{{title}} pane actions",
-          title: pane.title,
-        });
+        const paneActionsLabel = t("workbench.paneActions", { title: pane.title });
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
         const isArchived = archived.has(pane.key);
@@ -1452,10 +1442,7 @@ function ActivePaneRows({
                   {onDetachPane ? (
                     <DropdownMenuItem onSelect={() => onDetachPane(group.tabKey, pane.key)}>
                       <Unplug className="h-4 w-4 shrink-0" />
-                      {t("workbench.detachPane", {
-                        defaultValue: "Remove",
-                        title: pane.title,
-                      })}
+                      {t("workbench.detachPane", { title: pane.title })}
                     </DropdownMenuItem>
                   ) : null}
                   {onAttachPane ? (
@@ -1521,7 +1508,7 @@ function MoveToGroupSubmenu({
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <MoveRight className="h-4 w-4 shrink-0" aria-hidden />
-        {t("workbench.moveTo", { defaultValue: "Move to" })}
+        {t("workbench.moveTo")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         {targets.map((target) => (

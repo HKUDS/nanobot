@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "Espace de conversations",
     "panes": "Volets",
-    "tabAria": "Onglet : {{title}}",
+    "tabAria": "Groupe : {{title}}",
     "panesInTab": "Volets dans {{title}}",
     "collapseTabGroup": "Réduire les volets de {{title}}",
     "expandTabGroup": "Développer les volets de {{title}}",

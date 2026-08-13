@@ -1451,7 +1451,7 @@
   "workbench": {
     "aria": "会话工作台",
     "panes": "窗格",
-    "tabAria": "标签页：{{title}}",
+    "tabAria": "分组：{{title}}",
     "panesInTab": "{{title}} 中的窗格",
     "collapseTabGroup": "折叠 {{title}} 中的窗格",
     "expandTabGroup": "展开 {{title}} 中的窗格",

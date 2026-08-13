@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "Không gian hội thoại",
     "panes": "Khung",
-    "tabAria": "Thẻ: {{title}}",
+    "tabAria": "Nhóm: {{title}}",
     "panesInTab": "Các khung trong {{title}}",
     "collapseTabGroup": "Thu gọn các khung trong {{title}}",
     "expandTabGroup": "Mở rộng các khung trong {{title}}",

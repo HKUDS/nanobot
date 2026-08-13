@@ -1437,7 +1437,7 @@
   "workbench": {
     "aria": "對話工作台",
     "panes": "窗格",
-    "tabAria": "標籤頁：{{title}}",
+    "tabAria": "群組：{{title}}",
     "panesInTab": "{{title}} 中的窗格",
     "collapseTabGroup": "收合 {{title}} 中的窗格",
     "expandTabGroup": "展開 {{title}} 中的窗格",
