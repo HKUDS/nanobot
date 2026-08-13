@@ -91,6 +91,9 @@ export function ThreadMessages({
     && pendingTurn !== null
     && !pendingTurn.hasVisibleOutput
   ) ? pendingTurn : null;
+  const currentTurnStartIndex = isStreaming
+    ? activeTurnStartIndex(units, activeTurnId)
+    : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -140,7 +143,15 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
-            isTurnStreaming={liveActivityClusterIndices.has(index)}
+            isTurnStreaming={
+              unit.type === "activity"
+                ? liveActivityClusterIndices.has(index)
+                : isStreaming && (
+                    unit.message.turnId
+                      ? unit.message.turnId === activeTurnId
+                      : index > currentTurnStartIndex
+                  )
+            }
             forkIndex={forkIndex}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
@@ -280,6 +291,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         ) : (
           <MessageBubble
             message={unit.message}
+            isTurnStreaming={isTurnStreaming}
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
@@ -315,6 +327,27 @@ function threadDisplayUnitPropsEqual(
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );
+}
+
+function activeTurnStartIndex(units: DisplayUnit[], activeTurnId: string | null): number {
+  if (activeTurnId) {
+    const index = units.findIndex((unit) => (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+      && unit.message.turnId === activeTurnId
+    ));
+    if (index >= 0) return index;
+  }
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+    ) return i;
+  }
+  return -1;
 }
 
 function displayUnitsEqual(previous: DisplayUnit, next: DisplayUnit): boolean {

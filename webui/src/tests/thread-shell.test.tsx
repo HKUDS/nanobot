@@ -471,6 +471,54 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
   });
 
+  it("hides actions for a complete assistant-only message until turn_end", async () => {
+    const client = makeClient();
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("websocket%3Aassistant-only-actions/webui-thread")
+        ? httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "old automation", turnId: "turn-old" },
+          ]))
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("assistant-only-actions")}
+        title="Assistant-only actions"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1));
+    const turnId = "turn-automation";
+    const startedAt = Date.now() / 1000;
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "goal_status",
+      chat_id: "assistant-only-actions",
+      status: "running",
+      started_at: startedAt,
+      turn_id: turnId,
+    }));
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "message",
+      chat_id: "assistant-only-actions",
+      text: "new automation",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "turn_end",
+      chat_id: "assistant-only-actions",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
+  });
+
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();

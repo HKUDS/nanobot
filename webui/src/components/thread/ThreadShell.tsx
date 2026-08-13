@@ -216,17 +216,18 @@ function isStaleThreadSnapshot(
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
-function latestActiveTurnId(messages: UIMessage[]): string | null {
+function latestActiveTurnId(messages: UIMessage[], runStartedAt: number | null): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.isStreaming && message.turnId) return message.turnId;
   }
+  if (runStartedAt === null) return null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (
-      message.role === "user"
-      && message.deliveryStatus !== "failed"
+      message.role !== "user"
       && message.turnId
+      && message.createdAt >= runStartedAt * 1000
     ) return message.turnId;
   }
   return null;
@@ -808,8 +809,8 @@ export function ThreadShell({
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
-    () => turnActive ? latestActiveTurnId(displayMessages) : null,
-    [displayMessages, turnActive],
+    () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
+    [currentRunStartedAt, displayMessages, turnActive],
   );
   const rememberedViewportTurnId = chatId
     ? activeViewportTurnByChatIdRef.current.get(chatId) ?? null
@@ -818,7 +819,10 @@ export function ThreadShell({
     ? client.getRunTurnId(chatId)
     : null;
   const viewportTurnId = messagesReady && turnActive
-    ? canonicalRunTurnId ?? rememberedViewportTurnId ?? restoredViewportTurnId
+    ? canonicalRunTurnId
+      ?? rememberedViewportTurnId
+      ?? historyActiveTurnId
+      ?? restoredViewportTurnId
     : null;
   const activeTurnStartedHere =
     viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;

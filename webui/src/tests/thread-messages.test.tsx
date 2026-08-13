@@ -1055,6 +1055,122 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
+  it("hides current turn actions until turn_end", () => {
+    const activeTurnId = "turn-2";
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: activeTurnId,
+        createdAt: 4,
+      },
+      {
+        id: "t2",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        turnId: activeTurnId,
+        createdAt: 5,
+      },
+      {
+        id: "a3",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: activeTurnId,
+        createdAt: 6,
+      },
+    ];
+    const props = { messages, onForkFromMessage: vi.fn() };
+    const { container, rerender } = render(
+      <ThreadMessages {...props} isStreaming activeTurnId={activeTurnId} />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+
+    rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(2);
+  });
+
+  it("keeps active turn actions hidden across guidance and failed user rows", () => {
+    const activeTurnId = "turn-active";
+    const messages: UIMessage[] = [
+      { id: "old-user", role: "user", content: "old question", turnId: "turn-old", createdAt: 1 },
+      { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 2 },
+      { id: "active-user", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      { id: "live", role: "assistant", content: "live slice", createdAt: 4 },
+      { id: "guide", role: "user", content: "focus", turnId: "turn-guide", createdAt: 5 },
+      {
+        id: "failed",
+        role: "user",
+        content: "retry",
+        turnId: "turn-failed",
+        deliveryStatus: "failed",
+        createdAt: 6,
+      },
+    ];
+    const { container } = render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming
+        activeTurnId={activeTurnId}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+  });
+
+  it("only hides the active assistant-only automation turn", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 1 },
+          {
+            id: "automation",
+            role: "assistant",
+            content: "automation result",
+            turnId: "turn-automation",
+            createdAt: 2,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-automation"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(0);
+  });
+
+  it("falls back to the latest user boundary for untagged active slices", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "user", role: "user", content: "question", createdAt: 1 },
+          { id: "live", role: "assistant", content: "live slice", createdAt: 2 },
+        ]}
+        isStreaming
+        activeTurnId="turn-active"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Copy"]'))
+      .not.toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Fork"]'))
+      .not.toBeInTheDocument();
+  });
+
   it("shows copy on adjacent assistant text slices", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
