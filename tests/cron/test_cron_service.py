@@ -960,6 +960,48 @@ def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_save_store_failure_does_not_kill_scheduler(tmp_path, monkeypatch):
+    """A persistence failure in _on_timer must not stop future ticks."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    calls: list[str] = []
+
+    async def on_job(job):
+        calls.append(job.id)
+
+    service = CronService(store_path, on_job=on_job)
+    service._running = True
+    service._load_store()
+    service._arm_timer = lambda: None
+
+    job = service.add_job(
+        name="persist-failure",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    service._save_store()
+
+    # Simulate a disk-write failure on the next tick.
+    def failing_save() -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service, "_save_store", failing_save)
+    await service._on_timer()
+
+    # The scheduler must still be re-armed after the failed save...
+    assert service._active_executions == 0
+    # ...the first tick already ran the due job...
+    assert calls == [job.id]
+    # ...and a later, healthy tick must still run the job again.
+    monkeypatch.setattr(service, "_save_store", CronService._save_store.__get__(service))
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    await service._on_timer()
+
+    assert calls == [job.id, job.id]
+
+
+@pytest.mark.asyncio
 async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
     """list_jobs() during _on_timer should not replace the active store and re-run the same due job."""
     store_path = tmp_path / "cron" / "jobs.json"
