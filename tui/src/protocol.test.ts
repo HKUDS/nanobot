@@ -238,9 +238,28 @@ describe("gateway protocol", () => {
         title: "History",
         description: "Show recent messages",
         argHint: "[n]",
+        lifecycle: "side_channel",
         acceptsArgs: true,
       }])
       expect(authorization).toBe("Bearer secret")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("drops slash commands with unknown lifecycle metadata", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
+      commands: [{
+        command: "/future",
+        title: "Future",
+        description: "Unknown lifecycle",
+        lifecycle: "future_mode",
+      }],
+    })))) as unknown as typeof fetch
+
+    try {
+      expect(await fetchSlashCommands("http://nanobot.test", "secret")).toEqual([])
     } finally {
       globalThis.fetch = original
     }

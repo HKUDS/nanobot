@@ -92,8 +92,16 @@ export interface SlashCommand {
   title: string
   description: string
   argHint: string
+  lifecycle: SlashCommandLifecycle
   acceptsArgs: boolean
 }
+
+export type SlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn"
+  | "agent_turn_with_args"
 
 export interface SessionSummary {
   chatId: string
@@ -275,6 +283,7 @@ export async function fetchSlashCommands(
       title: typeof value.title === "string" ? value.title : value.command,
       description: typeof value.description === "string" ? value.description : "",
       argHint: typeof value.arg_hint === "string" ? value.arg_hint : "",
+      lifecycle: value.lifecycle as SlashCommandLifecycle,
       acceptsArgs: value.accepts_args === true,
     }]
   })

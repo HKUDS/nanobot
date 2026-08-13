@@ -7,6 +7,7 @@ import {
 } from "@opentui/core/testing"
 
 import { NanobotTui, type AppOptions } from "./app"
+import type { SlashCommand } from "./protocol"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -211,13 +212,7 @@ describe("NanobotTui layout", () => {
       composer: TextareaRenderable
       commandMenu: {
         visible: boolean
-        setCommands(commands: Array<{
-          command: string
-          title: string
-          description: string
-          argHint: string
-          acceptsArgs: boolean
-        }>): void
+        setCommands(commands: SlashCommand[]): void
       }
     }
     ui.commandMenu.setCommands([{
@@ -225,6 +220,7 @@ describe("NanobotTui layout", () => {
       title: "History",
       description: "Show recent messages",
       argHint: "[n]",
+      lifecycle: "side_channel",
       acceptsArgs: true,
     }])
 
@@ -237,7 +233,7 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual([])
   })
 
-  test("switches and creates gateway chats without sending agent commands", async () => {
+  test("switches and creates gateway chats without replacing core slash commands", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
@@ -285,13 +281,65 @@ describe("NanobotTui layout", () => {
 
       app.accept({ event: "attached", chat_id: "other" })
       await Bun.sleep(1)
-      ui.composer.setText("/new")
+      ui.composer.setText("/new-chat")
       ui.composer.submit()
       await waitUntil(() => newChats.length === 1)
       expect(newChats).toEqual(["new"])
     } finally {
       globalThis.fetch = original
     }
+  })
+
+  test("preserves gateway slash lifecycle while local navigation stays in the same menu", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      commandMenu: {
+        setCommands(commands: SlashCommand[]): void
+      }
+      activeTurn: boolean
+    }
+    ui.commandMenu.setCommands([{
+      command: "/new",
+      title: "New chat",
+      description: "Reset this chat",
+      argHint: "",
+      lifecycle: "finalize_active_turn",
+      acceptsArgs: false,
+    }, {
+      command: "/status",
+      title: "Status",
+      description: "Show status",
+      argHint: "",
+      lifecycle: "side_channel",
+      acceptsArgs: false,
+    }])
+
+    app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
+    ui.composer.setText("/status")
+    ui.composer.submit()
+    await waitUntil(() => sent.includes("/status"))
+    expect(ui.activeTurn).toBe(true)
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "Runtime healthy",
+      turn_id: "turn",
+    })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("Runtime healthy")
+
+    ui.composer.setText("/new")
+    ui.composer.submit()
+    await waitUntil(() => sent.includes("/new"))
+    expect(ui.activeTurn).toBe(false)
+    expect(sent).toEqual(["/status", "/new"])
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("/new")
   })
 
   test("blocks sends and ignores late session results after closing the picker", async () => {
@@ -331,6 +379,47 @@ describe("NanobotTui layout", () => {
       await Bun.sleep(10)
       expect(ui.sessionMenu.visible).toBe(false)
       expect(ui.composer.plainText).toBe("")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("applies a query typed while sessions are still loading", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let resolveFetch: ((response: Response) => void) | undefined
+    globalThis.fetch = (() => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })) as unknown as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean }
+    }
+
+    try {
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+      await Bun.sleep(10)
+      ui.composer.setText("release")
+      resolveFetch?.(new Response(JSON.stringify({
+        sessions: [
+          { key: "websocket:chat", title: "Current chat", preview: "Current work" },
+          { key: "websocket:other", title: "Release checklist", preview: "Ship it" },
+        ],
+      })))
+      await waitUntil(() => ui.sessionMenu.visible)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+      expect(frame).toContain("Release checklist")
+      expect(frame).not.toContain("Current chat")
     } finally {
       globalThis.fetch = original
     }

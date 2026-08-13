@@ -22,7 +22,13 @@ import {
   type InboundEvent,
   type SlashCommand,
 } from "./protocol"
-import { CommandMenu, type CommandMenuTheme } from "./command-menu"
+import {
+  CommandMenu,
+  resolveSlashCommandLifecycle,
+  type CommandMenuTheme,
+  type ResolvedSlashCommandLifecycle,
+  type TuiCommand,
+} from "./command-menu"
 import { SessionMenu } from "./session-menu"
 import { Transcript, type TranscriptTheme } from "./transcript"
 
@@ -90,27 +96,18 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const LOCAL_COMMANDS: SlashCommand[] = [
+const LOCAL_COMMANDS: TuiCommand[] = [
   {
     command: "/sessions",
     title: "Sessions",
     description: "Find and switch conversations",
-    argHint: "",
-    acceptsArgs: false,
+    action: "sessions",
   },
   {
-    command: "/resume",
-    title: "Resume",
-    description: "Find and switch conversations",
-    argHint: "",
-    acceptsArgs: false,
-  },
-  {
-    command: "/new",
-    title: "New chat",
-    description: "Start a separate conversation",
-    argHint: "",
-    acceptsArgs: false,
+    command: "/new-chat",
+    title: "New saved chat",
+    description: "Keep this conversation and start another",
+    action: "new-chat",
   },
 ]
 
@@ -221,6 +218,7 @@ export class NanobotTui {
   private quitting = false
   private sessionLoadId = 0
   private sessionLoading = false
+  private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
 
   private constructor(
     renderer: CliRenderer,
@@ -234,6 +232,7 @@ export class NanobotTui {
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
+    this.commandMenu.setCommands([], LOCAL_COMMANDS)
     this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
     this.client = client || new NanobotClient({
       url: options.wsUrl,
@@ -423,12 +422,15 @@ export class NanobotTui {
       this.updateMeta()
       return
     }
-    if (["/sessions", "/resume", "/continue"].includes(content.toLocaleLowerCase())) {
-      void this.openSessions()
+    const command = this.commandMenu.resolve(content)
+    if (command?.source === "tui") {
+      if (command.command.action === "sessions") void this.openSessions()
+      else this.startNewChat()
       return
     }
-    if (content.toLocaleLowerCase() === "/new") {
-      this.startNewChat()
+    if (command?.source === "gateway") {
+      const lifecycle = resolveSlashCommandLifecycle(content, command.command)
+      if (lifecycle) this.sendGatewayCommand(content, lifecycle)
       return
     }
     if (!this.ready) {
@@ -451,10 +453,7 @@ export class NanobotTui {
     }
     this.composer.setText("")
     this.commandMenu.hide()
-    if (this.promptHistory.at(-1) !== content) this.promptHistory.push(content)
-    if (this.promptHistory.length > 50) this.promptHistory.shift()
-    this.historyCursor = this.promptHistory.length
-    this.historyDraft = ""
+    this.recordPrompt(content)
     this.transcript.user(content)
     this.finalMessage = ""
     this.turnHadAnswer = false
@@ -465,6 +464,7 @@ export class NanobotTui {
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
+      this.commandTurns.clear()
       const restoring = this.attachedOnce
       this.attachedOnce = true
       if (restoring) this.setActive(false)
@@ -500,6 +500,15 @@ export class NanobotTui {
         this.transcript.stream(event.text)
         return
       case "message":
+        if (event.turn_id && this.commandTurns.has(event.turn_id) && !event.kind) {
+          const lifecycle = this.commandTurns.get(event.turn_id)
+          if (lifecycle !== "agent_turn") {
+            this.commandTurns.delete(event.turn_id)
+            this.transcript.assistant(event.text)
+            if (!this.activeTurn) this.status.content = "Ready"
+            return
+          }
+        }
         if (event.kind) {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.lastProgress = this.transcript.progress(event.text, event.tool_events)
@@ -528,6 +537,7 @@ export class NanobotTui {
         }
         return
       case "turn_end":
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
         this.transcript.finishActivity()
         this.finalMessage = ""
@@ -554,6 +564,7 @@ export class NanobotTui {
         this.setModel(event.model_name)
         return
       case "error":
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
         this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
         this.finalMessage = ""
@@ -870,8 +881,7 @@ export class NanobotTui {
       // Local navigation remains available against older gateways.
     }
     const commands = new Map(discovered.map((command) => [command.command, command]))
-    for (const command of LOCAL_COMMANDS) commands.set(command.command, command)
-    this.commandMenu.setCommands([...commands.values()])
+    this.commandMenu.setCommands([...commands.values()], LOCAL_COMMANDS)
     this.syncCommandMenu()
   }
 
@@ -891,6 +901,7 @@ export class NanobotTui {
       this.sessionLoading = false
       const limit = this.renderer.height >= 20 ? 8 : 4
       this.sessionMenu.open(sessions, this.client.activeChatId, limit)
+      this.sessionMenu.update(this.composer.plainText, limit)
       this.syncComposerPlaceholder()
       this.updateMeta()
       this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
@@ -906,17 +917,21 @@ export class NanobotTui {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
     }
-    this.closeSessions()
     if (chatId === this.client.activeChatId) {
+      this.closeSessions()
       this.status.content = "Ready"
       return
     }
+    if (!this.ready) {
+      this.status.content = "Preparing chat…"
+      return
+    }
+    this.closeSessions()
     try {
       this.ready = false
       this.status.content = "Opening session…"
       this.client.attach(chatId)
     } catch (error) {
-      this.ready = true
       this.status.content = error instanceof Error ? error.message : String(error)
     }
   }
@@ -924,6 +939,10 @@ export class NanobotTui {
   private startNewChat(): void {
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    if (!this.ready) {
+      this.status.content = "Preparing chat…"
       return
     }
     this.commandMenu.hide()
@@ -934,9 +953,61 @@ export class NanobotTui {
       this.status.content = "Starting a new chat…"
       this.client.newChat()
     } catch (error) {
-      this.ready = true
       this.status.content = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  private sendGatewayCommand(
+    content: string,
+    lifecycle: ResolvedSlashCommandLifecycle,
+  ): void {
+    if (!this.ready) {
+      this.status.content = "Preparing chat…"
+      return
+    }
+    if (this.activeTurn && lifecycle === "agent_turn") {
+      this.status.content = "A turn is already running · Ctrl+C to stop"
+      return
+    }
+    let turnId: string
+    try {
+      turnId = this.client.send(content)
+    } catch (error) {
+      this.status.content = error instanceof Error ? error.message : String(error)
+      return
+    }
+    this.commandTurns.set(turnId, lifecycle)
+    this.composer.setText("")
+    this.commandMenu.hide()
+    if (lifecycle !== "stop_active_turn") this.transcript.user(content)
+    this.recordPrompt(content)
+
+    if (lifecycle === "agent_turn") {
+      this.finalMessage = ""
+      this.turnHadAnswer = false
+      this.lastProgress = ""
+      this.activeLabel = "Thinking"
+      this.setActive(true)
+    } else if (lifecycle === "finalize_active_turn") {
+      this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
+      this.transcript.finishActivity()
+      this.finalMessage = ""
+      this.turnHadAnswer = false
+      this.setActive(false)
+      this.status.content = "Resetting chat…"
+    } else if (lifecycle === "stop_active_turn") {
+      this.setActive(false)
+      this.status.content = "Stopping…"
+    } else if (!this.activeTurn) {
+      this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`
+    }
+  }
+
+  private recordPrompt(content: string): void {
+    if (this.promptHistory.at(-1) !== content) this.promptHistory.push(content)
+    if (this.promptHistory.length > 50) this.promptHistory.shift()
+    this.historyCursor = this.promptHistory.length
+    this.historyDraft = ""
   }
 
   private closeSessions(): void {
