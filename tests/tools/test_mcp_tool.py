@@ -1828,6 +1828,32 @@ def test_sanitize_name_keeps_distinct_non_ascii_names_unique() -> None:
     assert _sanitize_name("获取天气") != _sanitize_name("日本語ツール")
 
 
+def test_sanitize_name_hashes_non_ascii_with_ascii_prefix() -> None:
+    # The real call path always carries an ASCII ``mcp_{server}_`` prefix, so
+    # the old ``tool_{digest}`` fallback never fired and Chinese tool names
+    # collapsed to the same underscore run. The digest must be appended to the
+    # stripped core instead, without stacking underscores.
+    name = "mcp_server_城市天气实况"
+    expected = f"mcp_server_{mcp_mod._short_digest(name)}"
+    assert _sanitize_name(name) == expected
+
+
+def test_sanitize_name_keeps_ascii_part_for_mixed_names() -> None:
+    # Mixed Chinese+ASCII names keep their readable ASCII part (15, POI, ...)
+    # in front of the digest.
+    name = "mcp_天气预报_城市15日预报"
+    assert _sanitize_name(name) == f"mcp_15_{mcp_mod._short_digest(name)}"
+    assert "__" not in _sanitize_name(name)
+
+
+def test_sanitize_name_leaves_pure_ascii_names_untouched() -> None:
+    # Only non-ASCII names get a digest appended; ASCII names with spaces or
+    # special characters sanitize readably without a hash.
+    assert _sanitize_name("mcp_srv_My Tool") == "mcp_srv_My_Tool"
+    assert _sanitize_name("mcp_my server_prompt_design-schema") == "mcp_my_server_prompt_design-schema"
+    assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
+
+
 # ---------------------------------------------------------------------------
 # Wrapper sanitization tests
 # ---------------------------------------------------------------------------

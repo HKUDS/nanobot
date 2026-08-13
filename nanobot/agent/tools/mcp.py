@@ -189,8 +189,11 @@ def _short_digest(value: str, length: int = _HASH_LENGTH) -> str:
 def _sanitize_name(name: str) -> str:
     """Sanitize an MCP-derived name for model API compatibility."""
     sanitized = _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
-    if sanitized.strip("_") == "":
-        return f"tool_{_short_digest(name)}"
+    if re.search(r"[^\x00-\x7f]", name):
+        core = sanitized.rstrip("_")
+        if core == "":
+            return f"tool_{_short_digest(name)}"
+        return f"{core}_{_short_digest(name)}"
     return sanitized
 
 
