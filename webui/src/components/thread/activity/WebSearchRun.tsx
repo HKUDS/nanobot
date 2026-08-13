@@ -1,4 +1,5 @@
 import { AlertCircle, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
@@ -8,9 +9,10 @@ import {
 } from "@/components/thread/activity/web-search-model";
 
 export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turnActive: boolean }) {
+  const { t } = useTranslation();
   const active = run.status === "running" && turnActive;
   const status = run.status === "running" && !turnActive ? "done" : run.status;
-  const label = presentWebSearchAction(run.query, status, run.target);
+  const label = presentWebSearchAction(run.query, status, run.target, t);
 
   return (
     <>

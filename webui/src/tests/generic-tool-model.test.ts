@@ -6,11 +6,12 @@ import {
   parseGenericToolTrace,
   type GenericToolStatus,
 } from "@/components/thread/activity/generic-tool-model";
+import i18n, { setAppLanguage } from "@/i18n";
 
 function describeRun(line: string, status: GenericToolStatus = "done") {
   const trace = parseGenericToolTrace(line);
   expect(trace).not.toBeNull();
-  return describeGenericToolRun([{ trace: trace!, status }]);
+  return describeGenericToolRun([{ trace: trace!, status }], i18n.t);
 }
 
 describe("generic tool activity semantics", () => {
@@ -59,7 +60,7 @@ describe("generic tool activity semantics", () => {
     const presentation = describeGenericToolRun([
       { trace: first, status: "done" },
       { trace: second, status: "done" },
-    ]);
+    ], i18n.t);
 
     expect(presentation).toMatchObject({ label: "Reviewed sources", detail: "", aside: "2 files" });
     expect(JSON.stringify(presentation)).not.toContain("/Users/test");
@@ -77,6 +78,33 @@ describe("generic tool activity semantics", () => {
       'mcp_browser_click({"text":"private"})',
     ]) {
       expect(parseGenericToolTrace(line)).toBeNull();
+    }
+  });
+
+  it("localizes labels and counts without translating raw search text", async () => {
+    await setAppLanguage("zh-CN");
+    const first = parseGenericToolTrace('grep({"pattern":"release notes"})')!;
+    const second = parseGenericToolTrace('grep({"pattern":"API changes"})')!;
+
+    expect(describeGenericToolRun([
+      { trace: first, status: "done" },
+      { trace: second, status: "done" },
+    ], i18n.t)).toMatchObject({
+      label: "已搜索文件",
+      aside: "2 次搜索",
+    });
+  });
+
+  it("localizes command continuation events", async () => {
+    await setAppLanguage("zh-CN");
+    const line = 'exec_session({"session_id":"session-1234567890-secret"})';
+    for (const status of ["running", "done", "error"] as const) {
+      const key = status === "running" ? "continuingCommand"
+        : status === "done" ? "continuedCommand" : "continueCommandFailed";
+      expect(describeRun(line, status)).toMatchObject({
+        label: i18n.t(`message.agentActivity.${key}`),
+        detail: "session…ecret",
+      });
     }
   });
 
