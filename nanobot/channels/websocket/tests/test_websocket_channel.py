@@ -4747,6 +4747,36 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert body["has_pending_tool_calls"] is False
 
 
+@pytest.mark.asyncio
+async def test_handle_session_context_get_reads_detached_session() -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.session import Session
+
+    session = Session(
+        key="websocket:context-route",
+        messages=[{"role": "user", "content": "hello"}],
+    )
+    manager = MagicMock()
+    manager.read_session_snapshot.return_value = session
+    gateway = _basic_handler(MagicMock(), session_manager=manager)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(session.key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/context",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = await gateway.http._handle_session_context_get(request, encoded)
+
+    assert response.status_code == 200
+    assert json.loads(response.body.decode())["replay_messages"] == 1
+    manager.read_session_snapshot.assert_called_once_with(session.key)
+
+
 def test_handle_webui_thread_get_reports_registered_turn_as_pending(
     tmp_path,
     monkeypatch,

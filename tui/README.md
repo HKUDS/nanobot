@@ -18,4 +18,11 @@ to move, `Tab` to complete, and `Esc` to close the menu.
 
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.
 `/new-chat` preserves the current conversation and starts another one; nanobot's existing `/new`
-command keeps its cross-channel behavior and resets the current chat.
+command keeps its cross-channel behavior and resets the current chat. The next launch returns to
+the last session unless `--session` selects another one. When earlier transcript pages exist,
+press `PageUp` at the top to load them in place.
+
+`/context` explains the session-owned material available for the next agent turn: the compacted
+summary, replayable raw suffix, and an estimated token count. It deliberately does not expose
+private reasoning and does not pretend to be the complete model prompt; workspace instructions,
+memory, and skills are assembled separately by the Python runtime.

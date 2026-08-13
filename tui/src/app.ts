@@ -16,6 +16,7 @@ import {
 import {
   NanobotClient,
   fetchHistory,
+  fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
   type ConnectionStatus,
@@ -30,7 +31,9 @@ import {
   type TuiCommand,
 } from "./command-menu"
 import { SessionMenu } from "./session-menu"
+import { ContextPanel, type ContextPanelTheme } from "./context-panel"
 import { Transcript, type TranscriptTheme } from "./transcript"
+import { rememberChat } from "./session-state"
 
 interface AppOptions {
   wsUrl: string
@@ -42,6 +45,7 @@ interface AppOptions {
   version: string
   access: string
   theme: "auto" | ThemeMode
+  statePath?: string
 }
 
 interface ChatClient {
@@ -109,6 +113,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     description: "Keep this conversation and start another",
     action: "new-chat",
   },
+  {
+    command: "/context",
+    title: "Agent context",
+    description: "Explain what this session contributes to the next prompt",
+    action: "context",
+  },
 ]
 
 function syntaxStyle(palette: Palette): SyntaxStyle {
@@ -157,6 +167,15 @@ function commandMenuTheme(palette: Palette): CommandMenuTheme {
   }
 }
 
+function contextPanelTheme(palette: Palette): ContextPanelTheme {
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    border: palette.border,
+    accent: palette.accent,
+  }
+}
+
 function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
   if (seconds < 60) return `${seconds}s`
@@ -187,6 +206,7 @@ export class NanobotTui {
   private readonly transcript: Transcript
   private readonly commandMenu: CommandMenu
   private readonly sessionMenu: SessionMenu
+  private readonly contextPanel: ContextPanel
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: TextRenderable
@@ -203,6 +223,9 @@ export class NanobotTui {
   private finalMessage = ""
   private turnHadAnswer = false
   private historyLoaded = false
+  private historyBeforeCursor: string | null = null
+  private historyHasMore = false
+  private historyLoadingOlder = false
   private attachedOnce = false
   private pendingEvents: InboundEvent[] | null = null
   private hydrationId = 0
@@ -234,6 +257,7 @@ export class NanobotTui {
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], LOCAL_COMMANDS)
     this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
+    this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
     this.client = client || new NanobotClient({
       url: options.wsUrl,
       chatId: options.chatId,
@@ -292,6 +316,7 @@ export class NanobotTui {
         { name: "return", meta: true, action: "newline" },
       ],
       onContentChange: () => {
+        if (this.contextPanel.visible && this.composer.plainText) this.contextPanel.hide()
         this.syncComposerPlaceholder()
         if (this.sessionMenu.visible) this.syncSessionMenu()
         else this.syncCommandMenu()
@@ -335,6 +360,7 @@ export class NanobotTui {
     this.shell.add(this.transcript.root)
     this.shell.add(this.commandMenu.root)
     this.shell.add(this.sessionMenu.root)
+    this.shell.add(this.contextPanel.root)
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
@@ -425,6 +451,7 @@ export class NanobotTui {
     const command = this.commandMenu.resolve(content)
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
+      else if (command.command.action === "context") void this.openContext()
       else this.startNewChat()
       return
     }
@@ -464,6 +491,7 @@ export class NanobotTui {
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
+      void rememberChat(this.options.statePath, event.chat_id)
       this.commandTurns.clear()
       const restoring = this.attachedOnce
       this.attachedOnce = true
@@ -577,6 +605,10 @@ export class NanobotTui {
   private async prepareChat(chatId: string, restoring: boolean, hydrationId: number): Promise<void> {
     try {
       if (restoring) {
+        this.contextPanel.hide()
+        this.historyBeforeCursor = null
+        this.historyHasMore = false
+        this.historyLoadingOlder = false
         this.transcript.reset({
           model: this.modelName,
           workspace: this.options.workspace,
@@ -588,9 +620,8 @@ export class NanobotTui {
         this.historyLoaded = true
         const history = await fetchHistory(this.options.apiUrl, this.options.apiToken, chatId)
         if (hydrationId !== this.hydrationId) return
-        if (history.truncated) {
-          this.transcript.notice("Earlier messages omitted · open WebUI to load the full history")
-        }
+        this.historyBeforeCursor = history.beforeCursor
+        this.historyHasMore = history.hasMoreBefore
         this.transcript.history(history.messages)
       }
     } catch (error) {
@@ -599,7 +630,9 @@ export class NanobotTui {
     } finally {
       if (hydrationId !== this.hydrationId) return
       this.ready = true
-      if (!this.activeTurn) this.status.content = "Ready"
+      if (!this.activeTurn) {
+        this.status.content = this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+      }
     }
   }
 
@@ -658,6 +691,12 @@ export class NanobotTui {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.contextPanel.visible && key.name === "escape") {
+      this.contextPanel.hide()
+      this.updateMeta()
+      key.preventDefault()
+      return
+    }
     if (this.sessionLoading && key.name === "escape") {
       this.closeSessions()
       this.status.content = "Ready"
@@ -748,7 +787,10 @@ export class NanobotTui {
     }
     if (key.name === "pageup" || key.name === "pagedown") {
       key.preventDefault()
-      this.transcript.scrollByPage(key.name === "pageup" ? -1 : 1)
+      const pageUp = key.name === "pageup"
+      const wasAtTop = this.transcript.atTop
+      this.transcript.scrollByPage(pageUp ? -1 : 1)
+      if (pageUp && (wasAtTop || this.transcript.atTop)) void this.loadOlderHistory()
       return
     }
     if (key.ctrl && (key.name === "home" || key.name === "end")) {
@@ -791,6 +833,7 @@ export class NanobotTui {
     this.transcript.setTheme(transcriptTheme(this.palette))
     this.commandMenu.setTheme(commandMenuTheme(this.palette))
     this.sessionMenu.setTheme(commandMenuTheme(this.palette))
+    this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.composerFrame.borderColor = this.palette.border
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
@@ -802,6 +845,7 @@ export class NanobotTui {
 
   private handleResize = (): void => {
     this.resizeComposer()
+    this.contextPanel.resize(this.renderer.height)
     this.title.visible = this.renderer.height >= 14
     this.updateMeta()
   }
@@ -821,6 +865,10 @@ export class NanobotTui {
       this.meta.content = this.renderer.width >= 64
         ? "type to filter · ↑↓ choose · enter open · esc close"
         : "enter open · esc close"
+      return
+    }
+    if (this.contextPanel.visible) {
+      this.meta.content = "esc close · pgup/pgdn scroll"
       return
     }
     this.meta.content = this.renderer.width >= 112
@@ -891,6 +939,7 @@ export class NanobotTui {
       return
     }
     this.commandMenu.hide()
+    this.contextPanel.hide()
     this.composer.setText("")
     this.sessionLoading = true
     const loadId = ++this.sessionLoadId
@@ -947,6 +996,7 @@ export class NanobotTui {
     }
     this.commandMenu.hide()
     this.sessionMenu.hide()
+    this.contextPanel.hide()
     this.composer.setText("")
     try {
       this.ready = false
@@ -1017,6 +1067,62 @@ export class NanobotTui {
     this.composer.setText("")
     this.syncComposerPlaceholder()
     this.updateMeta()
+  }
+
+  private async openContext(): Promise<void> {
+    this.commandMenu.hide()
+    this.sessionMenu.hide()
+    this.composer.setText("")
+    this.status.content = "Reading agent context…"
+    try {
+      const context = await fetchSessionContext(
+        this.options.apiUrl,
+        this.options.apiToken,
+        this.client.activeChatId,
+      )
+      if (!context) {
+        this.status.content = "Context unavailable · new session or older gateway"
+        return
+      }
+      this.contextPanel.show(context)
+      this.status.content = "Context snapshot"
+      this.updateMeta()
+    } catch (error) {
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private async loadOlderHistory(): Promise<void> {
+    if (
+      this.historyLoadingOlder
+      || !this.historyHasMore
+      || !this.historyBeforeCursor
+      || !this.client.activeChatId
+    ) return
+    const hydrationId = this.hydrationId
+    const chatId = this.client.activeChatId
+    this.historyLoadingOlder = true
+    this.status.content = "Loading earlier messages…"
+    try {
+      const history = await fetchHistory(
+        this.options.apiUrl,
+        this.options.apiToken,
+        chatId,
+        this.historyBeforeCursor,
+      )
+      if (hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
+      await this.transcript.prependHistory(history.messages)
+      this.historyBeforeCursor = history.beforeCursor
+      this.historyHasMore = history.hasMoreBefore
+      this.status.content = history.hasMoreBefore
+        ? `${history.messages.length} earlier messages · PageUp for more`
+        : "Start of session"
+    } catch (error) {
+      if (hydrationId !== this.hydrationId) return
+      this.status.content = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (hydrationId === this.hydrationId) this.historyLoadingOlder = false
+    }
   }
 
   private async copySelection(text: string): Promise<void> {

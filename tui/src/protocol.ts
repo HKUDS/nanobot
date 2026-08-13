@@ -84,7 +84,19 @@ export interface HistoryMessage {
 
 export interface HistorySnapshot {
   messages: HistoryMessage[]
-  truncated: boolean
+  hasMoreBefore: boolean
+  beforeCursor: string | null
+}
+
+export interface SessionContextSnapshot {
+  totalMessages: number
+  archivedMessages: number
+  replayMessages: number
+  estimatedReplayTokens: number
+  estimatedSummaryTokens: number
+  estimatedSessionTokens: number
+  archivedSummary: string | null
+  archivedSummaryAt: string | null
 }
 
 export interface SlashCommand {
@@ -110,6 +122,8 @@ export interface SessionSummary {
   createdAt: string | null
   updatedAt: string | null
   runStartedAt: number | null
+  pinned: boolean
+  archived: boolean
 }
 
 const SLASH_COMMAND_LIFECYCLES = new Set([
@@ -220,17 +234,24 @@ export async function fetchHistory(
   apiUrl: string,
   apiToken: string,
   chatId: string,
+  beforeCursor?: string | null,
 ): Promise<HistorySnapshot> {
-  if (!apiUrl || !apiToken) return { messages: [], truncated: false }
+  if (!apiUrl || !apiToken) {
+    return { messages: [], hasMoreBefore: false, beforeCursor: null }
+  }
   const key = encodeURIComponent(`websocket:${chatId}`)
-  const response = await fetch(`${apiUrl}/api/sessions/${key}/webui-thread?limit=120&direction=latest`, {
+  const params = new URLSearchParams({ limit: "120", direction: "latest" })
+  if (beforeCursor) params.set("before", beforeCursor)
+  const response = await fetch(`${apiUrl}/api/sessions/${key}/webui-thread?${params}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
   })
-  if (response.status === 404) return { messages: [], truncated: false }
+  if (response.status === 404) {
+    return { messages: [], hasMoreBefore: false, beforeCursor: null }
+  }
   if (!response.ok) throw new Error(`history request failed: HTTP ${response.status}`)
   const payload = (await response.json()) as {
     messages?: Array<Record<string, unknown>>
-    page?: { has_more_before?: boolean }
+    page?: { has_more_before?: boolean; before_cursor?: string }
   }
   const messages: HistoryMessage[] = (payload.messages || []).flatMap((message) => {
     const role = message.role
@@ -258,7 +279,41 @@ export async function fetchHistory(
     }
     return [{ role: role as HistoryMessage["role"], content }]
   })
-  return { messages, truncated: payload.page?.has_more_before === true }
+  return {
+    messages,
+    hasMoreBefore: payload.page?.has_more_before === true,
+    beforeCursor: typeof payload.page?.before_cursor === "string"
+      ? payload.page.before_cursor
+      : null,
+  }
+}
+
+export async function fetchSessionContext(
+  apiUrl: string,
+  apiToken: string,
+  chatId: string,
+): Promise<SessionContextSnapshot | null> {
+  if (!apiUrl || !apiToken) return null
+  const key = encodeURIComponent(`websocket:${chatId}`)
+  const response = await fetch(`${apiUrl}/api/sessions/${key}/context`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+  })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`context request failed: HTTP ${response.status}`)
+  const value = await response.json() as Record<string, unknown>
+  const number = (key: string) => typeof value[key] === "number" ? value[key] as number : 0
+  return {
+    totalMessages: number("total_messages"),
+    archivedMessages: number("archived_messages"),
+    replayMessages: number("replay_messages"),
+    estimatedReplayTokens: number("estimated_replay_tokens"),
+    estimatedSummaryTokens: number("estimated_summary_tokens"),
+    estimatedSessionTokens: number("estimated_session_tokens"),
+    archivedSummary: typeof value.archived_summary === "string" ? value.archived_summary : null,
+    archivedSummaryAt: typeof value.archived_summary_at === "string"
+      ? value.archived_summary_at
+      : null,
+  }
 }
 
 export async function fetchSlashCommands(
@@ -294,24 +349,43 @@ export async function fetchSessions(
   apiToken: string,
 ): Promise<SessionSummary[]> {
   if (!apiUrl || !apiToken) return []
-  const response = await fetch(`${apiUrl}/api/sessions`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const headers = { Authorization: `Bearer ${apiToken}` }
+  const [response, sidebarResponse] = await Promise.all([
+    fetch(`${apiUrl}/api/sessions`, { headers }),
+    fetch(`${apiUrl}/api/webui/sidebar-state`, { headers }).catch(() => null),
+  ])
   if (!response.ok) throw new Error(`session request failed: HTTP ${response.status}`)
   const payload = await response.json() as { sessions?: unknown[] }
+  let sidebar: Record<string, unknown> = {}
+  if (sidebarResponse?.ok) {
+    try {
+      const value: unknown = await sidebarResponse.json()
+      if (isRecord(value)) sidebar = value
+    } catch {
+      // Session navigation remains available against older or damaged sidebar state.
+    }
+  }
+  const pinned = new Set(Array.isArray(sidebar.pinned_keys) ? sidebar.pinned_keys : [])
+  const archived = new Set(Array.isArray(sidebar.archived_keys) ? sidebar.archived_keys : [])
+  const titles = isRecord(sidebar.title_overrides) ? sidebar.title_overrides : {}
   return (payload.sessions || []).flatMap((value) => {
     if (!isRecord(value) || typeof value.key !== "string" || !value.key.startsWith("websocket:")) {
       return []
     }
     const chatId = value.key.slice("websocket:".length)
     if (!chatId) return []
+    const titleOverride = titles[value.key]
     return [{
       chatId,
-      title: typeof value.title === "string" ? value.title : "",
+      title: typeof titleOverride === "string"
+        ? titleOverride
+        : typeof value.title === "string" ? value.title : "",
       preview: typeof value.preview === "string" ? value.preview : "",
       createdAt: typeof value.created_at === "string" ? value.created_at : null,
       updatedAt: typeof value.updated_at === "string" ? value.updated_at : null,
       runStartedAt: typeof value.run_started_at === "number" ? value.run_started_at : null,
+      pinned: pinned.has(value.key),
+      archived: archived.has(value.key),
     }]
   })
 }

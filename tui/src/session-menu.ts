@@ -35,7 +35,8 @@ export class SessionMenu {
         const detail = [age, preview && preview !== sessionLabel(session) ? preview : ""]
           .filter(Boolean)
           .join(" · ")
-        return `${session.active ? "● " : ""}${sessionLabel(session)}${detail ? `  ${detail}` : ""}`
+        const marker = session.active ? "● " : session.pinned ? "◆ " : session.archived ? "◇ " : ""
+        return `${marker}${sessionLabel(session)}${detail ? `  ${detail}` : ""}`
       },
       emptyText: "No matching sessions",
     })
@@ -49,7 +50,11 @@ export class SessionMenu {
   open(sessions: SessionSummary[], currentChatId: string, limit: number): void {
     const rows = sessions
       .map((session) => ({ ...session, active: session.chatId === currentChatId }))
-      .sort((left, right) => Number(right.active) - Number(left.active))
+      .sort((left, right) => {
+        return Number(right.active) - Number(left.active)
+          || Number(right.pinned) - Number(left.pinned)
+          || Number(left.archived) - Number(right.archived)
+      })
     this.picker.show(rows, "", limit)
   }
 

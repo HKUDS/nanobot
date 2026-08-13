@@ -144,6 +144,38 @@ export class Transcript {
     this.finishActivity()
   }
 
+  async prependHistory(messages: HistoryMessage[]): Promise<void> {
+    if (messages.length === 0) return
+    const previousTop = this.root.scrollTop
+    const previousHeight = this.root.scrollHeight
+    let index = 1 // Keep the launch header first.
+    for (const message of messages) {
+      if (message.role === "user") {
+        this.writeRole("›", message.content, "user", index++)
+      } else if (message.role === "assistant") {
+        this.writeMarkdown(message.content, false, index++)
+      } else {
+        const activity = this.createActivity(index++)
+        const events: ToolProgressEvent[] = message.fileEdits?.length
+          ? message.fileEdits.map((edit) => ({
+              call_id: `file:${edit.call_id || edit.path || "unknown"}`,
+              phase: edit.status === "error" ? "error" : edit.phase,
+              name: edit.path ? `${edit.tool || "edit"} ${edit.path}` : "edit file",
+              arguments: edit.error || formatDiffStat(edit),
+            }))
+          : message.toolEvents || []
+        this.updateActivity(activity, message.content, events)
+      }
+    }
+    this.renderer.requestRender()
+    await this.renderer.idle()
+    this.root.scrollTop = previousTop + Math.max(0, this.root.scrollHeight - previousHeight)
+  }
+
+  get atTop(): boolean {
+    return this.root.scrollTop <= 0
+  }
+
   user(content: string): void {
     this.finishActivity()
     this.writeRole("›", content, "user")
@@ -192,23 +224,9 @@ export class Transcript {
   }
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
-    const lines = events.length > 0
-      ? events.map(formatToolEvent).filter(Boolean)
-      : content.split("\n").map(cleanProgress).filter(Boolean)
-    if (lines.length === 0) return ""
+    if (events.length === 0 && !content.split("\n").some((line) => cleanProgress(line))) return ""
     if (!this.activity) this.activity = this.createActivity()
-    for (const [index, line] of lines.entries()) {
-      const key = events[index]?.call_id ? `tool:${events[index]?.call_id}` : undefined
-      const existing = key ? this.activity.keys.get(key) : undefined
-      if (existing !== undefined) {
-        this.activity.lines[existing] = line
-      } else if (line !== this.activity.lines.at(-1)) {
-        if (key) this.activity.keys.set(key, this.activity.lines.length)
-        this.activity.lines.push(line)
-      }
-    }
-    this.renderActivity(this.activity)
-    return lines.at(-1) || ""
+    return this.updateActivity(this.activity, content, events)
   }
 
   fileEdits(edits: FileEditEvent[]): string {
@@ -263,7 +281,7 @@ export class Transcript {
     })
   }
 
-  private createActivity(): Activity {
+  private createActivity(index?: number): Activity {
     const row = this.createRow("activity")
     const text = new TextRenderable(this.renderer, {
       id: this.id("agent-activity"),
@@ -273,12 +291,34 @@ export class Transcript {
       fg: this.theme.muted,
     })
     row.add(text)
-    this.root.add(row)
+    this.root.add(row, index)
     this.styledText.push({ renderable: text, tone: "muted" })
     this.wrote = true
     const activity = { text, lines: [], keys: new Map(), expanded: false }
     this.activities.add(activity)
     return activity
+  }
+
+  private updateActivity(
+    activity: Activity,
+    content: string,
+    events: ToolProgressEvent[] = [],
+  ): string {
+    const lines = events.length > 0
+      ? events.map(formatToolEvent).filter(Boolean)
+      : content.split("\n").map(cleanProgress).filter(Boolean)
+    for (const [index, line] of lines.entries()) {
+      const key = events[index]?.call_id ? `tool:${events[index]?.call_id}` : undefined
+      const existing = key ? activity.keys.get(key) : undefined
+      if (existing !== undefined) {
+        activity.lines[existing] = line
+      } else if (line !== activity.lines.at(-1)) {
+        if (key) activity.keys.set(key, activity.lines.length)
+        activity.lines.push(line)
+      }
+    }
+    this.renderActivity(activity)
+    return lines.at(-1) || ""
   }
 
   private renderActivity(activity: Activity): void {
@@ -313,6 +353,7 @@ export class Transcript {
     marker: string,
     content: string,
     tone: "muted" | "error" | "user",
+    index?: number,
   ): void {
     const row = this.createRow(tone === "user" ? "user" : "notice", "row")
     const prefix = this.createText(marker, tone, true, "role-marker")
@@ -324,7 +365,7 @@ export class Transcript {
     text.flexGrow = 1
     row.add(prefix)
     row.add(text)
-    this.root.add(row)
+    this.root.add(row, index)
     this.wrote = true
   }
 
@@ -344,18 +385,18 @@ export class Transcript {
     return markdown
   }
 
-  private writeMarkdown(content: string, streaming: boolean): void {
-    this.writeAssistant(this.createMarkdown(content, streaming))
+  private writeMarkdown(content: string, streaming: boolean, index?: number): void {
+    this.writeAssistant(this.createMarkdown(content, streaming), index)
   }
 
-  private writeAssistant(markdown: MarkdownRenderable): BoxRenderable {
+  private writeAssistant(markdown: MarkdownRenderable, index?: number): BoxRenderable {
     const row = this.createRow("assistant", "row")
     const prefix = this.createText("•", "assistant", false, "role-marker")
     prefix.width = 2
     prefix.flexShrink = 0
     row.add(prefix)
     row.add(markdown)
-    this.root.add(row)
+    this.root.add(row, index)
     this.wrote = true
     return row
   }

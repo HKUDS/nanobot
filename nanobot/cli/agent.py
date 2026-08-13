@@ -48,7 +48,7 @@ console = Console()
 
 def agent(
     message: str | None = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
-    session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    session_id: str | None = typer.Option(None, "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(
@@ -110,6 +110,8 @@ def agent(
             if exit_code:
                 raise typer.Exit(exit_code)
             return
+
+    session_id = session_id or "cli:direct"
 
     try:
         provider = make_provider(runtime_config)

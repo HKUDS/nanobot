@@ -10,6 +10,8 @@ from nanobot.cli.tui_launcher import (
     _authenticated_ws_url,
     _download_release_tui,
     _ensure_gateway,
+    _initial_tui_chat_id,
+    _read_tui_chat_id,
     _resolve_tui_command,
     _websocket_chat_id,
 )
@@ -34,6 +36,28 @@ def test_authenticated_ws_url_preserves_existing_query(monkeypatch: pytest.Monke
 )
 def test_websocket_chat_id(session_id: str, expected: str | None) -> None:
     assert _websocket_chat_id(session_id) == expected
+
+
+def test_tui_chat_state_is_optional_and_validated(tmp_path: Path) -> None:
+    path = tmp_path / "tui" / "state.json"
+    assert _read_tui_chat_id(path) is None
+
+    path.parent.mkdir()
+    path.write_text('{"schema_version": 1, "chat_id": "saved-chat"}', encoding="utf-8")
+    assert _read_tui_chat_id(path) == "saved-chat"
+
+    path.write_text('{"chat_id": "bad\\nchat"}', encoding="utf-8")
+    assert _read_tui_chat_id(path) is None
+
+
+def test_default_tui_resumes_but_explicit_session_wins(tmp_path: Path) -> None:
+    path = tmp_path / "tui" / "state.json"
+    path.parent.mkdir()
+    path.write_text('{"chat_id": "saved-chat"}', encoding="utf-8")
+
+    assert _initial_tui_chat_id(None, path) == "saved-chat"
+    assert _initial_tui_chat_id("cli:direct", path) == "tui-direct"
+    assert _initial_tui_chat_id("websocket:chosen", path) == "chosen"
 
 
 def test_explicit_tui_binary_must_exist(

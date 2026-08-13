@@ -96,6 +96,11 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot agent --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
 | `nanobot agent --logs` | Use the classic prompt and show runtime logs while chatting |
 
+Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
+conversation, and `/context` explains the compacted summary and raw session suffix available to
+the next agent turn. `PageUp` loads older transcript pages when you reach the top. The default
+launch returns to the last attached TUI session; `--session` selects a specific session instead.
+
 ## Session Storage and Rollback
 
 Session JSONL files live under `<config-dir>/sessions/<workspace-id>/`, outside the

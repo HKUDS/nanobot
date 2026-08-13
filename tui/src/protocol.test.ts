@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NanobotClient,
   fetchHistory,
+  fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
   type InboundEvent,
@@ -177,24 +178,28 @@ describe("gateway protocol", () => {
 
   test("reports when the bounded history snapshot omits earlier turns", async () => {
     const original = globalThis.fetch
-    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
-      messages: [
-        { role: "user", content: "hello" },
-        {
-          role: "tool",
-          kind: "trace",
-          content: "read_file",
-          traces: ["read_file"],
-          toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
-        },
-        { role: "assistant", kind: "reasoning", content: "private thought" },
-        { role: "assistant", content: "hi" },
-      ],
-      page: { has_more_before: true },
-    })))) as unknown as typeof fetch
+    let requested = ""
+    globalThis.fetch = ((input: string | URL | Request) => {
+      requested = String(input)
+      return Promise.resolve(new Response(JSON.stringify({
+        messages: [
+          { role: "user", content: "hello" },
+          {
+            role: "tool",
+            kind: "trace",
+            content: "read_file",
+            traces: ["read_file"],
+            toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
+          },
+          { role: "assistant", kind: "reasoning", content: "private thought" },
+          { role: "assistant", content: "hi" },
+        ],
+        page: { has_more_before: true, before_cursor: "older-1" },
+      })))
+    }) as typeof fetch
 
     try {
-      const history = await fetchHistory("http://nanobot.test", "token", "chat")
+      const history = await fetchHistory("http://nanobot.test", "token", "chat", "newer-page")
       expect(history).toEqual({
         messages: [
           { role: "user", content: "hello" },
@@ -205,7 +210,38 @@ describe("gateway protocol", () => {
           },
           { role: "assistant", content: "hi" },
         ],
-        truncated: true,
+        hasMoreBefore: true,
+        beforeCursor: "older-1",
+      })
+      expect(requested).toContain("before=newer-page")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads the explainable session context projection", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
+      total_messages: 24,
+      archived_messages: 16,
+      replay_messages: 10,
+      estimated_replay_tokens: 2048,
+      estimated_summary_tokens: 128,
+      estimated_session_tokens: 2176,
+      archived_summary: "Older work was compacted.",
+      archived_summary_at: "2026-08-13T10:00:00Z",
+    })))) as unknown as typeof fetch
+
+    try {
+      expect(await fetchSessionContext("http://nanobot.test", "secret", "chat")).toEqual({
+        totalMessages: 24,
+        archivedMessages: 16,
+        replayMessages: 10,
+        estimatedReplayTokens: 2048,
+        estimatedSummaryTokens: 128,
+        estimatedSessionTokens: 2176,
+        archivedSummary: "Older work was compacted.",
+        archivedSummaryAt: "2026-08-13T10:00:00Z",
       })
     } finally {
       globalThis.fetch = original
@@ -267,29 +303,41 @@ describe("gateway protocol", () => {
 
   test("loads and normalizes WebUI sessions", async () => {
     const original = globalThis.fetch
-    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
-      sessions: [
-        {
-          key: "websocket:chat-1",
-          title: "Release plan",
-          preview: "Prepare the release",
-          created_at: "2026-08-12T10:00:00Z",
-          updated_at: "2026-08-13T10:00:00Z",
-          run_started_at: 123,
-        },
-        { key: "cli:direct", title: "Not a WebUI session" },
-        { key: 42 },
-      ],
-    })))) as unknown as typeof fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          pinned_keys: ["websocket:chat-1"],
+          archived_keys: [],
+          title_overrides: { "websocket:chat-1": "Pinned release" },
+        })))
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        sessions: [
+          {
+            key: "websocket:chat-1",
+            title: "Release plan",
+            preview: "Prepare the release",
+            created_at: "2026-08-12T10:00:00Z",
+            updated_at: "2026-08-13T10:00:00Z",
+            run_started_at: 123,
+          },
+          { key: "cli:direct", title: "Not a WebUI session" },
+          { key: 42 },
+        ],
+      })))
+    }) as typeof fetch
 
     try {
       expect(await fetchSessions("http://nanobot.test", "secret")).toEqual([{
         chatId: "chat-1",
-        title: "Release plan",
+        title: "Pinned release",
         preview: "Prepare the release",
         createdAt: "2026-08-12T10:00:00Z",
         updatedAt: "2026-08-13T10:00:00Z",
         runStartedAt: 123,
+        pinned: true,
+        archived: false,
       }])
     } finally {
       globalThis.fetch = original

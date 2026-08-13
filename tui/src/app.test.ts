@@ -346,9 +346,14 @@ describe("NanobotTui layout", () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     let resolveFetch: ((response: Response) => void) | undefined
-    globalThis.fetch = (() => new Promise<Response>((resolve) => {
-      resolveFetch = resolve
-    })) as unknown as typeof fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      if (String(input).endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({})))
+      }
+      return new Promise<Response>((resolve) => {
+        resolveFetch = resolve
+      })
+    }) as typeof fetch
     const sent: string[] = []
     const app = NanobotTui.mount(
       setup.renderer,
@@ -388,9 +393,14 @@ describe("NanobotTui layout", () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     let resolveFetch: ((response: Response) => void) | undefined
-    globalThis.fetch = (() => new Promise<Response>((resolve) => {
-      resolveFetch = resolve
-    })) as unknown as typeof fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      if (String(input).endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({})))
+      }
+      return new Promise<Response>((resolve) => {
+        resolveFetch = resolve
+      })
+    }) as typeof fetch
     const app = NanobotTui.mount(
       setup.renderer,
       { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
@@ -420,6 +430,107 @@ describe("NanobotTui layout", () => {
       const frame = setup.captureCharFrame()
       expect(frame).toContain("Release checklist")
       expect(frame).not.toContain("Current chat")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("explains the session-owned agent context without exposing private reasoning", async () => {
+    setup = await createRenderer({ width: 96, height: 26, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      expect(String(input)).toContain("/api/sessions/websocket%3Achat/context")
+      return Promise.resolve(new Response(JSON.stringify({
+        total_messages: 24,
+        archived_messages: 16,
+        replay_messages: 10,
+        estimated_replay_tokens: 2048,
+        estimated_summary_tokens: 128,
+        estimated_session_tokens: 2176,
+        archived_summary: "The earlier turns agreed on a release plan.",
+        archived_summary_at: "2026-08-13T10:00:00Z",
+      })))
+    }) as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      contextPanel: { visible: boolean }
+    }
+
+    try {
+      ui.composer.setText("/context")
+      ui.composer.submit()
+      await waitUntil(() => ui.contextPanel.visible)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+
+      expect(frame).toContain("Agent context")
+      expect(frame).toContain("~2.2k session tokens · 10 replay messages · 16 archived · summary active")
+      expect(frame).toContain("The earlier turns agreed on a release plan.")
+      expect(frame).toContain("memory, instructions, and skills are added separately")
+
+      setup.resize(40, 10)
+      await setup.renderOnce()
+      const compact = setup.captureCharFrame()
+      expect(occurrences(compact, "Agent context")).toBe(1)
+      expect(occurrences(compact, "Ask nanobot anything")).toBe(1)
+
+      setup.mockInput.pressEscape()
+      await waitUntil(() => !ui.contextPanel.visible)
+      expect(ui.contextPanel.visible).toBe(false)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads earlier transcript pages in place when PageUp reaches the top", async () => {
+    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    const requests: string[] = []
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      requests.push(url)
+      const older = url.includes("before=older-page")
+      return Promise.resolve(new Response(JSON.stringify({
+        messages: older
+          ? [
+              { role: "user", content: "oldest question" },
+              { role: "assistant", content: "oldest answer" },
+            ]
+          : [
+              { role: "user", content: "recent question" },
+              { role: "assistant", content: "recent answer" },
+            ],
+        page: older
+          ? { has_more_before: false, before_cursor: null }
+          : { has_more_before: true, before_cursor: "older-page" },
+      })))
+    }) as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret", chatId: "chat" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    try {
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      setup.mockInput.pressKey("\u001B[5~")
+      await waitUntil(() => requests.length === 2)
+      await waitUntil(() => !(app as unknown as { historyLoadingOlder: boolean }).historyLoadingOlder)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+
+      expect(frame.indexOf("oldest question")).toBeLessThan(frame.indexOf("recent question"))
+      expect(frame.indexOf("oldest answer")).toBeLessThan(frame.indexOf("recent answer"))
+      expect((app as unknown as { historyHasMore: boolean }).historyHasMore).toBe(false)
     } finally {
       globalThis.fetch = original
     }

@@ -22,6 +22,7 @@ const options: AppOptions = {
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
   theme: themePreference(),
+  statePath: process.env.NANOBOT_TUI_STATE_PATH?.trim() || undefined,
 }
 
 let app: NanobotTui | undefined

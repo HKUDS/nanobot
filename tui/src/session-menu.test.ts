@@ -12,6 +12,8 @@ const sessions: SessionSummary[] = [
     createdAt: "2026-08-12T10:00:00Z",
     updatedAt: "2026-08-13T10:00:00Z",
     runStartedAt: null,
+    pinned: true,
+    archived: false,
   },
   {
     chatId: "two",
@@ -20,6 +22,8 @@ const sessions: SessionSummary[] = [
     createdAt: "2026-08-11T10:00:00Z",
     updatedAt: "2026-08-12T10:00:00Z",
     runStartedAt: null,
+    pinned: false,
+    archived: false,
   },
 ]
 

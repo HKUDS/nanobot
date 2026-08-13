@@ -48,7 +48,7 @@ def launch_tui(
     *,
     config_path: Path,
     workspace_override: str | None,
-    session_id: str,
+    session_id: str | None,
     theme: str,
 ) -> int:
     """Run the native TUI, owning a local gateway only when one is not running."""
@@ -78,7 +78,9 @@ def launch_tui(
                 "NANOBOT_TUI_THEME": theme,
             }
         )
-        chat_id = _websocket_chat_id(session_id)
+        state_path = config_path.parent / "tui" / "state.json"
+        env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
+        chat_id = _initial_tui_chat_id(session_id, state_path)
         if chat_id:
             env["NANOBOT_TUI_CHAT_ID"] = chat_id
         else:
@@ -328,3 +330,28 @@ def _websocket_chat_id(session_id: str) -> str | None:
     if session_id == "cli:direct":
         return "tui-direct"
     return session_id.split(":", 1)[-1] or None
+
+
+def _initial_tui_chat_id(session_id: str | None, state_path: Path) -> str | None:
+    """Resume the default TUI, while keeping an explicit selector authoritative."""
+    if session_id is not None:
+        return _websocket_chat_id(session_id)
+    return _read_tui_chat_id(state_path) or _websocket_chat_id("cli:direct")
+
+
+def _read_tui_chat_id(path: Path) -> str | None:
+    """Read the last attached chat without making launch depend on optional state."""
+    try:
+        raw_payload: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw_payload, dict):
+        return None
+    payload = cast(dict[str, Any], raw_payload)
+    value = payload.get("chat_id")
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or len(value) > 256 or any(character in value for character in "\r\n"):
+        return None
+    return value
