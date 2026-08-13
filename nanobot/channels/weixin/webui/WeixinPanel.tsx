@@ -197,7 +197,7 @@ export function WeixinPanel({
   });
 
   return (
-    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
+    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <WeixinLogo showBrandLogos={showBrandLogos} />
@@ -251,7 +251,7 @@ export function WeixinPanel({
       </div>
 
       {runtimeError ? (
-        <div className="mt-4 rounded-[12px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="mt-4 rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive">
           {runtimeError}
         </div>
       ) : null}
@@ -304,7 +304,7 @@ export function WeixinPanel({
         {saveError ? (
           <div
             role="alert"
-            className="rounded-[12px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive"
+            className="rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive"
           >
             {saveError}
           </div>
@@ -413,7 +413,7 @@ function WeixinLogo({ showBrandLogos }: { showBrandLogos: boolean }) {
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   if (showBrandLogos && logoUrl) {
     return (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-background">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-background">
         <img
           src={logoUrl}
           alt=""
@@ -428,7 +428,7 @@ function WeixinLogo({ showBrandLogos }: { showBrandLogos: boolean }) {
   }
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-background text-[11px] font-bold"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-[11px] font-bold"
       style={{ color: "#07C160" }}
       aria-hidden
     >

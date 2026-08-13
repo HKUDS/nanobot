@@ -31,7 +31,7 @@ export function CapabilityInstallNotice({
   installing?: boolean;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-[14px] border border-border/55 bg-muted/22 px-3.5 py-3">
+    <div className="flex items-start gap-3 rounded-control border border-border/55 bg-muted/22 px-3.5 py-3">
       {installing ? (
         <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
       ) : (
@@ -78,13 +78,13 @@ export function NanobotFeatureInstallDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
+        <DialogFooter className="mt-7 !grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Button
             type="button"
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={installing}
-            className="h-11 w-full min-w-0 rounded-full bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+            className="h-11 w-full min-w-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
           >
             {tx("settings.automations.cancel", "Cancel")}
           </Button>
@@ -92,7 +92,7 @@ export function NanobotFeatureInstallDialog({
             type="button"
             onClick={() => feature && void onConfirm(feature)}
             disabled={!feature || installing}
-            className="h-11 w-full min-w-0 !whitespace-normal rounded-full px-5 text-center text-[15px] font-semibold"
+            className="h-11 w-full min-w-0 !whitespace-normal px-5 text-center text-[15px] font-semibold"
           >
             {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
             {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
@@ -117,7 +117,7 @@ export function DismissibleStatusMessage({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
+        "flex items-center justify-between gap-3 rounded-control border py-2.5 pl-4 pr-2 text-[13px]",
         isError
           ? "border-destructive/20 bg-destructive/5 text-destructive"
           : "border-border/55 bg-muted/35 text-muted-foreground",
@@ -153,7 +153,7 @@ export function RestartRequiredNotice({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-control border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
       <span>{message}</span>
       {onRestart ? (
         <Button
@@ -186,7 +186,7 @@ export function SettingsSectionTitle({ children }: { children: ReactNode }) {
 
 export function SettingsGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[22px] bg-settings-surface">
+    <div className="overflow-hidden rounded-panel bg-settings-surface">
       <div className="divide-y divide-border/45">{children}</div>
     </div>
   );

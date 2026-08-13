@@ -98,7 +98,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
       />
 
       {view === "installed" ? (
-        <section className="overflow-hidden rounded-[22px] bg-settings-surface">
+        <section className="overflow-hidden rounded-panel bg-settings-surface">
           <div className="flex flex-col gap-3 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-[320px]">
               <Search
@@ -114,7 +114,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 aria-label={t("settings.skills.searchInstalled", {
                   defaultValue: "Search installed skills",
                 })}
-                className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
+                className="h-9 bg-background pl-9 text-[13px]"
               />
             </div>
             <SegmentedControl
@@ -220,7 +220,7 @@ function SkillCatalogRow({
       })}
       onClick={() => onSelect(skill)}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left",
+        "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
         "transition-colors duration-150",
         "hover:bg-muted/70",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -436,7 +436,7 @@ function SkillDetailSheet({
                 {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
               </div>
             ) : loadFailed ? (
-              <div className="mt-8 rounded-[16px] bg-destructive/10 px-3 py-3 text-sm text-destructive">
+              <div className="mt-8 rounded-floating bg-destructive/10 px-3 py-3 text-sm text-destructive">
                 {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
               </div>
             ) : (
@@ -484,7 +484,7 @@ function SkillDetailSheet({
                 </div>
 
                 {actionError ? (
-                  <div className="rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+                  <div className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
                     {actionError}
                   </div>
                 ) : null}
@@ -533,7 +533,7 @@ function SkillDetailSheet({
       </Sheet>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent className="rounded-[20px]">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("settings.skills.deleteConfirmTitle", {
@@ -574,7 +574,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
     });
 
   return (
-    <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
+    <details className="group rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
       <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
@@ -583,7 +583,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           SKILL.md
         </code>
       </summary>
-      <div className="mt-3 overflow-hidden rounded-[14px] border border-border/35 bg-background/70">
+      <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
             "max-h-[min(42vh,32rem)] overflow-auto overscroll-contain px-3.5 py-3 pr-4",
@@ -625,7 +625,7 @@ function RequirementsSection({
   };
 
   return (
-    <section className="rounded-[18px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
+    <section className="rounded-floating border border-amber-500/20 bg-amber-500/[0.06] p-4">
       <div className="flex items-start gap-2.5">
         <CircleAlert
           className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
@@ -648,7 +648,7 @@ function RequirementsSection({
         {installOptions.map((option) => (
           <div
             key={`${option.id}:${option.command}`}
-            className="flex min-w-0 items-center gap-2 rounded-[12px] bg-background/80 px-3 py-2"
+            className="flex min-w-0 items-center gap-2 rounded-control bg-background/80 px-3 py-2"
           >
             <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-foreground/80">
@@ -661,7 +661,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />

@@ -96,16 +96,16 @@ export function DeleteConfirm({
             </div>
           ) : null}
         </AlertDialogHeader>
-        <AlertDialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
+        <AlertDialogFooter className="mt-6 !grid grid-cols-1 gap-2 sm:grid-cols-2">
           <AlertDialogCancel
             onClick={onCancel}
-            className="mt-0 h-11 w-full min-w-0 rounded-full border-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+            className="mt-0 w-full min-w-0"
           >
             {t("deleteConfirm.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
-            className="h-11 w-full min-w-0 !whitespace-normal rounded-full bg-destructive px-5 text-center text-[15px] font-semibold text-destructive-foreground shadow-none hover:bg-destructive/90"
+            className="w-full min-w-0 !whitespace-normal bg-destructive text-center text-destructive-foreground hover:bg-destructive/90"
           >
             {hasAutomations
               ? t("deleteConfirm.confirmWithAutomations")

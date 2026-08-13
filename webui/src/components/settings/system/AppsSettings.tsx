@@ -256,7 +256,7 @@ export function AppsCatalogSettings({
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
               className={cn(
-                "h-12 rounded-[14px] pl-11 text-[15px]",
+                "h-12 pl-11 text-[15px]",
                 SETTINGS_SEARCH_INPUT_CLASS,
               )}
             />
@@ -289,7 +289,7 @@ export function AppsCatalogSettings({
         />
       ) : null}
 
-      <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
+      <section className="rounded-panel bg-settings-surface px-3 py-3 sm:px-4">
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
           <SettingsSectionTitle>
             {filter === "mcp"
@@ -412,7 +412,7 @@ function CliAppsCatalogRow({
   const description = app.description || app.requires || app.entry_point || app.name;
 
   return (
-    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
+    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-control px-3 py-3 transition-colors hover:bg-muted/45">
       <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -583,7 +583,7 @@ function McpAppsCatalogRow({
   };
 
   return (
-    <article className="min-w-0 rounded-[14px] transition-colors hover:bg-muted/45">
+    <article className="min-w-0 rounded-control transition-colors hover:bg-muted/45">
       <div className="group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
         <div className="min-w-[8rem] flex-[1_1_8rem]">
@@ -747,7 +747,7 @@ function McpAppsCatalogRow({
 
       {manualCallback ? (
         <form
-          className="mx-3 mb-3 min-w-0 space-y-3 rounded-[14px] bg-background/55 p-3"
+          className="mx-3 mb-3 min-w-0 space-y-3 rounded-control bg-background/55 p-3"
           onSubmit={(event) => {
             event.preventDefault();
             onOAuthComplete();
@@ -825,7 +825,7 @@ function McpAppsCatalogRow({
           </div>
         </form>
       ) : oauthFlow && oauthPopupBlocked && oauthFlow.authorization_url ? (
-        <div className="mx-3 mb-3 flex flex-col gap-2.5 rounded-[14px] bg-background/55 p-3">
+        <div className="mx-3 mb-3 flex flex-col gap-2.5 rounded-control bg-background/55 p-3">
           <div className="flex min-w-0 items-center gap-2.5 text-[12.5px] text-muted-foreground">
             <span>
               {mcpOAuthStatusText(
@@ -1016,10 +1016,10 @@ function McpCustomServerPanel({
   ];
 
   return (
-    <section className="overflow-hidden rounded-[16px] bg-settings-surface">
+    <section className="overflow-hidden rounded-floating bg-settings-surface">
       <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-muted text-muted-foreground">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
             <Server className="h-4 w-4" aria-hidden />
           </span>
           <div className="min-w-0">
@@ -1154,7 +1154,7 @@ function McpCustomServerPanel({
                 value={form.headers}
                 onChange={(event) => update("headers", event.target.value)}
                 placeholder={'{"Authorization":"Bearer ..."}'}
-                className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
+                className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
               />
               <p
                 id={headersHelpId}
@@ -1202,7 +1202,7 @@ function McpCustomServerPanel({
                     value={form.args}
                     onChange={(event) => update("args", event.target.value)}
                     placeholder={'["-y", "docs-mcp"]'}
-                    className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
+                    className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
                   />
                 </label>
               ) : null}
@@ -1214,7 +1214,7 @@ function McpCustomServerPanel({
                   value={form.env}
                   onChange={(event) => update("env", event.target.value)}
                   placeholder={'{"API_KEY":"..."}'}
-                  className="min-h-[68px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
+                  className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
                 />
               </label>
               <label className="min-w-0">
@@ -1257,7 +1257,7 @@ function McpCustomServerPanel({
                 value={configImport}
                 onChange={(event) => onConfigImportChange(event.target.value)}
                 placeholder={'{"mcpServers":{"docs":{"command":"npx","args":["-y","docs-mcp"]}}}'}
-                className="min-h-[84px] resize-y rounded-[12px] bg-background/80 font-mono text-[12px]"
+                className="min-h-[84px] resize-y bg-background/80 font-mono text-[12px]"
               />
             </label>
             <Button
@@ -1352,7 +1352,7 @@ function McpPresetLogo({
       <span
         className={cn(
           "grid shrink-0 place-items-center border border-border/45 bg-background",
-          compact ? "h-10 w-10 rounded-[10px]" : "h-11 w-11 rounded-[8px]",
+          compact ? "h-10 w-10 rounded-control" : "h-11 w-11 rounded-compact",
         )}
       >
         <img
@@ -1372,8 +1372,8 @@ function McpPresetLogo({
       className={cn(
         "grid shrink-0 place-items-center font-semibold text-white",
         compact
-          ? "h-10 w-10 rounded-[10px] text-[12px]"
-          : "h-11 w-11 rounded-[8px] text-[13px]",
+          ? "h-10 w-10 rounded-control text-[12px]"
+          : "h-11 w-11 rounded-compact text-[13px]",
       )}
       style={{ backgroundColor: bg }}
     >
@@ -1406,7 +1406,7 @@ function CliAppReadyPanel({
   };
 
   return (
-    <section className="rounded-[12px] bg-settings-surface px-4 py-3">
+    <section className="rounded-control bg-settings-surface px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
         <div className="min-w-0 flex-1">
@@ -1472,7 +1472,7 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
 
   return (
     <span
-      className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[8px] border border-border/45 bg-muted text-[13px] font-semibold"
+      className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-compact border border-border/45 bg-muted text-[13px] font-semibold"
       style={{ color: app.brand_color || "hsl(var(--muted-foreground))" }}
     >
       <span

@@ -493,7 +493,7 @@ describe("ChatList", () => {
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-[0.65rem]");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
     expect(activePane.querySelector("[data-sidebar-selection-track]"))
       .toHaveAttribute("data-active", "true");
     expect(screen.getByRole("button", {

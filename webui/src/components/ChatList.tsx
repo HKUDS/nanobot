@@ -807,7 +807,7 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-[0.65rem] px-2 text-[13px]",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
@@ -1081,7 +1081,7 @@ function WorkbenchTabHeader({
       data-workbench-tab
       onContextMenu={(event) => actionMenus.openFromContextMenu(event, actionMenuId)}
       className={cn(
-        "group/tab flex min-w-0 items-center gap-0.5 rounded-[0.65rem] px-1.5 text-sidebar-foreground/85",
+        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-sidebar-foreground/85",
         collapsed ? "min-h-6" : "min-h-7",
       )}
     >
@@ -1281,7 +1281,7 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-[0.65rem] px-2 text-[13px]",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active

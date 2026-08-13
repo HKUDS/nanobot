@@ -563,7 +563,7 @@ function PairingCodePopup({
       aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
       className={cn(
         "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
-        "w-[min(calc(100vw-2rem),24rem)] rounded-[24px]",
+        "w-[min(calc(100vw-2rem),24rem)] rounded-modal",
         floatingSurfaceElevationClassName,
         "p-4",
         "animate-in fade-in-0 slide-in-from-top-2 duration-200",

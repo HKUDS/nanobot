@@ -2246,8 +2246,8 @@ export function ThreadComposer({
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
-            : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
+            ? "max-w-[58rem] rounded-prominent bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[49.5rem] rounded-panel bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -2610,7 +2610,7 @@ function QueuedPromptStack({
       role="group"
       data-state="enter"
       className={cn(
-        "composer-status-strip relative z-20 mx-3 mt-3 overflow-hidden rounded-[18px]",
+        "composer-status-strip relative z-20 mx-3 mt-3 overflow-hidden rounded-floating",
         "border border-black/[0.05] bg-popover/90 p-1.5",
         "shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md",
         "dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_14px_34px_rgba(0,0,0,0.30)]",
@@ -2688,7 +2688,7 @@ function QueuedPromptRow({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "queued-prompt-row group/queued flex min-h-8 items-center gap-1.5 rounded-[12px] px-2 py-0.5",
+        "queued-prompt-row group/queued flex min-h-8 items-center gap-1.5 rounded-control px-2 py-0.5",
         "text-[13px] transition-colors hover:bg-muted/55 dark:hover:bg-white/[0.055]",
         isHero && "text-[13.5px]",
       )}
@@ -2973,7 +2973,7 @@ function MentionCandidateLogo({
     return (
       <span
         className={cn(
-          "flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[5px]",
+          "flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-compact",
           selected ? "bg-background/55" : "bg-transparent",
         )}
       >
@@ -2991,7 +2991,7 @@ function MentionCandidateLogo({
   }
   return (
     <span
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[7.5px] font-semibold text-white"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-compact text-[7.5px] font-semibold text-white"
       style={{ backgroundColor: color }}
     >
       {candidate.initials}
@@ -3135,7 +3135,7 @@ function AttachmentChip({
   return (
     <div
       className={cn(
-        "group relative flex items-center gap-2 rounded-[12px] border px-2 py-1.5",
+        "group relative flex items-center gap-2 rounded-control border px-2 py-1.5",
         "transition-colors motion-reduce:transition-none",
         tone,
       )}

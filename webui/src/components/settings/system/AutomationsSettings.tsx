@@ -129,14 +129,14 @@ export function AutomationsSettings({
         <section className="shrink-0">
           <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
             <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-              <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted p-1">
+              <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-floating bg-muted p-1">
                 {summaryOptions.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     onClick={() => onFilterChange(option.value)}
                     className={cn(
-                      "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+                      "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control px-3 text-[12px] font-medium text-muted-foreground transition-colors",
                       filter === option.value && "bg-background text-foreground",
                       automationFilterToneClass(option.value, option.count, filter === option.value),
                     )}
@@ -166,7 +166,7 @@ export function AutomationsSettings({
                     "Search task, message, linked chat, or schedule",
                   )}
                   className={cn(
-                    "h-9 w-full rounded-[13px] pl-9 text-[13px]",
+                    "h-9 w-full rounded-control pl-9 text-[13px]",
                     SETTINGS_SEARCH_INPUT_CLASS,
                   )}
                 />
@@ -175,7 +175,7 @@ export function AutomationsSettings({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
                   >
                     <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                     <span>{sortLabel[sort]}</span>
@@ -197,19 +197,19 @@ export function AutomationsSettings({
       ) : null}
 
       {error ? (
-        <div className="flex items-center gap-2 rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+        <div className="flex items-center gap-2 rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
           <CircleAlert className="h-4 w-4 shrink-0" aria-hidden />
           <span>{error}</span>
         </div>
       ) : null}
 
       {loading && !payload ? (
-        <div className="flex h-44 items-center justify-center rounded-[22px] bg-settings-surface text-[13px] text-muted-foreground">
+        <div className="flex h-44 items-center justify-center rounded-panel bg-settings-surface text-[13px] text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-[22px] bg-settings-surface xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+        <section className="grid min-h-0 overflow-hidden rounded-panel bg-settings-surface xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
           <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-settings-surface xl:border-b-0 xl:border-r">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
@@ -245,7 +245,7 @@ export function AutomationsSettings({
           />
         </section>
       ) : (
-        <div className="rounded-[22px] bg-settings-surface px-5 py-12 text-center text-[13px] text-muted-foreground">
+        <div className="rounded-panel bg-settings-surface px-5 py-12 text-center text-[13px] text-muted-foreground">
           <div>
             {jobs.length
               ? tx("settings.automations.noMatches", "No automations match this view.")
@@ -313,7 +313,7 @@ function AutomationListItem({
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
-          "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3.5 text-left transition-colors",
+          "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-floating px-3 py-3.5 text-left transition-colors",
           selected
             ? "bg-background/80 text-foreground"
             : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
@@ -433,7 +433,7 @@ function AutomationDetailPanel({
 
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-          <section className="rounded-[20px] bg-background/55 px-4 py-3.5">
+          <section className="rounded-floating bg-background/55 px-4 py-3.5">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
                 {messageLabel}
@@ -506,7 +506,7 @@ function AutomationDetailPanel({
           </div>
 
           {job.state.last_error ? (
-            <div className="rounded-[16px] border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
+            <div className="rounded-floating border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
               {job.state.last_error}
             </div>
           ) : null}
@@ -520,7 +520,7 @@ function AutomationDetailPanel({
             >
               {schedule}
             </AutomationDetail>
-            <div className="rounded-[18px] bg-background/55 p-3">
+            <div className="rounded-floating bg-background/55 p-3">
               <div className="grid gap-3">
                 {created ? (
                   <div>
@@ -672,7 +672,7 @@ function AutomationDetail({
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-[17px] bg-background/55 px-3 py-3">
+    <div className="min-w-0 rounded-floating bg-background/55 px-3 py-3">
       <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
         {label}
       </div>
@@ -757,7 +757,7 @@ export function AutomationEditDialog({
       {job ? (
         <DialogContent
           aria-describedby={undefined}
-          className="w-[min(calc(100vw-2rem),34rem)] rounded-[26px]"
+          className="w-[min(calc(100vw-2rem),34rem)]"
         >
           <form className="space-y-5" onSubmit={submit}>
             <DialogHeader>
@@ -772,7 +772,6 @@ export function AutomationEditDialog({
                 <Input
                   value={draft.name}
                   onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-                  className="h-10 rounded-[12px]"
                 />
               </label>
 
@@ -784,7 +783,7 @@ export function AutomationEditDialog({
                   <Textarea
                     value={draft.message}
                     onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
-                    className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
+                    className="min-h-[160px] resize-none text-[13px] leading-5"
                   />
                 </label>
               ) : null}
@@ -821,7 +820,6 @@ export function AutomationEditDialog({
                       onChange={(event) =>
                         setDraft((prev) => ({ ...prev, everyValue: event.target.value }))
                       }
-                      className="h-10 rounded-[12px]"
                     />
                   </label>
                   <label className="block space-y-1.5">
@@ -837,7 +835,7 @@ export function AutomationEditDialog({
                         }))
                       }
                       className={cn(
-                        "h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground transition-colors",
+                        "h-10 w-full rounded-control border border-input bg-background px-3 text-[13px] text-foreground transition-colors",
                         formControlFocusClassName,
                       )}
                     >
@@ -861,7 +859,7 @@ export function AutomationEditDialog({
                       value={draft.cronExpr}
                       onChange={(event) => setDraft((prev) => ({ ...prev, cronExpr: event.target.value }))}
                       placeholder="0 9 * * *"
-                      className="h-10 rounded-[12px] font-mono text-[13px]"
+                      className="font-mono text-[13px]"
                     />
                   </label>
                   <label className="block space-y-1.5">
@@ -872,7 +870,7 @@ export function AutomationEditDialog({
                       value={draft.tz}
                       onChange={(event) => setDraft((prev) => ({ ...prev, tz: event.target.value }))}
                       placeholder="Asia/Shanghai"
-                      className="h-10 rounded-[12px] text-[13px]"
+                      className="text-[13px]"
                     />
                   </label>
                 </div>
@@ -887,13 +885,12 @@ export function AutomationEditDialog({
                     type="datetime-local"
                     value={draft.atLocal}
                     onChange={(event) => setDraft((prev) => ({ ...prev, atLocal: event.target.value }))}
-                    className="h-10 rounded-[12px]"
                   />
                 </label>
               ) : null}
 
               {validation ? (
-                <div className="rounded-[12px] bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
+                <div className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                   {validation}
                 </div>
               ) : null}
@@ -905,11 +902,10 @@ export function AutomationEditDialog({
                 variant="ghost"
                 onClick={() => onOpenChange(false)}
                 disabled={saving}
-                className="rounded-full"
               >
                 {tx("settings.automations.cancel", "Cancel")}
               </Button>
-              <Button type="submit" disabled={Boolean(validation) || saving} className="rounded-full">
+              <Button type="submit" disabled={Boolean(validation) || saving}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
                 {tx("settings.automations.save", "Save")}
               </Button>
@@ -937,7 +933,7 @@ export function AutomationDeleteDialog({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
     <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-2rem),26rem)] rounded-[26px]">
+      <DialogContent className="w-[min(calc(100vw-2rem),26rem)]">
         <DialogHeader>
           <DialogTitle>{tx("settings.automations.deleteTitle", "Delete automation")}</DialogTitle>
           <DialogDescription>
@@ -954,7 +950,6 @@ export function AutomationDeleteDialog({
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={deleting}
-            className="rounded-full"
           >
             {tx("settings.automations.cancel", "Cancel")}
           </Button>
@@ -963,7 +958,6 @@ export function AutomationDeleteDialog({
             variant="destructive"
             onClick={() => job && void onConfirm(job)}
             disabled={!job || deleting}
-            className="rounded-full"
           >
             {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
             {tx("settings.automations.delete", "Delete")}

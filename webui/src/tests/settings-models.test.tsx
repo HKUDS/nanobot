@@ -165,7 +165,7 @@ describe("Settings models", () => {
     expect(editor).toHaveClass(
       "slide-in-from-top-1",
       "lg:max-w-6xl",
-      "rounded-[18px]",
+      "rounded-floating",
     );
     expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
     const deleteButton = within(editor).getByRole("button", { name: "Delete" });

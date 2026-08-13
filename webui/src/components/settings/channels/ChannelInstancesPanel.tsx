@@ -144,7 +144,7 @@ export function ChannelInstancesPanel({
   };
 
   return (
-    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
+    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -177,7 +177,7 @@ export function ChannelInstancesPanel({
             <article
               key={instance.id}
               className={cn(
-                "overflow-hidden rounded-[18px] transition-colors",
+                "overflow-hidden rounded-floating transition-colors",
                 expanded
                   ? "bg-background"
                   : "bg-background/70 hover:bg-muted",
@@ -313,7 +313,7 @@ export function ChannelInstancesPanel({
       {customization.footer}
 
       {notice ? (
-        <div className="mt-3 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="mt-3 rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {notice}
         </div>
       ) : null}

@@ -54,7 +54,7 @@ describe("CodeBlock", () => {
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("py-4", "pl-5", "pr-14");
 
     const container = screen.getByTestId("plain-code-fallback").closest(".not-prose");
-    expect(container).toHaveClass("relative", "rounded-[18px]", "bg-secondary/70");
+    expect(container).toHaveClass("relative", "rounded-floating", "bg-secondary/70");
     expect(container).not.toHaveClass("border");
     expect(container).toHaveAttribute("data-language", "ts");
 

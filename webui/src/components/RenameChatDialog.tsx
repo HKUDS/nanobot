@@ -44,41 +44,38 @@ export function RenameChatDialog({
     <Dialog open={open} onOpenChange={(next) => {
       if (!next) onCancel();
     }}>
-      <DialogContent className="max-w-sm rounded-[20px] p-5 sm:p-6">
+      <DialogContent className="max-w-sm">
         <form
-          className="grid gap-5"
+          className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (!trimmed) return;
             onConfirm(trimmed);
           }}
         >
-          <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-xl leading-tight">
-              {dialogTitle ?? t("chat.renameTitle")}
-            </DialogTitle>
-            <DialogDescription className="leading-relaxed">
+          <DialogHeader className="text-left">
+            <DialogTitle>{dialogTitle ?? t("chat.renameTitle")}</DialogTitle>
+            <DialogDescription>
               {description ?? t("chat.renameDescription")}
             </DialogDescription>
           </DialogHeader>
           <Input
-            className="h-11 rounded-xl border-border/80 bg-muted/20 px-3.5 text-[15px]"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={placeholder ?? t("chat.renamePlaceholder")}
             autoFocus
             maxLength={160}
           />
-          <DialogFooter className="gap-2 pt-1 sm:space-x-0">
+          <DialogFooter>
             <Button
-              className="min-w-20 rounded-xl"
+              className="min-w-20"
               type="button"
               variant="outline"
               onClick={onCancel}
             >
               {t("deleteConfirm.cancel")}
             </Button>
-            <Button className="min-w-20 rounded-xl" type="submit" disabled={!trimmed}>
+            <Button className="min-w-20" type="submit" disabled={!trimmed}>
               {t("chat.renameSave")}
             </Button>
           </DialogFooter>

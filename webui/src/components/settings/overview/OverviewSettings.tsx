@@ -129,7 +129,7 @@ export function OverviewSettings({
       : tx("settings.values.ready", "Ready");
   return (
     <div className="space-y-7">
-      <section className="rounded-[22px] bg-settings-surface px-4 py-4 sm:px-5">
+      <section className="rounded-panel bg-settings-surface px-4 py-4 sm:px-5">
         <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
@@ -433,7 +433,7 @@ function OverviewRowIcon({
   icon: LucideIcon;
 }) {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   );

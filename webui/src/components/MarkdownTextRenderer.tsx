@@ -450,7 +450,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     >
       <span
         className={cn(
-          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
+          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark",
           "border border-border/65 bg-background text-muted-foreground",
         )}
         aria-hidden
@@ -459,7 +459,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
           <img
             src={favicon}
             alt=""
-            className="h-3 w-3 rounded-[2px] object-contain"
+            className="h-3 w-3 rounded-mark object-contain"
             decoding="async"
             loading="lazy"
             referrerPolicy="no-referrer"
@@ -745,7 +745,7 @@ export default function MarkdownTextRenderer({
       },
       mark({ children: markdownChildren }) {
         return (
-          <mark className="rounded-[5px] bg-yellow-200/75 px-1 py-0.5 text-inherit dark:bg-yellow-300/25">
+          <mark className="rounded-compact bg-yellow-200/75 px-1 py-0.5 text-inherit dark:bg-yellow-300/25">
             {markdownChildren}
           </mark>
         );
