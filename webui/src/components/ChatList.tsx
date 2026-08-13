@@ -936,7 +936,7 @@ export const ChatList = memo(function ChatList({
                           }}
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
-                          className="relative my-1.5 min-w-0"
+                          className="relative my-1.5 first:mb-0 min-w-0"
                         >
                           <div
                             data-session-block-drop-zone="before"
