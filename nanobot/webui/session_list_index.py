@@ -84,24 +84,11 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
         if key is not None:
             session_paths[key] = path
 
-    transcript_sources: dict[str, tuple[str, tuple[Path, ...]]] = {}
     session_keys_by_stem = {
         SessionManager.safe_key(key): key
         for key in session_paths
         if key.startswith("websocket:")
     }
-    for stem, paths in _webui_transcript_sources(webui_dir).items():
-        key = session_keys_by_stem.get(stem)
-        if key is None:
-            cached = existing_by_source.get((_TRANSCRIPT_SOURCE, stem))
-            cached_key = cached.get("key") if cached is not None else None
-            if isinstance(cached_key, str) and _valid_transcript_session_key(cached_key, stem):
-                key = cached_key
-            else:
-                key = _session_key_from_transcript(stem, paths)
-        if key is not None:
-            transcript_sources[key] = (stem, paths)
-
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
     expected_sources: set[tuple[str, str]] = set()
@@ -120,19 +107,30 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
             rows.append(scanned)
             expected_sources.add(identity)
 
-    for key, (stem, paths) in sorted(transcript_sources.items()):
-        if key in session_paths:
+    for stem, paths in _webui_transcript_sources(webui_dir).items():
+        if stem in session_keys_by_stem:
             continue
         identity = (_TRANSCRIPT_SOURCE, stem)
         row = existing_by_source.get(identity)
-        if row is not None and _indexed_transcript_row_matches(row, key, webui_dir):
+        cached_key = row.get("key") if row is not None else None
+        key = (
+            cached_key
+            if isinstance(cached_key, str) and _valid_transcript_session_key(cached_key, stem)
+            else None
+        )
+        if key is not None and row is not None and _indexed_transcript_row_matches(
+            row,
+            key,
+            webui_dir,
+        ):
             rows.append(row)
             expected_sources.add(identity)
             continue
 
         changed = True
         scanned = _scan_transcript_row(key, stem, paths, webui_dir)
-        if scanned is not None:
+        scanned_key = scanned.get("key") if scanned is not None else None
+        if scanned is not None and scanned_key not in session_paths:
             rows.append(scanned)
             expected_sources.add(identity)
 
@@ -372,43 +370,6 @@ def _transcript_record(line: str) -> dict[str, Any] | None:
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
-def _session_key_from_transcript(stem: str, paths: tuple[Path, ...]) -> str | None:
-    scanned_records = 0
-    scanned_chars = 0
-    for path in paths:
-        try:
-            with open(path, encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    scanned_records += 1
-                    scanned_chars += len(line)
-                    record = _transcript_record(line)
-                    chat_id = record.get("chat_id") if record is not None else None
-                    if isinstance(chat_id, str) and chat_id.strip():
-                        key = f"websocket:{chat_id.strip()}"
-                        if _valid_transcript_session_key(key, stem):
-                            return key
-                    if (
-                        scanned_records >= _SESSION_LIST_PREVIEW_MAX_RECORDS
-                        or scanned_chars >= _SESSION_LIST_PREVIEW_MAX_CHARS
-                    ):
-                        break
-        except OSError:
-            continue
-        if (
-            scanned_records >= _SESSION_LIST_PREVIEW_MAX_RECORDS
-            or scanned_chars >= _SESSION_LIST_PREVIEW_MAX_CHARS
-        ):
-            break
-
-    chat_id = stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)
-    fallback = f"websocket:{chat_id}"
-    if _valid_transcript_session_key(fallback, stem):
-        return fallback
-    return None
-
-
 def _valid_transcript_session_key(key: str, stem: str) -> bool:
     if not key.startswith("websocket:"):
         return False
@@ -561,12 +522,13 @@ def _transcript_created_at(record: dict[str, Any]) -> str | None:
 
 
 def _scan_transcript_row(
-    session_key: str,
+    session_key: str | None,
     stem: str,
     paths: tuple[Path, ...],
     webui_dir: Path,
 ) -> dict[str, Any] | None:
-    signature = _webui_activity_signature(session_key, webui_dir)
+    path_key = session_key or f"websocket:{stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)}"
+    signature = _webui_activity_signature(path_key, webui_dir)
     activity_updated_at = _webui_activity_updated_at(signature)
     if activity_updated_at is None:
         return None
@@ -588,6 +550,11 @@ def _scan_transcript_row(
                     record = _transcript_record(line)
                     if record is not None:
                         saw_record = True
+                        chat_id = record.get("chat_id")
+                        if isinstance(chat_id, str) and chat_id.strip():
+                            candidate = f"websocket:{chat_id.strip()}"
+                            if _valid_transcript_session_key(candidate, stem):
+                                session_key = candidate
                         if created_at is None:
                             created_at = _transcript_created_at(record)
                         user_preview, assistant_preview = _transcript_preview(record)
@@ -610,6 +577,11 @@ def _scan_transcript_row(
             break
     if not saw_record:
         return None
+    if session_key is None:
+        fallback = f"websocket:{stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)}"
+        if not _valid_transcript_session_key(fallback, stem):
+            return None
+        session_key = fallback
 
     if created_at is None:
         try:
