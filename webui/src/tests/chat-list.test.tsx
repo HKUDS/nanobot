@@ -238,6 +238,89 @@ describe("ChatList", () => {
     expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:fine");
   });
 
+  it("moves a dragged topic directly into a visible group", () => {
+    const onAttachPane = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "solo", title: "Solo topic" }),
+          session({ chatId: "target", title: "Target group" }),
+          session({ chatId: "full", title: "Full group" }),
+        ]}
+        activeKey="websocket:target"
+        paneGroups={{
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo topic",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo topic" }],
+          },
+          "websocket:target": {
+            tabKey: "tab:target",
+            title: "Target group",
+            activePaneKey: "websocket:target",
+            visible: true,
+            panes: [{ key: "websocket:target", chatId: "target", title: "Target pane" }],
+          },
+          "websocket:full": {
+            tabKey: "tab:full",
+            title: "Full group",
+            activePaneKey: "websocket:full-1",
+            visible: true,
+            panes: [1, 2, 3, 4].map((index) => ({
+              key: `websocket:full-${index}`,
+              chatId: `full-${index}`,
+              title: `Full pane ${index}`,
+            })),
+          },
+        }}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+      types: [SESSION_DRAG_TYPE],
+    } as unknown as DataTransfer;
+    const source = screen.getByRole("button", { name: "Solo topic" });
+    const targetGroup = screen.getByRole("button", { name: "Tab: Target group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const targetSurface = targetGroup.querySelector("[data-workbench-tab-surface]")!;
+    const fullGroup = screen.getByRole("button", { name: "Tab: Full group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const fullSurface = fullGroup.querySelector("[data-workbench-tab-surface]")!;
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(fullSurface, { dataTransfer });
+    fireEvent.dragOver(fullSurface, { dataTransfer });
+    fireEvent.drop(fullSurface, { dataTransfer });
+
+    expect(fullGroup).not.toHaveAttribute("data-pane-drop-target");
+    expect(onAttachPane).not.toHaveBeenCalled();
+
+    fireEvent.dragEnter(targetSurface, { dataTransfer });
+    fireEvent.dragOver(targetSurface, { dataTransfer });
+
+    expect(targetGroup).toHaveAttribute("data-pane-drop-target", "true");
+    expect(targetSurface).toHaveClass("ring-2", "ring-primary/35");
+
+    fireEvent.drop(targetSurface, { dataTransfer });
+
+    expect(onAttachPane).toHaveBeenCalledOnce();
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:target");
+    expect(targetGroup).not.toHaveAttribute("data-pane-drop-target");
+  });
+
   it("shows every tab's pane membership in a sidebar tab group", async () => {
     const onSelect = vi.fn();
     const onSelectPane = vi.fn();

@@ -63,7 +63,12 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
-import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
+import {
+  clearDraggedSession,
+  hasDraggedSession,
+  readDraggedSession,
+  writeDraggedSession,
+} from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -162,6 +167,17 @@ export interface SidebarDeleteItem {
   label: string;
 }
 
+function droppablePaneKey(
+  dataTransfer: DataTransfer,
+  group: SidebarPaneGroup,
+): string | null {
+  if (group.panes.length >= MAX_WORKBENCH_PANES
+    || !hasDraggedSession(dataTransfer)) return null;
+  const paneKey = readDraggedSession(dataTransfer);
+  if (!paneKey || group.panes.some((pane) => pane.key === paneKey)) return null;
+  return paneKey;
+}
+
 interface ChatListProps {
   sessions: ChatSummary[];
   temporarySessions?: ChatSummary[];
@@ -256,11 +272,22 @@ export const ChatList = memo(function ChatList({
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
     readCollapsedPaneGroups,
   );
+  const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
     () => new Set(),
   );
+
+  useEffect(() => {
+    const clearPaneDropTarget = () => setPaneDropTarget(null);
+    window.addEventListener("dragend", clearPaneDropTarget);
+    window.addEventListener("drop", clearPaneDropTarget);
+    return () => {
+      window.removeEventListener("dragend", clearPaneDropTarget);
+      window.removeEventListener("drop", clearPaneDropTarget);
+    };
+  }, []);
   const deleteItemsByKey = useMemo(() => {
     const items = new Map<string, SidebarDeleteItem>();
     for (const group of Object.values(paneGroups)) {
@@ -633,15 +660,59 @@ export const ChatList = memo(function ChatList({
                           }}
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
+                          data-pane-drop-target={
+                            paneDropTarget === resolvedPaneGroup.tabKey ? "true" : undefined
+                          }
                           className="relative my-1.5 min-w-0"
                         >
                           <div
                             data-workbench-tab-surface
+                            onDragEnter={(event) => {
+                              const paneKey = onAttachPane && !deleteSelectionMode
+                                ? droppablePaneKey(event.dataTransfer, resolvedPaneGroup)
+                                : null;
+                              if (!paneKey) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              event.dataTransfer.dropEffect = "move";
+                              setPaneDropTarget(resolvedPaneGroup.tabKey);
+                            }}
+                            onDragOver={(event) => {
+                              const paneKey = onAttachPane && !deleteSelectionMode
+                                ? droppablePaneKey(event.dataTransfer, resolvedPaneGroup)
+                                : null;
+                              if (!paneKey) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              event.dataTransfer.dropEffect = "move";
+                              setPaneDropTarget(resolvedPaneGroup.tabKey);
+                            }}
+                            onDragLeave={(event) => {
+                              const nextTarget = event.relatedTarget;
+                              if (nextTarget instanceof Node
+                                && event.currentTarget.contains(nextTarget)) return;
+                              setPaneDropTarget((current) => (
+                                current === resolvedPaneGroup.tabKey ? null : current
+                              ));
+                            }}
+                            onDrop={(event) => {
+                              const paneKey = onAttachPane && !deleteSelectionMode
+                                ? droppablePaneKey(event.dataTransfer, resolvedPaneGroup)
+                                : null;
+                              if (!paneKey || !onAttachPane) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setPaneDropTarget(null);
+                              clearDraggedSession();
+                              onAttachPane(paneKey, resolvedPaneGroup.tabKey);
+                            }}
                             className={cn(
-                              "min-w-0",
+                              "min-w-0 transition-[background-color,box-shadow]",
                               projectMode && "-ms-0.5",
                               deleteSelectionMode && (tabSelected || tabPartiallySelected)
                                 && "ring-1 ring-inset ring-sidebar-foreground/25",
+                              paneDropTarget === resolvedPaneGroup.tabKey
+                                && "bg-primary/[0.09] ring-2 ring-inset ring-primary/35 dark:bg-primary/[0.14]",
                             )}
                           >
                               <WorkbenchTabHeader
