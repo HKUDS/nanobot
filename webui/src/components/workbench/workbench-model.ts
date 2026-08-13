@@ -30,6 +30,8 @@ export interface OrderedWorkbenchTab extends WorkbenchTabMatch {
   updatedAt: string | null;
 }
 
+type DropEdge = "before" | "after";
+
 export const EMPTY_WORKBENCH_STATE: WorkbenchState = {
   version: 1,
   tabs: {},
@@ -455,12 +457,31 @@ export function contiguousWorkbenchSessionOrder(
   return result;
 }
 
+function moveKeysBesideBlock(
+  order: string[],
+  sourceKeys: ReadonlySet<string>,
+  targetKeys: readonly string[],
+  edge: DropEdge,
+): string[] {
+  const sourceBlock = order.filter((key) => sourceKeys.has(key));
+  const withoutSource = order.filter((key) => !sourceKeys.has(key));
+  const targetIndexes = targetKeys
+    .map((key) => withoutSource.indexOf(key))
+    .filter((index) => index >= 0);
+  if (sourceBlock.length === 0 || targetIndexes.length === 0) return order;
+  const insertIndex = edge === "before"
+    ? Math.min(...targetIndexes)
+    : Math.max(...targetIndexes) + 1;
+  withoutSource.splice(insertIndex, 0, ...sourceBlock);
+  return withoutSource;
+}
+
 export function moveSessionBesideWorkbenchBlock(
   state: WorkbenchState,
   orderedSessionKeys: readonly string[],
   sourcePaneKey: string,
   targetPaneKey: string,
-  edge: "before" | "after",
+  edge: DropEdge,
 ): string[] {
   const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
   if (
@@ -473,16 +494,7 @@ export function moveSessionBesideWorkbenchBlock(
   const targetBlock = targetTab.tab.paneKeys.filter((key) => (
     key !== sourcePaneKey && contiguousOrder.includes(key)
   ));
-  const withoutSource = contiguousOrder.filter((key) => key !== sourcePaneKey);
-  const targetIndexes = targetBlock
-    .map((key) => withoutSource.indexOf(key))
-    .filter((index) => index >= 0);
-  if (targetIndexes.length === 0) return contiguousOrder;
-  const insertIndex = edge === "before"
-    ? Math.min(...targetIndexes)
-    : Math.max(...targetIndexes) + 1;
-  withoutSource.splice(insertIndex, 0, sourcePaneKey);
-  return withoutSource;
+  return moveKeysBesideBlock(contiguousOrder, new Set([sourcePaneKey]), targetBlock, edge);
 }
 
 export function moveWorkbenchTabBlock(
@@ -490,7 +502,7 @@ export function moveWorkbenchTabBlock(
   orderedSessionKeys: readonly string[],
   sourceTabKey: string,
   targetPaneKey: string,
-  edge: "before" | "after",
+  edge: DropEdge,
 ): string[] {
   const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
   const sourceTab = state.tabs[sourceTabKey];
@@ -499,18 +511,8 @@ export function moveWorkbenchTabBlock(
   const targetTab = workbenchTabForPane(state, targetPaneKey);
   if (targetTab.tabKey === sourceTabKey) return contiguousOrder;
   const sourceKeys = new Set(sourceTab.paneKeys);
-  const sourceBlock = contiguousOrder.filter((key) => sourceKeys.has(key));
-  const withoutSource = contiguousOrder.filter((key) => !sourceKeys.has(key));
-  const targetBlock = targetTab.tab.paneKeys.filter((key) => withoutSource.includes(key));
-  const targetIndexes = targetBlock
-    .map((key) => withoutSource.indexOf(key))
-    .filter((index) => index >= 0);
-  if (sourceBlock.length === 0 || targetIndexes.length === 0) return contiguousOrder;
-  const insertIndex = edge === "before"
-    ? Math.min(...targetIndexes)
-    : Math.max(...targetIndexes) + 1;
-  withoutSource.splice(insertIndex, 0, ...sourceBlock);
-  return withoutSource;
+  const targetBlock = targetTab.tab.paneKeys.filter((key) => !sourceKeys.has(key));
+  return moveKeysBesideBlock(contiguousOrder, sourceKeys, targetBlock, edge);
 }
 
 export function reorderWorkbenchPane(
@@ -518,7 +520,7 @@ export function reorderWorkbenchPane(
   tabKey: string,
   sourcePaneKey: string,
   targetPaneKey: string,
-  edge: "before" | "after",
+  edge: DropEdge,
 ): WorkbenchState {
   const tab = state.tabs[tabKey];
   if (
@@ -547,7 +549,7 @@ export function moveSessionWithinWorkbenchTab(
   tabKey: string,
   sourcePaneKey: string,
   targetPaneKey: string,
-  edge: "before" | "after",
+  edge: DropEdge,
 ): string[] {
   const contiguousOrder = contiguousWorkbenchSessionOrder(state, orderedSessionKeys);
   const tab = state.tabs[tabKey];
@@ -558,11 +560,12 @@ export function moveSessionWithinWorkbenchTab(
     || !tab.paneKeys.includes(targetPaneKey)
   ) return contiguousOrder;
 
-  const withoutSource = contiguousOrder.filter((key) => key !== sourcePaneKey);
-  const targetIndex = withoutSource.indexOf(targetPaneKey);
-  if (targetIndex < 0) return contiguousOrder;
-  withoutSource.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourcePaneKey);
-  return withoutSource;
+  return moveKeysBesideBlock(
+    contiguousOrder,
+    new Set([sourcePaneKey]),
+    [targetPaneKey],
+    edge,
+  );
 }
 
 function dateToTime(value: string | null | undefined): number {

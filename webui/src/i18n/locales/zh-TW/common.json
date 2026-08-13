@@ -1444,6 +1444,8 @@
     "dropPane": "將 {{pane}} 移入 {{tab}}",
     "createGroup": "建立群組",
     "groupWith": "與 {{title}} 組成群組",
+    "groupAction": "成組",
+    "releaseToGroup": "放開成組",
     "moveTo": "移動到",
     "renameTabTitle": "重新命名分頁",
     "renameTabDescription": "為這個分頁命名，以便整理其中的窗格。",

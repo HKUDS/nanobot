@@ -1444,6 +1444,8 @@
     "dropPane": "Déplacer {{pane}} dans {{tab}}",
     "createGroup": "Créer un groupe",
     "groupWith": "Regrouper avec {{title}}",
+    "groupAction": "Regrouper",
+    "releaseToGroup": "Relâcher pour regrouper",
     "moveTo": "Déplacer vers",
     "renameTabTitle": "Renommer l’onglet",
     "renameTabDescription": "Donnez un nom à cet onglet pour organiser ses volets.",

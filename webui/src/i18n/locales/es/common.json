@@ -1445,6 +1445,8 @@
     "dropPane": "Mover {{pane}} a {{tab}}",
     "createGroup": "Crear grupo",
     "groupWith": "Agrupar con {{title}}",
+    "groupAction": "Agrupar",
+    "releaseToGroup": "Soltar para agrupar",
     "moveTo": "Mover a",
     "renameTabTitle": "Renombrar pestaña",
     "renameTabDescription": "Ponle un nombre a esta pestaña para organizar sus paneles.",

@@ -70,6 +70,7 @@ import type {
   PairingRequestInfo,
   SessionAutomationJob,
   SettingsPayload,
+  SidebarStatePayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -2401,6 +2402,14 @@ function Shell({
   const activePaneLimitReached = Boolean(
     activeTabState && activeTabState.paneKeys.length >= MAX_WORKBENCH_PANES,
   );
+  const orderedSidebarSessionKeys = useCallback((state: SidebarStatePayload) => (
+    sortSessions(
+      sessions,
+      state.view.sort,
+      state.title_overrides,
+      state.session_order,
+    ).map((session) => session.key)
+  ), [sessions]);
 
   const onActivateWorkbenchPane = useCallback((paneKey: string) => {
     onSelectChat(paneKey);
@@ -2455,12 +2464,7 @@ function Shell({
         || (!target.explicit && target.paneKeys.length < 2)
         || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
       ) return current;
-      const orderedKeys = sortSessions(
-        sessions,
-        current.view.sort,
-        current.title_overrides,
-        current.session_order,
-      ).map((session) => session.key);
+      const orderedKeys = orderedSidebarSessionKeys(current);
       return {
         ...current,
         session_order: moveSessionBesideWorkbenchBlock(
@@ -2474,19 +2478,14 @@ function Shell({
         view: { ...current.view, sort: "manual" },
       };
     });
-  }, [sessions, updateSidebarState]);
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   const onGroupSidebarSessions = useCallback((
     sourcePaneKey: string,
     targetPaneKey: string,
   ) => {
     void updateSidebarState((current) => {
-      const orderedKeys = sortSessions(
-        sessions,
-        current.view.sort,
-        current.title_overrides,
-        current.session_order,
-      ).map((session) => session.key);
+      const orderedKeys = orderedSidebarSessionKeys(current);
       return {
         ...current,
         session_order: moveSessionBesideWorkbenchBlock(
@@ -2500,7 +2499,7 @@ function Shell({
         view: { ...current.view, sort: "manual" },
       };
     });
-  }, [sessions, updateSidebarState]);
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   const onReorderSidebarSession = useCallback((
     sourcePaneKey: string,
@@ -2509,12 +2508,7 @@ function Shell({
   ) => {
     if (sourcePaneKey === targetPaneKey) return;
     void updateSidebarState((current) => {
-      const orderedKeys = sortSessions(
-        sessions,
-        current.view.sort,
-        current.title_overrides,
-        current.session_order,
-      ).map((session) => session.key);
+      const orderedKeys = orderedSidebarSessionKeys(current);
       if (!orderedKeys.includes(sourcePaneKey) || !orderedKeys.includes(targetPaneKey)) {
         return current;
       }
@@ -2535,7 +2529,7 @@ function Shell({
         view: { ...current.view, sort: "manual" },
       };
     });
-  }, [sessions, updateSidebarState]);
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   const onReorderSidebarPane = useCallback((
     tabKey: string,
@@ -2549,12 +2543,7 @@ function Shell({
       if (!tab?.paneKeys.includes(sourcePaneKey) || !tab.paneKeys.includes(targetPaneKey)) {
         return current;
       }
-      const orderedKeys = sortSessions(
-        sessions,
-        current.view.sort,
-        current.title_overrides,
-        current.session_order,
-      ).map((session) => session.key);
+      const orderedKeys = orderedSidebarSessionKeys(current);
       return {
         ...current,
         session_order: moveSessionWithinWorkbenchTab(
@@ -2575,7 +2564,7 @@ function Shell({
         view: { ...current.view, sort: "manual" },
       };
     });
-  }, [sessions, updateSidebarState]);
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   const onReorderSidebarGroup = useCallback((
     sourceTabKey: string,
@@ -2584,12 +2573,7 @@ function Shell({
   ) => {
     void updateSidebarState((current) => {
       if (!workbenchTab(current.workbench, sourceTabKey)) return current;
-      const orderedKeys = sortSessions(
-        sessions,
-        current.view.sort,
-        current.title_overrides,
-        current.session_order,
-      ).map((session) => session.key);
+      const orderedKeys = orderedSidebarSessionKeys(current);
       return {
         ...current,
         session_order: moveWorkbenchTabBlock(
@@ -2602,7 +2586,7 @@ function Shell({
         view: { ...current.view, sort: "manual" },
       };
     });
-  }, [sessions, updateSidebarState]);
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   useEffect(() => {
     if (view === "settings") {

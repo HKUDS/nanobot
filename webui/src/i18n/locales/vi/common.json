@@ -1444,6 +1444,8 @@
     "dropPane": "Di chuyển {{pane}} vào {{tab}}",
     "createGroup": "Tạo nhóm",
     "groupWith": "Nhóm với {{title}}",
+    "groupAction": "Nhóm",
+    "releaseToGroup": "Thả để nhóm",
     "moveTo": "Di chuyển đến",
     "renameTabTitle": "Đổi tên thẻ",
     "renameTabDescription": "Đặt tên cho thẻ này để sắp xếp các khung.",
