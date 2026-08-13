@@ -25,7 +25,7 @@ describe("ChatList", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
+  it("keeps tab headers out of drag protocols while exposing panes as drag sources", () => {
     render(
       <ChatList
         sessions={[session({ chatId: "root", title: "Root topic" })]}
@@ -278,9 +278,142 @@ describe("ChatList", () => {
       .toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    expect(child).toHaveAttribute("draggable", "false");
+    expect(child).toHaveAttribute("draggable", "true");
     expect(screen.getByRole("button", { name: "Tab: Target tab" }))
       .toHaveAttribute("draggable", "false");
+  });
+
+  it("reorders sessions with an insertion line and groups them through drag targets", () => {
+    const onReorderSession = vi.fn();
+    const onGroupSessions = vi.fn();
+    const onAttachPane = vi.fn();
+    const createDataTransfer = () => {
+      const values = new Map<string, string>();
+      const types: string[] = [];
+      return {
+        effectAllowed: "none",
+        dropEffect: "none",
+        types,
+        setData: vi.fn((type: string, value: string) => {
+          values.set(type, value);
+          if (!types.includes(type)) types.push(type);
+        }),
+        getData: vi.fn((type: string) => values.get(type) ?? ""),
+      } as unknown as DataTransfer;
+    };
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "source", title: "Source topic" }),
+          session({ chatId: "target", title: "Target topic" }),
+          session({ key: "tab:group", chatId: "group", title: "Existing group" }),
+        ]}
+        activeKey="websocket:source"
+        paneGroups={{
+          "websocket:source": {
+            tabKey: "tab:source",
+            title: "Source topic",
+            activePaneKey: "websocket:source",
+            visible: false,
+            panes: [{ key: "websocket:source", chatId: "source", title: "Source topic" }],
+          },
+          "websocket:target": {
+            tabKey: "tab:target",
+            title: "Target topic",
+            activePaneKey: "websocket:target",
+            visible: false,
+            panes: [{ key: "websocket:target", chatId: "target", title: "Target topic" }],
+          },
+          "tab:group": {
+            tabKey: "tab:group",
+            title: "Existing group",
+            activePaneKey: "websocket:group-a",
+            visible: true,
+            panes: [
+              { key: "websocket:group-a", chatId: "group-a", title: "Group A" },
+              { key: "websocket:group-b", chatId: "group-b", title: "Group B" },
+            ],
+          },
+        }}
+        onReorderSession={onReorderSession}
+        onGroupSessions={onGroupSessions}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const source = screen.getByRole("button", { name: "Source topic" });
+    expect(source).toHaveAttribute("draggable", "true");
+    const reorderTransfer = createDataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: reorderTransfer });
+    const targetRow = document.querySelector('[data-chat-row="websocket:target"]')!;
+    const targetItem = targetRow.closest("li")!;
+    vi.spyOn(targetItem, "getBoundingClientRect").mockReturnValue({
+      top: 10,
+      bottom: 42,
+      left: 0,
+      right: 200,
+      width: 200,
+      height: 32,
+      x: 0,
+      y: 10,
+      toJSON: () => ({}),
+    });
+    fireEvent.dragOver(targetItem, { dataTransfer: reorderTransfer, clientY: 12 });
+    expect(targetItem.querySelector('[data-session-drop-line="before"]'))
+      .toBeInTheDocument();
+    fireEvent.drop(targetItem, { dataTransfer: reorderTransfer, clientY: 12 });
+    expect(onReorderSession).toHaveBeenCalledWith(
+      "websocket:source",
+      "websocket:target",
+      "before",
+    );
+
+    const groupTransfer = createDataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: groupTransfer });
+    const groupIcon = screen.getByRole("button", { name: "Group with Target topic" });
+    fireEvent.dragOver(groupIcon, { dataTransfer: groupTransfer });
+    fireEvent.drop(groupIcon, { dataTransfer: groupTransfer });
+    expect(onGroupSessions).toHaveBeenCalledWith(
+      "websocket:source",
+      "websocket:target",
+    );
+
+    const attachTransfer = createDataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: attachTransfer });
+    const groupSurface = document.querySelector("[data-workbench-tab-surface]")!;
+    fireEvent.dragOver(groupSurface, { dataTransfer: attachTransfer });
+    fireEvent.drop(groupSurface, { dataTransfer: attachTransfer });
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:source", "tab:group");
+
+    const firstPane = screen.getByRole("button", { name: "Group A" });
+    const detachTransfer = createDataTransfer();
+    fireEvent.dragStart(firstPane, { dataTransfer: detachTransfer });
+    const groupedItem = groupSurface.closest("li")!;
+    vi.spyOn(groupedItem, "getBoundingClientRect").mockReturnValue({
+      top: 50,
+      bottom: 150,
+      left: 0,
+      right: 200,
+      width: 200,
+      height: 100,
+      x: 0,
+      y: 50,
+      toJSON: () => ({}),
+    });
+    fireEvent.dragOver(groupedItem, { dataTransfer: detachTransfer, clientY: 52 });
+    expect(groupedItem.querySelector('[data-session-drop-line="before"]'))
+      .toBeInTheDocument();
+    fireEvent.drop(groupedItem, { dataTransfer: detachTransfer, clientY: 52 });
+    expect(onReorderSession).toHaveBeenCalledWith(
+      "websocket:group-a",
+      "websocket:group-b",
+      "before",
+    );
   });
 
   it("collapses a multi-pane tab into one Chrome-style group header", () => {

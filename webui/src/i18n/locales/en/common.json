@@ -1457,6 +1457,7 @@
     "expandTabGroup": "Expand panes in {{title}}",
     "dropPane": "Move {{pane}} into {{tab}}",
     "createGroup": "Create group",
+    "groupWith": "Group with {{title}}",
     "moveTo": "Move to",
     "renameTabTitle": "Rename tab",
     "renameTabDescription": "Give this tab a name for organizing its panes.",

@@ -392,6 +392,7 @@ export function orderWorkbenchTabs(
   state: WorkbenchState,
   orderedSessionKeys: readonly string[],
   updatedAtByKey: ReadonlyMap<string, string | null | undefined>,
+  manualOrder = false,
 ): OrderedWorkbenchTab[] {
   const rank = new Map(orderedSessionKeys.map((key, index) => [key, index]));
   const validKeys = new Set(orderedSessionKeys);
@@ -417,10 +418,11 @@ export function orderWorkbenchTabs(
   });
 
   return tabs.sort((left, right) => {
-    const updateOrder = dateToTime(right.updatedAt) - dateToTime(left.updatedAt);
-    if (updateOrder !== 0) return updateOrder;
     const leftRank = Math.min(...left.paneKeys.map((key) => rank.get(key) ?? Infinity));
     const rightRank = Math.min(...right.paneKeys.map((key) => rank.get(key) ?? Infinity));
+    if (manualOrder) return leftRank - rightRank;
+    const updateOrder = dateToTime(right.updatedAt) - dateToTime(left.updatedAt);
+    if (updateOrder !== 0) return updateOrder;
     return leftRank - rightRank;
   });
 }

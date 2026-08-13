@@ -159,6 +159,27 @@ describe("workbench model", () => {
     expect(Object.keys(state.tabs)).toHaveLength(2);
   });
 
+  it("uses the persisted session rank when manual ordering is enabled", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-c");
+    state = addWorkbenchPane(state, "pane-b", "pane-d");
+    const alphaTabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    const betaTabKey = workbenchTabForPane(state, "pane-b").tabKey;
+
+    const tabs = orderWorkbenchTabs(
+      state,
+      ["pane-d", "pane-c", "pane-b", "pane-a"],
+      new Map([
+        ["pane-a", "2026-08-06T10:00:00Z"],
+        ["pane-b", "2026-08-03T10:00:00Z"],
+        ["pane-c", "2026-08-05T10:00:00Z"],
+        ["pane-d", "2026-08-04T10:00:00Z"],
+      ]),
+      true,
+    );
+
+    expect(tabs.map(({ tabKey }) => tabKey)).toEqual([betaTabKey, alphaTabKey]);
+  });
+
   it("caps a group at four panes", () => {
     let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-1");
     for (let index = 2; index <= MAX_WORKBENCH_PANES; index += 1) {

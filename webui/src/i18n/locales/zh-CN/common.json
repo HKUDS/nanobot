@@ -1457,6 +1457,7 @@
     "expandTabGroup": "展开 {{title}} 中的窗格",
     "dropPane": "将 {{pane}} 移入 {{tab}}",
     "createGroup": "创建分组",
+    "groupWith": "与 {{title}} 组成分组",
     "moveTo": "移动到",
     "renameTabTitle": "重命名标签页",
     "renameTabDescription": "为这个标签页命名，以便组织其中的窗格。",

@@ -57,6 +57,12 @@ interface SidebarProps {
     paneKey: string,
     tabKey: string,
   ) => void;
+  onGroupSessions?: (sourcePaneKey: string, targetPaneKey: string) => void;
+  onReorderSession?: (
+    sourcePaneKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => void;
   onToggleGroup: (groupId: string) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
@@ -257,6 +263,8 @@ export function Sidebar(props: SidebarProps) {
             onDetachPane={props.onDetachPane}
             onDissolveTab={props.onDissolveTab}
             onAttachPane={props.onAttachPane}
+            onGroupSessions={props.onGroupSessions}
+            onReorderSession={props.onReorderSession}
             onToggleGroup={props.onToggleGroup}
             onRequestRenameProject={props.onRequestRenameProject}
             onNewChatInProject={props.onNewChatInProject}

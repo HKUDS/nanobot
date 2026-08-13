@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
 } from "react";
 import {
   Archive,
@@ -55,7 +56,12 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
-import { clearDraggedSession, writeDraggedSession } from "@/lib/session-drag";
+import {
+  clearDraggedSession,
+  hasDraggedSession,
+  readDraggedSession,
+  writeDraggedSession,
+} from "@/lib/session-drag";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -133,6 +139,12 @@ interface ChatListProps {
     paneKey: string,
     tabKey: string,
   ) => void;
+  onGroupSessions?: (sourcePaneKey: string, targetPaneKey: string) => void;
+  onReorderSession?: (
+    sourcePaneKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => void;
   onToggleGroup?: (groupId: string) => void;
   onRequestRenameProject?: (projectKey: string, label: string) => void;
   onNewChatInProject?: (projectPath: string, projectName: string) => void;
@@ -175,6 +187,8 @@ export const ChatList = memo(function ChatList({
   onDetachPane,
   onDissolveTab,
   onAttachPane,
+  onGroupSessions,
+  onReorderSession,
   onToggleGroup,
   onRequestRenameProject,
   onNewChatInProject,
@@ -210,6 +224,12 @@ export const ChatList = memo(function ChatList({
   const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
     () => new Set(),
   );
+  const [draggedPaneKey, setDraggedPaneKey] = useState<string | null>(null);
+  const [sessionDropTarget, setSessionDropTarget] = useState<{
+    key: string;
+    edge: "before" | "after";
+  } | null>(null);
+  const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
   const deleteItemsByKey = useMemo(() => {
     const items = new Map<string, SidebarDeleteItem>();
     for (const group of Object.values(paneGroups)) {
@@ -291,6 +311,87 @@ export const ChatList = memo(function ChatList({
   const pinnedPanes = useMemo(() => new Set(pinnedPaneKeys), [pinnedPaneKeys]);
   const archivedPanes = useMemo(() => new Set(archivedPaneKeys), [archivedPaneKeys]);
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
+
+  const draggedKeyForEvent = useCallback((dataTransfer: DataTransfer) => (
+    readDraggedSession(dataTransfer) ?? draggedPaneKey
+  ), [draggedPaneKey]);
+  const clearSessionDrag = useCallback(() => {
+    clearDraggedSession();
+    setDraggedPaneKey(null);
+    setSessionDropTarget(null);
+    setGroupDropTarget(null);
+  }, []);
+  const previewSessionReorder = useCallback((
+    event: DragEvent<HTMLElement>,
+    targetPaneKey: string,
+  ) => {
+    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget.getBoundingClientRect();
+    const edge = event.clientY >= rect.top + rect.height / 2 ? "after" : "before";
+    setGroupDropTarget(null);
+    setSessionDropTarget({ key: targetPaneKey, edge });
+  }, [draggedKeyForEvent, onReorderSession]);
+  const dropSessionAt = useCallback((
+    event: DragEvent<HTMLElement>,
+    targetPaneKey: string,
+  ) => {
+    if (!onReorderSession || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const edge = sessionDropTarget?.key === targetPaneKey
+      ? sessionDropTarget.edge
+      : "before";
+    onReorderSession(sourcePaneKey, targetPaneKey, edge);
+    clearSessionDrag();
+  }, [clearSessionDrag, draggedKeyForEvent, onReorderSession, sessionDropTarget]);
+  const previewGroupDrop = useCallback((
+    event: DragEvent<HTMLElement>,
+    targetKey: string,
+    memberKeys: readonly string[],
+    atCapacity: boolean,
+  ) => {
+    if (!onAttachPane || atCapacity || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || memberKeys.includes(sourcePaneKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setSessionDropTarget(null);
+    setGroupDropTarget(targetKey);
+  }, [draggedKeyForEvent, onAttachPane]);
+  const dropIntoGroup = useCallback((
+    event: DragEvent<HTMLElement>,
+    targetKey: string,
+    memberKeys: readonly string[],
+    atCapacity: boolean,
+  ) => {
+    if (!onAttachPane || atCapacity || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || memberKeys.includes(sourcePaneKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onAttachPane(sourcePaneKey, targetKey);
+    clearSessionDrag();
+  }, [clearSessionDrag, draggedKeyForEvent, onAttachPane]);
+  const dropToCreateGroup = useCallback((
+    event: DragEvent<HTMLElement>,
+    targetPaneKey: string,
+  ) => {
+    if (!onGroupSessions || !hasDraggedSession(event.dataTransfer)) return;
+    const sourcePaneKey = draggedKeyForEvent(event.dataTransfer);
+    if (!sourcePaneKey || sourcePaneKey === targetPaneKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onGroupSessions(sourcePaneKey, targetPaneKey);
+    clearSessionDrag();
+  }, [clearSessionDrag, draggedKeyForEvent, onGroupSessions]);
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
@@ -522,6 +623,9 @@ export const ChatList = memo(function ChatList({
                       selectedDeleteKeys.has(key)
                     ));
                     const projectMode = group.kind === "project";
+                    const groupReorderTargetKey = resolvedPaneGroup.panes.find(
+                      (pane) => pane.key !== draggedPaneKey,
+                    )?.key ?? resolvedPaneGroup.panes[0]?.key ?? s.key;
 
                     if (isWorkbenchTab) {
                       return (
@@ -534,7 +638,19 @@ export const ChatList = memo(function ChatList({
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
                           className="relative my-1.5 min-w-0"
+                          onDragOver={(event) => previewSessionReorder(
+                            event,
+                            groupReorderTargetKey,
+                          )}
+                          onDrop={(event) => dropSessionAt(
+                            event,
+                            groupReorderTargetKey,
+                          )}
                         >
+                          <SessionDropLine
+                            visible={sessionDropTarget?.key === groupReorderTargetKey}
+                            edge={sessionDropTarget?.edge}
+                          />
                           <div
                             data-workbench-tab-surface
                             className={cn(
@@ -542,6 +658,20 @@ export const ChatList = memo(function ChatList({
                               paneGroupCollapsed ? "py-0" : "py-1",
                               deleteSelectionMode && (tabSelected || tabPartiallySelected)
                                 && "ring-1 ring-inset ring-sidebar-foreground/25",
+                              groupDropTarget === resolvedPaneGroup.tabKey
+                                && "ring-2 ring-inset ring-primary/55 bg-primary/[0.08]",
+                            )}
+                            onDragOver={(event) => previewGroupDrop(
+                              event,
+                              resolvedPaneGroup.tabKey,
+                              tabDeleteKeys,
+                              tabDeleteKeys.length >= MAX_WORKBENCH_PANES,
+                            )}
+                            onDrop={(event) => dropIntoGroup(
+                              event,
+                              resolvedPaneGroup.tabKey,
+                              tabDeleteKeys,
+                              tabDeleteKeys.length >= MAX_WORKBENCH_PANES,
                             )}
                           >
                             <div className={cn("min-w-0", projectMode && "ps-7")}>
@@ -589,6 +719,8 @@ export const ChatList = memo(function ChatList({
                                   onToggleDeleteSelection={toggleDeleteSelection}
                                   onBeginDeleteSelection={beginDeleteSelection}
                                   actionMenuPortalContainer={actionMenuPortalContainer}
+                                  onSessionDragStart={setDraggedPaneKey}
+                                  onSessionDragEnd={clearSessionDrag}
                                 />
                               ) : null}
                             </div>
@@ -617,7 +749,7 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !topicActive
                         ? "updated"
                         : null;
-                    const canDragSession = !topicActive && !deleteSelectionMode;
+                    const canDragSession = !deleteSelectionMode;
                     return (
                       <li
                         key={s.key}
@@ -626,7 +758,13 @@ export const ChatList = memo(function ChatList({
                           else tabRowRefs.current.delete(s.key);
                         }}
                         className="relative min-w-0"
+                        onDragOver={(event) => previewSessionReorder(event, s.key)}
+                        onDrop={(event) => dropSessionAt(event, s.key)}
                       >
+                        <SessionDropLine
+                          visible={sessionDropTarget?.key === s.key}
+                          edge={sessionDropTarget?.edge}
+                        />
                         <div
                           data-chat-row={s.key}
                           data-sidebar-tab={s.key}
@@ -657,8 +795,9 @@ export const ChatList = memo(function ChatList({
                                 return;
                               }
                               writeDraggedSession(event.dataTransfer, s.key);
+                              setDraggedPaneKey(s.key);
                             }}
-                            onDragEnd={clearDraggedSession}
+                            onDragEnd={clearSessionDrag}
                             aria-current={topicActive ? "page" : undefined}
                             aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                             title={tooltipTitle}
@@ -710,6 +849,37 @@ export const ChatList = memo(function ChatList({
                             </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />
+                          {!deleteSelectionMode && onGroupSessions && draggedPaneKey
+                            && draggedPaneKey !== s.key ? (
+                            <button
+                              type="button"
+                              data-session-group-drop-target={s.key}
+                              aria-label={t("workbench.groupWith", {
+                                defaultValue: "Group with {{title}}",
+                                title,
+                              })}
+                              title={t("workbench.groupWith", {
+                                defaultValue: "Group with {{title}}",
+                                title,
+                              })}
+                              onDragOver={(event) => {
+                                if (!hasDraggedSession(event.dataTransfer)) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                event.dataTransfer.dropEffect = "move";
+                                setSessionDropTarget(null);
+                                setGroupDropTarget(s.key);
+                              }}
+                              onDrop={(event) => dropToCreateGroup(event, s.key)}
+                              className={cn(
+                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+                                "text-muted-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                                groupDropTarget === s.key && "bg-primary/15 text-primary ring-1 ring-primary/50",
+                              )}
+                            >
+                              <PanelsTopLeft className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                          ) : null}
                           {!deleteSelectionMode ? (
                             <DropdownMenu modal={false}>
                             <DropdownMenuTrigger
@@ -1009,6 +1179,8 @@ function ActivePaneRows({
   onToggleDeleteSelection,
   onBeginDeleteSelection,
   actionMenuPortalContainer,
+  onSessionDragStart,
+  onSessionDragEnd,
 }: {
   id: string;
   group: SidebarPaneGroup;
@@ -1035,6 +1207,8 @@ function ActivePaneRows({
   onToggleDeleteSelection: (keys: string[]) => void;
   onBeginDeleteSelection: (keys: string[]) => void;
   actionMenuPortalContainer?: HTMLElement | null;
+  onSessionDragStart: (paneKey: string) => void;
+  onSessionDragEnd: () => void;
 }) {
   const { t } = useTranslation();
   const panes = group.panes;
@@ -1061,7 +1235,7 @@ function ActivePaneRows({
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
         const isArchived = archived.has(pane.key);
-        const canDragSession = !active && !deleteSelectionMode;
+        const canDragSession = !deleteSelectionMode;
 
         return (
           <li
@@ -1098,8 +1272,9 @@ function ActivePaneRows({
                     return;
                   }
                   writeDraggedSession(event.dataTransfer, pane.key);
+                  onSessionDragStart(pane.key);
                 }}
-                onDragEnd={clearDraggedSession}
+                onDragEnd={onSessionDragEnd}
                 aria-current={active ? "true" : undefined}
                 aria-pressed={deleteSelectionMode ? selected : undefined}
                 title={pane.title}
@@ -1193,6 +1368,28 @@ function ActivePaneRows({
         );
       })}
     </ul>
+  );
+}
+
+function SessionDropLine({
+  visible,
+  edge,
+}: {
+  visible: boolean;
+  edge?: "before" | "after";
+}) {
+  if (!visible || !edge) return null;
+  return (
+    <div
+      data-session-drop-line={edge}
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute inset-x-1 z-20 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_hsl(var(--background)),0_0_8px_hsl(var(--primary)/0.45)]",
+        edge === "before" ? "-top-[3px]" : "-bottom-[3px]",
+      )}
+    >
+      <span className="absolute -left-0.5 -top-[3px] h-2 w-2 rounded-full bg-primary" />
+    </div>
   );
 }
 

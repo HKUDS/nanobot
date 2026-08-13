@@ -2250,13 +2250,10 @@ function Shell({
     || deriveTitle(session.preview, t("chat.newChat"))
   ), [sidebarState.title_overrides, t]);
 
-  const automaticSidebarSort = sidebarState.view.sort === "manual"
-    ? "updated_desc"
-    : sidebarState.view.sort;
   const orderedWorkbenchTabs = useMemo(() => {
     const orderedSessions = sortSessions(
       sessions,
-      automaticSidebarSort,
+      sidebarState.view.sort,
       sidebarState.title_overrides,
       sidebarState.session_order,
     );
@@ -2268,12 +2265,13 @@ function Shell({
       workbenchState,
       orderedSessions.map((session) => session.key),
       updatedAtByKey,
+      sidebarState.view.sort === "manual",
     );
   }, [
-    automaticSidebarSort,
     sessions,
     sidebarState.session_order,
     sidebarState.title_overrides,
+    sidebarState.view.sort,
     workbenchState,
   ]);
   const orderedWorkbenchTabsByKey = useMemo(
@@ -2457,6 +2455,48 @@ function Shell({
     });
   }, [updateWorkbenchState]);
 
+  const onGroupSidebarSessions = useCallback((
+    sourcePaneKey: string,
+    targetPaneKey: string,
+  ) => {
+    updateWorkbenchState((current) => (
+      addWorkbenchPane(current, targetPaneKey, sourcePaneKey)
+    ));
+  }, [updateWorkbenchState]);
+
+  const onReorderSidebarSession = useCallback((
+    sourcePaneKey: string,
+    targetPaneKey: string,
+    edge: "before" | "after",
+  ) => {
+    if (sourcePaneKey === targetPaneKey) return;
+    void updateSidebarState((current) => {
+      const orderedKeys = sortSessions(
+        sessions,
+        current.view.sort,
+        current.title_overrides,
+        current.session_order,
+      ).map((session) => session.key);
+      if (!orderedKeys.includes(sourcePaneKey) || !orderedKeys.includes(targetPaneKey)) {
+        return current;
+      }
+      const withoutSource = orderedKeys.filter((key) => key !== sourcePaneKey);
+      const targetIndex = withoutSource.indexOf(targetPaneKey);
+      withoutSource.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourcePaneKey);
+
+      const sourceTab = workbenchTabForPane(current.workbench, sourcePaneKey);
+      const nextWorkbench = current.workbench.tabs[sourceTab.tabKey]
+        ? detachWorkbenchPane(current.workbench, sourceTab.tabKey, sourcePaneKey)
+        : current.workbench;
+      return {
+        ...current,
+        session_order: withoutSource,
+        workbench: nextWorkbench,
+        view: { ...current.view, sort: "manual" },
+      };
+    });
+  }, [sessions, updateSidebarState]);
+
   useEffect(() => {
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
@@ -2506,6 +2546,9 @@ function Shell({
         orderedTab.tabKey === activeTabKey
       ))?.rowKey ?? activeKey
     : activeKey;
+  const sidebarSessionOrder = sidebarState.view.sort === "manual"
+    ? sidebarTabPresentations.map(({ rowKey }) => rowKey)
+    : sidebarState.session_order;
 
   const sidebarProps = {
     sessions: sidebarTopicSessions,
@@ -2530,6 +2573,8 @@ function Shell({
     onDetachPane: mobileWorkbench ? undefined : onDetachWorkbenchPane,
     onDissolveTab: mobileWorkbench ? undefined : onDissolveWorkbenchTab,
     onAttachPane: mobileWorkbench ? undefined : onAttachWorkbenchPane,
+    onGroupSessions: mobileWorkbench ? undefined : onGroupSidebarSessions,
+    onReorderSession: mobileWorkbench ? undefined : onReorderSidebarSession,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -2545,13 +2590,13 @@ function Shell({
     archivedKeys: sidebarArchivedTabKeys,
     pinnedPaneKeys: sidebarState.pinned_keys,
     archivedPaneKeys: sidebarState.archived_keys,
-    sessionOrder: sidebarState.session_order,
+    sessionOrder: sidebarSessionOrder,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
     collapsedGroups: sidebarState.collapsed_groups,
     runningChatIds: runningChatIdList,
     updatedChatIds: updatedChatIdList,
-    viewState: { ...sidebarState.view, sort: automaticSidebarSort },
+    viewState: sidebarState.view,
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
