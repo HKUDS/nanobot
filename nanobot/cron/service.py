@@ -515,11 +515,10 @@ class CronService:
         self._active_executions += 1
         try:
             store = self._load_store(reload_during_execution=reload_store)
-            # If a hot reload found a corrupt store on disk, ``self._store`` may
-            # still hold the previous, known-good in-memory snapshot.  Keep using
-            # it rather than crashing the timer or wiping live jobs.
+            # If a hot reload found a corrupt store on disk, ``self._store``
+            # may still hold the previous, known-good in-memory snapshot.
+            # Keep using it rather than crashing the timer or wiping live jobs.
             if store is None:
-                self._arm_timer()
                 return
 
             now = _now_ms()
@@ -532,9 +531,21 @@ class CronService:
                 await self._execute_job(job)
 
             self._save_store()
+        except Exception:
+            # A load/persist failure must not kill the scheduler: keep the
+            # in-memory store and retry on the next tick.  This mirrors the
+            # read-path defense in ``_load_jobs`` (``.corrupt-<ts>`` backups);
+            # ``_load_store`` may also persist (agent-binding migrations).
+            logger.exception(
+                "Cron: tick failed ({}); "
+                "keeping in-memory state and retrying on next tick",
+                self.store_path,
+            )
         finally:
             self._active_executions -= 1
-        self._arm_timer()
+            # Always re-arm the timer, even on unexpected failures, so a
+            # single bad tick cannot silently stop all future jobs.
+            self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
