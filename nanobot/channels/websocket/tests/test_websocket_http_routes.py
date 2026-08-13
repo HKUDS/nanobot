@@ -73,6 +73,7 @@ def _make_handler(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     local_trigger_pending_ids: Any | None = None,
+    session_discard: Any | None = None,
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
     mcp_reload: Any | None = None,
@@ -93,6 +94,7 @@ def _make_handler(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        session_discard=session_discard,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_reload=mcp_reload,
@@ -111,6 +113,7 @@ def _ch(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     local_trigger_pending_ids: Any | None = None,
+    session_discard: Any | None = None,
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
     mcp_reload: Any | None = None,
@@ -135,6 +138,7 @@ def _ch(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        session_discard=session_discard,
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_reload=mcp_reload,
@@ -2246,22 +2250,65 @@ async def test_session_delete_removes_file(
     from nanobot.webui.transcript import append_transcript_object
 
     append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
-    channel = _ch(bus, session_manager=sm, port=29903)
+    discard_started = asyncio.Event()
+    allow_discard = asyncio.Event()
+
+    async def discard_session(key: str) -> None:
+        assert key == "websocket:doomed"
+        discard_started.set()
+        await allow_discard.wait()
+
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        session_discard=discard_session,
+        port=29903,
+    )
     server_task = asyncio.create_task(channel.start())
     try:
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
         webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
-        resp = await _webui_mutate(
-            channel,
-            "session.delete",
-            {"key": "websocket:doomed"},
+        delete_task = asyncio.create_task(
+            _webui_mutate(
+                channel,
+                "session.delete",
+                {"key": "websocket:doomed"},
+            )
         )
+        await asyncio.wait_for(discard_started.wait(), timeout=2)
+        assert path.exists()
+        assert webui_path.is_file()
+
+        allow_discard.set()
+        resp = await delete_task
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
         assert not webui_path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_requires_lifecycle_control(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    server_task = asyncio.create_task(channel.start())
+    try:
+        path = sm._get_session_path("websocket:doomed")
+        response = await _webui_mutate(
+            channel,
+            "session.delete",
+            {"key": "websocket:doomed"},
+        )
+
+        assert response.status_code == 503
+        assert path.exists()
     finally:
         await channel.stop()
         await server_task
@@ -2650,6 +2697,7 @@ async def test_session_delete_blocks_and_cascades_local_triggers(
         bus,
         session_manager=sm,
         local_trigger_store=trigger_store,
+        session_discard=AsyncMock(),
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
@@ -2698,7 +2746,13 @@ async def test_session_delete_can_cascade_bound_automations(
         channel="websocket",
         to="doomed",
     )
-    channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        cron_service=cron,
+        session_discard=AsyncMock(),
+        port=29916,
+    )
     server_task = asyncio.create_task(channel.start())
     try:
         path = sm._get_session_path("websocket:doomed")
@@ -2767,7 +2821,12 @@ async def test_session_delete_action_accepts_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path, key="websocket:encoded-key")
-    channel = _ch(bus, session_manager=sm, port=29910)
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        session_discard=AsyncMock(),
+        port=29910,
+    )
     server_task = asyncio.create_task(channel.start())
     try:
         path = sm._get_session_path("websocket:encoded-key")

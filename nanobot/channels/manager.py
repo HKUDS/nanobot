@@ -97,6 +97,7 @@ class ChannelManager:
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        webui_session_discard: Callable[[str], Awaitable[None]] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
@@ -118,6 +119,7 @@ class ChannelManager:
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
         self._webui_local_trigger_pending_ids = webui_local_trigger_pending_ids
+        self._webui_session_discard = webui_session_discard
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
@@ -189,6 +191,7 @@ class ChannelManager:
                 local_trigger_store=self._local_trigger_store,
                 cron_pending_job_ids=self._webui_cron_pending_job_ids,
                 local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
+                session_discard=self._webui_session_discard,
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
                 mcp_runtime_status=self._webui_mcp_runtime_status,
