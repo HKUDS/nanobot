@@ -16,9 +16,11 @@ import {
 import {
   NanobotClient,
   fetchHistory,
+  fetchSlashCommands,
   type ConnectionStatus,
   type InboundEvent,
 } from "./protocol"
+import { CommandMenu, type CommandMenuTheme } from "./command-menu"
 import { Transcript, type TranscriptTheme } from "./transcript"
 
 interface AppOptions {
@@ -122,6 +124,14 @@ function transcriptTheme(palette: Palette): TranscriptTheme {
   }
 }
 
+function commandMenuTheme(palette: Palette): CommandMenuTheme {
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    border: palette.border,
+  }
+}
+
 function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
   if (seconds < 60) return `${seconds}s`
@@ -150,6 +160,7 @@ async function copyWithSystemClipboard(text: string): Promise<void> {
 export class NanobotTui {
   private readonly renderer: CliRenderer
   private readonly transcript: Transcript
+  private readonly commandMenu: CommandMenu
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: TextRenderable
@@ -191,6 +202,7 @@ export class NanobotTui {
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
+    this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.client = client || new NanobotClient({
       url: options.wsUrl,
       chatId: options.chatId,
@@ -250,6 +262,7 @@ export class NanobotTui {
       ],
       onContentChange: () => {
         this.syncComposerPlaceholder()
+        this.syncCommandMenu()
         this.resizeComposer()
       },
       // IMEs may commit their final composed glyph after Enter. Matching the
@@ -288,6 +301,7 @@ export class NanobotTui {
     statusRow.add(this.status)
     statusRow.add(this.meta)
     this.shell.add(this.transcript.root)
+    this.shell.add(this.commandMenu.root)
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
@@ -335,6 +349,7 @@ export class NanobotTui {
       this.applyTheme(this.renderer.themeMode)
     }
     this.client.connect()
+    void this.loadCommands()
     this.renderer.start()
   }
 
@@ -358,6 +373,13 @@ export class NanobotTui {
     if (this.quitting || this.composer.isDestroyed) return
     const content = this.composer.plainText.trim()
     if (!content) return
+    const completion = this.commandMenu.completion(content)
+    if (completion) {
+      this.setComposer(completion)
+      this.commandMenu.hide()
+      this.updateMeta()
+      return
+    }
     if (!this.ready) {
       this.status.content = "Preparing chat…"
       return
@@ -377,6 +399,7 @@ export class NanobotTui {
       return
     }
     this.composer.setText("")
+    this.commandMenu.hide()
     if (this.promptHistory.at(-1) !== content) this.promptHistory.push(content)
     if (this.promptHistory.length > 50) this.promptHistory.shift()
     this.historyCursor = this.promptHistory.length
@@ -573,6 +596,29 @@ export class NanobotTui {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.commandMenu.visible) {
+      if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
+        this.commandMenu.move(key.name === "up" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
+      if (!key.ctrl && !key.meta && key.name === "tab") {
+        const completion = this.commandMenu.complete()
+        if (completion) {
+          this.setComposer(completion)
+          this.commandMenu.hide()
+        }
+        this.updateMeta()
+        key.preventDefault()
+        return
+      }
+      if (key.name === "escape") {
+        this.commandMenu.hide()
+        this.updateMeta()
+        key.preventDefault()
+        return
+      }
+    }
     if (key.ctrl && key.name === "o") {
       const expanded = this.transcript.toggleActivityDetails()
       if (expanded === null) return
@@ -663,6 +709,7 @@ export class NanobotTui {
     this.activeThemeMode = mode
     this.palette = mode === "light" ? LIGHT : DARK
     this.transcript.setTheme(transcriptTheme(this.palette))
+    this.commandMenu.setTheme(commandMenuTheme(this.palette))
     this.composerFrame.borderColor = this.palette.border
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
@@ -681,6 +728,12 @@ export class NanobotTui {
   private updateMeta(): void {
     if (this.activeTurn) {
       this.meta.content = this.renderer.width >= 48 ? "ctrl+c stop" : ""
+      return
+    }
+    if (this.commandMenu.visible) {
+      this.meta.content = this.renderer.width >= 72
+        ? "↑↓ choose · tab complete · esc close"
+        : "tab complete · esc close"
       return
     }
     this.meta.content = this.renderer.width >= 112
@@ -709,6 +762,30 @@ export class NanobotTui {
     // prevents stale placeholder text in differential/embedded terminals.
     const placeholder = this.composer.plainText ? null : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
+  }
+
+  private syncCommandMenu(): void {
+    const limit = this.renderer.height >= 20 ? 6 : 3
+    this.commandMenu.update(this.composer.plainText, limit)
+    this.updateMeta()
+  }
+
+  private setComposer(content: string): void {
+    this.composer.setText(content)
+    this.composer.cursorOffset = content.length
+  }
+
+  private async loadCommands(): Promise<void> {
+    try {
+      this.commandMenu.setCommands(await fetchSlashCommands(
+        this.options.apiUrl,
+        this.options.apiToken,
+      ))
+      this.syncCommandMenu()
+    } catch {
+      // Command discovery is an enhancement; chat stays usable if the
+      // version-matched gateway does not expose the catalog yet.
+    }
   }
 
   private async copySelection(text: string): Promise<void> {

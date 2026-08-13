@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { NanobotClient, fetchHistory, type InboundEvent } from "./protocol"
+import {
+  NanobotClient,
+  fetchHistory,
+  fetchSlashCommands,
+  type InboundEvent,
+} from "./protocol"
 
 class FakeSocket {
   static readonly OPEN = 1
@@ -197,6 +202,40 @@ describe("gateway protocol", () => {
         ],
         truncated: true,
       })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads the gateway-owned slash command catalog", async () => {
+    const original = globalThis.fetch
+    let authorization = ""
+    globalThis.fetch = ((_: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("Authorization") || ""
+      return Promise.resolve(new Response(JSON.stringify({
+        commands: [
+          {
+            command: "/history",
+            title: "History",
+            description: "Show recent messages",
+            arg_hint: "[n]",
+            accepts_args: true,
+            lifecycle: "side_channel",
+          },
+          { title: "invalid" },
+        ],
+      })))
+    }) as typeof fetch
+
+    try {
+      expect(await fetchSlashCommands("http://nanobot.test", "secret")).toEqual([{
+        command: "/history",
+        title: "History",
+        description: "Show recent messages",
+        argHint: "[n]",
+        acceptsArgs: true,
+      }])
+      expect(authorization).toBe("Bearer secret")
     } finally {
       globalThis.fetch = original
     }

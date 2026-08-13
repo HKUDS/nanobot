@@ -197,6 +197,40 @@ describe("NanobotTui layout", () => {
     expect(composer.plainText).toBe(wrapped)
   })
 
+  test("discovers and completes gateway slash commands without sending them", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      commandMenu: {
+        visible: boolean
+        setCommands(commands: Array<{
+          command: string
+          title: string
+          description: string
+          argHint: string
+          acceptsArgs: boolean
+        }>): void
+      }
+    }
+    ui.commandMenu.setCommands([{
+      command: "/history",
+      title: "History",
+      description: "Show recent messages",
+      argHint: "[n]",
+      acceptsArgs: true,
+    }])
+
+    await setup.mockInput.typeText("/h")
+    expect(ui.commandMenu.visible).toBe(true)
+    setup.mockInput.pressTab()
+
+    expect(ui.composer.plainText).toBe("/history ")
+    expect(ui.commandMenu.visible).toBe(false)
+    expect(sent).toEqual([])
+  })
+
   test("survives rapid narrow resizes with long CJK and code", async () => {
     setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
     const app = mount(setup)

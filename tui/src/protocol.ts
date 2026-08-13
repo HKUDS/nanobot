@@ -87,6 +87,22 @@ export interface HistorySnapshot {
   truncated: boolean
 }
 
+export interface SlashCommand {
+  command: string
+  title: string
+  description: string
+  argHint: string
+  acceptsArgs: boolean
+}
+
+const SLASH_COMMAND_LIFECYCLES = new Set([
+  "side_channel",
+  "finalize_active_turn",
+  "stop_active_turn",
+  "agent_turn",
+  "agent_turn_with_args",
+])
+
 const CHAT_EVENTS = new Set([
   "attached",
   "message_accepted",
@@ -226,6 +242,33 @@ export async function fetchHistory(
     return [{ role: role as HistoryMessage["role"], content }]
   })
   return { messages, truncated: payload.page?.has_more_before === true }
+}
+
+export async function fetchSlashCommands(
+  apiUrl: string,
+  apiToken: string,
+): Promise<SlashCommand[]> {
+  if (!apiUrl || !apiToken) return []
+  const response = await fetch(`${apiUrl}/api/commands`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+  })
+  if (!response.ok) throw new Error(`command request failed: HTTP ${response.status}`)
+  const payload = await response.json() as { commands?: unknown[] }
+  return (payload.commands || []).flatMap((value) => {
+    if (
+      !isRecord(value)
+      || typeof value.command !== "string"
+      || typeof value.lifecycle !== "string"
+      || !SLASH_COMMAND_LIFECYCLES.has(value.lifecycle)
+    ) return []
+    return [{
+      command: value.command,
+      title: typeof value.title === "string" ? value.title : value.command,
+      description: typeof value.description === "string" ? value.description : "",
+      argHint: typeof value.arg_hint === "string" ? value.arg_hint : "",
+      acceptsArgs: value.accepts_args === true,
+    }]
+  })
 }
 
 export class NanobotClient {
