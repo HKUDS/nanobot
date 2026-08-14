@@ -250,9 +250,9 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
-  const tabRowRefs = useRef(new Map<string, HTMLElement>());
-  const pendingTabRectsRef = useRef<Map<string, DOMRect> | null>(null);
-  const tabLayoutAnimationsRef = useRef(new Map<string, Animation>());
+  const layoutRowRefs = useRef(new Map<string, HTMLElement>());
+  const pendingLayoutRectsRef = useRef<Map<string, DOMRect> | null>(null);
+  const layoutAnimationsRef = useRef(new Map<string, Animation>());
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
     readCollapsedPaneGroups,
   );
@@ -396,47 +396,47 @@ export const ChatList = memo(function ChatList({
     });
   }, [loading, paneGroups]);
 
-  const measureTabRows = useCallback(() => {
+  const measureLayoutRows = useCallback(() => {
     const rects = new Map<string, DOMRect>();
-    for (const [key, row] of tabRowRefs.current) {
+    for (const [key, row] of layoutRowRefs.current) {
       rects.set(key, row.getBoundingClientRect());
     }
     return rects;
   }, []);
 
-  const captureTabLayout = useCallback(() => {
-    for (const animation of tabLayoutAnimationsRef.current.values()) animation.cancel();
-    tabLayoutAnimationsRef.current.clear();
-    pendingTabRectsRef.current = measureTabRows();
-  }, [measureTabRows]);
+  const captureLayout = useCallback(() => {
+    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
+    layoutAnimationsRef.current.clear();
+    pendingLayoutRectsRef.current = measureLayoutRows();
+  }, [measureLayoutRows]);
 
   const togglePaneGroup = useCallback((key: string) => {
-    captureTabLayout();
+    captureLayout();
     setCollapsedPaneGroups((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  }, [captureTabLayout]);
+  }, [captureLayout]);
 
   const toggleProjectGroup = useCallback((key: string) => {
     if (!onToggleGroup) return;
-    captureTabLayout();
+    captureLayout();
     onToggleGroup(key);
-  }, [captureTabLayout, onToggleGroup]);
+  }, [captureLayout, onToggleGroup]);
 
   useLayoutEffect(() => {
-    const previousRects = pendingTabRectsRef.current;
+    const previousRects = pendingLayoutRectsRef.current;
     if (!previousRects) return;
-    pendingTabRectsRef.current = null;
-    const nextRects = measureTabRows();
+    pendingLayoutRectsRef.current = null;
+    const nextRects = measureLayoutRows();
     const reduceMotion = typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion) return;
     for (const [key, nextRect] of nextRects) {
       const previousRect = previousRects.get(key);
-      const row = tabRowRefs.current.get(key);
+      const row = layoutRowRefs.current.get(key);
       if (!previousRect || !row || typeof row.animate !== "function") continue;
       const deltaY = previousRect.top - nextRect.top;
       if (Math.abs(deltaY) < 0.5) continue;
@@ -450,17 +450,17 @@ export const ChatList = memo(function ChatList({
           easing: "cubic-bezier(0.2, 0, 0, 1)",
         },
       );
-      tabLayoutAnimationsRef.current.set(key, animation);
+      layoutAnimationsRef.current.set(key, animation);
       animation.addEventListener("finish", () => {
-        if (tabLayoutAnimationsRef.current.get(key) === animation) {
-          tabLayoutAnimationsRef.current.delete(key);
+        if (layoutAnimationsRef.current.get(key) === animation) {
+          layoutAnimationsRef.current.delete(key);
         }
       }, { once: true });
     }
-  }, [collapsedGroups, collapsedPaneGroups, measureTabRows]);
+  }, [collapsedGroups, collapsedPaneGroups, measureLayoutRows]);
 
   useEffect(() => () => {
-    for (const animation of tabLayoutAnimationsRef.current.values()) animation.cancel();
+    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
   }, []);
 
   if (loading && sessions.length === 0 && temporarySessions.length === 0) {
@@ -557,8 +557,8 @@ export const ChatList = memo(function ChatList({
                 <div
                   ref={(element) => {
                     const key = `group:${group.id}`;
-                    if (element) tabRowRefs.current.set(key, element);
-                    else tabRowRefs.current.delete(key);
+                    if (element) layoutRowRefs.current.set(key, element);
+                    else layoutRowRefs.current.delete(key);
                   }}
                   data-sidebar-group-header={group.id}
                 >
@@ -628,8 +628,8 @@ export const ChatList = memo(function ChatList({
                         <li
                           key={s.key}
                           ref={(element) => {
-                            if (element) tabRowRefs.current.set(s.key, element);
-                            else tabRowRefs.current.delete(s.key);
+                            if (element) layoutRowRefs.current.set(s.key, element);
+                            else layoutRowRefs.current.delete(s.key);
                           }}
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
@@ -724,8 +724,8 @@ export const ChatList = memo(function ChatList({
                       <li
                         key={s.key}
                         ref={(element) => {
-                          if (element) tabRowRefs.current.set(s.key, element);
-                          else tabRowRefs.current.delete(s.key);
+                          if (element) layoutRowRefs.current.set(s.key, element);
+                          else layoutRowRefs.current.delete(s.key);
                         }}
                         className="relative min-w-0"
                       >
