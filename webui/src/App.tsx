@@ -145,6 +145,10 @@ const RenameChatDialog = lazy(async () => {
   return { default: module.RenameChatDialog };
 });
 
+function sameSessionOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((key, index) => key === right[index]);
+}
+
 function SurfaceLoadingFallback() {
   const { t } = useTranslation();
   return (
@@ -2486,16 +2490,21 @@ function Shell({
   ) => {
     void updateSidebarState((current) => {
       const orderedKeys = orderedSidebarSessionKeys(current);
+      const nextOrder = moveSessionBesideWorkbenchBlock(
+        current.workbench,
+        orderedKeys,
+        sourcePaneKey,
+        targetPaneKey,
+        "after",
+      );
+      const nextWorkbench = addWorkbenchPane(current.workbench, targetPaneKey, sourcePaneKey);
+      if (sameSessionOrder(nextOrder, orderedKeys) && nextWorkbench === current.workbench) {
+        return current;
+      }
       return {
         ...current,
-        session_order: moveSessionBesideWorkbenchBlock(
-          current.workbench,
-          orderedKeys,
-          sourcePaneKey,
-          targetPaneKey,
-          "after",
-        ),
-        workbench: addWorkbenchPane(current.workbench, targetPaneKey, sourcePaneKey),
+        session_order: nextOrder,
+        workbench: nextWorkbench,
         view: { ...current.view, sort: "manual" },
       };
     });
@@ -2516,15 +2525,19 @@ function Shell({
       const nextWorkbench = current.workbench.tabs[sourceTab.tabKey]
         ? detachWorkbenchPane(current.workbench, sourceTab.tabKey, sourcePaneKey)
         : current.workbench;
+      const nextOrder = moveSessionBesideWorkbenchBlock(
+        current.workbench,
+        orderedKeys,
+        sourcePaneKey,
+        targetPaneKey,
+        edge,
+      );
+      if (sameSessionOrder(nextOrder, orderedKeys) && nextWorkbench === current.workbench) {
+        return current;
+      }
       return {
         ...current,
-        session_order: moveSessionBesideWorkbenchBlock(
-          current.workbench,
-          orderedKeys,
-          sourcePaneKey,
-          targetPaneKey,
-          edge,
-        ),
+        session_order: nextOrder,
         workbench: nextWorkbench,
         view: { ...current.view, sort: "manual" },
       };
@@ -2544,23 +2557,28 @@ function Shell({
         return current;
       }
       const orderedKeys = orderedSidebarSessionKeys(current);
+      const nextOrder = moveSessionWithinWorkbenchTab(
+        current.workbench,
+        orderedKeys,
+        tabKey,
+        sourcePaneKey,
+        targetPaneKey,
+        edge,
+      );
+      const nextWorkbench = reorderWorkbenchPane(
+        current.workbench,
+        tabKey,
+        sourcePaneKey,
+        targetPaneKey,
+        edge,
+      );
+      if (sameSessionOrder(nextOrder, orderedKeys) && nextWorkbench === current.workbench) {
+        return current;
+      }
       return {
         ...current,
-        session_order: moveSessionWithinWorkbenchTab(
-          current.workbench,
-          orderedKeys,
-          tabKey,
-          sourcePaneKey,
-          targetPaneKey,
-          edge,
-        ),
-        workbench: reorderWorkbenchPane(
-          current.workbench,
-          tabKey,
-          sourcePaneKey,
-          targetPaneKey,
-          edge,
-        ),
+        session_order: nextOrder,
+        workbench: nextWorkbench,
         view: { ...current.view, sort: "manual" },
       };
     });
@@ -2574,15 +2592,17 @@ function Shell({
     void updateSidebarState((current) => {
       if (!workbenchTab(current.workbench, sourceTabKey)) return current;
       const orderedKeys = orderedSidebarSessionKeys(current);
+      const nextOrder = moveWorkbenchTabBlock(
+        current.workbench,
+        orderedKeys,
+        sourceTabKey,
+        targetPaneKey,
+        edge,
+      );
+      if (sameSessionOrder(nextOrder, orderedKeys)) return current;
       return {
         ...current,
-        session_order: moveWorkbenchTabBlock(
-          current.workbench,
-          orderedKeys,
-          sourceTabKey,
-          targetPaneKey,
-          edge,
-        ),
+        session_order: nextOrder,
         view: { ...current.view, sort: "manual" },
       };
     });

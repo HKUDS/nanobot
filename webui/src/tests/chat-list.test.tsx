@@ -417,6 +417,16 @@ describe("ChatList", () => {
       .toBeInTheDocument();
     dragOverTargetAt(12);
     reorderTransfer.clearData();
+    const outsideListDrop = new Event("drop", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(outsideListDrop, "dataTransfer", {
+      value: reorderTransfer,
+    });
+    expect(fireEvent(document.body, outsideListDrop)).toBe(true);
+    expect(onReorderSession).not.toHaveBeenCalled();
+
     const slightlyDisplacedDrop = new Event("drop", {
       bubbles: true,
       cancelable: true,
@@ -424,7 +434,8 @@ describe("ChatList", () => {
     Object.defineProperty(slightlyDisplacedDrop, "dataTransfer", {
       value: reorderTransfer,
     });
-    expect(fireEvent(document.body, slightlyDisplacedDrop)).toBe(false);
+    const chatListContent = document.querySelector("[data-chat-list-content]")!;
+    expect(fireEvent(chatListContent, slightlyDisplacedDrop)).toBe(false);
     expect(onReorderSession).toHaveBeenCalledWith(
       "websocket:source",
       "websocket:target",

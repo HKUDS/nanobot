@@ -299,6 +299,7 @@ export const ChatList = memo(function ChatList({
   const [draggedPaneKey, setDraggedPaneKey] = useState<string | null>(null);
   const [sessionDropTarget, setSessionDropTargetState] = useState<SessionDropTarget | null>(null);
   const sessionDropTargetRef = useRef<SessionDropTarget | null>(null);
+  const chatListContentRef = useRef<HTMLDivElement | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
   const deleteItemsByKey = useMemo(() => {
     const items = new Map<string, SidebarDeleteItem>();
@@ -583,7 +584,12 @@ export const ChatList = memo(function ChatList({
     };
     const finishVisibleSessionDrop = (event: globalThis.DragEvent) => {
       const target = sessionDropTargetRef.current;
-      if (!target || !event.dataTransfer) return;
+      if (
+        !target
+        || !event.dataTransfer
+        || !(event.target instanceof Node)
+        || !chatListContentRef.current?.contains(event.target)
+      ) return;
       commitSessionDrop(event, target);
     };
     document.addEventListener("dragenter", keepSessionDragEnabled, true);
@@ -742,6 +748,7 @@ export const ChatList = memo(function ChatList({
   };
   return (
     <div
+      ref={chatListContentRef}
       data-chat-list-content
       className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent"
       onDragOverCapture={(event) => {

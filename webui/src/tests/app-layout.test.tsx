@@ -51,6 +51,21 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
+function createDataTransfer(): DataTransfer {
+  const values = new Map<string, string>();
+  const types: string[] = [];
+  return {
+    effectAllowed: "none",
+    dropEffect: "none",
+    types,
+    setData: (type: string, value: string) => {
+      values.set(type, value);
+      if (!types.includes(type)) types.push(type);
+    },
+    getData: (type: string) => values.get(type) ?? "",
+  } as unknown as DataTransfer;
+}
+
 function mockFetchRoutes(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     "fetch",
@@ -1932,6 +1947,64 @@ describe("App layout", () => {
     );
 
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
+  });
+
+  it("keeps automatic sorting after an equivalent sidebar drop", async () => {
+    mockSessions = [
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        title: "Alpha",
+        preview: "",
+      },
+      {
+        key: "websocket:beta",
+        channel: "websocket",
+        chatId: "beta",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Beta",
+        preview: "",
+      },
+    ];
+    const initialState = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      session_order: ["websocket:alpha", "websocket:beta"],
+      title_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      workbench: { version: 1, tabs: {} },
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": initialState });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const source = await within(sidebar).findByRole("button", { name: /^Alpha$/ });
+    const target = within(sidebar).getByRole("button", { name: /^Beta$/ }).closest("li")!;
+    const dataTransfer = createDataTransfer();
+    setSidebarStateSpy.mockClear();
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer, clientY: 0 });
+    fireEvent.drop(target, { dataTransfer, clientY: 0 });
+
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
   });
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
