@@ -223,6 +223,20 @@ jobs:
         working-directory: tui
         run: python3 scripts/pty_smoke.py
 
+      - name: Set up Python for ConPTY smoke test
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Test TUI in a real ConPTY terminal
+        if: runner.os == 'Windows'
+        working-directory: tui
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pywinpty==3.0.5
+          python scripts/conpty_smoke.py
+
       - name: Build TUI
         working-directory: tui
         run: bun run build
