@@ -1,6 +1,7 @@
 import {
   BoxRenderable,
   MarkdownRenderable,
+  RGBA,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextAttributes,
@@ -16,7 +17,7 @@ export interface TranscriptTheme {
   muted: string
   error: string
   user: string
-  assistant: string
+  userBackground: string | null
   border: string
   syntax: SyntaxStyle
 }
@@ -44,11 +45,12 @@ export class Transcript {
   private activity: Activity | null = null
   private readonly styledText: Array<{
     renderable: TextRenderable
-    tone: "text" | "muted" | "error" | "user" | "assistant"
+    tone: "text" | "muted" | "error" | "user"
   }> = []
   private readonly markdown = new Set<MarkdownRenderable>()
   private readonly activities = new Set<Activity>()
   private readonly frames = new Set<BoxRenderable>()
+  private readonly userRows = new Set<BoxRenderable>()
   private wrote = false
   private nextId = 0
 
@@ -87,6 +89,11 @@ export class Transcript {
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
     for (const frame of this.frames) frame.borderColor = theme.border
+    for (const row of this.userRows) {
+      row.backgroundColor = theme.userBackground
+        ? RGBA.fromHex(theme.userBackground)
+        : RGBA.defaultBackground()
+    }
     // Markdown may still be rendering this frame. Release the prior native
     // style only after the renderer reaches idle, matching OpenCode's retained
     // theme lifecycle and avoiding both leaks and use-after-free transitions.
@@ -129,6 +136,7 @@ export class Transcript {
     this.markdown.clear()
     this.activities.clear()
     this.frames.clear()
+    this.userRows.clear()
     this.wrote = false
     this.nextId = 0
     this.header(header)
@@ -264,6 +272,7 @@ export class Transcript {
     this.live = null
     this.activity = null
     this.frames.clear()
+    this.userRows.clear()
     this.theme.syntax.destroy()
   }
 
@@ -333,7 +342,7 @@ export class Transcript {
 
   private createText(
     content: string,
-    tone: "text" | "muted" | "error" | "user" | "assistant",
+    tone: "text" | "muted" | "error" | "user",
     bold = false,
     id = "text",
   ): TextRenderable {
@@ -356,6 +365,12 @@ export class Transcript {
     index?: number,
   ): void {
     const row = this.createRow(tone === "user" ? "user" : "notice", "row")
+    if (tone === "user") {
+      row.backgroundColor = this.theme.userBackground
+        ? RGBA.fromHex(this.theme.userBackground)
+        : RGBA.defaultBackground()
+      this.userRows.add(row)
+    }
     const prefix = this.createText(marker, tone, true, "role-marker")
     prefix.width = 2
     prefix.flexShrink = 0
@@ -391,7 +406,7 @@ export class Transcript {
 
   private writeAssistant(markdown: MarkdownRenderable, index?: number): BoxRenderable {
     const row = this.createRow("assistant", "row")
-    const prefix = this.createText("•", "assistant", false, "role-marker")
+    const prefix = this.createText("•", "muted", false, "role-marker")
     prefix.width = 2
     prefix.flexShrink = 0
     row.add(prefix)

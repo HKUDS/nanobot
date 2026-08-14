@@ -26,3 +26,7 @@ press `PageUp` at the top to load them in place.
 summary, replayable raw suffix, and an estimated token count. It deliberately does not expose
 private reasoning and does not pretend to be the complete model prompt; workspace instructions,
 memory, and skills are assembled separately by the Python runtime.
+
+`/diff` opens the latest turn's file changes in a full-screen unified diff. Use `Left`/`Right`
+to switch edits, `PageUp`/`PageDown` or `Home`/`End` to navigate, and `Esc` to return to chat.
+The gateway remains the source of the patch; the TUI never rereads workspace files to rebuild it.

@@ -20,6 +20,8 @@ import {
   fetchSessions,
   fetchSlashCommands,
   type ConnectionStatus,
+  type FileEditEvent,
+  type HistoryMessage,
   type InboundEvent,
   type SlashCommand,
 } from "./protocol"
@@ -32,6 +34,12 @@ import {
 } from "./command-menu"
 import { SessionMenu } from "./session-menu"
 import { ContextPanel, type ContextPanelTheme } from "./context-panel"
+import {
+  DiffViewer,
+  latestTurnFileEdits,
+  mergeFileEdits,
+  type DiffViewerTheme,
+} from "./diff-viewer"
 import { Transcript, type TranscriptTheme } from "./transcript"
 import { rememberChat } from "./session-state"
 
@@ -67,6 +75,7 @@ interface Palette {
   success: string
   error: string
   user: string
+  userBackground: string
   warm: string
   cool: string
 }
@@ -81,6 +90,8 @@ const DARK: Palette = {
   success: "#5CC489",
   error: "#F87171",
   user: "#60A5FA",
+  // Codex-style turn anchor: 12% white over the reference dark background.
+  userBackground: "#2B2C2E",
   warm: "#C26A25",
   cool: "#1795A2",
 }
@@ -95,6 +106,8 @@ const LIGHT: Palette = {
   success: "#166534",
   error: "#B91C1C",
   user: "#1D4ED8",
+  // Codex-style turn anchor: 4% black over the reference light background.
+  userBackground: "#F0F0F0",
   warm: "#C2410C",
   cool: "#0F766E",
 }
@@ -118,6 +131,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     title: "Agent context",
     description: "Explain what this session contributes to the next prompt",
     action: "context",
+  },
+  {
+    command: "/diff",
+    title: "Last turn diff",
+    description: "Inspect file changes from the latest turn",
+    action: "diff",
   },
 ]
 
@@ -147,13 +166,13 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
   })
 }
 
-function transcriptTheme(palette: Palette): TranscriptTheme {
+function transcriptTheme(palette: Palette, backgroundKnown: boolean): TranscriptTheme {
   return {
     text: palette.text,
     muted: palette.muted,
     error: palette.error,
     user: palette.user,
-    assistant: palette.accent,
+    userBackground: backgroundKnown ? palette.userBackground : null,
     border: palette.border,
     syntax: syntaxStyle(palette),
   }
@@ -173,6 +192,21 @@ function contextPanelTheme(palette: Palette): ContextPanelTheme {
     muted: palette.muted,
     border: palette.border,
     accent: palette.accent,
+  }
+}
+
+function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewerTheme {
+  const light = palette === LIGHT
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    border: palette.border,
+    accent: palette.accent,
+    success: palette.success,
+    error: palette.error,
+    addedBackground: backgroundKnown ? light ? "#E7F6EC" : "#142D22" : null,
+    removedBackground: backgroundKnown ? light ? "#FCE8EA" : "#352024" : null,
+    syntax: syntaxStyle(palette),
   }
 }
 
@@ -207,15 +241,19 @@ export class NanobotTui {
   private readonly commandMenu: CommandMenu
   private readonly sessionMenu: SessionMenu
   private readonly contextPanel: ContextPanel
+  private readonly diffViewer: DiffViewer
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
-  private readonly title: TextRenderable
+  private readonly title: BoxRenderable
+  private readonly titleText: TextRenderable
+  private readonly modelText: TextRenderable
   private readonly composerFrame: BoxRenderable
   private readonly composer: TextareaRenderable
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private palette: Palette
   private activeThemeMode: ThemeMode
+  private backgroundKnown: boolean
   private activeTurn = false
   private activeLabel = "Thinking"
   private activeStartedAt = 0
@@ -242,6 +280,8 @@ export class NanobotTui {
   private sessionLoadId = 0
   private sessionLoading = false
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
+  private currentFileEdits: FileEditEvent[] = []
+  private lastFileEdits: FileEditEvent[] = []
 
   private constructor(
     renderer: CliRenderer,
@@ -251,13 +291,23 @@ export class NanobotTui {
   ) {
     this.renderer = renderer
     this.modelName = options.model
+    this.backgroundKnown = options.theme !== "auto" || renderer.themeMode !== null
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
-    this.transcript = new Transcript(renderer, transcriptTheme(this.palette), treeSitterClient)
+    this.transcript = new Transcript(
+      renderer,
+      transcriptTheme(this.palette, this.backgroundKnown),
+      treeSitterClient,
+    )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], LOCAL_COMMANDS)
     this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
     this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
+    this.diffViewer = new DiffViewer(
+      renderer,
+      diffViewerTheme(this.palette, this.backgroundKnown),
+      treeSitterClient,
+    )
     this.client = client || new NanobotClient({
       url: options.wsUrl,
       chatId: options.chatId,
@@ -278,13 +328,31 @@ export class NanobotTui {
       flexDirection: "column",
       backgroundColor: RGBA.defaultBackground(),
     })
-    this.title = new TextRenderable(renderer, {
+    this.title = new BoxRenderable(renderer, {
       id: "nanobot-tui-title",
-      content: `nanobot  ·  ${this.modelName}`,
+      width: "100%",
+      height: 1,
+      flexShrink: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: RGBA.defaultBackground(),
+    })
+    this.titleText = new TextRenderable(renderer, {
+      id: "nanobot-tui-title-text",
+      content: "nanobot  ·  ",
       height: 1,
       flexShrink: 0,
       fg: this.palette.muted,
     })
+    this.modelText = new TextRenderable(renderer, {
+      id: "nanobot-tui-model-text",
+      content: this.modelName,
+      height: 1,
+      flexShrink: 1,
+      fg: this.palette.muted,
+    })
+    this.title.add(this.titleText)
+    this.title.add(this.modelText)
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
       width: "100%",
@@ -364,6 +432,7 @@ export class NanobotTui {
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
+    this.shell.add(this.diffViewer.root)
     this.renderer.root.add(this.shell)
 
     this.renderer.keyInput.on("keypress", this.handleKey)
@@ -452,6 +521,7 @@ export class NanobotTui {
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()
+      else if (command.command.action === "diff") this.openDiff()
       else this.startNewChat()
       return
     }
@@ -486,6 +556,7 @@ export class NanobotTui {
     this.turnHadAnswer = false
     this.lastProgress = ""
     this.activeLabel = "Thinking"
+    this.currentFileEdits = []
     this.setActive(true)
   }
 
@@ -547,6 +618,8 @@ export class NanobotTui {
         return
       case "file_edit":
         this.activeLabel = "Editing"
+        this.currentFileEdits = mergeFileEdits(this.currentFileEdits, event.edits)
+        if (this.diffViewer.visible) this.diffViewer.update(this.currentFileEdits)
         this.lastProgress = this.transcript.fileEdits(event.edits)
         this.setActive(true)
         return
@@ -568,6 +641,9 @@ export class NanobotTui {
         if (event.turn_id) this.commandTurns.delete(event.turn_id)
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
         this.transcript.finishActivity()
+        if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
+        this.currentFileEdits = []
+        if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
         this.finalMessage = ""
         this.turnHadAnswer = false
         this.setActive(false)
@@ -592,9 +668,15 @@ export class NanobotTui {
         this.setModel(event.model_name)
         return
       case "error":
+        const commandLifecycle = event.turn_id ? this.commandTurns.get(event.turn_id) : undefined
         if (event.turn_id) this.commandTurns.delete(event.turn_id)
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
         this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
+        if (!commandLifecycle || commandLifecycle === "agent_turn") {
+          if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
+          this.currentFileEdits = []
+          if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
+        }
         this.finalMessage = ""
         this.turnHadAnswer = false
         this.setActive(false)
@@ -606,6 +688,9 @@ export class NanobotTui {
     try {
       if (restoring) {
         this.contextPanel.hide()
+        this.diffViewer.hide()
+        this.currentFileEdits = []
+        this.lastFileEdits = []
         this.historyBeforeCursor = null
         this.historyHasMore = false
         this.historyLoadingOlder = false
@@ -623,6 +708,9 @@ export class NanobotTui {
         this.historyBeforeCursor = history.beforeCursor
         this.historyHasMore = history.hasMoreBefore
         this.transcript.history(history.messages)
+        this.restorePromptHistory(history.messages)
+        this.lastFileEdits = latestTurnFileEdits(history.messages)
+        if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
       }
     } catch (error) {
       if (hydrationId !== this.hydrationId) return
@@ -691,6 +779,18 @@ export class NanobotTui {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.diffViewer.visible) {
+      if (key.ctrl && key.name === "c") {
+        const selected = this.renderer.getSelection()?.getSelectedText()
+        if (selected) void this.copySelection(selected)
+      } else if (this.diffViewer.handleKey(key) && !this.diffViewer.visible) {
+        this.composer.focus()
+        this.status.content = "Ready"
+        this.updateMeta()
+      }
+      key.preventDefault()
+      return
+    }
     if (this.contextPanel.visible && key.name === "escape") {
       this.contextPanel.hide()
       this.updateMeta()
@@ -827,18 +927,22 @@ export class NanobotTui {
   }
 
   private applyTheme(mode: ThemeMode): void {
-    if (this.activeThemeMode === mode) return
+    const backgroundWasUnknown = !this.backgroundKnown
+    this.backgroundKnown = true
+    if (this.activeThemeMode === mode && !backgroundWasUnknown) return
     this.activeThemeMode = mode
     this.palette = mode === "light" ? LIGHT : DARK
-    this.transcript.setTheme(transcriptTheme(this.palette))
+    this.transcript.setTheme(transcriptTheme(this.palette, this.backgroundKnown))
     this.commandMenu.setTheme(commandMenuTheme(this.palette))
     this.sessionMenu.setTheme(commandMenuTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
+    this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.composerFrame.borderColor = this.palette.border
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent
-    this.title.fg = this.palette.muted
+    this.titleText.fg = this.palette.muted
+    this.modelText.fg = this.palette.muted
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
   }
@@ -846,6 +950,7 @@ export class NanobotTui {
   private handleResize = (): void => {
     this.resizeComposer()
     this.contextPanel.resize(this.renderer.height)
+    this.diffViewer.resize(this.renderer.width)
     this.title.visible = this.renderer.height >= 14
     this.updateMeta()
   }
@@ -882,7 +987,7 @@ export class NanobotTui {
 
   private setModel(model: string): void {
     this.modelName = model
-    this.title.content = `nanobot  ·  ${model}`
+    this.modelText.content = model
   }
 
   private resizeComposer(): void {
@@ -1037,6 +1142,7 @@ export class NanobotTui {
       this.turnHadAnswer = false
       this.lastProgress = ""
       this.activeLabel = "Thinking"
+      this.currentFileEdits = []
       this.setActive(true)
     } else if (lifecycle === "finalize_active_turn") {
       this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
@@ -1056,6 +1162,18 @@ export class NanobotTui {
   private recordPrompt(content: string): void {
     if (this.promptHistory.at(-1) !== content) this.promptHistory.push(content)
     if (this.promptHistory.length > 50) this.promptHistory.shift()
+    this.historyCursor = this.promptHistory.length
+    this.historyDraft = ""
+  }
+
+  private restorePromptHistory(messages: HistoryMessage[], prepend = false): void {
+    const restored = messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content.trim())
+      .filter(Boolean)
+    const combined = prepend ? [...restored, ...this.promptHistory] : restored
+    const compacted = combined.filter((content, index) => content !== combined[index - 1])
+    this.promptHistory.splice(0, this.promptHistory.length, ...compacted.slice(-50))
     this.historyCursor = this.promptHistory.length
     this.historyDraft = ""
   }
@@ -1092,6 +1210,19 @@ export class NanobotTui {
     }
   }
 
+  private openDiff(): void {
+    this.commandMenu.hide()
+    this.sessionMenu.hide()
+    this.contextPanel.hide()
+    this.composer.setText("")
+    this.composer.blur()
+    const edits = this.currentFileEdits.length ? this.currentFileEdits : this.lastFileEdits
+    this.diffViewer.show(edits)
+    this.diffViewer.resize(this.renderer.width)
+    this.status.content = edits.length ? "Last turn diff" : "No file changes in the last turn"
+    this.updateMeta()
+  }
+
   private async loadOlderHistory(): Promise<void> {
     if (
       this.historyLoadingOlder
@@ -1112,6 +1243,7 @@ export class NanobotTui {
       )
       if (hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       await this.transcript.prependHistory(history.messages)
+      this.restorePromptHistory(history.messages, true)
       this.historyBeforeCursor = history.beforeCursor
       this.historyHasMore = history.hasMoreBefore
       this.status.content = history.hasMoreBefore
@@ -1148,6 +1280,7 @@ export class NanobotTui {
   private handleDestroy = (): void => {
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.transcript.destroy()
+    this.diffViewer.destroy()
     this.client.close()
   }
 }

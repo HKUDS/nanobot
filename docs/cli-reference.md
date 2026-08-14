@@ -98,7 +98,8 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
 conversation, and `/context` explains the compacted summary and raw session suffix available to
-the next agent turn. `PageUp` loads older transcript pages when you reach the top. The default
+the next agent turn. `/diff` opens the latest turn's file changes as a full-screen unified diff.
+`PageUp` loads older transcript pages when you reach the top. The default
 launch returns to the last attached TUI session; `--session` selects a specific session instead.
 
 ## Session Storage and Rollback
@@ -123,7 +124,7 @@ Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the s
 
 The default `--theme auto` mode probes the terminal's real foreground and background colors before first paint and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably.
 
-`Enter` sends the current message. Press `Alt+Enter` to add a newline and use `Up`/`Down` at the composer edge to recall recent prompts. Type `/` to discover nanobot commands and terminal navigation in one palette, use the arrow keys to choose one, and press `Tab` to complete it. `/sessions` opens a searchable conversation picker, while `/new-chat` preserves the current conversation and starts another one. The core `/new` command retains its cross-channel behavior and resets the current chat. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
+`Enter` sends the current message. Press `Alt+Enter` to add a newline and use `Up`/`Down` at the composer edge to recall prompts from the current saved session. Type `/` to discover nanobot commands and terminal navigation in one palette, use the arrow keys to choose one, and press `Tab` to complete it. `/sessions` opens a searchable conversation picker, while `/new-chat` preserves the current conversation and starts another one. `/diff` opens a read-only unified diff for the newest turn; use `Left`/`Right` to switch edits and `Esc` to close it. The core `/new` command retains its cross-channel behavior and resets the current chat. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
 
 Packaged releases fetch a version-matched, checksummed terminal binary for macOS (Apple Silicon and Intel), Linux (x64 and ARM64), or Windows x64 on first use and cache it under the nanobot data directory. Windows ARM64 currently falls back to the classic prompt because the Bun runtime disables the FFI required by OpenTUI on that platform. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A source checkout can run the client with Bun after `bun install --cwd tui`.
 

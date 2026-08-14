@@ -417,9 +417,9 @@ describe("NanobotTui layout", () => {
     try {
       ui.composer.setText("/sessions")
       ui.composer.submit()
-      await Bun.sleep(10)
+      await waitUntil(() => resolveFetch !== undefined)
       ui.composer.setText("release")
-      resolveFetch?.(new Response(JSON.stringify({
+      resolveFetch!(new Response(JSON.stringify({
         sessions: [
           { key: "websocket:chat", title: "Current chat", preview: "Current work" },
           { key: "websocket:other", title: "Release checklist", preview: "Ship it" },
@@ -489,6 +489,93 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("opens the latest turn diff as a full-screen, navigable view", async () => {
+    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    app.accept({ event: "message_accepted", chat_id: "chat", turn_id: "edit-turn" })
+    app.accept({
+      event: "file_edit",
+      chat_id: "chat",
+      edits: [{
+        call_id: "edit-1",
+        tool: "edit_file",
+        path: "src/first.ts",
+        status: "done",
+        added: 2,
+        deleted: 1,
+        diff: {
+          format: "unified",
+          truncated: true,
+          text: [
+            "--- a/src/first.ts",
+            "+++ b/src/first.ts",
+            "@@ -1 +1,2 @@",
+            "-const oldValue = 1",
+            "+const newValue = 2",
+            "+export { newValue }",
+          ].join("\n"),
+        },
+      }, {
+        call_id: "edit-2",
+        tool: "write_file",
+        path: "src/second.py",
+        status: "done",
+        added: 1,
+        deleted: 0,
+        diff: {
+          format: "unified",
+          text: [
+            "--- a/src/second.py",
+            "+++ b/src/second.py",
+            "@@ -0,0 +1 @@",
+            "+print('hello')",
+          ].join("\n"),
+        },
+      }],
+    })
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "edit-turn" })
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      diffViewer: {
+        visible: boolean
+        scroll: { getChildren(): Array<{ addedBg?: { toInts(): number[] } }> }
+      }
+    }
+
+    ui.composer.setText("/diff")
+    ui.composer.submit()
+    await waitUntil(() => ui.diffViewer.visible)
+    await setup.flush()
+    let frame = setup.captureCharFrame()
+    expect(frame).toContain("Diff · Last turn · 2 changes · +3 -1")
+    expect(frame).toContain("1/2 · src/first.ts · +2 -1")
+    expect(frame).toContain("const newValue = 2")
+    expect(frame).toContain("Diff truncated by the gateway")
+    expect(frame).not.toContain("Ask nanobot anything")
+
+    setup.mockInput.pressArrow("right")
+    await setup.flush()
+    frame = setup.captureCharFrame()
+    expect(frame).toContain("2/2 · src/second.py · +1 -0")
+    expect(frame).toContain("print('hello')")
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+    expect(ui.diffViewer.scroll.getChildren()[0]?.addedBg?.toInts().slice(0, 3)).toEqual([231, 246, 236])
+    expect(setup.captureCharFrame()).toContain("print('hello')")
+
+    setup.resize(52, 18)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("←/→ file · pgup/pgdn · esc")
+
+    setup.mockInput.pressEscape()
+    await waitUntil(() => !ui.diffViewer.visible)
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("Ask nanobot anything")
+  })
+
   test("loads earlier transcript pages in place when PageUp reaches the top", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const original = globalThis.fetch
@@ -531,6 +618,12 @@ describe("NanobotTui layout", () => {
       expect(frame.indexOf("oldest question")).toBeLessThan(frame.indexOf("recent question"))
       expect(frame.indexOf("oldest answer")).toBeLessThan(frame.indexOf("recent answer"))
       expect((app as unknown as { historyHasMore: boolean }).historyHasMore).toBe(false)
+
+      const composer = (app as unknown as { composer: TextareaRenderable }).composer
+      setup.mockInput.pressArrow("up")
+      expect(composer.plainText).toBe("recent question")
+      setup.mockInput.pressArrow("up")
+      expect(composer.plainText).toBe("oldest question")
     } finally {
       globalThis.fetch = original
     }
@@ -598,13 +691,17 @@ describe("NanobotTui layout", () => {
       composerFrame: { backgroundColor: { intent: string } }
       composer: { backgroundColor: { intent: string } }
     }
-    const spans = setup.captureSpans().lines.flatMap((line) => line.spans)
+    const lines = setup.captureSpans().lines
+    const spans = lines.flatMap((line) => line.spans)
+    const brandedRows = lines.filter((line) => (
+      line.spans.some((span) => span.bg.intent !== "default")
+    ))
 
     expect(internals.shell.backgroundColor.intent).toBe("default")
     expect(internals.composerFrame.backgroundColor.intent).toBe("default")
     expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(spans.length).toBeGreaterThan(0)
-    expect(spans.every((span) => span.bg.intent === "default")).toBe(true)
+    expect(brandedRows).toHaveLength(0)
   })
 
   test("rethemes the complete retained interface when the terminal appearance changes", async () => {
@@ -623,11 +720,17 @@ describe("NanobotTui layout", () => {
       transcript: {
         markdown: Set<{ syntaxStyle: object }>
         frames: Set<{ borderColor: { toInts(): number[] } }>
+        userRows: Set<{ backgroundColor: { intent: string; toInts(): number[] } }>
+        user(content: string): void
       }
     }
+    internals.transcript.user("Existing question")
+    const userRow = [...internals.transcript.userRows][0]
     const markdown = [...internals.transcript.markdown][0]
     const sessionFrame = [...internals.transcript.frames][0]
     const darkSyntax = markdown?.syntaxStyle
+
+    expect(userRow?.backgroundColor.intent).toBe("default")
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
     await setup.flush()
@@ -641,12 +744,18 @@ describe("NanobotTui layout", () => {
     expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
+    expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
   })
 
   test("uses asymmetric roles instead of chat bubbles", async () => {
     setup = await createRenderer({ width: 72, height: 24, screenMode: "alternate-screen" })
-    const app = mount(setup)
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, theme: "dark" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
     app.accept({ event: "attached", chat_id: "chat" })
     app.accept({ event: "delta", chat_id: "chat", text: "Agent **answer**" })
     app.accept({ event: "stream_end", chat_id: "chat" })
@@ -666,6 +775,25 @@ describe("NanobotTui layout", () => {
     expect(agentLine).not.toContain("│")
     expect(headerLine).toContain("│")
     expect(headerBorder.trim().length).toBeLessThanOrEqual(62)
+
+    const transcript = (app as unknown as {
+      transcript: {
+        userRows: Set<{ backgroundColor: { intent: string; toInts(): number[] } }>
+        styledText: Array<{
+          renderable: { id: string; fg: { toInts(): number[] } }
+          tone: string
+        }>
+      }
+    }).transcript
+    const userRow = [...transcript.userRows][0]
+    const assistantMarker = transcript.styledText.find(({ renderable, tone }) => (
+      tone === "muted" && renderable.id.includes("role-marker")
+    ))
+
+    expect(userRow?.backgroundColor.intent).toBe("rgb")
+    expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([43, 44, 46])
+    expect(assistantMarker?.tone).toBe("muted")
+    expect(assistantMarker?.renderable.fg.toInts().slice(0, 3)).toEqual([161, 161, 170])
   })
 
   test("keeps footer status and shortcuts visually separated", async () => {
@@ -751,8 +879,17 @@ describe("NanobotTui layout", () => {
 
     await app.start()
 
+    const transcript = (app as unknown as {
+      transcript: {
+        userRows: Set<{ backgroundColor: { intent: string } }>
+        user(content: string): void
+      }
+    }).transcript
+    transcript.user("Unknown terminal background")
+
     expect(connected).toBe(true)
     expect((app as unknown as { palette: { referenceBackground: string } }).palette.referenceBackground).toBe("#0E0F11")
+    expect([...transcript.userRows][0]?.backgroundColor.intent).toBe("default")
   })
 
   test("keeps semantic colors legible in both terminal appearances", async () => {
@@ -766,6 +903,12 @@ describe("NanobotTui layout", () => {
         expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.referenceBackground)).toBeGreaterThanOrEqual(4.5)
       }
       expect(contrastRatio(internals.palette.faint, internals.palette.referenceBackground)).toBeGreaterThanOrEqual(3)
+      const turnContrast = contrastRatio(
+        internals.palette.userBackground ?? "",
+        internals.palette.referenceBackground,
+      )
+      expect(turnContrast).toBeGreaterThan(1.05)
+      expect(turnContrast).toBeLessThan(1.5)
     }
 
     assertContrast()

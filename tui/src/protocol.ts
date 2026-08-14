@@ -17,11 +17,23 @@ export interface FileEditEvent {
   call_id?: string
   tool?: string
   path?: string
+  absolute_path?: string
   phase?: "start" | "end" | "error" | string
   added?: number
   deleted?: number
+  approximate?: boolean
   status?: "editing" | "done" | "error" | string
+  operation?: "edit" | "delete" | string
+  binary?: boolean
   error?: string
+  diff?: FileDiff
+}
+
+export interface FileDiff {
+  format: "unified" | string
+  context?: number
+  truncated?: boolean
+  text?: string
 }
 
 export type InboundEvent =
@@ -174,11 +186,23 @@ function isFileEdit(value: unknown): value is FileEditEvent {
     && optional(value.call_id, "string")
     && optional(value.tool, "string")
     && optional(value.path, "string")
+    && optional(value.absolute_path, "string")
     && optional(value.phase, "string")
     && optional(value.status, "string")
     && optional(value.added, "number")
     && optional(value.deleted, "number")
+    && optional(value.approximate, "boolean")
+    && optional(value.operation, "string")
+    && optional(value.binary, "boolean")
     && optional(value.error, "string")
+    && (value.diff === undefined || isFileDiff(value.diff))
+}
+
+function isFileDiff(value: unknown): value is FileDiff {
+  if (!isRecord(value) || typeof value.format !== "string") return false
+  return optional(value.context, "number")
+    && optional(value.truncated, "boolean")
+    && optional(value.text, "string")
 }
 
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
@@ -261,10 +285,10 @@ export async function fetchHistory(
         ? message.traces.filter((value): value is string => typeof value === "string")
         : []
       const toolEvents = Array.isArray(message.toolEvents)
-        ? message.toolEvents as ToolProgressEvent[]
+        ? message.toolEvents.filter(isToolEvent)
         : undefined
       const fileEdits = Array.isArray(message.fileEdits)
-        ? message.fileEdits as FileEditEvent[]
+        ? message.fileEdits.filter(isFileEdit)
         : undefined
       const activity = traces.join("\n") || (typeof content === "string" ? content : "")
       return [{ role: "activity", content: activity, toolEvents, fileEdits }]

@@ -134,6 +134,57 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("validates nested unified diff payloads at the websocket boundary", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const events: InboundEvent[] = []
+      const statuses: string[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: (event) => events.push(event),
+        onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("message", { data: JSON.stringify({
+        event: "file_edit",
+        chat_id: "chat",
+        edits: [{
+          call_id: "edit-1",
+          tool: "edit_file",
+          path: "src/app.ts",
+          status: "done",
+          added: 1,
+          deleted: 1,
+          diff: { format: "unified", truncated: false, text: "--- a\n+++ b" },
+        }],
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "file_edit",
+        chat_id: "chat",
+        edits: [{ diff: { format: "unified", text: ["not", "a", "string"] } }],
+      }) })
+
+      expect(events).toHaveLength(1)
+      expect(events[0]?.event).toBe("file_edit")
+      expect(statuses).toContain("error:gateway sent an invalid event")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("reattaches the same generated chat after a transient disconnect", async () => {
     const original = globalThis.WebSocket
     const sockets: FakeSocket[] = []

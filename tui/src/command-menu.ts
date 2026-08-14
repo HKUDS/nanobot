@@ -5,7 +5,7 @@ import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
 
 export type CommandMenuTheme = PickerMenuTheme
 
-export type TuiCommandAction = "sessions" | "new-chat" | "context"
+export type TuiCommandAction = "sessions" | "new-chat" | "context" | "diff"
 
 export interface TuiCommand {
   command: string
