@@ -346,7 +346,7 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "nanobot" }))
       .toBeInTheDocument();
     const password = screen.getByLabelText("Password");
     expect(password).toHaveAttribute(
@@ -354,6 +354,11 @@ describe("App layout", () => {
       "current-password",
     );
     expect(password).not.toHaveAttribute("placeholder");
+    expect(password).toHaveClass("bg-background");
+    expect(screen.getByTestId("nanobot-particle-mark")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Incorrect password. Try again."),
@@ -417,7 +422,7 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "nanobot" }))
       .toBeInTheDocument();
     expect(
       screen.queryByText("Incorrect password. Try again."),

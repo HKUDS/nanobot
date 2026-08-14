@@ -34,7 +34,8 @@
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "streamdown": "2.5.0",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -47,6 +48,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "2.1.9",
     "autoprefixer": "^10.4.20",
