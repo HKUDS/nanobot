@@ -7,6 +7,7 @@ import {
   Play,
   type LucideIcon,
 } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
@@ -28,7 +29,7 @@ interface GenericToolRunModel {
 
 export function GenericToolRun({ items }: { items: GenericToolRunItem[] }) {
   const { t } = useTranslation();
-  const model = buildModel(items, t);
+  const model = useMemo(() => buildModel(items, t), [items, t]);
   const action = formatActivityTarget(t, model.label, model.detail);
   const label = model.aside ? `${action} · ${model.aside}` : action;
 
