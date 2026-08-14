@@ -958,6 +958,7 @@
       "marketplaceEmpty": "没有找到与“{{query}}”相关的技能。",
       "marketplaceConfirmTitle": "安装 {{name}}？",
       "marketplaceConfirmDescription": "此第三方技能来自 {{provider}}（{{source}}），其中可能包含操作指令或可执行脚本。",
+      "marketplaceOverrideNotice": "此工作区副本会覆盖现有的内置或插件技能，删除该副本后才会恢复原版本。",
       "marketplaceConfirmInstall": "安装技能",
       "marketplaceOpen": "在 {{provider}} 中打开 {{name}}",
       "marketplaceOpenProvider": "打开 {{provider}}",

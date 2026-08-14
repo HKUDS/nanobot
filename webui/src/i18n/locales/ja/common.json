@@ -944,6 +944,7 @@
       "marketplaceEmpty": "「{{query}}」に一致するスキルはありません。",
       "marketplaceConfirmTitle": "{{name}} をインストールしますか？",
       "marketplaceConfirmDescription": "このサードパーティ製スキルは {{provider}}（{{source}}）から提供され、指示や実行可能なスクリプトを含む場合があります。",
+      "marketplaceOverrideNotice": "このワークスペースのコピーは、削除するまで既存の組み込みまたはプラグインスキルを上書きします。",
       "marketplaceConfirmInstall": "スキルをインストール",
       "marketplaceOpen": "{{provider}} で {{name}} を開く",
       "marketplaceOpenProvider": "{{provider}} を開く",

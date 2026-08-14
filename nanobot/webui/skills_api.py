@@ -119,12 +119,18 @@ def delete_webui_skill(
     config = load_config()
     original_disabled = list(config.agents.defaults.disabled_skills)
     next_disabled = set(original_disabled)
-    if name in next_disabled:
-        next_disabled.remove(name)
     with tempfile.TemporaryDirectory(prefix=".nanobot-delete-", dir=skills_root) as staging:
         staged_target = Path(staging) / name
         target.replace(staged_target)
         try:
+            fallback_exists = any(
+                item["name"] == name
+                for item in SkillsLoader(workspace_path).list_skills(
+                    filter_unavailable=False,
+                )
+            )
+            if not fallback_exists:
+                next_disabled.discard(name)
             if next_disabled != set(original_disabled):
                 config.agents.defaults.disabled_skills = sorted(next_disabled)
                 save_config(config)

@@ -167,7 +167,14 @@ describe("SkillsMarketplace", () => {
 
     await act(async () => {});
 
-    expect(screen.getByRole("button", { name: "Install GitHub" })).toBeEnabled();
+    const install = screen.getByRole("button", { name: "Install GitHub" });
+    expect(install).toBeEnabled();
+    fireEvent.click(install);
+    expect(
+      screen.getByText(
+        "This workspace copy will override the existing built-in or plugin skill until you delete it.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("keeps a marketplace skill disabled when it is installed in the workspace", async () => {

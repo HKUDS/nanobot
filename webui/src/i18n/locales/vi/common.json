@@ -944,6 +944,7 @@
       "marketplaceEmpty": "Không tìm thấy kỹ năng cho “{{query}}”.",
       "marketplaceConfirmTitle": "Cài đặt {{name}}?",
       "marketplaceConfirmDescription": "Kỹ năng của bên thứ ba này đến từ {{provider}} ({{source}}) và có thể chứa hướng dẫn hoặc tập lệnh thực thi.",
+      "marketplaceOverrideNotice": "Bản sao trong không gian làm việc này sẽ ghi đè kỹ năng tích hợp hoặc kỹ năng từ plugin cho đến khi bạn xóa nó.",
       "marketplaceConfirmInstall": "Cài đặt kỹ năng",
       "marketplaceOpen": "Mở {{name}} trên {{provider}}",
       "marketplaceOpenProvider": "Mở {{provider}}",

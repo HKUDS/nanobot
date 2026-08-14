@@ -944,6 +944,7 @@
       "marketplaceEmpty": "“{{query}}”에 해당하는 스킬이 없습니다.",
       "marketplaceConfirmTitle": "{{name}}을(를) 설치할까요?",
       "marketplaceConfirmDescription": "이 타사 스킬은 {{provider}}({{source}})에서 제공되며 지침이나 실행 가능한 스크립트를 포함할 수 있습니다.",
+      "marketplaceOverrideNotice": "이 워크스페이스 사본은 삭제할 때까지 기존 기본 제공 또는 플러그인 스킬을 재정의합니다.",
       "marketplaceConfirmInstall": "스킬 설치",
       "marketplaceOpen": "{{provider}}에서 {{name}} 열기",
       "marketplaceOpenProvider": "{{provider}} 열기",

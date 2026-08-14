@@ -944,6 +944,7 @@
       "marketplaceEmpty": "Aucune compétence trouvée pour « {{query}} ».",
       "marketplaceConfirmTitle": "Installer {{name}} ?",
       "marketplaceConfirmDescription": "Cette compétence tierce provient de {{provider}} ({{source}}) et peut contenir des instructions ou des scripts exécutables.",
+      "marketplaceOverrideNotice": "Cette copie de l’espace de travail remplacera la compétence intégrée ou fournie par un plugin jusqu’à sa suppression.",
       "marketplaceConfirmInstall": "Installer la compétence",
       "marketplaceOpen": "Ouvrir {{name}} sur {{provider}}",
       "marketplaceOpenProvider": "Ouvrir {{provider}}",
