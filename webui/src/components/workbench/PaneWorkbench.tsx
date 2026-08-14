@@ -220,7 +220,9 @@ export function PaneWorkbench({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const paneRefs = useRef(new Map<string, HTMLElement>());
   const lastRectsRef = useRef(new Map<string, DOMRect>());
+  const lastElementRectsRef = useRef(new Map<HTMLElement, DOMRect>());
   const pendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
+  const pendingElementRectsRef = useRef<Map<HTMLElement, DOMRect> | null>(null);
   const animationsRef = useRef(new Map<string, Animation>());
   const sourceSplitRatiosKey = splitRatios.join("\u0000");
   const [previewSplitRatios, setPreviewSplitRatios] = useState(splitRatios);
@@ -284,24 +286,36 @@ export function PaneWorkbench({
     return rects;
   }, []);
 
+  const measurePaneElements = useCallback(() => {
+    const rects = new Map<HTMLElement, DOMRect>();
+    for (const element of paneRefs.current.values()) {
+      if (!element.hidden) rects.set(element, element.getBoundingClientRect());
+    }
+    return rects;
+  }, []);
+
   const captureLayout = useCallback(() => {
     pendingRectsRef.current = measurePanes();
+    pendingElementRectsRef.current = measurePaneElements();
     for (const animation of animationsRef.current.values()) animation.cancel();
     animationsRef.current.clear();
-  }, [measurePanes]);
+  }, [measurePaneElements, measurePanes]);
 
   useLayoutEffect(() => {
     const previousRects = pendingRectsRef.current ?? lastRectsRef.current;
+    const previousElementRects = pendingElementRectsRef.current ?? lastElementRectsRef.current;
     pendingRectsRef.current = null;
+    pendingElementRectsRef.current = null;
     const nextRects = measurePanes();
+    const nextElementRects = measurePaneElements();
     const reduceMotion = typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (!reduceMotion) {
       for (const [key, nextRect] of nextRects) {
-        const previousRect = previousRects.get(key);
         const element = paneRefs.current.get(key);
         if (!element) continue;
+        const previousRect = previousRects.get(key) ?? previousElementRects.get(element);
         if (!previousRect) {
           if (previousRects.size === 0 || typeof element.animate !== "function") continue;
           const animation = element.animate(
@@ -356,7 +370,8 @@ export function PaneWorkbench({
       }
     }
     lastRectsRef.current = nextRects;
-  }, [activePaneKey, effectiveLayout, measurePanes, paneOrder]);
+    lastElementRectsRef.current = nextElementRects;
+  }, [activePaneKey, effectiveLayout, measurePaneElements, measurePanes, paneOrder]);
 
   useEffect(() => () => {
     for (const animation of animationsRef.current.values()) animation.cancel();

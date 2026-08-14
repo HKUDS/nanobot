@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -56,12 +57,13 @@ _TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    rows, changed = _reconcile_index(session_manager)
-    if changed:
-        try:
-            _write_index_rows(session_manager.sessions_dir, rows)
-        except Exception as e:
-            logger.debug("Failed to write WebUI session list index: {}", e)
+    with session_manager.locked_session_files():
+        rows, changed = _reconcile_index(session_manager)
+        if changed:
+            try:
+                _write_index_rows(session_manager.sessions_dir, rows)
+            except Exception as e:
+                logger.debug("Failed to write WebUI session list index: {}", e)
     sessions = [
         _public_row(session_manager.sessions_dir, get_webui_dir(), row)
         for row in rows
@@ -169,14 +171,14 @@ def _read_index_rows(sessions_dir: Path) -> list[dict[str, Any]] | None:
 
 def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
     path = _index_path(sessions_dir)
-    tmp_path = path.with_suffix(".json.tmp")
+    tmp_path = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
     data = {"version": _INDEX_VERSION, "sessions": rows}
     try:
-        tmp_path.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+        with open(tmp_path, "x", encoding="utf-8") as file:
+            file.write(json.dumps(data, ensure_ascii=False) + "\n")
         os.replace(tmp_path, path)
-    except BaseException:
+    finally:
         tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def _file_signature(path: Path) -> dict[str, int]:

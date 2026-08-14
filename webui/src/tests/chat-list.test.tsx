@@ -18,14 +18,55 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
   };
 }
 
+function rect(top: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    width: 240,
+    height: 32,
+    top,
+    right: 240,
+    bottom: top + 32,
+    left: 0,
+    toJSON: () => ({}),
+  };
+}
+
 describe("ChatList", () => {
+  const originalAnimate = HTMLElement.prototype.animate;
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
   afterEach(() => {
+    HTMLElement.prototype.animate = originalAnimate;
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it("keeps tab headers out of drag protocols while exposing panes as drag sources", () => {
+  it("opens a conversation's existing actions from the row context menu", async () => {
+    const onTogglePin = vi.fn();
+    render(
+      <ChatList
+        sessions={[session({ chatId: "review", title: "Review the patch" })]}
+        activeKey="websocket:review"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={onTogglePin}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: "Review the patch" })
+      .closest("[data-chat-row]")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+
+    expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
+  });
+
+  it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
     render(
       <ChatList
         sessions={[session({ chatId: "root", title: "Root topic" })]}
@@ -70,6 +111,46 @@ describe("ChatList", () => {
     expect(readDraggedSession(dataTransfer)).toBeNull();
     expect(document.querySelector("[data-pane-drag-overlay]")).not.toBeInTheDocument();
     expect(document.querySelector("[data-pane-snap-slot]")).not.toBeInTheDocument();
+  });
+
+  it("opens grouped pane and tab actions from their context menus", async () => {
+    const onRequestRename = vi.fn();
+    const onDissolveTab = vi.fn();
+    render(
+      <ChatList
+        sessions={[session({ chatId: "root", title: "Root topic" })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={onRequestRename}
+        onToggleArchive={vi.fn()}
+        onDissolveTab={onDissolveTab}
+      />,
+    );
+
+    const paneRow = screen.getByRole("button", { name: "Research pane" })
+      .closest("[data-sidebar-pane]")!;
+    fireEvent.contextMenu(paneRow);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
+
+    const tabRow = screen.getByRole("button", { name: "Tab: Root topic" })
+      .closest("[data-workbench-tab]")!;
+    fireEvent.contextMenu(tabRow);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Dissolve group" }));
+    expect(onDissolveTab).toHaveBeenCalledWith("websocket:root");
   });
 
   it("creates a visible tab in place and only moves panes into visible tabs", async () => {
@@ -648,21 +729,25 @@ describe("ChatList", () => {
     expect(tabHeader).not.toHaveAttribute("data-chat-row");
     expect(tabHeader).not.toHaveAttribute("data-sidebar-pane");
     expect(tabButton).not.toHaveAttribute("aria-current");
-    expect(tabButton.querySelector("svg")).not.toBeInTheDocument();
+    expect(tabButton.querySelector(".lucide-folder-tree")).toBeInTheDocument();
     const paneList = within(tabGroup).getByRole("list", { name: "Panes in Root topic" });
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass(
-      "bg-sidebar-selected",
-      "rounded-[0.65rem]",
-    );
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-[0.65rem]");
+    expect(activePane.querySelector("[data-sidebar-selection-track]"))
+      .toHaveAttribute("data-active", "true");
     expect(screen.getByRole("button", {
       name: "Research pane pane actions",
     })).toHaveClass("opacity-0");
     expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
       .not.toHaveAttribute("aria-current");
     expect(tabGroup).not.toHaveTextContent("2/4");
+    expect(paneList).toHaveClass(
+      "rounded-es-[14px]",
+      "border-s-2",
+      "border-sidebar-foreground/25",
+    );
 
     const collapse = within(tabGroup).getByRole("button", {
       name: "Collapse panes in Root topic",
@@ -678,7 +763,6 @@ describe("ChatList", () => {
     })).toHaveAttribute("aria-expanded", "false");
     expect(within(tabGroup).getByRole("button", { name: "Tab: Root topic" }))
       .not.toHaveAttribute("aria-current");
-    expect(tabSurface).toHaveClass("bg-sidebar-foreground/[0.045]");
 
     fireEvent.click(within(tabGroup).getByRole("button", {
       name: "Expand panes in Root topic",
@@ -841,10 +925,13 @@ describe("ChatList", () => {
     );
 
     const pinnedSection = screen.getByRole("region", { name: "Pinned" });
-    expect(within(pinnedSection).getByTitle("Pinned")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("region", { name: "Earlier" })).queryByTitle("Pinned"),
-    ).not.toBeInTheDocument();
+      within(pinnedSection)
+        .getByText("Pinned chat")
+        .closest("[data-chat-row]")
+        ?.querySelector("[data-sidebar-pinned-indicator]"),
+    ).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-sidebar-pinned-indicator]")).toHaveLength(1);
   });
 
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {
@@ -898,8 +985,16 @@ describe("ChatList", () => {
 
     const nanobotSection = screen.getByRole("region", { name: "nanobot" });
     const nanobotText = nanobotSection.textContent ?? "";
+    const projectSurface = nanobotSection.querySelector(
+      "[data-sidebar-project-surface]",
+    );
 
     expect(screen.getByRole("region", { name: "nanobot-bench" })).toBeInTheDocument();
+    expect(projectSurface).toHaveClass(
+      "rounded-es-[16px]",
+      "border-s-2",
+      "border-sidebar-foreground/10",
+    );
     expect(within(nanobotSection).getByText("Alpha task")).toBeInTheDocument();
     expect(within(nanobotSection).getByText("Zeta task")).toBeInTheDocument();
     expect(nanobotText.indexOf("Alpha task")).toBeLessThan(nanobotText.indexOf("Zeta task"));
@@ -954,7 +1049,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("switches row-owned tab highlights without a moving selection surface", () => {
+  it("grows and retracts the row-owned selection track", () => {
     const props = {
       sessions: [
         session({ chatId: "active", title: "Active topic" }),
@@ -974,12 +1069,10 @@ describe("ChatList", () => {
       />,
     );
 
-    const activeButton = screen.getByTitle("Active topic");
+    const activeButton = screen.getByRole("button", { name: "Active topic" });
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    expect(activeButton.closest("[data-sidebar-tab]")).toHaveClass(
-      "bg-sidebar-selected",
-    );
-    expect(screen.queryByTestId("sessions-selection-highlight")).not.toBeInTheDocument();
+    expect(activeButton.querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("origin-left", "scale-x-100", "transition-transform", "bg-current");
 
     rerender(
       <ChatList
@@ -988,11 +1081,16 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
-    expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
-    expect(screen.getByTitle("Inactive topic").closest("[data-sidebar-tab]")).toHaveClass(
-      "bg-sidebar-selected",
-    );
+    expect(screen.getByRole("button", { name: "Active topic" }))
+      .not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Inactive topic" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Active topic" })
+      .querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("scale-x-0");
+    expect(screen.getByRole("button", { name: "Inactive topic" })
+      .querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("scale-x-100");
   });
 
   it("restores collapsed tabs from the local UI preference", () => {
@@ -1067,19 +1165,109 @@ describe("ChatList", () => {
     expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/nanobot");
     expect(within(projectSection).queryByText("Alpha task")).not.toBeInTheDocument();
 
-    fireEvent.click(
-      within(projectSection).getByRole("button", { name: "Start a new topic in Photos" }),
-    );
+    const projectButton = within(projectSection).getByRole("button", { name: "Photos" });
+    fireEvent.contextMenu(projectButton);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New topic" }));
     expect(onNewChatInProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
     expect(onToggleGroup).toHaveBeenCalledTimes(1);
 
-    fireEvent.pointerDown(
-      within(projectSection).getByLabelText("Topic actions for Photos"),
-      { button: 0 },
-    );
+    fireEvent.contextMenu(projectButton);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 
     expect(onRequestRenameProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
+  });
+
+  it("animates project disclosure and surrounding layout like tab groups", () => {
+    let collapsed = false;
+    const onToggleGroup = vi.fn();
+    const animate = vi.fn(() => ({
+      addEventListener: vi.fn(),
+      cancel: vi.fn(),
+    }) as unknown as Animation);
+    HTMLElement.prototype.animate = animate;
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const followsCollapsedProject = this.textContent?.includes("Beta") ?? false;
+      return rect(followsCollapsedProject ? (collapsed ? 64 : 160) : 0);
+    };
+    const sessions = [
+      session({
+        chatId: "alpha",
+        title: "Alpha task",
+        workspaceScope: {
+          project_path: "/Users/me/alpha",
+          project_name: "Alpha project",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "beta",
+        title: "Beta task",
+        workspaceScope: {
+          project_path: "/Users/me/beta",
+          project_name: "Beta project",
+          access_mode: "restricted",
+        },
+      }),
+    ];
+    const props = {
+      sessions,
+      activeKey: "websocket:alpha",
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onRequestRenameProject: vi.fn(),
+      onToggleArchive: vi.fn(),
+      onToggleGroup,
+    };
+
+    const { rerender } = render(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": false }} />,
+    );
+
+    const projectButton = screen.getByRole("button", { name: "Alpha project" });
+    const disclosureButton = screen.getByRole("button", {
+      name: "Projects: Alpha project",
+    });
+    expect(projectButton).toHaveAttribute("aria-expanded", "true");
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "true");
+    const expandedIcon = disclosureButton
+      .querySelector("[data-sidebar-project-disclosure-icon]");
+    expect(expandedIcon).toHaveClass(
+      "transition-transform",
+      "duration-200",
+      "ease-out",
+      "motion-reduce:transition-none",
+    );
+    expect(expandedIcon).not.toHaveClass("rotate-90");
+    expect(screen.getByRole("button", { name: "Topic actions for Alpha project" })
+      .compareDocumentPosition(disclosureButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+
+    fireEvent.click(disclosureButton);
+    expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/alpha");
+    collapsed = true;
+    rerender(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": true }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Projects: Alpha project" })
+      .querySelector("[data-sidebar-project-disclosure-icon]"))
+      .toHaveClass("rotate-90");
+    expect(projectButton).toHaveAttribute("aria-expanded", "false");
+    expect(animate).toHaveBeenCalledWith(
+      [
+        { transform: "translateY(96px)" },
+        { transform: "translateY(0)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    );
+    expect(screen.getByRole("button", { name: "Beta project" })
+      .closest("[data-sidebar-group-header]"))
+      .toHaveAttribute("data-sidebar-group-header", "project:/Users/me/beta");
   });
 
   it("hides the updated dot for the active chat", () => {
