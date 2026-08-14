@@ -27,7 +27,7 @@ function createTestStorage(): Storage {
   };
 }
 
-if (typeof window !== "undefined" && typeof localStorage.setItem !== "function") {
+if (typeof window !== "undefined") {
   const storage = createTestStorage();
   Object.defineProperty(window, "localStorage", {
     value: storage,

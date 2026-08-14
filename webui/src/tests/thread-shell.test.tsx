@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useLayoutEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
@@ -185,6 +185,11 @@ function makeClient() {
     close: vi.fn(),
     updateUrl: vi.fn(),
   };
+}
+
+function LayoutProbe({ children, onLayout }: { children: ReactNode; onLayout: () => void }) {
+  useLayoutEffect(onLayout);
+  return children;
 }
 
 function wrap(
@@ -832,6 +837,61 @@ describe("ThreadShell", () => {
     expect(
       screen.queryByRole("button", { name: "Suggestion from chat A" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not commit a visible suggestion into another chat", async () => {
+    const client = makeClient();
+    client.requestMutation.mockResolvedValue({ suggestions: ["Suggestion from chat A"] });
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+    const staleSuggestionObserved: boolean[] = [];
+    const view = (chatId: string) => wrap(
+      client,
+      <LayoutProbe
+        onLayout={() => {
+          if (chatId === "suggestions-visible-b") {
+            staleSuggestionObserved.push(
+              screen.queryByRole("button", { name: "Suggestion from chat A" }) !== null,
+            );
+          }
+        }}
+      >
+        <ThreadShell
+          session={session(chatId)}
+          title={chatId}
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />
+      </LayoutProbe>,
+    );
+    const { rerender } = render(view("suggestions-visible-a"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Question in chat A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+    act(() => {
+      client._emitChat("suggestions-visible-a", {
+        event: "message",
+        chat_id: "suggestions-visible-a",
+        text: "Answer in chat A",
+        turn_id: turnId,
+      });
+      client._emitChat("suggestions-visible-a", {
+        event: "turn_end",
+        chat_id: "suggestions-visible-a",
+        turn_id: turnId,
+      });
+    });
+    await screen.findByRole("button", { name: "Suggestion from chat A" });
+
+    await act(async () => {
+      rerender(view("suggestions-visible-b"));
+    });
+
+    expect(staleSuggestionObserved).toEqual([false]);
   });
 
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {

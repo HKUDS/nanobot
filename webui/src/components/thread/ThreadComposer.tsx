@@ -2643,7 +2643,10 @@ export function ThreadComposer({
           if (!open) setPendingSuggestion(null);
         }}
       >
-        <DialogContent className="w-[min(calc(100vw-2rem),28rem)] rounded-[20px] p-5">
+        <DialogContent
+          className="w-[min(calc(100vw-2rem),28rem)] rounded-[20px] p-5"
+          showCloseButton={false}
+        >
           <DialogHeader className="text-left">
             <DialogTitle>
               {t("thread.suggestions.dialogTitle", { defaultValue: "Use this suggestion?" })}

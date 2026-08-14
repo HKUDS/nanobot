@@ -381,7 +381,9 @@ describe("ThreadComposer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add a regression test" }));
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Use this suggestion?" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Use this suggestion?" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(input).toHaveValue("Keep my draft");

@@ -703,7 +703,10 @@ export function ThreadShell({
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
-  const [followUpSuggestions, setFollowUpSuggestions] = useState<string[]>([]);
+  const [followUpSuggestionState, setFollowUpSuggestionState] = useState<{
+    chatId: string;
+    values: string[];
+  } | null>(null);
   const [suggestionCompletion, setSuggestionCompletion] = useState<{
     chatId: string;
     turnId: string;
@@ -738,6 +741,9 @@ export function ThreadShell({
   const suggestibleTurnIdRef = useRef<string | null>(null);
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
+  const followUpSuggestions = followUpSuggestionState?.chatId === chatId
+    ? followUpSuggestionState.values
+    : [];
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -746,7 +752,7 @@ export function ThreadShell({
   const clearFollowUpSuggestions = useCallback(() => {
     suggestionFenceRef.current += 1;
     setSuggestionCompletion(null);
-    setFollowUpSuggestions([]);
+    setFollowUpSuggestionState(null);
   }, []);
   const handleTurnEnd = useCallback((turnId: string | undefined, successful: boolean) => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
@@ -866,17 +872,20 @@ export function ThreadShell({
       messages: recentMessages,
     }).then((response) => {
       if (suggestionFenceRef.current === completion.fence) {
-        setFollowUpSuggestions(response.suggestions);
+        setFollowUpSuggestionState({
+          chatId: completion.chatId,
+          values: response.suggestions,
+        });
       }
     }).catch(() => {});
   }, [chatId, client, displayMessages, settings, suggestionCompletion]);
   useEffect(() => {
     if (settings === null || settings.follow_up_suggestions?.enabled === true) return;
-    if (!suggestionCompletion && followUpSuggestions.length === 0) return;
+    if (!suggestionCompletion && followUpSuggestionState === null) return;
     clearFollowUpSuggestions();
   }, [
     clearFollowUpSuggestions,
-    followUpSuggestions.length,
+    followUpSuggestionState,
     settings?.follow_up_suggestions?.enabled,
     suggestionCompletion,
   ]);
