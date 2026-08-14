@@ -148,6 +148,56 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_apply_channel_feature_action_preserves_runtime_when_stop_raises(monkeypatch):
+    enabled = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "hot": {"enabled": True},
+        }
+    })
+    disabled = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "hot": {"enabled": False},
+        }
+    })
+    _stub_registry(monkeypatch, _plugin(_HotChannel))
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: disabled)
+
+    manager = ChannelManager(enabled, MessageBus())
+    channel = manager.channels["hot"]
+    manager._started = True
+    task = manager._start_channel_task("hot", channel)
+    await asyncio.wait_for(channel.started.wait(), timeout=1)
+    original_stop = channel.stop
+
+    async def fail_stop() -> None:
+        raise RuntimeError("socket close failed")
+
+    monkeypatch.setattr(channel, "stop", fail_stop)
+    result = await manager.apply_channel_feature_action("disable", "hot")
+
+    assert result == {
+        "handled": True,
+        "ok": False,
+        "stopped": False,
+        "requires_restart": True,
+        "message": (
+            "hot channel could not be stopped safely. "
+            "Restart nanobot before replacing its runtime state."
+        ),
+    }
+    assert manager.channels["hot"] is channel
+    assert manager._channel_owners["hot"] == "hot"
+    assert manager._channel_runtime_specs["hot"] == ("hot", "default")
+    assert manager._channel_tasks["hot"] is task
+    assert not task.done()
+
+    monkeypatch.setattr(channel, "stop", original_stop)
+    assert await manager._stop_channel("hot") is True
+
+
+@pytest.mark.asyncio
 async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_fails(monkeypatch):
     enabled = Config.model_validate({
         "channels": {

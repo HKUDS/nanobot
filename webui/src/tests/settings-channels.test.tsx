@@ -1,6 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { ChannelSetupContract, ChannelSetupContractField } from "@/lib/types";
+import type {
+  ChannelSetupContract,
+  ChannelSetupContractField,
+  NanobotFeatureInfo,
+} from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -46,6 +50,9 @@ function channelSetupContract(
             defaultValue: "mention",
           }),
         ],
+        requirements: [
+          { alternatives: [["channels.discord.token"]] },
+        ],
       };
     case "email":
       return {
@@ -66,6 +73,15 @@ function channelSetupContract(
           field("verifyDkim", "bool", { defaultValue: "true" }),
           field("verifySpf", "bool", { defaultValue: "true" }),
         ],
+        requirements: [
+          { alternatives: [["channels.email.consentGranted"]] },
+          { alternatives: [["channels.email.imapHost"]] },
+          { alternatives: [["channels.email.imapUsername"]] },
+          { alternatives: [["channels.email.imapPassword"]] },
+          { alternatives: [["channels.email.smtpHost"]] },
+          { alternatives: [["channels.email.smtpUsername"]] },
+          { alternatives: [["channels.email.smtpPassword"]] },
+        ],
       };
     case "feishu":
       return {
@@ -84,6 +100,10 @@ function channelSetupContract(
           field("allowFrom", "list"),
           field("topicIsolation", "bool"),
         ],
+        requirements: [
+          { alternatives: [["channels.feishu.appId"]] },
+          { alternatives: [["channels.feishu.appSecret"]] },
+        ],
       };
     case "matrix":
       return {
@@ -99,6 +119,16 @@ function channelSetupContract(
             defaultValue: "open",
           }),
         ],
+        requirements: [
+          { alternatives: [["channels.matrix.homeserver"]] },
+          { alternatives: [["channels.matrix.userId"]] },
+          {
+            alternatives: [
+              ["channels.matrix.password"],
+              ["channels.matrix.accessToken", "channels.matrix.deviceId"],
+            ],
+          },
+        ],
       };
     case "qq":
       return {
@@ -112,13 +142,228 @@ function channelSetupContract(
             defaultValue: "plain",
           }),
         ],
+        requirements: [
+          { alternatives: [["channels.qq.appId"]] },
+          { alternatives: [["channels.qq.secret"]] },
+        ],
       };
   }
+}
+
+function uninstalledConnectFeature(
+  name: "feishu" | "weixin" | "whatsapp",
+): NanobotFeatureInfo {
+  const displayNames = {
+    feishu: "Feishu",
+    weixin: "WeChat",
+    whatsapp: "WhatsApp",
+  };
+  return {
+    name,
+    display_name: displayNames[name],
+    webui: "webui/index.tsx",
+    type: "channel",
+    enabled: false,
+    configured: false,
+    installed: false,
+    ready: false,
+    runtime_status: "stopped",
+    status: "not_enabled",
+    install_supported: true,
+    requires_restart: true,
+    ...(name === "feishu"
+      ? {
+          instances: [{
+            id: "default",
+            name: "nanobot",
+            enabled: false,
+            runtime_status: "stopped",
+            configured: false,
+            config_values: {},
+            configured_fields: [],
+          }],
+        }
+      : {}),
+  };
 }
 
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
+  it("installs WhatsApp support before exposing the connect flow", async () => {
+    const whatsappFeature = {
+      name: "whatsapp",
+      display_name: "WhatsApp",
+      webui: "webui/index.tsx",
+      type: "channel",
+      enabled: false,
+      configured: false,
+      installed: false,
+      ready: false,
+      status: "not_enabled",
+      install_supported: true,
+      requires_restart: false,
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({ features: [whatsappFeature], enabled_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockResolvedValueOnce({
+      features: [{ ...whatsappFeature, installed: true }],
+      enabled_count: 0,
+      requires_restart: false,
+      last_action: {
+        ok: true,
+        message: "Installed support for channel 'whatsapp'",
+        enabled: false,
+      },
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View WhatsApp settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect WhatsApp" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(
+      "nanobot will install what WhatsApp needs. You can connect it after installation.",
+    )).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Install support" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "whatsapp", install_only: true },
+        150_000,
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Connect WhatsApp" })).toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.some(([action]) => (
+      action.startsWith("settings.channel.connect")
+    ))).toBe(false);
+  });
+
+  it.each([
+    ["feishu", "Feishu", "Create assistant"],
+    ["weixin", "WeChat", "Connect WeChat"],
+  ] as const)(
+    "installs %s support before mounting its custom connect panel",
+    async (name, displayName, connectActionLabel) => {
+      const feature = uninstalledConnectFeature(name);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === "/api/settings") return jsonResponse(settingsPayload());
+          if (url === "/api/settings/cli-apps") {
+            return jsonResponse({ apps: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/mcp-presets") {
+            return jsonResponse({ presets: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/nanobot-features") {
+            return jsonResponse({ features: [feature], enabled_count: 0 });
+          }
+          return { ok: false, status: 404, json: async () => ({}) } as Response;
+        }),
+      );
+      requestMutationMock.mockResolvedValueOnce({
+        features: [{ ...feature, installed: true }],
+        enabled_count: 0,
+        requires_restart: false,
+        last_action: {
+          ok: true,
+          message: `Installed support for channel '${name}'`,
+          enabled: false,
+        },
+      });
+
+      renderSettingsView({ initialSection: "channels" });
+
+      expect(
+        await screen.findByRole("button", { name: `View ${displayName} settings` }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Install support" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: connectActionLabel })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Install support" }));
+
+      await waitFor(() =>
+        expect(requestMutationMock).toHaveBeenCalledWith(
+          "settings.feature.enable",
+          { name, install_only: true },
+          150_000,
+        ),
+      );
+      expect(
+        await screen.findByRole("button", { name: connectActionLabel }, { timeout: 3_000 }),
+      ).toBeInTheDocument();
+      expect(requestMutationMock.mock.calls.some(([action]) => (
+        action.startsWith("settings.channel.connect")
+      ))).toBe(false);
+    },
+  );
+
+  it("announces an install-only failure and logs action context", async () => {
+    const feature = uninstalledConnectFeature("whatsapp");
+    const installError = new Error("Package install failed");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === "/api/settings") return jsonResponse(settingsPayload());
+          if (url === "/api/settings/cli-apps") {
+            return jsonResponse({ apps: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/mcp-presets") {
+            return jsonResponse({ presets: [], installed_count: 0 });
+          }
+          if (url === "/api/settings/nanobot-features") {
+            return jsonResponse({ features: [feature], enabled_count: 0 });
+          }
+          return { ok: false, status: 404, json: async () => ({}) } as Response;
+        }),
+      );
+      requestMutationMock.mockRejectedValueOnce(installError);
+
+      renderSettingsView({ initialSection: "channels" });
+
+      expect(
+        await screen.findByRole("button", { name: "View WhatsApp settings" }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Install support" }),
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Package install failed");
+      expect(consoleError).toHaveBeenCalledWith(
+        "nanobot feature action failed",
+        expect.objectContaining({
+          action: "enable",
+          name: "whatsapp",
+          installOnly: true,
+          error: installError,
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 
   it("shows an enabled channel with missing support as failed", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -612,7 +857,7 @@ describe("Settings channels", () => {
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Product worker" }));
-    expect(screen.getByRole("radio", { name: "Eu" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Eu" })).toBeChecked();
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
@@ -779,22 +1024,15 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Advanced"));
 
-    const behavior = screen.getByRole("radiogroup", { name: "Group behavior" });
-    expect(within(behavior).getByRole("radio", { name: "Mention only" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const behavior = screen.getByRole("group", { name: "Group behavior" });
+    expect(within(behavior).getByRole("radio", { name: "Mention only" })).toBeChecked();
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("mention")).not.toBeInTheDocument();
 
     fireEvent.click(within(behavior).getByRole("radio", { name: "All messages" }));
 
-    expect(within(behavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
   });
 
   it("uses a list-to-detail navigation stack on compact screens", async () => {
@@ -934,15 +1172,14 @@ describe("Settings channels", () => {
       "href",
       "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#discord",
     );
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeEnabled();
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
-    fireEvent.click(screen.getByText("Advanced"));
     fireEvent.change(screen.getByLabelText("Allowed channels"), {
       target: { value: "123, 456" },
     });
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+    fireEvent.click(within(screen.getByRole("group", { name: "Group behavior" })).getByRole(
       "radio",
       { name: "All messages" },
     ));
@@ -972,6 +1209,120 @@ describe("Settings channels", () => {
     expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
       "aria-checked",
       "true",
+    );
+  });
+
+  it("requires Email consent to be granted before validating or enabling", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "email",
+              display_name: "Email",
+              webui: "webui/index.ts",
+              type: "channel",
+              enabled: false,
+              configured: false,
+              installed: true,
+              ready: false,
+              status: "not_enabled",
+              install_supported: true,
+              requires_restart: false,
+              setup: channelSetupContract("email"),
+            }],
+            enabled_count: 0,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.channel.validate") {
+        return {
+          name: "email",
+          status: "ready",
+          checks: [],
+          missing_fields: [],
+          can_enable: true,
+          requires_restart: false,
+        };
+      }
+      if (action === "settings.channel.configure") {
+        return {
+          name: "email",
+          saved: true,
+          saved_keys: [
+            "channels.email.consentGranted",
+            "channels.email.imapHost",
+            "channels.email.imapUsername",
+            "channels.email.imapPassword",
+            "channels.email.smtpHost",
+            "channels.email.smtpUsername",
+            "channels.email.smtpPassword",
+          ],
+        };
+      }
+      return settingsPayload();
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Email settings" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.example.com" } });
+    fireEvent.change(screen.getByLabelText("IMAP username"), { target: { value: "bot@example.com" } });
+    fireEvent.change(screen.getByLabelText("IMAP password"), { target: { value: "imap-secret" } });
+    fireEvent.change(screen.getByLabelText("SMTP host"), { target: { value: "smtp.example.com" } });
+    fireEvent.change(screen.getByLabelText("SMTP username"), { target: { value: "bot@example.com" } });
+    fireEvent.change(screen.getByLabelText("SMTP password"), { target: { value: "smtp-secret" } });
+
+    const consentGroup = screen.getByRole("group", { name: "Consent granted" });
+    const notGranted = within(consentGroup).getByRole("radio", { name: "Not granted" });
+    const granted = within(consentGroup).getByRole("radio", { name: "Granted" });
+    expect(notGranted).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check and enable" }));
+
+    await waitFor(() => expect(granted).toHaveFocus());
+    expect(consentGroup).toHaveAttribute("aria-invalid", "true");
+    expect(notGranted).toHaveAttribute("aria-invalid", "true");
+    expect(granted).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Required to complete setup.")).toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.some(([action]) => (
+      action === "settings.channel.validate" || action === "settings.channel.configure"
+    ))).toBe(false);
+
+    fireEvent.click(granted);
+
+    expect(consentGroup).toHaveAttribute("aria-invalid", "false");
+    expect(notGranted).toHaveAttribute("aria-invalid", "false");
+    expect(granted).toHaveAttribute("aria-invalid", "false");
+    expect(screen.queryByText("Required to complete setup.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check and enable" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.validate",
+        expect.objectContaining({
+          name: "email",
+          values: expect.objectContaining({
+            "channels.email.consentGranted": "true",
+          }),
+        }),
+        20_000,
+      ),
+    );
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.configure",
+        expect.objectContaining({ name: "email", enable: true }),
+        150_000,
+      ),
     );
   });
 
@@ -1047,12 +1398,11 @@ describe("Settings channels", () => {
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Advanced"));
     expect(screen.getByLabelText("Allowed channels")).toHaveValue("123, 456");
-    expect(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+    expect(within(screen.getByRole("group", { name: "Group behavior" })).getByRole(
       "radio",
       { name: "All messages" },
-    )).toHaveAttribute("aria-checked", "true");
+    )).toBeChecked();
 
     fireEvent.click(screen.getByRole("switch", { name: "Discord channel" }));
     await waitFor(() =>
@@ -1102,7 +1452,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("shows branded setup guide links for supported WebUI channels", async () => {
+  it("shows setup guide links with local channel identity", async () => {
     const channels = [
       ["websocket", "WebSocket", "Open WebSocket setup"],
       ["telegram", "Telegram", "Open Telegram setup"],
@@ -1134,7 +1484,7 @@ describe("Settings channels", () => {
             features: channels.map(([name, displayName]) => ({
               name,
               display_name: displayName,
-              webui: ["feishu", "weixin"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
+              webui: ["feishu", "weixin", "whatsapp"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
               type: "channel",
               enabled: name === "websocket",
               installed: true,
@@ -1174,7 +1524,8 @@ describe("Settings channels", () => {
       }
       const guide = await screen.findByRole("link", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
-      expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
+      expect(guide.querySelector("span[aria-hidden]")).not.toBeNull();
+      expect(guide.querySelector('img[src^="http"]')).toBeNull();
     }
     expect(screen.queryByRole("button", { name: "View MoChat settings" })).not.toBeInTheDocument();
   });
@@ -1212,40 +1563,27 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
-    const consent = screen.getByRole("radiogroup", { name: "Consent granted" });
-    expect(within(consent).getByRole("radio", { name: "Not granted" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const consent = screen.getByRole("group", { name: "Consent granted" });
+    expect(within(consent).getByRole("radio", { name: "Not granted" })).toBeChecked();
     expect(within(consent).getByRole("radio", { name: "Granted" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("true")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
     fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
     fireEvent.click(screen.getByText("Advanced"));
-    const region = screen.getByRole("radiogroup", { name: "Region" });
-    expect(within(region).getByRole("radio", { name: "Feishu" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const region = screen.getByRole("group", { name: "Region" });
+    expect(within(region).getByRole("radio", { name: "Feishu" })).toBeChecked();
     expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
-    const matrixBehavior = screen.getByRole("radiogroup", { name: "Group behavior" });
-    expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(screen.getByText("Choose one credential method")).toBeInTheDocument();
+    const matrixBehavior = screen.getByRole("group", { name: "Group behavior" });
+    expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toBeChecked();
     expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
-    const format = screen.getByRole("radiogroup", { name: "Message format" });
-    expect(within(format).getByRole("radio", { name: "Plain text" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const format = screen.getByRole("group", { name: "Message format" });
+    expect(within(format).getByRole("radio", { name: "Plain text" })).toBeChecked();
     expect(within(format).getByRole("radio", { name: "Markdown" })).toBeInTheDocument();
   });
 

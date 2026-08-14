@@ -714,6 +714,23 @@
       "toggleInstance": "Instance {{name}}",
       "tryIt": "Essayer",
       "validationFailed": "Vérifiez la configuration requise avant l'activation.",
+      "completeSetupToEnable": "Terminez la configuration requise ci-dessous pour activer ce canal.",
+      "chooseCredentialMethod": "Choisissez une méthode d'authentification",
+      "or": "ou",
+      "fieldRequired": "Requis pour terminer la configuration.",
+      "secretWillBeRemoved": "Sera supprimé",
+      "keepSavedSecret": "Conserver l'identifiant enregistré",
+      "removeSavedSecret": "Supprimer l'identifiant enregistré",
+      "sections": {
+        "account": "Compte",
+        "credentials": "Identifiants",
+        "connection": "Connexion",
+        "receiving": "Réception des e-mails",
+        "sending": "Envoi des e-mails",
+        "access": "Accès",
+        "behavior": "Comportement",
+        "security": "Sécurité"
+      },
       "validation": {
         "connected": "Connecté",
         "configured": "Configuré manuellement",
@@ -731,7 +748,9 @@
       "installSupport": "Installer le support",
       "installConfirmTitle": "Installer le support pour {{name}} ?",
       "installConfirmDescription": "nanobot ajoutera ce dont {{name}} a besoin, puis l'activera. Continuer ?",
+      "installOnlyConfirmDescription": "nanobot installera les composants requis par {{name}}. Vous pourrez vous connecter après l’installation.",
       "installConfirmAction": "Installer et activer",
+      "installOnlyConfirmAction": "Installer le support",
       "websocketRequired": "Requis pour la WebUI",
       "channelDisabled": "Canal désactivé",
       "notEnabled": "Non activé"

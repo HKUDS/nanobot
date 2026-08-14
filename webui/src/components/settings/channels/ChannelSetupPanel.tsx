@@ -16,11 +16,17 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { channelUiContribution } from "@/channel-plugins/registry";
-import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
+import type {
+  ChannelFeatureAction,
+  ChannelPluginConnectFlowProps,
+} from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
+  type ChannelConfigField,
+  type ChannelFieldSection,
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
+  type ChannelSetupRequirement,
 } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
@@ -130,7 +136,7 @@ export function ChannelSetupPanel({
   actionKey: string | null;
   chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -139,7 +145,10 @@ export function ChannelSetupPanel({
   const [connectRequestId, setConnectRequestId] = useState(0);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
-  if (PluginPanel) {
+  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
+  const installOnly = !feature.enabled && setup.mode === "connect";
+  const missingSupport = !feature.installed && (feature.enabled || installOnly);
+  if (PluginPanel && !missingSupport) {
     return (
       <Suspense fallback={<ChannelPluginLoading />}>
         <PluginPanel
@@ -154,7 +163,7 @@ export function ChannelSetupPanel({
       </Suspense>
     );
   }
-  if (feature.instances !== undefined) {
+  if (feature.instances !== undefined && !missingSupport) {
     return (
       <ChannelInstancesPanel
         feature={feature}
@@ -166,11 +175,9 @@ export function ChannelSetupPanel({
   }
   const enableBusy = actionKey === `enable:${feature.name}`;
   const disableBusy = actionKey === `disable:${feature.name}`;
-  const missingSupport = feature.enabled && !feature.installed;
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
   const channelChecked = alwaysEnabled || channelToggleChecked(feature);
   const channelBusy = enableBusy || disableBusy;
-  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
   const needsSetupBeforeEnable =
     !channelChecked
     && feature.configured === false
@@ -178,7 +185,6 @@ export function ChannelSetupPanel({
   const channelToggleDisabled =
     alwaysEnabled
     || channelBusy
-    || needsSetupBeforeEnable
     || (!feature.install_supported && !feature.installed && !feature.enabled);
   const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
   const toggleAriaLabel = t("settings.channels.toggleChannel", {
@@ -204,7 +210,7 @@ export function ChannelSetupPanel({
                 size="sm"
                 variant="secondary"
                 disabled={enableBusy}
-                onClick={() => onAction("enable", feature.name)}
+                onClick={() => onAction("enable", feature.name, { installOnly })}
                 className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
               >
                 {enableBusy ? (
@@ -230,13 +236,18 @@ export function ChannelSetupPanel({
             ariaLabel={toggleAriaLabel}
             label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             onChange={(checked) => {
-              if (
-                uiContribution?.canConnectBeforeConfigured
-                && checked
-                && !channelChecked
-                && feature.configured === false
-              ) {
-                setConnectRequestId((current) => current + 1);
+              if (checked && missingSupport) {
+                onAction("enable", feature.name, { installOnly });
+                return;
+              }
+              if (checked && !channelChecked && feature.configured === false) {
+                if (uiContribution?.canConnectBeforeConfigured && setup.mode === "connect") {
+                  setConnectRequestId((current) => current + 1);
+                } else {
+                  window.requestAnimationFrame(() => {
+                    document.querySelector<HTMLElement>("[id^='channel-field-']")?.focus();
+                  });
+                }
                 return;
               }
               onAction(checked ? "enable" : "disable", feature.name);
@@ -247,13 +258,22 @@ export function ChannelSetupPanel({
 
       <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
 
+      {needsSetupBeforeEnable ? (
+        <p className="mt-3 text-[12px] leading-5 text-muted-foreground">
+          {tx(
+            "settings.channels.completeSetupToEnable",
+            "Complete the required setup below, then nanobot can enable this channel.",
+          )}
+        </p>
+      ) : null}
+
       <ChannelSetupSurface
         token={token}
         feature={feature}
         setup={setup}
         chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
-        ConnectFlow={uiContribution?.ConnectFlow}
+        ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     </aside>
@@ -286,6 +306,8 @@ function ChannelSetupSurface({
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
+  const [clearedSecrets, setClearedSecrets] = useState<Set<string>>(() => new Set());
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const configValuesKey = JSON.stringify(feature.config_values ?? {});
   const configuredFields = useMemo(
     () => new Set(feature.configured_fields ?? []),
@@ -293,11 +315,17 @@ function ChannelSetupSurface({
   );
   const mode = setup.mode ?? "credentials";
   const fields = setup.fields ?? [];
-  const requiredFields = fields.filter((field) => !field.optional);
-  const primaryFields = requiredFields.length ? requiredFields : fields.slice(0, 1);
-  const optionalFields = fields.filter((field) => field.optional);
+  const requirementKeys = new Set(
+    (setup.requirements ?? []).flatMap((requirement) => requirement.alternatives.flat()),
+  );
+  const primaryFields = fields.filter(
+    (field) => field.section !== "advanced"
+      && (!field.optional || Boolean(field.section) || requirementKeys.has(field.key)),
+  );
   const manualFields = setup.manualFields ?? [];
-  const advancedFields = mode === "connect" ? manualFields : optionalFields;
+  const advancedFields = mode === "connect"
+    ? manualFields
+    : fields.filter((field) => !primaryFields.includes(field));
   const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
@@ -316,6 +344,8 @@ function ChannelSetupSurface({
     setValidating(false);
     setValidation(null);
     setTouchedFields(new Set());
+    setClearedSecrets(new Set());
+    setFieldErrors({});
     setFieldValues(defaultChannelFieldValues(editableFields, feature.config_values));
   }, [configValuesKey, feature.name]);
 
@@ -326,6 +356,27 @@ function ChannelSetupSurface({
   const setFieldValue = (key: string, value: string) => {
     setFieldValues((current) => ({ ...current, [key]: value }));
     setTouchedFields((current) => new Set(current).add(key));
+    setClearedSecrets((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+    setFieldErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const setSecretCleared = (key: string, clear: boolean) => {
+    setClearedSecrets((current) => {
+      const next = new Set(current);
+      if (clear) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   };
 
   const applyPreset = (preset: ChannelProviderPreset) => {
@@ -349,14 +400,35 @@ function ChannelSetupSurface({
   };
 
   const saveCredentialSettings = async () => {
+    const errors = channelRequirementErrors(
+      fields,
+      setup.requirements ?? [],
+      fieldValues,
+      configuredFields,
+      clearedSecrets,
+      tx("settings.channels.fieldRequired", "Required to complete setup."),
+    );
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setNotice(tx("settings.channels.validationFailed", "Check the required setup before enabling."));
+      focusFirstChannelFieldError(errors);
+      return;
+    }
     setSaving(true);
     setValidating(true);
     setNotice(null);
-    const values = channelValuesForSubmit(fields, fieldValues, touchedFields);
+    const values = channelValuesForSubmit(fields, fieldValues, touchedFields, clearedSecrets);
     try {
       const validationPayload = await validateChannel(client, feature.name, values);
       setValidation(validationPayload);
       if (!validationPayload.can_enable) {
+        const errors = channelServerValidationErrors(
+          fields,
+          validationPayload.missing_fields,
+          tx("settings.channels.fieldRequired", "Required to complete setup."),
+        );
+        setFieldErrors(errors);
+        focusFirstChannelFieldError(errors);
         setNotice(
           validationPayload.message
             ?? tx("settings.channels.validationFailed", "Check the required setup before enabling."),
@@ -388,7 +460,7 @@ function ChannelSetupSurface({
       const payload = await validateChannel(
         client,
         feature.name,
-        channelValuesForSubmit(fields, fieldValues, touchedFields),
+        channelValuesForSubmit(fields, fieldValues, touchedFields, clearedSecrets),
       );
       setValidation(payload);
       if (payload.message) setNotice(payload.message);
@@ -439,7 +511,7 @@ function ChannelSetupSurface({
         <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && ConnectFlow ? (
+        {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
           <Suspense fallback={<ChannelPluginLoading compact />}>
             <ConnectFlow
               token={token}
@@ -496,13 +568,17 @@ function ChannelSetupSurface({
               />
             ) : null}
             {primaryFields.length ? (
-              <CredentialForm
+              <ChannelFieldGroups
                 fields={primaryFields}
                 values={fieldValues}
                 configuredFields={configuredFields}
                 visibleSecrets={visibleSecrets}
                 onChange={setFieldValue}
                 onToggleSecret={toggleSecret}
+                errors={fieldErrors}
+                clearedSecrets={clearedSecrets}
+                onClearSecret={setSecretCleared}
+                requirements={setup.requirements ?? []}
               />
             ) : null}
             <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -535,14 +611,16 @@ function ChannelSetupSurface({
         ) : null}
       </section>
 
-      {notice ? (
-        <div
-          role="status"
-          className="rounded-[12px] bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground"
-        >
-          {notice}
-        </div>
-      ) : null}
+      <div
+        role="status"
+        aria-live="polite"
+        className={cn(
+          "rounded-[12px] bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground",
+          !notice && "sr-only",
+        )}
+      >
+        {notice ?? ""}
+      </div>
 
       {setup.steps.length ? (
         <ChannelSetupSteps steps={setup.steps} tryIt={setup.tryIt} />
@@ -567,6 +645,9 @@ function ChannelSetupSurface({
                 visibleSecrets={visibleSecrets}
                 onChange={setFieldValue}
                 onToggleSecret={toggleSecret}
+                errors={fieldErrors}
+                clearedSecrets={clearedSecrets}
+                onClearSecret={setSecretCleared}
                 compact
               />
             </div>
@@ -575,6 +656,154 @@ function ChannelSetupSurface({
       ) : null}
     </form>
   );
+}
+
+const CHANNEL_FIELD_SECTION_ORDER: ChannelFieldSection[] = [
+  "account",
+  "credentials",
+  "connection",
+  "receiving",
+  "sending",
+  "access",
+  "behavior",
+  "security",
+];
+
+function ChannelFieldGroups({
+  fields,
+  requirements,
+  ...formProps
+}: {
+  fields: ChannelConfigField[];
+  requirements: ChannelSetupRequirement[];
+  values: Record<string, string>;
+  configuredFields: Set<string>;
+  visibleSecrets: Record<string, boolean>;
+  onChange: (key: string, value: string) => void;
+  onToggleSecret: (key: string) => void;
+  errors: Record<string, string>;
+  clearedSecrets: Set<string>;
+  onClearSecret: (key: string, clear: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const labels = new Map(fields.map((field) => [field.key, field.label]));
+  const compositeRequirements = requirements.filter(
+    (requirement) => requirement.alternatives.length > 1,
+  );
+  const groups = new Map<ChannelFieldSection, ChannelConfigField[]>();
+  for (const field of fields) {
+    const section = field.section ?? "credentials";
+    const current = groups.get(section) ?? [];
+    current.push(field);
+    groups.set(section, current);
+  }
+
+  return (
+    <div className="mt-4 space-y-5">
+      {compositeRequirements.map((requirement, index) => (
+        <div
+          key={index}
+          className="rounded-[12px] border border-border/60 bg-background/55 px-3 py-2.5"
+        >
+          <div className="text-[11px] font-semibold text-foreground">
+            {tx("settings.channels.chooseCredentialMethod", "Choose one credential method")}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+            {requirement.alternatives.map((alternative, alternativeIndex) => (
+              <span key={alternative.join("|")} className="contents">
+                {alternativeIndex ? <span aria-hidden>{tx("settings.channels.or", "or")}</span> : null}
+                <span className="rounded-full bg-muted px-2 py-0.5 text-foreground/85">
+                  {alternative.map((key) => labels.get(key) ?? key.split(".").at(-1)).join(" + ")}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+      {CHANNEL_FIELD_SECTION_ORDER.map((section) => {
+        const sectionFields = groups.get(section);
+        if (!sectionFields?.length) return null;
+        return (
+          <fieldset key={section} className="space-y-3">
+            <legend className="text-[12px] font-semibold text-foreground">
+              {channelFieldSectionLabel(section, tx)}
+            </legend>
+            <CredentialForm fields={sectionFields} {...formProps} compact />
+          </fieldset>
+        );
+      })}
+    </div>
+  );
+}
+
+function channelFieldSectionLabel(
+  section: ChannelFieldSection,
+  tx: (key: string, fallback: string) => string,
+): string {
+  const fallbacks: Record<ChannelFieldSection, string> = {
+    account: "Account",
+    credentials: "Credentials",
+    connection: "Connection",
+    receiving: "Receiving mail",
+    sending: "Sending mail",
+    access: "Access",
+    behavior: "Behavior",
+    security: "Security",
+    advanced: "Advanced",
+  };
+  return tx(`settings.channels.sections.${section}`, fallbacks[section]);
+}
+
+function channelRequirementErrors(
+  fields: ChannelConfigField[],
+  requirements: ChannelSetupRequirement[],
+  values: Record<string, string>,
+  configuredFields: Set<string>,
+  clearedSecrets: Set<string>,
+  message: string,
+): Record<string, string> {
+  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
+  const present = (key: string) => {
+    const field = fieldByKey.get(key);
+    if (!field || clearedSecrets.has(key)) return false;
+    const value = (values[key] ?? "").trim();
+    if (field.kind === "bool") return value === "true";
+    if (value) return true;
+    return Boolean(field.secret && configuredFields.has(key));
+  };
+  const errors: Record<string, string> = {};
+  for (const requirement of requirements) {
+    if (requirement.alternatives.some((alternative) => alternative.every(present))) continue;
+    const closest = [...requirement.alternatives].sort(
+      (left, right) => left.filter((key) => !present(key)).length - right.filter((key) => !present(key)).length,
+    )[0] ?? [];
+    for (const key of closest) {
+      if (!present(key) && fieldByKey.has(key)) errors[key] = message;
+    }
+  }
+  return errors;
+}
+
+function channelServerValidationErrors(
+  fields: ChannelConfigField[],
+  missingFields: string[],
+  message: string,
+): Record<string, string> {
+  const missing = new Set(missingFields);
+  return Object.fromEntries(
+    fields
+      .filter((field) => missing.has(field.key) || missing.has(field.key.split(".").at(-1) ?? ""))
+      .map((field) => [field.key, message]),
+  );
+}
+
+function focusFirstChannelFieldError(errors: Record<string, string>) {
+  const key = Object.keys(errors)[0];
+  if (!key) return;
+  window.requestAnimationFrame(() => {
+    document.getElementById(`channel-field-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`)?.focus();
+  });
 }
 
 function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {

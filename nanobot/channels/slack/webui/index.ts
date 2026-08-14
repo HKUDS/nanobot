@@ -43,7 +43,6 @@ export default {
     displayName: "Slack",
     initials: "SL",
     color: "#4A154B",
-    logoUrl: "https://slack.com/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("slack"),
@@ -51,13 +50,12 @@ export default {
         {
           id: "slack-manifest",
           copyText: SLACK_SOCKET_MODE_MANIFEST,
-          logoUrl: "https://slack.com/favicon.ico",
         },
       ],
       fields: [
-        { key: "channels.slack.appToken" },
-        { key: "channels.slack.botToken" },
-        { key: "channels.slack.groupPolicy" },
+        { key: "channels.slack.appToken", section: "credentials" },
+        { key: "channels.slack.botToken", section: "credentials" },
+        { key: "channels.slack.groupPolicy", section: "behavior" },
       ],
     },
   },

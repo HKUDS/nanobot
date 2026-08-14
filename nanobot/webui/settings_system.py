@@ -6,7 +6,8 @@ import asyncio
 import inspect
 import re
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Coroutine, Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -20,7 +21,11 @@ from nanobot.channels.contracts import (
     channel_update_instance_config,
 )
 from nanobot.config.schema import Config
-from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
+from nanobot.optional_features import (
+    OptionalFeatureError,
+    extra_installed,
+    with_channel_runtime_status,
+)
 from nanobot.security.workspace_access import workspace_sandbox_status
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
@@ -262,6 +267,8 @@ def coerce_channel_value(
         allowed = None
 
     if kind in {"string", "secret"}:
+        if kind == "secret" and raw_value is None:
+            return ""
         value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
         if kind == "secret" and not value:
             return _SKIP_FIELD
@@ -362,6 +369,27 @@ class SystemSettingsHandler:
         self.settings = settings
         self.logger = logger
         self._channel_connectors: dict[str, Any] = {}
+        self._channel_mutation_locks: dict[str, asyncio.Lock] = {}
+        self._channel_recovery_blocks: dict[str, str] = {}
+
+    async def _run_channel_mutation(
+        self,
+        channel_name: str,
+        operation: Callable[[], Coroutine[Any, Any, SettingsRouteResult]],
+    ) -> SettingsRouteResult:
+        """Serialize a channel's config, runtime, and connector transaction."""
+        lock = self._channel_mutation_locks.setdefault(channel_name, asyncio.Lock())
+        async with lock:
+            task = asyncio.create_task(operation())
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Config writes may be running in a worker thread and connect
+                # finalization may have paused a live runtime. Keep ownership of
+                # the channel until the transaction has restored a safe state.
+                with suppress(Exception, asyncio.CancelledError):
+                    await task
+                raise
 
     async def handle(
         self,
@@ -505,6 +533,30 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        channel_name = (query_first(request.query, "name") or "").strip()
+        return await self._run_channel_mutation(
+            channel_name or "__features__",
+            lambda: self._features_action_locked(request, action, operations),
+        )
+
+    async def _features_action_locked(
+        self,
+        request: SettingsRequest,
+        action: str,
+        operations: SystemSettingsOperations,
+    ) -> SettingsRouteResult:
+        install_only = (
+            action == "enable"
+            and (query_first(request.query, "install_only") or "").strip().lower()
+            in {"1", "true", "yes"}
+        )
+        channel_name = (query_first(request.query, "name") or "").strip()
+        if (
+            action == "enable"
+            and not install_only
+            and (message := self._channel_recovery_blocks.get(channel_name))
+        ):
+            return SettingsRouteResult.failure(409, message)
         try:
             payload = await asyncio.to_thread(
                 self._nanobot_features_action,
@@ -527,12 +579,13 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
-        payload = await self._apply_feature_runtime_change(
-            action,
-            request.query,
-            payload,
-            operations,
-        )
+        if not install_only:
+            payload = await self._apply_feature_runtime_change(
+                action,
+                request.query,
+                payload,
+                operations,
+            )
         payload = self._with_channel_runtime_status(payload, operations)
         return SettingsRouteResult.success(
             payload,
@@ -563,11 +616,26 @@ class SystemSettingsHandler:
         payload: dict[str, Any],
         operations: SystemSettingsOperations,
     ) -> dict[str, Any]:
+        updated, _applied = await self._apply_feature_runtime_change_result(
+            action,
+            query,
+            payload,
+            operations,
+        )
+        return updated
+
+    async def _apply_feature_runtime_change_result(
+        self,
+        action: str,
+        query: QueryParams,
+        payload: dict[str, Any],
+        operations: SystemSettingsOperations,
+    ) -> tuple[dict[str, Any], bool]:
         if operations.channel_feature_action is None:
-            return payload
+            return payload, False
         name = (query_first(query, "name") or "").strip()
         if not name:
-            return payload
+            return payload, False
         try:
             instance_id = operations.nanobot_feature_instance_target(query)
             result = operations.channel_feature_action(action, name, instance_id)
@@ -575,18 +643,21 @@ class SystemSettingsHandler:
                 result = await result
         except Exception as exc:
             self.logger.exception("failed to apply channel '{}' without restart", name)
-            return self.feature_runtime_fallback(
-                payload,
-                message=(
-                    f"{name} channel config was saved, but hot reload failed: {exc}"
+            return (
+                self.feature_runtime_fallback(
+                    payload,
+                    message=(
+                        f"{name} channel config was saved, but hot reload failed: {exc}"
+                    ),
                 ),
+                False,
             )
 
         if not isinstance(result, dict):
-            return payload
+            return payload, False
         result = cast(dict[str, Any], result)
         if not result.get("handled"):
-            return payload
+            return payload, False
 
         updated = dict(payload)
         updated["requires_restart"] = bool(result.get("requires_restart"))
@@ -603,7 +674,8 @@ class SystemSettingsHandler:
             if "ok" in result:
                 last_action["ok"] = bool(result["ok"])
             updated["last_action"] = last_action
-        return updated
+        applied = result.get("ok") is not False and not updated["requires_restart"]
+        return updated, applied
 
     @staticmethod
     def feature_runtime_fallback(
@@ -630,6 +702,17 @@ class SystemSettingsHandler:
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
         name = (query_first(request.query, "name") or "").strip()
+        return await self._run_channel_mutation(
+            name or "__configure__",
+            lambda: self._channel_configure_locked(request, operations, name),
+        )
+
+    async def _channel_configure_locked(
+        self,
+        request: SettingsRequest,
+        operations: SystemSettingsOperations,
+        name: str,
+    ) -> SettingsRouteResult:
         instance_id = (
             query_first(request.query, "instance_id") or "default"
         ).strip()
@@ -638,6 +721,8 @@ class SystemSettingsHandler:
             "true",
             "yes",
         }
+        if enable and (message := self._channel_recovery_blocks.get(name)):
+            return SettingsRouteResult.failure(409, message)
         try:
             saved = await asyncio.to_thread(
                 self._save_channel_config_values,
@@ -777,10 +862,38 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        return await self._run_channel_mutation(
+            channel_name,
+            lambda: self._channel_connect_locked(
+                request,
+                channel_name,
+                action,
+                operations,
+            ),
+        )
+
+    async def _channel_connect_locked(
+        self,
+        request: SettingsRequest,
+        channel_name: str,
+        action: str,
+        operations: SystemSettingsOperations,
+    ) -> SettingsRouteResult:
         try:
+            plugin = operations.load_channel_plugin(channel_name)
+            dependencies = cast(list[str], list(getattr(plugin, "dependencies", ())))
+            if action == "start" and dependencies and not extra_installed(
+                channel_name,
+                dependencies,
+            ):
+                display_name = str(getattr(plugin, "display_name", channel_name))
+                return SettingsRouteResult.failure(
+                    409,
+                    f"{display_name} support is not installed. "
+                    "Choose Install support, then try connecting again.",
+                )
             connector = self._channel_connectors.get(channel_name)
             if connector is None:
-                plugin = operations.load_channel_plugin(channel_name)
                 connector = plugin.load_connector()
                 self._channel_connectors[channel_name] = connector
         except ImportError:
@@ -790,7 +903,7 @@ class SystemSettingsHandler:
             )
 
         try:
-            payload = await connector.handle(action, request.query)
+            payload = dict(await connector.handle(action, request.query))
         except ChannelConnectError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
         except Exception:
@@ -804,19 +917,329 @@ class SystemSettingsHandler:
                 f"failed to {action} {channel_name} connection",
             )
 
+        terminal_replay = bool(payload.pop("_terminal_replay", False))
+        requires_finalize = bool(payload.pop("_requires_finalize", False))
+        recovery_required = bool(payload.pop("_recovery_required", False))
+        if terminal_replay:
+            return SettingsRouteResult.success(payload)
+        if recovery_required:
+            payload = self._channel_connect_recovery_payload(channel_name, payload)
+            return SettingsRouteResult.success(
+                payload,
+                clear_restart_section="runtime",
+            )
+
+        if action == "cancel" and payload.get("status") == "prepared" and requires_finalize:
+            payload.update(
+                status="failed",
+                message=(
+                    "This connection can no longer be cancelled because its session data "
+                    "has already been applied. Try again to finish activation."
+                ),
+                retryable=True,
+            )
+            return SettingsRouteResult.success(payload)
+
+        if payload.get("status") == "prepared" and requires_finalize:
+            return await self._finalize_channel_connect(
+                request,
+                channel_name,
+                connector,
+                payload,
+                operations,
+            )
+
         if payload.get("status") != "succeeded":
             return SettingsRouteResult.success(payload)
-        payload = await self._with_channel_connect_success(
-            request,
-            channel_name,
-            payload,
-            operations,
-        )
+        try:
+            payload, activated = await self._with_channel_connect_success(
+                request,
+                channel_name,
+                payload,
+                operations,
+            )
+        except Exception as exc:
+            self.logger.exception("failed to activate existing {} connection", channel_name)
+            payload.update(
+                status="failed",
+                message=f"{channel_name} connection activation failed: {exc}",
+            )
+            return self._channel_connect_retry_result(payload, runtime_safe=True)
+        if not activated:
+            return self._channel_connect_retry_result(payload, runtime_safe=True)
         return SettingsRouteResult.success(
             payload,
             decorate_restart=True,
             restart_section="runtime",
             restart_payload_key="nanobot_features",
+        )
+
+    async def _finalize_channel_connect(
+        self,
+        request: SettingsRequest,
+        channel_name: str,
+        connector: Any,
+        prepared: dict[str, Any],
+        operations: SystemSettingsOperations,
+    ) -> SettingsRouteResult:
+        session_id = str(prepared.get("session_id") or "").strip()
+        finalize = getattr(connector, "finalize", None)
+        if not session_id or not callable(finalize):
+            self.logger.error(
+                "channel '{}' returned an invalid prepared connection",
+                channel_name,
+            )
+            return SettingsRouteResult.failure(
+                500,
+                f"failed to finish {channel_name} connection",
+            )
+
+        instance_id = (
+            str(prepared.get("instance_id") or "").strip()
+            or operations.nanobot_feature_instance_target(request.query)
+        )
+        stopped, stop_payload = await self._run_channel_runtime_action(
+            "disable",
+            channel_name,
+            instance_id,
+            operations,
+        )
+        if not stopped:
+            retry = dict(prepared)
+            retry.pop("_requires_finalize", None)
+            retry.update(
+                status="failed",
+                message=(
+                    f"Could not pause {channel_name} while finishing the connection. "
+                    "Try again."
+                ),
+            )
+            if stop_payload is not None and stop_payload.get("requires_restart"):
+                retry["requires_restart"] = True
+            return self._channel_connect_retry_result(retry, runtime_safe=True)
+        runtime_was_stopped = (
+            stop_payload is None or stop_payload.get("stopped") is not False
+        )
+
+        try:
+            finalized = finalize(session_id)
+            if inspect.isawaitable(finalized):
+                finalized = await finalized
+            if not isinstance(finalized, dict):
+                raise TypeError("channel connector finalize() returned an invalid payload")
+            payload = dict(cast(dict[str, Any], finalized))
+        except Exception as exc:
+            self.logger.exception("failed to finalize {} connection", channel_name)
+            restored = await self._restore_channel_runtime(
+                channel_name,
+                instance_id,
+                operations,
+                runtime_was_stopped=runtime_was_stopped,
+            )
+            retry = dict(prepared)
+            retry.pop("_requires_finalize", None)
+            retry.update(
+                status="failed",
+                message=f"Failed to finish {channel_name} connection: {exc}",
+            )
+            return self._channel_connect_retry_result(retry, runtime_safe=restored)
+
+        terminal_replay = bool(payload.pop("_terminal_replay", False))
+        requires_complete = bool(payload.pop("_requires_complete", False))
+        recovery_required = bool(payload.pop("_recovery_required", False))
+        payload.pop("_requires_finalize", None)
+        if recovery_required:
+            # The target SQLite family may contain a promoted generation while
+            # the old generation survives in backup files. Starting either
+            # runtime could make manual recovery destructive.
+            payload = self._channel_connect_recovery_payload(channel_name, payload)
+            return SettingsRouteResult.success(
+                payload,
+                clear_restart_section="runtime",
+            )
+        if payload.get("status") != "succeeded":
+            restored = await self._restore_channel_runtime(
+                channel_name,
+                instance_id,
+                operations,
+                runtime_was_stopped=runtime_was_stopped,
+            )
+            return self._channel_connect_retry_result(payload, runtime_safe=restored)
+        if terminal_replay:
+            restored = await self._restore_channel_runtime(
+                channel_name,
+                instance_id,
+                operations,
+                runtime_was_stopped=runtime_was_stopped,
+            )
+            if restored:
+                return SettingsRouteResult.success(payload)
+            return self._channel_connect_retry_result(payload, runtime_safe=False)
+
+        try:
+            payload, activated = await self._with_channel_connect_success(
+                request,
+                channel_name,
+                payload,
+                operations,
+            )
+        except Exception as exc:
+            self.logger.exception("failed to activate {} connection", channel_name)
+            restored = await self._restore_channel_runtime(
+                channel_name,
+                instance_id,
+                operations,
+                runtime_was_stopped=runtime_was_stopped,
+            )
+            payload.update(
+                status="failed",
+                message=f"{channel_name} connection was saved, but activation failed: {exc}",
+            )
+            return self._channel_connect_retry_result(payload, runtime_safe=restored)
+
+        if not activated:
+            restored = await self._restore_channel_runtime(
+                channel_name,
+                instance_id,
+                operations,
+                runtime_was_stopped=runtime_was_stopped,
+            )
+            return self._channel_connect_retry_result(payload, runtime_safe=restored)
+
+        if requires_complete:
+            complete = getattr(connector, "complete", None)
+            if not callable(complete):
+                payload.update(
+                    status="failed",
+                    message=f"{channel_name} connection could not be acknowledged. Try again.",
+                )
+                return self._channel_connect_retry_result(payload, runtime_safe=True)
+            try:
+                completed = complete(session_id)
+                if inspect.isawaitable(completed):
+                    completed = await completed
+                if not isinstance(completed, dict):
+                    raise TypeError("channel connector complete() returned an invalid payload")
+                completed_payload = dict(cast(dict[str, Any], completed))
+                if completed_payload.get("status") != "succeeded":
+                    raise RuntimeError(
+                        str(completed_payload.get("message") or "connection was not acknowledged")
+                    )
+            except Exception as exc:
+                self.logger.exception("failed to acknowledge {} connection", channel_name)
+                payload.update(
+                    status="failed",
+                    message=f"{channel_name} is active, but completion failed: {exc}",
+                )
+                return self._channel_connect_retry_result(payload, runtime_safe=True)
+            completed_payload["nanobot_features"] = payload["nanobot_features"]
+            payload = completed_payload
+
+        return SettingsRouteResult.success(
+            payload,
+            decorate_restart=True,
+            restart_section="runtime",
+            restart_payload_key="nanobot_features",
+        )
+
+    async def _run_channel_runtime_action(
+        self,
+        action: str,
+        channel_name: str,
+        instance_id: str | None,
+        operations: SystemSettingsOperations,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        callback = operations.channel_feature_action
+        if callback is None:
+            return True, None
+        try:
+            result = callback(action, channel_name, instance_id)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            self.logger.exception(
+                "failed to {} channel '{}' during connection finalization",
+                action,
+                channel_name,
+            )
+            return False, None
+        if not isinstance(result, dict):
+            return False, None
+        payload = cast(dict[str, Any], result)
+        applied = (
+            bool(payload.get("handled"))
+            and payload.get("ok") is not False
+            and not payload.get("requires_restart")
+        )
+        return applied, payload
+
+    async def _restore_channel_runtime(
+        self,
+        channel_name: str,
+        instance_id: str | None,
+        operations: SystemSettingsOperations,
+        *,
+        runtime_was_stopped: bool,
+    ) -> bool:
+        if not runtime_was_stopped:
+            return True
+        restored, _payload = await self._run_channel_runtime_action(
+            "enable",
+            channel_name,
+            instance_id,
+            operations,
+        )
+        if not restored:
+            self.logger.error(
+                "failed to restore channel '{}' after connection finalization",
+                channel_name,
+            )
+        return restored
+
+    def _channel_connect_recovery_payload(
+        self,
+        channel_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(payload)
+        warning = (
+            "Do not restart or enable this channel until its database files "
+            "have been reconciled."
+        )
+        message = str(updated.get("message") or "Manual database recovery is required.")
+        if "do not restart" not in message.lower():
+            message = f"{message} {warning}"
+        updated.update(
+            message=message,
+            recovery_required=True,
+            restart_blocked=True,
+            requires_restart=False,
+        )
+        self._channel_recovery_blocks[channel_name] = message
+        return updated
+
+    @staticmethod
+    def _channel_connect_retry_result(
+        payload: dict[str, Any],
+        *,
+        runtime_safe: bool,
+    ) -> SettingsRouteResult:
+        updated = dict(payload)
+        updated["status"] = "failed"
+        updated["retryable"] = True
+        features = updated.get("nanobot_features")
+        feature_payload = cast(dict[str, Any], features) if isinstance(features, dict) else None
+        feature_restart = bool(feature_payload and feature_payload.get("requires_restart"))
+        if not runtime_safe:
+            updated["runtime_restore_failed"] = True
+            current = str(updated.get("message") or "Connection activation failed.")
+            updated["message"] = f"{current} The previous runtime could not be restored."
+        if not runtime_safe or feature_restart:
+            updated["requires_restart"] = True
+        return SettingsRouteResult.success(
+            updated,
+            decorate_restart=True,
+            restart_section="runtime",
         )
 
     async def _with_channel_connect_success(
@@ -825,7 +1248,7 @@ class SystemSettingsHandler:
         channel_name: str,
         payload: dict[str, Any],
         operations: SystemSettingsOperations,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], bool]:
         target = {"name": [channel_name]}
         if payload.get("instance_id"):
             target["instance_id"] = [str(payload["instance_id"])]
@@ -845,19 +1268,32 @@ class SystemSettingsHandler:
                     f"{exc.message}"
                 ),
             )
+            activated = False
         else:
-            features = await self._apply_feature_runtime_change(
-                "enable",
-                target,
-                features,
-                operations,
-            )
+            if operations.channel_feature_action is None:
+                # Standalone settings handlers have no managed runtime to hot
+                # reload. Persisting enabled config is the activation boundary.
+                activated = True
+            else:
+                features, activated = await self._apply_feature_runtime_change_result(
+                    "enable",
+                    target,
+                    features,
+                    operations,
+                )
         updated = dict(payload)
         updated["nanobot_features"] = self._with_channel_runtime_status(
             features,
             operations,
         )
-        return updated
+        if not activated:
+            updated["status"] = "failed"
+            action = features.get("last_action")
+            if isinstance(action, dict):
+                action_payload = cast(dict[str, Any], action)
+                if isinstance(action_payload.get("message"), str):
+                    updated["message"] = action_payload["message"]
+        return updated, activated
 
     def allow_feature_package_install(self, request: SettingsRequest) -> bool:
         if request.local_browser:

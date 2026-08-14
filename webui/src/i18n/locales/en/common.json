@@ -728,6 +728,23 @@
       "toggleInstance": "{{name}} instance",
       "tryIt": "Try it",
       "validationFailed": "Check the required setup before enabling.",
+      "completeSetupToEnable": "Complete the required setup below, then nanobot can enable this channel.",
+      "chooseCredentialMethod": "Choose one credential method",
+      "or": "or",
+      "fieldRequired": "Required to complete setup.",
+      "secretWillBeRemoved": "Will be removed",
+      "keepSavedSecret": "Keep saved credential",
+      "removeSavedSecret": "Remove saved credential",
+      "sections": {
+        "account": "Account",
+        "credentials": "Credentials",
+        "connection": "Connection",
+        "receiving": "Receiving mail",
+        "sending": "Sending mail",
+        "access": "Access",
+        "behavior": "Behavior",
+        "security": "Security"
+      },
       "validation": {
         "connected": "Connected",
         "configured": "Configured manually",
@@ -745,7 +762,9 @@
       "installSupport": "Install support",
       "installConfirmTitle": "Install support for {{name}}?",
       "installConfirmDescription": "nanobot will add what {{name}} needs, then turn it on. Continue?",
+      "installOnlyConfirmDescription": "nanobot will install what {{name}} needs. You can connect it after installation.",
       "installConfirmAction": "Install and enable",
+      "installOnlyConfirmAction": "Install support",
       "websocketRequired": "Required for WebUI",
       "channelDisabled": "Channel is disabled",
       "notEnabled": "Not enabled"

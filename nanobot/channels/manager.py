@@ -384,7 +384,7 @@ class ChannelManager:
             self._channel_tasks.pop(name, None)
             return False
 
-        task = self._channel_tasks.pop(name, None)
+        task = self._channel_tasks.get(name)
         try:
             await channel.stop()
             logger.info("Stopped {} channel", name)
@@ -392,14 +392,17 @@ class ChannelManager:
             current_task = asyncio.current_task()
             if current_task is not None and current_task.cancelling():
                 raise
-            logger.debug("Channel {} stop task was already cancelled", name)
+            logger.warning("Channel {} did not confirm that it stopped", name)
+            return False
         except Exception:
             logger.exception("Error stopping {}", name)
+            return False
 
         if task is not None and not task.done():
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        self._channel_tasks.pop(name, None)
         return True
 
     async def apply_channel_feature_action(
@@ -447,15 +450,31 @@ class ChannelManager:
                 else []
             )
             stopped = False
+            failed: list[str] = []
             for runtime_name in runtime_names:
-                stopped = await self._stop_channel(runtime_name) or stopped
+                if not await self._stop_channel(runtime_name):
+                    failed.append(runtime_name)
+                    continue
+                stopped = True
                 self.channels.pop(runtime_name, None)
                 self._channel_owners.pop(runtime_name, None)
-            self._channel_runtime_specs.pop(runtime_name, None)
-            self._channel_errors.pop(runtime_name, None)
+                self._channel_runtime_specs.pop(runtime_name, None)
+                self._channel_errors.pop(runtime_name, None)
+            if failed:
+                return {
+                    "handled": True,
+                    "ok": False,
+                    "stopped": False,
+                    "requires_restart": True,
+                    "message": (
+                        f"{name} channel could not be stopped safely. "
+                        "Restart nanobot before replacing its runtime state."
+                    ),
+                }
             return {
                 "handled": True,
                 "ok": True,
+                "stopped": stopped,
                 "requires_restart": False,
                 "message": f"{name} channel stopped." if stopped else f"{name} channel disabled.",
             }
@@ -496,8 +515,8 @@ class ChannelManager:
                 ),
             }
         for runtime_name, spec in runtime_specs:
-            self._channel_runtime_specs[runtime_name] = (name, spec.instance_id)
-
+            if runtime_name not in self.channels:
+                self._channel_runtime_specs[runtime_name] = (name, spec.instance_id)
         try:
             cls = plugin.load_channel_class()
         except Exception:
@@ -542,13 +561,28 @@ class ChannelManager:
         for runtime_name in sorted(runtime_names_to_replace):
             if runtime_name not in self.channels:
                 continue
-            await self._stop_channel(runtime_name)
+            if not await self._stop_channel(runtime_name):
+                return {
+                    "handled": True,
+                    "ok": False,
+                    "requires_restart": True,
+                    "message": (
+                        f"{name} channel could not be stopped safely. "
+                        "Restart nanobot to apply the saved configuration."
+                    ),
+                }
             self.channels.pop(runtime_name, None)
             self._channel_owners.pop(runtime_name, None)
 
         for runtime_name, channel in built:
             self.channels[runtime_name] = channel
             self._channel_owners[runtime_name] = name
+            instance_id = next(
+                spec.instance_id
+                for spec_runtime_name, spec in runtime_specs
+                if spec_runtime_name == runtime_name
+            )
+            self._channel_runtime_specs[runtime_name] = (name, instance_id)
             self._channel_errors.pop(runtime_name, None)
             if self._started:
                 self._start_channel_task(runtime_name, channel)

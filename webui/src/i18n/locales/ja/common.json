@@ -714,6 +714,23 @@
       "toggleInstance": "{{name}} インスタンス",
       "tryIt": "試してみる",
       "validationFailed": "有効化する前に必要な設定を確認してください。",
+      "completeSetupToEnable": "以下の必須設定を完了すると、このチャンネルを有効にできます。",
+      "chooseCredentialMethod": "認証方法を1つ選択",
+      "or": "または",
+      "fieldRequired": "設定を完了するために必要です。",
+      "secretWillBeRemoved": "削除されます",
+      "keepSavedSecret": "保存済みの認証情報を保持",
+      "removeSavedSecret": "保存済みの認証情報を削除",
+      "sections": {
+        "account": "アカウント",
+        "credentials": "認証情報",
+        "connection": "接続",
+        "receiving": "メール受信",
+        "sending": "メール送信",
+        "access": "アクセス",
+        "behavior": "動作",
+        "security": "セキュリティ"
+      },
       "validation": {
         "connected": "接続済み",
         "configured": "手動設定済み",
@@ -731,7 +748,9 @@
       "installSupport": "サポートをインストール",
       "installConfirmTitle": "{{name}} のサポートをインストールしますか？",
       "installConfirmDescription": "nanobot が {{name}} に必要なものを追加し、その後有効化します。続けますか？",
+      "installOnlyConfirmDescription": "nanobot が {{name}} に必要なサポートをインストールします。インストール後に接続できます。",
       "installConfirmAction": "インストールして有効化",
+      "installOnlyConfirmAction": "サポートをインストール",
       "websocketRequired": "WebUI に必須",
       "channelDisabled": "チャンネルは無効",
       "notEnabled": "未有効"

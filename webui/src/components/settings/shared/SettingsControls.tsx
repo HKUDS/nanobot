@@ -47,11 +47,13 @@ export function CapabilityInstallNotice({
 
 export function NanobotFeatureInstallDialog({
   feature,
+  installOnly = false,
   installing,
   onOpenChange,
   onConfirm,
 }: {
   feature: NanobotFeatureInfo | null;
+  installOnly?: boolean;
   installing: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (feature: NanobotFeatureInfo) => void | Promise<void>;
@@ -71,11 +73,17 @@ export function NanobotFeatureInstallDialog({
             {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
           </DialogTitle>
           <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
-            {tx(
-              "settings.nanobotFeatures.installConfirmDescription",
-              "nanobot will add what {{name}} needs, then turn it on. Continue?",
-              { name },
-            )}
+            {installOnly
+              ? tx(
+                "settings.nanobotFeatures.installOnlyConfirmDescription",
+                "nanobot will install what {{name}} needs. You can connect it after installation.",
+                { name },
+              )
+              : tx(
+                "settings.nanobotFeatures.installConfirmDescription",
+                "nanobot will add what {{name}} needs, then turn it on. Continue?",
+                { name },
+              )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
@@ -95,7 +103,9 @@ export function NanobotFeatureInstallDialog({
             className="h-11 w-full min-w-0 !whitespace-normal rounded-full px-5 text-center text-[15px] font-semibold"
           >
             {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
-            {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
+            {installOnly
+              ? tx("settings.nanobotFeatures.installOnlyConfirmAction", "Install support")
+              : tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -116,6 +126,8 @@ export function DismissibleStatusMessage({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
     <div
+      role={isError ? "alert" : "status"}
+      aria-atomic="true"
       className={cn(
         "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
         isError

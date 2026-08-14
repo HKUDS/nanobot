@@ -5,12 +5,12 @@
     "primaryAction": "連接 WhatsApp",
     "docsLabel": "開啟 WhatsApp 設定指南",
     "officialLabel": "開啟 WhatsApp 說明",
-    "tryIt": "終端機登入完成後，向已連接的帳戶傳送一則 WhatsApp 私訊。",
+    "tryIt": "連結完成後，向已連接的帳戶傳送一則 WhatsApp 私訊。",
     "summary": "使用要執行機器人的 WhatsApp 帳戶掃描二維碼即可完成連接。",
     "steps": [
-      "執行下方顯示的 WhatsApp 登入指令。",
-      "用手機 WhatsApp 掃描終端機中的二維碼。",
-      "登入後返回這裡，啟用 WhatsApp，然後傳送一則私訊測試。"
+      "選擇「連接 WhatsApp」以在瀏覽器中顯示二維碼。",
+      "在手機 WhatsApp 中開啟「已連結裝置」並掃描二維碼。",
+      "連結後啟用 WhatsApp，然後傳送一則私訊測試。"
     ],
     "fields": {
       "allowFrom": {
@@ -26,5 +26,16 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp 連結二維碼",
+    "scanTitle": "連結 WhatsApp",
+    "scanDescription": "在 WhatsApp 中開啟「已連結裝置」，選擇「連結裝置」，然後掃描此二維碼。",
+    "waiting": "正在等待 WhatsApp 掃描…",
+    "connected": "WhatsApp 已連接。",
+    "stopped": "WhatsApp 連接已停止。請重新開始以取得新的二維碼。",
+    "connecting": "正在連接…",
+    "scanAgain": "連結其他帳戶",
+    "connect": "連結 WhatsApp"
   }
 }

@@ -714,6 +714,23 @@
       "toggleInstance": "Instans {{name}}",
       "tryIt": "Coba",
       "validationFailed": "Periksa penyiapan wajib sebelum mengaktifkan.",
+      "completeSetupToEnable": "Selesaikan penyiapan wajib di bawah untuk mengaktifkan kanal ini.",
+      "chooseCredentialMethod": "Pilih satu metode kredensial",
+      "or": "atau",
+      "fieldRequired": "Wajib untuk menyelesaikan penyiapan.",
+      "secretWillBeRemoved": "Akan dihapus",
+      "keepSavedSecret": "Pertahankan kredensial tersimpan",
+      "removeSavedSecret": "Hapus kredensial tersimpan",
+      "sections": {
+        "account": "Akun",
+        "credentials": "Kredensial",
+        "connection": "Koneksi",
+        "receiving": "Penerimaan email",
+        "sending": "Pengiriman email",
+        "access": "Akses",
+        "behavior": "Perilaku",
+        "security": "Keamanan"
+      },
       "validation": {
         "connected": "Terhubung",
         "configured": "Dikonfigurasi manual",
@@ -731,7 +748,9 @@
       "installSupport": "Instal dukungan",
       "installConfirmTitle": "Instal dukungan untuk {{name}}?",
       "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installOnlyConfirmDescription": "nanobot akan menginstal dukungan yang dibutuhkan {{name}}. Anda dapat menghubungkannya setelah instalasi.",
       "installConfirmAction": "Instal dan aktifkan",
+      "installOnlyConfirmAction": "Instal dukungan",
       "websocketRequired": "Wajib untuk WebUI",
       "channelDisabled": "Kanal dinonaktifkan",
       "notEnabled": "Belum aktif"

@@ -545,12 +545,16 @@ export async function stopApiService(
 export async function enableNanobotFeature(
   transport: WebUIMutationTransport,
   name: string,
-  options: { instanceId?: string } = {},
+  options: { instanceId?: string; installOnly?: boolean } = {},
 ): Promise<NanobotFeaturesPayload> {
   return mutation<NanobotFeaturesPayload>(
     transport,
     "settings.feature.enable",
-    { name, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
+    {
+      name,
+      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
+      ...(options.installOnly ? { install_only: true } : {}),
+    },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
@@ -643,7 +647,7 @@ export async function cancelChannelConnect(
 export async function configureChannel(
   transport: WebUIMutationTransport,
   name: string,
-  values: Record<string, string>,
+  values: Record<string, string | null>,
   options: { enable?: boolean; instanceId?: string } = {},
 ): Promise<ChannelConfigurePayload> {
   return mutation<ChannelConfigurePayload>(
@@ -662,7 +666,7 @@ export async function configureChannel(
 export async function validateChannel(
   transport: WebUIMutationTransport,
   name: string,
-  values: Record<string, string> = {},
+  values: Record<string, string | null> = {},
   options: { instanceId?: string } = {},
 ): Promise<ChannelValidationPayload> {
   return mutation<ChannelValidationPayload>(

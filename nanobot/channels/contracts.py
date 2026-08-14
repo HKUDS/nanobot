@@ -141,9 +141,22 @@ class SetupRequirement:
         """Require one complete alternative field group."""
         return cls(alternatives)
 
-    def is_satisfied(self, values: Any) -> bool:
+    def is_satisfied(
+        self,
+        values: Any,
+        fields: dict[str, ChannelFieldSpec] | None = None,
+    ) -> bool:
+        def present(name: str) -> bool:
+            value = channel_field_value(values, name)
+            field = fields.get(name) if fields is not None else None
+            if field is not None and field.kind == "bool":
+                return value is True or (
+                    isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
+                )
+            return channel_value_present(value)
+
         return any(
-            all(channel_value_present(channel_field_value(values, field)) for field in group)
+            all(present(field) for field in group)
             for group in self.alternatives
         )
 
@@ -189,7 +202,7 @@ class ChannelSetupSpec:
 
     def is_configured(self, values: Any) -> bool:
         return bool(self.required) and all(
-            requirement.is_satisfied(values) for requirement in self.required
+            requirement.is_satisfied(values, self.fields) for requirement in self.required
         )
 
     def to_public_dict(self, channel_name: str) -> dict[str, Any]:
@@ -211,6 +224,15 @@ class ChannelSetupSpec:
             fields.append(public_field)
         payload: dict[str, Any] = {
             "fields": fields,
+            "requirements": [
+                {
+                    "alternatives": [
+                        [f"channels.{channel_name}.{name}" for name in alternative]
+                        for alternative in requirement.alternatives
+                    ]
+                }
+                for requirement in self.required
+            ],
         }
         if self.official_url:
             payload["official_url"] = self.official_url

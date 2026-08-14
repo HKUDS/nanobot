@@ -12,6 +12,7 @@ import {
 } from "@/channel-plugins/registry";
 import type {
   ChannelConfigField,
+  ChannelFieldPresentation,
   ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -38,6 +39,12 @@ export function channelSetup(
       help: copy?.help,
     };
   };
+  const localizePresentedField = (
+    field: ChannelFieldPresentation,
+  ): ChannelConfigField => ({
+    ...localizeField(field.key),
+    section: field.section,
+  });
   const presentation: ChannelSetupPresentation = {
     ...definition,
     primaryActionLabel: setupMessages?.primaryAction,
@@ -52,8 +59,8 @@ export function channelSetup(
       "Add the credentials required by that platform, using the channel documentation as the source of truth.",
       "Restart nanobot, then send a small test message from that platform.",
     ],
-    fields: definition?.fields?.map((field) => localizeField(field.key)),
-    manualFields: definition?.manualFields?.map((field) => localizeField(field.key)),
+    fields: definition?.fields?.map(localizePresentedField),
+    manualFields: definition?.manualFields?.map(localizePresentedField),
     actions: definition?.actions?.map((action) => ({
       ...action,
       label: setupMessages?.actions?.[action.id] ?? fieldLabel(action.id),
@@ -85,7 +92,8 @@ export function channelSetup(
       label: copy.label,
       secret: field.kind === "secret",
       optional: !field.required,
-      inputType: field.kind === "int" ? "number" : undefined,
+      kind: field.kind,
+      inputType: channelFieldInputType(field.field, field.kind),
       defaultValue: field.default_value,
       options:
         field.kind === "enum" || field.kind === "bool"
@@ -106,9 +114,22 @@ export function channelSetup(
     officialLabel:
       presentation.officialLabel
       ?? (contract.official_url ? "Open official setup" : undefined),
+    requirements: contract.requirements,
     fields: fields.length ? fields : undefined,
     manualFields: manual.length ? manual : undefined,
   };
+}
+
+function channelFieldInputType(
+  field: string,
+  kind: string,
+): ChannelConfigField["inputType"] {
+  if (kind === "int") return "number";
+  const normalized = field.toLowerCase();
+  if (normalized.includes("url")) return "url";
+  if (normalized.includes("email") || normalized.includes("address")) return "email";
+  if (normalized.includes("phone")) return "tel";
+  return undefined;
 }
 
 function fieldLabel(value: string): string {
@@ -224,6 +245,8 @@ export function channelStatusLabel(
   }
   if (channelIsRunning(feature)) return tx("settings.values.on", "On");
   if (feature.enabled) return tx("settings.channels.runtimeStopped", "Not running");
+  if (feature.configured === false) return tx("settings.channels.needsConfig", "Needs setup");
+  if (feature.configured === true) return tx("settings.nanobotFeatures.ready", "Ready");
   return tx("settings.values.off", "Off");
 }
 

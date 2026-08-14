@@ -224,36 +224,34 @@ export function ChannelProviderPresets({
   const [selected, setSelected] = useState("");
   if (!presets.length) return null;
   return (
-    <div className="mt-3">
-      <div className="mb-1 text-[11px] font-medium text-foreground/85">
+    <fieldset className="mt-3">
+      <legend className="mb-1 text-[11px] font-medium text-foreground/85">
         {t("settings.channels.providerPreset", { defaultValue: "Provider" })}
-      </div>
+      </legend>
       <div
-        role="radiogroup"
-        aria-label={t("settings.channels.providerPreset", { defaultValue: "Provider" })}
         className="grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
         style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
       >
         {presets.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            role="radio"
-            aria-checked={selected === preset.id}
-            onClick={() => {
-              setSelected(preset.id);
-              onApply(preset);
-            }}
-            className={cn(
-              "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
-              selected === preset.id && "bg-background text-foreground",
-            )}
-          >
-            {preset.label}
-          </button>
+          <label key={preset.id} className="relative block">
+            <input
+              type="radio"
+              name="channel-provider-preset"
+              value={preset.id}
+              checked={selected === preset.id}
+              onChange={() => {
+                setSelected(preset.id);
+                onApply(preset);
+              }}
+              className="peer sr-only"
+            />
+            <span className="grid min-h-11 cursor-pointer place-items-center rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground peer-checked:bg-background peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring sm:min-h-9">
+              {preset.label}
+            </span>
+          </label>
         ))}
       </div>
-    </div>
+    </fieldset>
   );
 }
 

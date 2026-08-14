@@ -714,6 +714,23 @@
       "toggleInstance": "Phiên bản {{name}}",
       "tryIt": "Dùng thử",
       "validationFailed": "Hãy kiểm tra thiết lập bắt buộc trước khi bật.",
+      "completeSetupToEnable": "Hoàn tất thiết lập bắt buộc bên dưới để bật kênh này.",
+      "chooseCredentialMethod": "Chọn một phương thức xác thực",
+      "or": "hoặc",
+      "fieldRequired": "Bắt buộc để hoàn tất thiết lập.",
+      "secretWillBeRemoved": "Sẽ bị xóa",
+      "keepSavedSecret": "Giữ thông tin xác thực đã lưu",
+      "removeSavedSecret": "Xóa thông tin xác thực đã lưu",
+      "sections": {
+        "account": "Tài khoản",
+        "credentials": "Thông tin xác thực",
+        "connection": "Kết nối",
+        "receiving": "Nhận thư",
+        "sending": "Gửi thư",
+        "access": "Quyền truy cập",
+        "behavior": "Hành vi",
+        "security": "Bảo mật"
+      },
       "validation": {
         "connected": "Đã kết nối",
         "configured": "Đã cấu hình thủ công",
@@ -731,7 +748,9 @@
       "installSupport": "Cài gói hỗ trợ",
       "installConfirmTitle": "Cài hỗ trợ cho {{name}}?",
       "installConfirmDescription": "nanobot sẽ thêm những gì {{name}} cần, rồi bật tính năng này. Tiếp tục?",
+      "installOnlyConfirmDescription": "nanobot sẽ cài đặt gói hỗ trợ mà {{name}} cần. Bạn có thể kết nối sau khi cài đặt.",
       "installConfirmAction": "Cài và bật",
+      "installOnlyConfirmAction": "Cài gói hỗ trợ",
       "websocketRequired": "Bắt buộc cho WebUI",
       "channelDisabled": "Kênh đang tắt",
       "notEnabled": "Chưa bật"
