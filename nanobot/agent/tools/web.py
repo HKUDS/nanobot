@@ -1,7 +1,5 @@
 """Web tools: web_search and web_fetch."""
 
-# pyright: reportIncompatibleMethodOverride=false
-
 from __future__ import annotations
 
 import asyncio
@@ -468,7 +466,8 @@ class WebSearchTool(Tool):
         """DuckDuckGo searches are serialized because ddgs is not concurrency-safe."""
         return self._effective_provider() == "duckduckgo"
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         query: str,
         count: int | None = None,
@@ -476,7 +475,7 @@ class WebSearchTool(Tool):
         auth_level: int | None = None,
         query_rewrite: bool | None = None,
         **kwargs: Any,
-    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
+    ) -> str:
         self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
@@ -1096,13 +1095,14 @@ class WebFetchTool(Tool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         url: str,
         extract_mode: str = "markdown",
         max_chars: int | None = None,
         **kwargs: Any,
-    ) -> Any:  # pyright: ignore[reportIncompatibleMethodOverride]
+    ) -> Any:
         url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
         max_chars = cast(int, kwargs.pop("maxChars", max_chars) or self.max_chars)

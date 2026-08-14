@@ -1,7 +1,5 @@
 """Message tool for sending messages to users."""
 
-# pyright: reportIncompatibleMethodOverride=false
-
 from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Any, Awaitable, Callable, cast
@@ -143,7 +141,8 @@ class MessageTool(Tool):
                 resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
         return resolved
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         content: str,
         channel: str | None = None,
@@ -152,7 +151,7 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         buttons: Any = None,
         **kwargs: Any,
-    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
+    ) -> str:
         from nanobot.utils.helpers import strip_think
 
         content = strip_think(content)
