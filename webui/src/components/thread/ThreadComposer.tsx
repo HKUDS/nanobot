@@ -217,6 +217,7 @@ interface ThreadComposerProps {
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
+  onPickWorkspaceFolder?: () => Promise<string | null>;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
   transcriptionProvider?: string | null;
@@ -970,6 +971,7 @@ export function ThreadComposer({
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
+  onPickWorkspaceFolder,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
   transcriptionProvider = null,
@@ -2600,6 +2602,7 @@ export function ThreadComposer({
                   defaultScope={workspaceDefaultScope}
                   controls={workspaceControls}
                   error={workspaceError}
+                  onPickFolder={onPickWorkspaceFolder}
                   onChange={onWorkspaceScopeChange}
                 />
               </div>

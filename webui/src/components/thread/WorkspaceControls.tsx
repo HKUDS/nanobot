@@ -51,6 +51,7 @@ export function WorkspaceProjectPicker({
   defaultScope,
   controls,
   error,
+  onPickFolder,
   onChange,
 }: {
   isHero: boolean;
@@ -61,6 +62,7 @@ export function WorkspaceProjectPicker({
   defaultScope: WorkspaceScopePayload | null;
   controls: WorkspacesPayload["controls"] | null;
   error?: string | null;
+  onPickFolder?: () => Promise<string | null>;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
@@ -79,7 +81,7 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const pickFolder = getRuntimeHost().pickFolder;
+  const pickFolder = getRuntimeHost().pickFolder ?? onPickFolder;
   const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {

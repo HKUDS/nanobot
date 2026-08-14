@@ -486,6 +486,35 @@ class WeixinChannel(BaseChannel):
         if base_url:
             self.config.base_url = base_url
         self._save_state(force=True)
+        self._persist_connect_credentials(token=token, base_url=base_url)
+
+    def _persist_connect_credentials(self, *, token: str, base_url: str) -> None:
+        """Write the QR-login token and base_url back to config.json.
+
+        The connect flow saves account state to ``account.json`` (via
+        ``_save_state``), but the WebUI's post-connect ``enable`` step calls
+        ``set_channel_config_enabled`` which reads config.json. Without
+        persisting the token here, that step would overwrite it with the
+        default empty value, losing the freshly obtained credential.
+        """
+        from nanobot.config.loader import get_config_path, load_config, save_config
+
+        try:
+            full_config = load_config()
+            section = getattr(full_config.channels, "weixin", None)
+            if section is not None and hasattr(section, "model_dump"):
+                values = section.model_dump(mode="json", by_alias=True)
+            elif isinstance(section, dict):
+                values = dict(cast(dict[str, Any], section))
+            else:
+                values = {}
+            values["token"] = token
+            if base_url:
+                values["baseUrl"] = base_url
+            setattr(full_config.channels, "weixin", values)
+            save_config(full_config, get_config_path())
+        except Exception:
+            self.logger.exception("Failed to persist WeChat credentials to config.json")
 
     # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)

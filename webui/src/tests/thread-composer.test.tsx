@@ -1260,6 +1260,45 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it("uses the gateway folder picker for a locally hosted WebUI", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/gateway-project");
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{
+          can_change_project: true,
+          can_use_full_access: true,
+          can_pick_folder: true,
+        }}
+        onPickWorkspaceFolder={pickFolder}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/gateway-project",
+      project_name: "gateway-project",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
   it("uses the web path menu when no native host picker is available", async () => {
     const user = userEvent.setup();
     const defaultScope = {

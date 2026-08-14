@@ -661,6 +661,14 @@ export function ThreadShell({
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, getToken, ingressLimits, modelName, token } = useClient();
+  const pickWorkspaceFolder = useCallback(async (): Promise<string | null> => {
+    const response = await client.requestMutation<{ path: unknown }>(
+      "workspace.pick_folder",
+      {},
+      300_000,
+    );
+    return typeof response.path === "string" ? response.path : null;
+  }, [client]);
   const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
@@ -1458,6 +1466,9 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          onPickWorkspaceFolder={
+            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
+          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={temporary ? null : chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
@@ -1503,6 +1514,9 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          onPickWorkspaceFolder={
+            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
+          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}

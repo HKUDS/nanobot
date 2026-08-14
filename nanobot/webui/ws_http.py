@@ -62,6 +62,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
 )
+from nanobot.webui.http_utils import is_loopback_host as _is_loopback_host
 from nanobot.webui.http_utils import (
     is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
 )
@@ -85,6 +86,11 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.native_folder_picker import (
+    NativeFolderPickerError,
+    native_folder_picker_available,
+    pick_native_folder,
+)
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -133,6 +139,7 @@ _WEBUI_MUTATION_PATHS = {
     "skill.update": "/api/webui/skills/update",
     "skill.delete": "/api/webui/skills/delete",
     "sidebar.update": "/api/webui/sidebar-state/update",
+    "workspace.pick_folder": "/api/workspaces/pick-folder",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
     "settings.model_configuration.update": "/api/settings/model-configurations/update",
@@ -329,6 +336,7 @@ class GatewayHTTPHandler:
         )
         self.skill_state_action = skill_state_action
         self._skill_install_lock = asyncio.Lock()
+        self._folder_picker_lock = asyncio.Lock()
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -359,6 +367,17 @@ class GatewayHTTPHandler:
 
     def workspace_controls_available(self, connection: Any) -> bool:
         return self._runtime_surface == "native" or _is_localhost(connection)
+
+    def workspace_folder_picker_available(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> bool:
+        return (
+            _is_loopback_host(self.config.host)
+            and _is_local_browser_request(connection, request.headers)
+            and native_folder_picker_available()
+        )
 
     # -- Token management ---------------------------------------------------
 
@@ -435,6 +454,7 @@ class GatewayHTTPHandler:
             "/api/webui/skills/update",
             "/api/webui/skills/delete",
             "/api/webui/sidebar-state/update",
+            "/api/workspaces/pick-folder",
         }
 
     @staticmethod
@@ -855,9 +875,9 @@ class GatewayHTTPHandler:
                         self.local_trigger_store.delete(job.id)
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
-        deleted = self.session_manager.delete_session(decoded_key)
-        delete_webui_thread(decoded_key)
-        return _http_json_response({"deleted": bool(deleted)})
+        session_deleted = self.session_manager.delete_session(decoded_key)
+        transcript_deleted = delete_webui_thread(decoded_key)
+        return _http_json_response({"deleted": bool(session_deleted or transcript_deleted)})
 
     # -- Automation routes --------------------------------------------------
 
@@ -1054,6 +1074,8 @@ class GatewayHTTPHandler:
             return await self._handle_sessions_list(request)
         if got == "/api/commands":
             return self._handle_commands(request)
+        if got == "/api/workspaces/pick-folder":
+            return await self._handle_workspace_folder_picker(connection, request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
         if got == "/api/webui/skills/search":
@@ -1089,9 +1111,31 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         return _http_json_response(
             self.workspaces.payload(
-                controls_available=self.workspace_controls_available(connection)
+                controls_available=self.workspace_controls_available(connection),
+                folder_picker_available=self.workspace_folder_picker_available(
+                    connection,
+                    request,
+                ),
             )
         )
+
+    async def _handle_workspace_folder_picker(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self.workspace_folder_picker_available(connection, request):
+            return _http_error(403, "native folder picker is unavailable for this connection")
+        if self._folder_picker_lock.locked():
+            return _http_error(409, "native folder picker is already open")
+        try:
+            async with self._folder_picker_lock:
+                path = await pick_native_folder()
+        except NativeFolderPickerError as exc:
+            return _http_error(503, str(exc))
+        return _http_json_response({"path": path})
 
     def _handle_webui_skills(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

@@ -566,7 +566,7 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+                prune_dream_sessions(agent.sessions)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
