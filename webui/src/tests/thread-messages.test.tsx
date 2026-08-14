@@ -16,6 +16,54 @@ afterEach(() => {
 });
 
 describe("ThreadMessages", () => {
+  it("shows optimistic turn progress in the thread before the first agent output", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-13T10:00:05.000Z").getTime();
+    vi.setSystemTime(now);
+    const prompt: UIMessage = {
+      id: "u-optimistic",
+      role: "user",
+      content: "check this",
+      turnId: "turn-optimistic",
+      turnPhase: "user",
+      deliveryStatus: "sending",
+      createdAt: now - 5_000,
+    };
+    const { rerender } = render(
+      <ThreadMessages
+        messages={[prompt]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Thinking for 5s" })).toBeInTheDocument();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          { ...prompt, deliveryStatus: "accepted" },
+          {
+            id: "t-optimistic",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            turnId: "turn-optimistic",
+            turnPhase: "activity",
+            createdAt: now,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Working for 5s" })).toBeInTheDocument();
+  });
+
   it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
     const completed: UIMessage[] = [
       { id: "u1", role: "user", content: "question", createdAt: 1 },

@@ -11,6 +11,9 @@ interface ThreadMessagesProps {
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
+  activeTurnId?: string | null;
+  /** Optimistic or canonical active-turn start, in unix seconds. */
+  runStartedAt?: number | null;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -53,6 +56,8 @@ export function ThreadMessages({
   messages,
   temporary = false,
   isStreaming = false,
+  activeTurnId = null,
+  runStartedAt = null,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
@@ -74,6 +79,16 @@ export function ThreadMessages({
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
   );
+  const pendingTurn = useMemo(
+    () => pendingTurnProjection(messages, activeTurnId),
+    [activeTurnId, messages],
+  );
+  const pendingActivity = (
+    isStreaming
+    && liveActivityClusterIndices.size === 0
+    && pendingTurn !== null
+    && !pendingTurn.hasVisibleOutput
+  ) ? pendingTurn : null;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -136,8 +151,66 @@ export function ThreadMessages({
           />
         );
       })}
+      {pendingActivity ? (
+        <div className={units.length > 0 ? "mt-5" : undefined}>
+          <AgentActivityCluster
+            messages={[]}
+            isTurnStreaming
+            hasBodyBelow={false}
+            startedAtMs={
+              runStartedAt != null
+                ? runStartedAt * 1000
+                : pendingActivity.startedAtMs
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
+}
+
+interface PendingTurnProjection {
+  startedAtMs?: number;
+  hasVisibleOutput: boolean;
+}
+
+function pendingTurnProjection(
+  messages: UIMessage[],
+  activeTurnId: string | null,
+): PendingTurnProjection | null {
+  let promptIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      message.role === "user"
+      && message.deliveryStatus !== "failed"
+      && (activeTurnId === null || message.turnId === activeTurnId)
+    ) {
+      promptIndex = index;
+      break;
+    }
+  }
+  if (promptIndex < 0) return null;
+
+  const prompt = messages[promptIndex];
+  const hasVisibleOutput = messages.slice(promptIndex + 1).some((message) => {
+    if (message.role === "user") return false;
+    if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false;
+    return (
+      message.content.trim().length > 0
+      || !!message.reasoning?.trim()
+      || !!message.reasoningStreaming
+      || message.kind === "trace"
+      || !!message.media?.length
+    );
+  });
+
+  return {
+    ...(typeof prompt.createdAt === "number" && Number.isFinite(prompt.createdAt)
+      ? { startedAtMs: prompt.createdAt }
+      : {}),
+    hasVisibleOutput,
+  };
 }
 
 interface ThreadDisplayUnitProps {

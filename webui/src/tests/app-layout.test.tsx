@@ -2040,18 +2040,20 @@ describe("App layout", () => {
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", 12_345);
     });
-    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
-    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
   it("does not show an updated dot later when the active session finishes", async () => {
@@ -2092,18 +2094,21 @@ describe("App layout", () => {
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", 12_345);
     });
-    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
-    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
   it("marks inactive sessions when a thread update arrives", async () => {
@@ -2138,13 +2143,14 @@ describe("App layout", () => {
       for (const handler of sessionUpdateHandlers) handler("chat-b", "thread");
     });
 
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Scheduled update target$/ }));
     });
 
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
   it("restores sidebar run indicators after a page reload", async () => {
@@ -2177,9 +2183,9 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
-      expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
+      expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument(),
     );
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
     expect(attachSpy).toHaveBeenCalledWith("chat-a");
   });
 
@@ -3099,13 +3105,10 @@ describe("App layout", () => {
       .toBeTruthy();
 
     const alphaGroup = alphaTab.closest("[data-sidebar-tab-group]") as HTMLElement;
-    const paneTitles = within(alphaGroup)
-      .getAllByRole("button")
-      .filter((button) => (
-        button.closest("[data-sidebar-pane]") && button.hasAttribute("title")
-      ))
-      .map((button) => button.getAttribute("title"));
-    expect(paneTitles).toEqual(["Alpha child", "Alpha tab"]);
+    const alphaChild = within(alphaGroup).getByRole("button", { name: "Alpha child" });
+    const alphaRoot = within(alphaGroup).getByRole("button", { name: "Alpha tab" });
+    expect(alphaChild.compareDocumentPosition(alphaRoot) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("uses one active pane without workbench editing controls on mobile", async () => {

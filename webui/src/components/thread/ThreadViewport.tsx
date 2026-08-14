@@ -37,6 +37,8 @@ interface ThreadViewportProps {
   messages: UIMessage[];
   temporary?: boolean;
   isStreaming: boolean;
+  /** Optimistic or canonical start time for the active turn, in unix seconds. */
+  runStartedAt?: number | null;
   composer?: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
@@ -64,6 +66,9 @@ const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
 const EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX = 16;
 const SCROLL_BUTTON_COMPOSER_GAP_PX = 16;
 const SOFT_KEYBOARD_MIN_INSET_PX = 80;
+const SESSION_HANDOFF_EXIT_DURATION_MS = 80;
+const SESSION_HANDOFF_ENTER_DURATION_MS = 140;
+const SESSION_HANDOFF_OPACITY = 0.82;
 export const INITIAL_HISTORY_WINDOW = 160;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
@@ -102,6 +107,13 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
 function isThreadDisclosureTarget(target: EventTarget | null): boolean {
   return target instanceof Element
     && target.closest("[data-thread-disclosure]") !== null;
+}
+
+function isKeyboardControl(element: Element | null): boolean {
+  return element instanceof HTMLElement
+    && element.closest(
+      "button, a[href], select, [role='button'], [role='menuitem'], [role='option']",
+    ) !== null;
 }
 
 type ThreadScrollDirection = "backward" | "forward";
@@ -161,6 +173,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   messages,
   temporary = false,
   isStreaming,
+  runStartedAt = null,
   composer,
   emptyState,
   scrollToBottomSignal = 0,
@@ -187,9 +200,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const contentRef = useRef<HTMLDivElement>(null);
   const messageRegionRef = useRef<HTMLDivElement>(null);
   const messageContentRef = useRef<HTMLDivElement>(null);
+  const emptyStateRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
+  const conversationHandoffPendingRef = useRef(false);
+  const conversationHandoffAnimationRef = useRef<Animation | null>(null);
   const pendingConversationScrollRef = useRef(true);
   const pendingPromptJumpRef = useRef<string | null>(null);
   const restoreScrollAfterPrependRef =
@@ -422,11 +438,27 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   useLayoutEffect(() => {
     if (lastConversationKeyRef.current === conversationKey) return;
     lastConversationKeyRef.current = conversationKey;
+    conversationHandoffAnimationRef.current?.cancel();
+    conversationHandoffAnimationRef.current = null;
+    conversationHandoffPendingRef.current = true;
     pendingConversationScrollRef.current = true;
     threadMotionRef.current?.reset();
     setAtBottom(true);
     setVisibleMessageCount(INITIAL_HISTORY_WINDOW);
-  }, [conversationKey]);
+
+    const surface = hasMessages ? messageRegionRef.current : emptyStateRef.current;
+    const reduceMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!surface || reduceMotion || typeof surface.animate !== "function") return;
+    conversationHandoffAnimationRef.current = surface.animate(
+      [{ opacity: 1 }, { opacity: SESSION_HANDOFF_OPACITY }],
+      {
+        duration: SESSION_HANDOFF_EXIT_DURATION_MS,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+        fill: "forwards",
+      },
+    );
+  }, [conversationKey, hasMessages]);
 
   useLayoutEffect(() => {
     if (!conversationReady) {
@@ -514,10 +546,40 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   ]);
 
   useLayoutEffect(() => {
+    if (!conversationReady || !conversationHandoffPendingRef.current) return;
+    conversationHandoffPendingRef.current = false;
+    conversationHandoffAnimationRef.current?.cancel();
+    conversationHandoffAnimationRef.current = null;
+    const surface = hasMessages ? messageRegionRef.current : emptyStateRef.current;
+    const reduceMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!surface || reduceMotion || typeof surface.animate !== "function") return;
+
+    const animation = surface.animate(
+      [{ opacity: SESSION_HANDOFF_OPACITY }, { opacity: 1 }],
+      {
+        duration: SESSION_HANDOFF_ENTER_DURATION_MS,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    );
+    conversationHandoffAnimationRef.current = animation;
+    const clearAnimation = () => {
+      if (conversationHandoffAnimationRef.current === animation) {
+        conversationHandoffAnimationRef.current = null;
+      }
+    };
+    animation.onfinish = clearAnimation;
+    animation.oncancel = clearAnimation;
+  }, [conversationReady, hasMessages]);
+
+  useLayoutEffect(() => {
     threadMotionRef.current?.invalidateGeometry();
   }, [composer, hasMessages, visibleMessages.length]);
 
-  useEffect(() => () => threadMotionRef.current?.dispose(), []);
+  useEffect(() => () => {
+    conversationHandoffAnimationRef.current?.cancel();
+    threadMotionRef.current?.dispose();
+  }, []);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -530,10 +592,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const invalidateGeometry = () => {
       threadMotionRef.current?.invalidateGeometry();
     };
-    invalidateGeometry();
+    const reconcileObservedGeometry = () => {
+      threadMotionRef.current?.reconcileObservedGeometry();
+    };
+    reconcileObservedGeometry();
     const observer = typeof ResizeObserver === "undefined"
       ? null
-      : new ResizeObserver(invalidateGeometry);
+      : new ResizeObserver(reconcileObservedGeometry);
     observer?.observe(el);
     if (content) observer?.observe(content);
     if (messageRegion) observer?.observe(messageRegion);
@@ -623,6 +688,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         yieldCameraToUser();
         return;
       }
+      if (isKeyboardControl(event.target as Element | null)) return;
       handleDirectionalInput(keyboardScrollDirection(event));
     };
     el.addEventListener("scroll", handleScroll, { passive: true });
@@ -690,6 +756,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   messages={visibleMessages}
                   temporary={temporary}
                   isStreaming={isStreaming}
+                  activeTurnId={activeTurnId}
+                  runStartedAt={runStartedAt}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
@@ -704,6 +772,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             </div>
           ) : (
             <div
+              ref={emptyStateRef}
+              data-testid="thread-empty-region"
               className={cn(
                 "row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center",
                 hasComposer && "sm:items-end sm:pb-8",
