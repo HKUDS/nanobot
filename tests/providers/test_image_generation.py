@@ -1949,3 +1949,111 @@ def test_image_provider_http_client_kwargs_include_explicit_proxy() -> None:
         "proxy": proxy,
         "trust_env": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# DashScope (Bailian) native image synthesis
+# ---------------------------------------------------------------------------
+
+
+from nanobot.providers.image_generation import DashScopeImageGenerationClient  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _dashscope_fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip the real asyncio.sleep between DashScope poll attempts."""
+    monkeypatch.setattr(
+        "nanobot.providers.image_generation._DASHSCOPE_POLL_INTERVAL_S", 0.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_submit_and_poll(
+    generated_image_downloads: list[tuple[str, str | None]],
+) -> None:
+    submit = FakeResponse({"output": {"task_id": "abc123", "task_status": "PENDING"}})
+    poll_responses = [
+        FakeResponse({"output": {"task_status": "RUNNING"}}),
+        FakeResponse({"output": {
+            "task_status": "SUCCEEDED",
+            "results": [{"url": "https://cdn.example/image.png"}],
+        }}),
+    ]
+    fake = ModelScopeFakeClient(submit, poll_responses)
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(prompt="A golden cat", model="qwen-image-3.0-pro")
+
+    assert response.images[0].startswith("data:image/png;base64,")
+    assert generated_image_downloads == [("https://cdn.example/image.png", None)]
+
+    post_call = fake.calls[0]
+    assert post_call["url"] == (
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    )
+    assert post_call["headers"]["Authorization"] == "Bearer ds-token"
+    assert post_call["headers"]["X-DashScope-Async"] == "enable"
+    body = post_call["json"]
+    assert body["model"] == "qwen-image-3.0-pro"
+    assert body["input"]["prompt"] == "A golden cat"
+    assert body["parameters"]["n"] == 1
+
+    assert "/api/v1/tasks/abc123" in fake.get_calls[0]["url"]
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_size_mapping() -> None:
+    submit = FakeResponse({"output": {"task_id": "t1"}})
+    poll = [FakeResponse({"output": {"task_status": "SUCCEEDED", "results": [{"url": "https://cdn/img.png"}]}})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="test", model="wan2.7-image-pro", aspect_ratio="16:9")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1280*720"
+
+    await client.generate(prompt="test", model="wan2.7-image-pro", image_size="1664x928")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1664*928"
+
+    await client.generate(prompt="test", model="wan2.7-image-pro")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1024*1024"
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_task_failed() -> None:
+    submit = FakeResponse({"output": {"task_id": "bad-task"}})
+    poll = [FakeResponse({"output": {"task_status": "FAILED", "code": "InternalError"}})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="FAILED"):
+        await client.generate(prompt="test", model="m")
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_requires_api_key() -> None:
+    client = DashScopeImageGenerationClient(api_key=None)
+
+    with pytest.raises(ImageGenerationError, match="API key"):
+        await client.generate(prompt="draw", model="m")
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_missing_task_id() -> None:
+    submit = FakeResponse({"unexpected": "response"})
+    fake = ModelScopeFakeClient(submit, [])
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="task_id"):
+        await client.generate(prompt="draw", model="m")

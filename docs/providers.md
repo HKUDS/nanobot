@@ -407,6 +407,56 @@ ModelScope image generation reuses the same provider key but is configured under
 
 Use the image model's exact ModelScope ID without a leading `modelscope/`; the image client sends this value unchanged and handles ModelScope's async submit/poll flow. The example uses [`Qwen/Qwen-Image-2512`](https://modelscope.cn/models/Qwen/Qwen-Image-2512). See [Image Generation](./image-generation.md#modelscope) for supported sizes, aspect ratios, and the complete provider configuration.
 
+### DashScope (Alibaba Cloud Bailian)
+
+DashScope offers two built-in providers sharing the same `DASHSCOPE_API_KEY`:
+
+- `dashscope` — the OpenAI-compatible endpoint (`compatible-mode/v1`). Simplest option; covers most text models plus vision input.
+- `dashscope_native` — the [DashScope native protocol](https://help.aliyun.com/zh/model-studio/qwen-api-via-dashscope). Use it for the full parameter surface (native thinking controls such as `reasoning_effort`) and models or features that compatible-mode does not expose.
+
+```json
+{
+  "providers": {
+    "dashscope_native": {
+      "apiKey": "${DASHSCOPE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "dashscope_native",
+      "model": "qwen3.8-max"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+The default base URL is `https://dashscope.aliyuncs.com`; override `providers.dashscope_native.apiBase` only for workspace-specific endpoints. Messages containing images are routed to the multimodal-generation endpoint automatically.
+
+`dashscope_native` also backs Bailian image generation and speech-to-text, configured separately:
+
+```json
+{
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "dashscope_native",
+      "model": "qwen-image-3.0-pro"
+    }
+  },
+  "transcription": {
+    "provider": "dashscope",
+    "model": "qwen3-asr-flash"
+  }
+}
+```
+
+See [Image Generation](./image-generation.md) for the complete image tool configuration.
+
 ### Ollama
 
 Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.

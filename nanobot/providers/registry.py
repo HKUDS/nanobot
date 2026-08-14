@@ -513,6 +513,65 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
     ),
+    # DashScope native protocol (百炼原生接口): full parameter surface and
+    # native-only models that compatible-mode does not expose.
+    ProviderSpec(
+        name="dashscope_native",
+        keywords=("dashscope_native", "dashscope-native"),
+        env_key="DASHSCOPE_API_KEY",
+        display_name="DashScope (Native)",
+        backend="dashscope_native",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="qwen3.8-max",
+                label="Qwen3.8-Max",
+                description="Flagship multimodal model (text and image input).",
+                context_window=1000000,
+            ),
+            ProviderModelSpec(
+                id="qwen-max",
+                label="Qwen-Max",
+                description="Stable alias of the latest Qwen flagship model.",
+            ),
+            ProviderModelSpec(
+                id="qwen3.7-plus",
+                label="Qwen3.7-Plus",
+                description="Balanced model for everyday multimodal work.",
+            ),
+            ProviderModelSpec(
+                id="qwen-plus",
+                label="Qwen-Plus",
+                description="Stable alias of the latest Qwen plus-tier model.",
+            ),
+            ProviderModelSpec(
+                id="qwen3.7-flash",
+                label="Qwen3.7-Flash",
+                description="Fast and cost-efficient model.",
+            ),
+            ProviderModelSpec(
+                id="qwen-turbo",
+                label="Qwen-Turbo",
+                description="Stable alias of the fastest Qwen model.",
+            ),
+            ProviderModelSpec(
+                id="qwen3.5-omni-plus",
+                label="Qwen3.5-Omni-Plus",
+                description="Omni model accepting text, image, audio, and video.",
+            ),
+            ProviderModelSpec(
+                id="deepseek-v4-pro",
+                label="DeepSeek-V4-Pro",
+                description="DeepSeek reasoning model hosted on Bailian.",
+            ),
+            ProviderModelSpec(
+                id="deepseek-v4-flash",
+                label="DeepSeek-V4-Flash",
+                description="Fast DeepSeek model hosted on Bailian.",
+            ),
+        ),
+        default_api_base="https://dashscope.aliyuncs.com",
+    ),
     # ModelScope (魔搭社区): OpenAI-compatible API
     ProviderSpec(
         name="modelscope",

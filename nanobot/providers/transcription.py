@@ -11,6 +11,7 @@ import base64
 import json
 import mimetypes
 import os
+import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -24,6 +25,20 @@ _STEPFUN_ASR_PATH = "audio/asr/sse"
 _ASSEMBLYAI_DEFAULT_API_BASE = "https://api.assemblyai.com/v2"
 _ASSEMBLYAI_POLL_ATTEMPTS = 60
 _ASSEMBLYAI_POLL_INTERVAL_S = 2.0
+_DASHSCOPE_ASR_MAX_BYTES = 10 * 1024 * 1024
+_DASHSCOPE_AUDIO_MIME_BY_SUFFIX = {
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "oga": "audio/ogg",
+    "ogg": "audio/ogg",
+    "opus": "audio/ogg",
+    "wav": "audio/wav",
+    "weba": "audio/webm",
+    "webm": "audio/webm",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "mpga": "audio/mpeg",
+}
 _AUDIO_MIME_OVERRIDES = {
     ".m4a": "audio/mp4",
     ".mpga": "audio/mpeg",
@@ -746,6 +761,181 @@ class OpenRouterTranscriptionProvider:
             path=path,
             model=self.model,
             provider_label="OpenRouter",
+            language=self.language,
+        )
+
+
+async def _post_dashscope_asr_with_retry(
+    url: str,
+    *,
+    api_key: str | None,
+    path: Path,
+    model: str,
+    provider_label: str,
+    language: str | None = None,
+) -> str:
+    """POST audio (base64 data URL) to DashScope native ASR and return text."""
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
+        return ""
+    if len(data) > _DASHSCOPE_ASR_MAX_BYTES:
+        logger.error(
+            "{} transcription error: audio file exceeds {} bytes",
+            provider_label,
+            _DASHSCOPE_ASR_MAX_BYTES,
+        )
+        return ""
+
+    mime = (
+        mimetypes.guess_type(path)[0]
+        or _DASHSCOPE_AUDIO_MIME_BY_SUFFIX.get(path.suffix.lstrip(".").lower())
+        or "audio/wav"
+    )
+    audio_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+    content: list[dict[str, Any]] = [{"audio": audio_url}]
+    parameters: dict[str, Any] = {"asr_options": {"enable_itn": True}}
+    if language:
+        parameters["asr_options"]["language"] = language
+
+    body: dict[str, Any] = {
+        "model": model,
+        "input": {
+            "messages": [
+                {"role": "user", "content": content},
+            ]
+        },
+        "parameters": parameters,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = await client.post(url, headers=headers, json=body, timeout=60.0)
+                if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                    logger.warning(
+                        "{} transcription transient HTTP {} (attempt {}/{})",
+                        provider_label,
+                        response.status_code,
+                        attempt + 1,
+                        _MAX_RETRIES + 1,
+                    )
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                response.raise_for_status()
+                payload_raw: object = response.json()
+                if isinstance(payload_raw, dict):
+                    payload = cast(dict[str, Any], payload_raw)
+                    if payload.get("code"):
+                        logger.error(
+                            "{} ASR error {}: {}",
+                            provider_label,
+                            payload.get("code"),
+                            payload.get("message"),
+                        )
+                        return ""
+                    return _dashscope_asr_text(payload)
+                return _dashscope_asr_text(payload_raw)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                logger.error(
+                    "{} transcription HTTP {}{}",
+                    provider_label,
+                    e.response.status_code,
+                    f" {e.response.reason_phrase}" if e.response.reason_phrase else "",
+                )
+                return ""
+            except (httpx.RequestError, Exception):
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                logger.exception("{} transcription request error", provider_label)
+                return ""
+    return ""
+
+
+def _dashscope_asr_text(payload: object) -> str:
+    """Extract text from a DashScope multimodal-generation ASR response."""
+    if not isinstance(payload, dict):
+        return ""
+    data = cast(dict[str, Any], payload)
+    output = data.get("output")
+    if not isinstance(output, dict):
+        return ""
+    output_data = cast(dict[str, Any], output)
+    choices = output_data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    items = cast(list[object], choices)
+    choice = cast(dict[str, Any], items[0]) if isinstance(items[0], dict) else {}
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = cast(dict[str, Any], message).get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(
+            str(cast(dict[str, Any], part).get("text") or "")
+            for part in cast(list[object], content)
+            if isinstance(part, dict)
+        ).strip()
+    return ""
+
+
+class DashScopeTranscriptionProvider:
+    """Voice transcription provider using DashScope (Bailian) native ASR.
+
+    Uses the synchronous multimodal-generation endpoint with a base64 audio
+    content block (``qwen3-asr-flash``); no file upload or task polling.
+    """
+
+    _DEFAULT_BASE = "https://dashscope.aliyuncs.com"
+    _GENERATION_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+        model: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
+        # Accept any DashScope-shaped base (including compatible-mode URLs)
+        # and normalize to the host root for native-protocol endpoints.
+        base = api_base or os.environ.get("DASHSCOPE_API_BASE") or self._DEFAULT_BASE
+        parts = urllib.parse.urlsplit(base.strip())
+        root = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else self._DEFAULT_BASE
+        self.api_url = f"{root}{self._GENERATION_PATH}"
+        self.language = language or None
+        self.model = model or "qwen3-asr-flash"
+        logger.debug("DashScope transcription endpoint: {}", self.api_url)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("DashScope API key not configured for transcription")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        return await _post_dashscope_asr_with_retry(
+            self.api_url,
+            api_key=self.api_key,
+            path=path,
+            model=self.model,
+            provider_label="DashScope",
             language=self.language,
         )
 

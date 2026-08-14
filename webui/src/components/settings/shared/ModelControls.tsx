@@ -584,6 +584,7 @@ export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   deepseek: Waves,
   zhipu: Grid3X3,
   dashscope: Cloud,
+  dashscope_native: Cloud,
   modelscope: Layers,
   moonshot: Moon,
   minimax: Zap,

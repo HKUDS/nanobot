@@ -2112,6 +2112,172 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         return images
 
 
+_DASHSCOPE_POLL_INTERVAL_S = 3.0
+_DASHSCOPE_POLL_MAX_ATTEMPTS = 100  # 5 min at 3s intervals
+
+_DASHSCOPE_ASPECT_SIZES = {
+    "1:1": "1024*1024",
+    "9:16": "720*1280",
+    "3:4": "768*1152",
+    "16:9": "1280*720",
+    "4:3": "1152*768",
+}
+
+
+def _dashscope_size(aspect_ratio: str | None, image_size: str | None) -> str:
+    """Resolve aspect ratio / image_size to a DashScope ``W*H`` size string."""
+    if image_size:
+        normalized = image_size.strip().lower().replace("x", "*")
+        if "*" in normalized:
+            return normalized
+    if aspect_ratio and aspect_ratio in _DASHSCOPE_ASPECT_SIZES:
+        return _DASHSCOPE_ASPECT_SIZES[aspect_ratio]
+    return "1024*1024"
+
+
+class DashScopeImageGenerationClient(ImageGenerationProvider):
+    """Async client for DashScope (Bailian) native image synthesis.
+
+    DashScope uses the async task pattern shared across its AIGC services:
+    POST with ``X-DashScope-Async: enable`` returns ``output.task_id``, then
+    GET /api/v1/tasks/{task_id} is polled until ``output.task_status`` is
+    SUCCEEDED or FAILED.
+    """
+
+    provider_name = "dashscope_native"
+    model_options = ("qwen-image-3.0-pro", "wan2.7-image-pro")
+    missing_key_message = (
+        "DashScope API key is not configured. "
+        "Set providers.dashscope_native.apiKey."
+    )
+
+    def _default_base_url(self) -> str:
+        return "https://dashscope.aliyuncs.com"
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str] | None = None,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImageResponse:
+        if not self.api_key:
+            raise ImageGenerationError(self.missing_key_message)
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-Async": "enable",
+            **self.extra_headers,
+        }
+
+        body: dict[str, Any] = {
+            "model": model,
+            "input": {"prompt": prompt},
+            "parameters": {
+                "size": _dashscope_size(aspect_ratio, image_size),
+                "n": 1,
+            },
+        }
+        refs = list(reference_images or [])
+        if refs:
+            body["input"]["ref_img"] = image_path_to_data_url(refs[0])
+        body["parameters"].update(self.extra_body)
+
+        submit_url = f"{self.api_base}/api/v1/services/aigc/text2image/image-synthesis"
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
+        try:
+            try:
+                response = await client.post(submit_url, headers=headers, json=body)
+            except httpx.TimeoutException as exc:
+                raise ImageGenerationError(
+                    "DashScope image generation request timed out"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise ImageGenerationError(
+                    f"DashScope image generation request failed: {exc}"
+                ) from exc
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                detail = _http_error_detail(response)
+                raise ImageGenerationError(
+                    f"DashScope image generation failed: {detail}"
+                ) from exc
+
+            task_data = cast(dict[str, Any], response.json())
+            output = cast(dict[str, Any], task_data.get("output") or {})
+            task_id = output.get("task_id")
+            if not task_id:
+                raise ImageGenerationError(
+                    f"DashScope did not return a task_id: {response.text[:500]}"
+                )
+
+            images = await self._poll_task(
+                client, cast(str, task_id), headers
+            )
+            self._require_images(images, task_data)
+            return GeneratedImageResponse(images=images, content="", raw=task_data)
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+    async def _poll_task(
+        self,
+        client: httpx.AsyncClient,
+        task_id: str,
+        submit_headers: dict[str, str],
+    ) -> list[str]:
+        poll_url = f"{self.api_base}/api/v1/tasks/{task_id}"
+        for _ in range(_DASHSCOPE_POLL_MAX_ATTEMPTS):
+            try:
+                response = await client.get(poll_url, headers=submit_headers)
+            except httpx.RequestError:
+                await asyncio.sleep(_DASHSCOPE_POLL_INTERVAL_S)
+                continue
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                detail = _http_error_detail(response)
+                raise ImageGenerationError(
+                    f"DashScope task polling failed: {detail}"
+                ) from exc
+
+            data = cast(dict[str, Any], response.json())
+            output = cast(dict[str, Any], data.get("output") or {})
+            status = output.get("task_status")
+
+            if status == "SUCCEEDED":
+                return await self._collect_images(output)
+            if status in ("FAILED", "CANCELED", "UNKNOWN"):
+                raise ImageGenerationError(
+                    f"DashScope image generation task {status}: {data}"
+                )
+
+            await asyncio.sleep(_DASHSCOPE_POLL_INTERVAL_S)
+
+        raise ImageGenerationError(
+            f"DashScope image generation timed out after "
+            f"{_DASHSCOPE_POLL_MAX_ATTEMPTS} polls"
+        )
+
+    async def _collect_images(self, output: dict[str, Any]) -> list[str]:
+        images: list[str] = []
+        for raw_result in cast(list[object], output.get("results") or []):
+            if not isinstance(raw_result, dict):
+                continue
+            url = cast(dict[str, Any], raw_result).get("url")
+            if isinstance(url, str) and url:
+                images.append(
+                    await _download_image_data_url(url, proxy=self.proxy)
+                )
+        return images
+
+
 # ---------------------------------------------------------------------------
 # Provider registration
 # ---------------------------------------------------------------------------
@@ -2127,3 +2293,4 @@ register_image_gen_provider(OpenRouterImageGenerationClient)
 register_image_gen_provider(StepFunImageGenerationClient)
 register_image_gen_provider(ZhipuImageGenerationClient)
 register_image_gen_provider(ModelScopeImageGenerationClient)
+register_image_gen_provider(DashScopeImageGenerationClient)
