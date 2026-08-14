@@ -1807,7 +1807,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("rejects session drops that are unavailable to the composer", () => {
+  it("rejects self-session drops that are unavailable to the composer", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}

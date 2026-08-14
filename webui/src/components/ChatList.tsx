@@ -865,7 +865,12 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !topicActive
                         ? "updated"
                         : null;
-                    const canDragSession = !topicActive && !deleteSelectionMode;
+                    const hasPaneMoveTarget = Boolean(onAttachPane)
+                      && paneGroupTargets.some((target) => (
+                        target.key !== paneGroup?.tabKey && !target.atCapacity
+                      ));
+                    const canDragSession = !deleteSelectionMode
+                      && (!topicActive || hasPaneMoveTarget);
                     const actionMenuId = `session:${s.key}`;
                     return (
                       <li
@@ -1332,7 +1337,10 @@ function ActivePaneRows({
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
         const isArchived = archived.has(pane.key);
-        const canDragSession = !active && !deleteSelectionMode;
+        const hasPaneMoveTarget = Boolean(onAttachPane)
+          && moveTargets.some((target) => !target.atCapacity);
+        const canDragSession = !deleteSelectionMode
+          && (!active || Boolean(onDetachPane) || hasPaneMoveTarget);
         const actionMenuId = `pane:${pane.key}`;
 
         return (

@@ -92,6 +92,8 @@ describe("ChatList", () => {
 
     expect(screen.getByRole("button", { name: "Group: Root topic" }))
       .toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("draggable", "false");
     const pane = screen.getByRole("button", { name: "Research pane" });
     expect(pane).toHaveAttribute("draggable", "true");
     const dataTransfer = {
@@ -145,7 +147,7 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
     expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
 
-    const tabRow = screen.getByRole("button", { name: "Tab: Root topic" })
+    const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab]")!;
     fireEvent.contextMenu(tabRow);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Dissolve group" }));
@@ -247,7 +249,7 @@ describe("ChatList", () => {
           session({ chatId: "target", title: "Target group" }),
           session({ chatId: "full", title: "Full group" }),
         ]}
-        activeKey="websocket:target"
+        activeKey="websocket:solo"
         paneGroups={{
           "websocket:solo": {
             tabKey: "tab:solo",
@@ -293,6 +295,7 @@ describe("ChatList", () => {
       types: [SESSION_DRAG_TYPE],
     } as unknown as DataTransfer;
     const source = screen.getByRole("button", { name: "Solo topic" });
+    expect(source).toHaveAttribute("draggable", "true");
     const targetGroup = screen.getByRole("button", { name: "Group: Target group" })
       .closest("[data-sidebar-tab-group]")!;
     const targetSurface = targetGroup.querySelector("[data-workbench-tab-surface]")!;
@@ -334,7 +337,7 @@ describe("ChatList", () => {
           "websocket:root": {
             tabKey: "tab:root",
             title: "Root group",
-            activePaneKey: "websocket:root",
+            activePaneKey: "websocket:child",
             visible: true,
             panes: [
               { key: "websocket:root", chatId: "root", title: "Root topic" },
@@ -367,6 +370,8 @@ describe("ChatList", () => {
       types: [SESSION_DRAG_TYPE],
     } as unknown as DataTransfer;
     const source = screen.getByRole("button", { name: "Research pane" });
+    expect(source).toHaveAttribute("aria-current", "true");
+    expect(source).toHaveAttribute("draggable", "true");
     const sourceSurface = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab-surface]")!;
     const standaloneList = document.querySelector("[data-chat-list-content]")!;
@@ -509,7 +514,7 @@ describe("ChatList", () => {
       .toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    expect(child).toHaveAttribute("draggable", "false");
+    expect(child).toHaveAttribute("draggable", "true");
     expect(screen.getByRole("button", { name: "Group: Target tab" }))
       .toHaveAttribute("draggable", "false");
   });
