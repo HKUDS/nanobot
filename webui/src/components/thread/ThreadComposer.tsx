@@ -52,6 +52,14 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   floatingItemClassName,
   floatingSurfaceElevationClassName,
   floatingSurfaceVisualClassName,
@@ -222,6 +230,8 @@ interface ThreadComposerProps {
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
+  suggestions?: string[];
+  onDismissSuggestions?: () => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -939,9 +949,17 @@ export function ThreadComposer({
   quotedContext = null,
   focusRequest = 0,
   onQuotedContextChange,
+  suggestions = [],
+  onDismissSuggestions,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [pendingSuggestion, setPendingSuggestion] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingSuggestion && !suggestions.includes(pendingSuggestion)) {
+      setPendingSuggestion(null);
+    }
+  }, [pendingSuggestion, suggestions]);
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
@@ -2044,6 +2062,13 @@ export function ThreadComposer({
     value,
   ]);
 
+  const submitSuggestion = useCallback((nextValue: string) => {
+    setPendingSuggestion(null);
+    setValue(nextValue);
+    onDismissSuggestions?.();
+    requestAnimationFrame(() => formRef.current?.requestSubmit());
+  }, [onDismissSuggestions]);
+
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showCliAppMenu) {
       if (e.key === "ArrowDown") {
@@ -2221,6 +2246,48 @@ export function ThreadComposer({
       }}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
+      {suggestions.length > 0 ? (
+        <div
+          role="group"
+          aria-label={t("thread.suggestions.label", {
+            defaultValue: "Suggested follow-up messages",
+          })}
+          className="mx-auto mb-2 flex w-full max-w-[49.5rem] flex-wrap items-center gap-2 px-1"
+        >
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              onClick={() => {
+                if (value.trim()) {
+                  setPendingSuggestion(suggestion);
+                  return;
+                }
+                submitSuggestion(suggestion);
+              }}
+              disabled={interactionDisabled}
+              className="min-w-0 max-w-full whitespace-normal break-words rounded-full border border-border/70 bg-background px-3 py-1.5 text-left text-[13px] leading-5 text-foreground transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              {suggestion}
+            </button>
+          ))}
+          {onDismissSuggestions ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={onDismissSuggestions}
+              disabled={interactionDisabled}
+              aria-label={t("thread.suggestions.dismiss", {
+                defaultValue: "Dismiss follow-up suggestions",
+              })}
+              className="h-8 w-8 shrink-0 rounded-full text-muted-foreground"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {showSlashMenu ? (
         <SlashCommandPalette
           commands={filteredSlashCommands}
@@ -2570,6 +2637,55 @@ export function ThreadComposer({
           </div>
         ) : null}
       </div>
+      <Dialog
+        open={pendingSuggestion !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingSuggestion(null);
+        }}
+      >
+        <DialogContent className="w-[min(calc(100vw-2rem),28rem)] rounded-[20px] p-5">
+          <DialogHeader className="text-left">
+            <DialogTitle>
+              {t("thread.suggestions.dialogTitle", { defaultValue: "Use this suggestion?" })}
+            </DialogTitle>
+            <DialogDescription>
+              {t("thread.suggestions.dialogDescription", {
+                defaultValue: "Your message already has text. Choose how to continue.",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:flex-wrap sm:space-x-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingSuggestion(null)}
+            >
+              {t("common.cancel", { defaultValue: "Cancel" })}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (pendingSuggestion) submitSuggestion(`${value.trim()}\n${pendingSuggestion}`);
+              }}
+            >
+              {t("thread.suggestions.appendAndSend", {
+                defaultValue: "Append and send",
+              })}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (pendingSuggestion) submitSuggestion(pendingSuggestion);
+              }}
+            >
+              {t("thread.suggestions.replaceAndSend", {
+                defaultValue: "Replace and send",
+              })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

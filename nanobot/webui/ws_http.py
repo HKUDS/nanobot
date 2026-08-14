@@ -34,6 +34,10 @@ from nanobot.webui.file_preview import (
     file_preview_availability_payload,
     file_preview_payload,
 )
+from nanobot.webui.follow_up_suggestions import (
+    FollowUpRequestError,
+    generate_follow_up_suggestions,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     accepts_gzip as _accepts_gzip,
@@ -130,6 +134,7 @@ _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _NO_STORE_HEADERS = [("Cache-Control", "no-store")]
 
 _WEBUI_MUTATION_PATHS = {
+    "follow_up_suggestions.generate": "/api/webui/follow-up-suggestions",
     "automation.enable": "/api/webui/automations/enable",
     "automation.disable": "/api/webui/automations/disable",
     "automation.delete": "/api/webui/automations/delete",
@@ -451,6 +456,7 @@ class GatewayHTTPHandler:
         if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", path):
             return True
         return path in {
+            "/api/webui/follow-up-suggestions",
             "/api/webui/skills/install",
             "/api/webui/skills/update",
             "/api/webui/skills/delete",
@@ -1085,6 +1091,8 @@ class GatewayHTTPHandler:
             return await self._handle_workspace_folder_picker(connection, request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
+        if got == "/api/webui/follow-up-suggestions":
+            return await self._handle_follow_up_suggestions(request)
         if got == "/api/webui/skills/search":
             return await self._handle_webui_skills_search(request)
         if got == "/api/webui/skills/trending":
@@ -1107,6 +1115,24 @@ class GatewayHTTPHandler:
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
         return None
+
+    async def _handle_follow_up_suggestions(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        payload = _mutation_payload(request)
+        if payload is None:
+            return _http_error(400, "invalid follow-up suggestions request")
+        try:
+            suggestions = await generate_follow_up_suggestions(
+                config=self.settings.config.load(),
+                payload=payload,
+            )
+        except FollowUpRequestError:
+            return _http_error(400, "invalid follow-up suggestions request")
+        except Exception:
+            self._log.exception("WebUI follow-up suggestion request failed")
+            suggestions = []
+        return _http_json_response({"suggestions": suggestions})
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

@@ -3319,6 +3319,32 @@ async def test_workspace_folder_picker_rejects_direct_http(
 
 
 @pytest.mark.asyncio
+async def test_follow_up_suggestions_rejects_direct_http(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generate = AsyncMock(return_value=["Should not run"])
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.generate_follow_up_suggestions",
+        generate,
+    )
+    channel = _ch(bus)
+
+    response = await channel.gateway.http.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {"Host": "127.0.0.1:8765"},
+            path="/api/webui/follow-up-suggestions",
+        ),
+    )
+
+    assert response is not None
+    assert response.status_code == 405
+    assert b"authenticated WebSocket" in response.body
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("connection", "host"),
     [(_REMOTE, "127.0.0.1"), (_LOCAL, "0.0.0.0")],

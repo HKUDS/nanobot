@@ -42,6 +42,7 @@ function makeClient() {
       advanceRunGeneration(chatId, options.turnId);
     }
   });
+  const requestMutation = vi.fn().mockResolvedValue({ suggestions: [] });
   const canReconcileCanonicalCompletion = vi.fn((
     chatId: string,
     expectedRunGeneration: number,
@@ -175,6 +176,7 @@ function makeClient() {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
     },
     sendMessage,
+    requestMutation,
     sendSystemCommand: vi.fn().mockResolvedValue(undefined),
     newChat: vi.fn(),
     forkChat: vi.fn(),
@@ -415,6 +417,421 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("requests and renders follow-up suggestions after a successful user turn", async () => {
+    const client = makeClient();
+    client.requestMutation.mockResolvedValue({ suggestions: ["Inspect the logs"] });
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("suggestions-success")}
+        title="Suggestions"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    ));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Why did the build fail?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+
+    act(() => {
+      client._emitChat("suggestions-success", {
+        event: "message",
+        chat_id: "suggestions-success",
+        text: "The compiler found a type mismatch.",
+        turn_id: turnId,
+      });
+      client._emitChat("suggestions-success", {
+        event: "turn_end",
+        chat_id: "suggestions-success",
+        turn_id: turnId,
+      });
+    });
+
+    expect(screen.queryByText(/Generating follow-up/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledTimes(1));
+    expect(client.requestMutation).toHaveBeenCalledWith(
+      "follow_up_suggestions.generate",
+      {
+        chat_id: "suggestions-success",
+        turn_id: turnId,
+        messages: [
+          { role: "user", content: "Why did the build fail?" },
+          { role: "assistant", content: "The compiler found a type mismatch." },
+        ],
+      },
+      20_000,
+    );
+    const suggestion = await screen.findByRole("button", { name: "Inspect the logs" });
+    fireEvent.click(suggestion);
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "suggestions-success",
+      "Inspect the logs",
+    ));
+    expect(screen.queryByRole("button", { name: "Inspect the logs" })).not.toBeInTheDocument();
+  });
+
+  it("sends only the six latest non-empty conversational messages", async () => {
+    const client = makeClient();
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Asuggestions-context/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "Drop this old question" },
+            { role: "assistant", content: "Keep answer one" },
+            { role: "user", content: "Keep question two" },
+            { role: "assistant", content: "   " },
+            { role: "assistant", content: "Keep answer three" },
+            { role: "user", content: "Keep question four" },
+            { role: "assistant", content: "Keep answer five" },
+          ]));
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("suggestions-context")}
+        title="Suggestion context"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    ));
+    await screen.findByText("Keep answer five");
+    expect(client.requestMutation).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Current question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+    act(() => {
+      client._emitChat("suggestions-context", {
+        event: "message",
+        chat_id: "suggestions-context",
+        text: "Current answer",
+        turn_id: turnId,
+      });
+      client._emitChat("suggestions-context", {
+        event: "turn_end",
+        chat_id: "suggestions-context",
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledWith(
+      "follow_up_suggestions.generate",
+      {
+        chat_id: "suggestions-context",
+        turn_id: turnId,
+        messages: [
+          { role: "user", content: "Keep question two" },
+          { role: "assistant", content: "Keep answer three" },
+          { role: "user", content: "Keep question four" },
+          { role: "assistant", content: "Keep answer five" },
+          { role: "user", content: "Current question" },
+          { role: "assistant", content: "Current answer" },
+        ],
+      },
+      20_000,
+    ));
+  });
+
+  it.each([
+    ["disabled setting", false, "Ordinary question", "complete"],
+    ["slash command", true, "/status", "complete"],
+    ["rejected turn", true, "Rejected question", "reject"],
+    ["provider error", true, "Failed question", "provider-error"],
+    ["stopped turn", true, "Stopped question", "stop"],
+    ["active-turn guidance", true, "Initial question", "guide"],
+  ] as const)("does not request suggestions for a %s", async (
+    _scenario,
+    enabled,
+    content,
+    outcome,
+  ) => {
+    const client = makeClient();
+    const chatId = `suggestions-excluded-${outcome}-${enabled}`;
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled },
+    });
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title="Excluded suggestions"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    ));
+
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: content } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+
+    if (outcome === "reject") {
+      act(() => {
+        client._emitError({ kind: "turn_rejected", chatId, turnId });
+      });
+    } else if (outcome === "stop") {
+      fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    } else if (outcome === "guide") {
+      fireEvent.change(input, { target: { value: "Additional guidance" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+    }
+
+    act(() => {
+      client._emitChat(chatId, {
+        event: "turn_end",
+        chat_id: chatId,
+        turn_id: turnId,
+        ...(outcome === "provider-error" ? { successful: false } : {}),
+      });
+    });
+    await act(async () => {});
+
+    expect(client.requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("waits for an unknown follow-up setting before handling a completion", async () => {
+    const client = makeClient();
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+    let resolveSettings!: (value: ReturnType<typeof httpJson>) => void;
+    const settingsResponse = new Promise<ReturnType<typeof httpJson>>((resolve) => {
+      resolveSettings = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        if (String(input).endsWith("/api/settings")) return settingsResponse;
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      }),
+    );
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("suggestions-settings-loading")}
+        title="Loading settings"
+        onToggleSidebar={() => {}}
+      />,
+      "deepseek-v4-pro",
+    ));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Fast question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+    act(() => {
+      client._emitChat("suggestions-settings-loading", {
+        event: "message",
+        chat_id: "suggestions-settings-loading",
+        text: "Fast answer",
+        turn_id: turnId,
+      });
+      client._emitChat("suggestions-settings-loading", {
+        event: "turn_end",
+        chat_id: "suggestions-settings-loading",
+        turn_id: turnId,
+      });
+    });
+    expect(client.requestMutation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSettings(httpJson(settings));
+    });
+
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the current suggestion request valid when an older turn completes late", async () => {
+    const client = makeClient();
+    let resolveSuggestions!: (value: { suggestions: string[] }) => void;
+    client.requestMutation.mockReturnValue(new Promise((resolve) => {
+      resolveSuggestions = resolve;
+    }));
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("suggestions-late-completion")}
+        title="Late completion"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    ));
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "First attempt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const firstTurnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+
+    act(() => {
+      client._emitError({
+        kind: "turn_rejected",
+        chatId: "suggestions-late-completion",
+        turnId: firstTurnId,
+      });
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Second attempt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const secondTurnId = client.sendMessage.mock.calls[1]?.[3]?.turnId as string;
+
+    act(() => {
+      client._emitChat("suggestions-late-completion", {
+        event: "message",
+        chat_id: "suggestions-late-completion",
+        text: "The second attempt succeeded.",
+        turn_id: secondTurnId,
+      });
+      client._emitChat("suggestions-late-completion", {
+        event: "turn_end",
+        chat_id: "suggestions-late-completion",
+        turn_id: secondTurnId,
+      });
+    });
+
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledTimes(1));
+    act(() => {
+      client._emitChat("suggestions-late-completion", {
+        event: "turn_end",
+        chat_id: "suggestions-late-completion",
+        turn_id: firstTurnId,
+        successful: false,
+      });
+      resolveSuggestions({ suggestions: ["Inspect the successful result"] });
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "Inspect the successful result" }),
+    ).toBeInTheDocument();
+  });
+
+  it("fences a pending suggestion when another turn completes successfully", async () => {
+    const client = makeClient();
+    let resolveSuggestions!: (value: { suggestions: string[] }) => void;
+    client.requestMutation.mockReturnValue(new Promise((resolve) => {
+      resolveSuggestions = resolve;
+    }));
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("suggestions-newer-completion")}
+        title="Newer completion"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    ));
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "First question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const firstTurnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+    act(() => {
+      client._emitChat("suggestions-newer-completion", {
+        event: "message",
+        chat_id: "suggestions-newer-completion",
+        text: "First answer",
+        turn_id: firstTurnId,
+      });
+      client._emitChat("suggestions-newer-completion", {
+        event: "turn_end",
+        chat_id: "suggestions-newer-completion",
+        turn_id: firstTurnId,
+        successful: true,
+      });
+    });
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      client._emitChat("suggestions-newer-completion", {
+        event: "turn_end",
+        chat_id: "suggestions-newer-completion",
+        turn_id: "newer-turn",
+        successful: true,
+      });
+      resolveSuggestions({ suggestions: ["Stale suggestion"] });
+    });
+
+    expect(screen.queryByRole("button", { name: "Stale suggestion" })).not.toBeInTheDocument();
+  });
+
+  it("fences a pending suggestion response when switching temporary chats", async () => {
+    const client = makeClient();
+    let resolveSuggestions!: (value: { suggestions: string[] }) => void;
+    client.requestMutation.mockReturnValue(new Promise((resolve) => {
+      resolveSuggestions = resolve;
+    }));
+    const settings = Object.assign(modelSettings("deepseek-v4-pro", "deepseek"), {
+      follow_up_suggestions: { enabled: true },
+    });
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={chatId}
+        temporary
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+    );
+    const { rerender } = render(view("temporary-suggestions-a"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "Question in chat A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const turnId = client.sendMessage.mock.calls[0]?.[3]?.turnId as string;
+    act(() => {
+      client._emitChat("temporary-suggestions-a", {
+        event: "message",
+        chat_id: "temporary-suggestions-a",
+        text: "Answer in chat A",
+        turn_id: turnId,
+      });
+      client._emitChat("temporary-suggestions-a", {
+        event: "turn_end",
+        chat_id: "temporary-suggestions-a",
+        turn_id: turnId,
+      });
+    });
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledTimes(1));
+
+    rerender(view("temporary-suggestions-b"));
+    await act(async () => {
+      resolveSuggestions({ suggestions: ["Suggestion from chat A"] });
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Suggestion from chat A" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {

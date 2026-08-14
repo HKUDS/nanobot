@@ -4,25 +4,31 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.hook import AgentRunHookContext, AgentTurnHookContext
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent
+from nanobot.bus.outbound_events import GoalStatusEvent, TurnEndEvent, TurnModelUpdatedEvent
 from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventContext, TurnRuntimeAdmitted
 from nanobot.providers.base import GenerationSettings
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clear_turn_wall_clock() -> None:
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._COMPLETED_WEBUI_TURN_RUNTIMES.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
     yield
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._COMPLETED_WEBUI_TURN_RUNTIMES.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
@@ -101,6 +107,23 @@ def test_clear_websocket_turn_only_clears_matching_owner() -> None:
     assert wth.websocket_turn_id("chat-b") is None
 
 
+def test_new_or_discarded_chat_drops_unclaimed_completed_runtime() -> None:
+    runtime = LLMRuntime(
+        provider=MagicMock(),
+        model="deep-model",
+        generation=GenerationSettings(),
+        context_window_tokens=100_000,
+    )
+    wth.remember_completed_websocket_turn_runtime("chat-b", "turn-old", runtime)
+
+    assert wth.register_queued_websocket_turn_if_idle("chat-b", "turn-new") is not None
+    assert wth.take_completed_websocket_turn_runtime("chat-b", "turn-old") is None
+
+    wth.remember_completed_websocket_turn_runtime("chat-b", "turn-new", runtime)
+    wth.clear_websocket_turns("chat-b")
+    assert wth.take_completed_websocket_turn_runtime("chat-b", "turn-new") is None
+
+
 @pytest.mark.asyncio
 async def test_ownerless_turns_receive_distinct_internal_owners() -> None:
     bus = MagicMock()
@@ -140,6 +163,121 @@ async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
 
     assert wth._WEBSOCKET_TURN_WALL_STARTED_AT == {}
     assert wth._WEBSOCKET_TURN_IDS == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("stop_reason", "successful"), [("completed", True), ("error", False)])
+async def test_webui_turn_result_hook_records_runner_outcome_by_owner(
+    stop_reason: str,
+    successful: bool,
+) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    metadata = {
+        "webui": True,
+        WEBUI_TURN_METADATA_KEY: "turn-result",
+        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-result",
+    }
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat-result",
+        content="hi",
+        metadata=metadata,
+    )
+    await wth.publish_turn_run_status(bus, msg, "running")
+
+    hook = wth.create_webui_turn_result_hook(AgentTurnHookContext(
+        channel="websocket",
+        chat_id="chat-result",
+        metadata=metadata,
+    ))
+    assert hook is not None
+    await hook.on_finally(AgentRunHookContext(messages=[], stop_reason=stop_reason))
+
+    assert wth.websocket_turn_successful("chat-result", "owner-result") is successful
+
+
+@pytest.mark.asyncio
+async def test_webui_turn_completion_defaults_missing_runner_outcome_to_failed(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    metadata = {
+        "webui": True,
+        WEBUI_TURN_METADATA_KEY: "turn-missing-result",
+        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-missing-result",
+    }
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat-missing-result",
+        content="hi",
+        metadata=metadata,
+    )
+    await wth.publish_turn_run_status(bus, msg, "running")
+    bus.publish_outbound.reset_mock()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=MagicMock(),
+    )
+
+    await coordinator.handle_turn_end(
+        msg,
+        session_key="websocket:chat-missing-result",
+        latency_ms=None,
+    )
+
+    outbound = bus.publish_outbound.await_args.args[0]
+    assert isinstance(outbound.event, TurnEndEvent)
+    assert outbound.event.successful is False
+
+
+@pytest.mark.asyncio
+async def test_successful_webui_turn_hands_off_completed_runtime_once(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    metadata = {
+        "webui": True,
+        WEBUI_TURN_METADATA_KEY: "turn-completed",
+        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-completed",
+    }
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat-completed",
+        content="hi",
+        metadata=metadata,
+    )
+    await wth.publish_turn_run_status(bus, msg, "running")
+    assert wth.mark_websocket_turn_successful("chat-completed", "owner-completed", True)
+    runtime = LLMRuntime(
+        provider=MagicMock(),
+        model="deep-model",
+        generation=GenerationSettings(),
+        context_window_tokens=100_000,
+    )
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=MagicMock(),
+    )
+
+    await coordinator.handle_turn_end(
+        msg,
+        session_key="websocket:chat-completed",
+        latency_ms=None,
+        runtime=runtime,
+    )
+
+    assert wth.take_completed_websocket_turn_runtime(
+        "chat-completed",
+        "turn-completed",
+    ) is runtime
+    assert wth.take_completed_websocket_turn_runtime(
+        "chat-completed",
+        "turn-completed",
+    ) is None
 
 
 @pytest.mark.asyncio

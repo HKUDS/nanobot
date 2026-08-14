@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -228,6 +228,52 @@ describe("Settings system domains", () => {
         150_000,
       );
     });
+  });
+
+  it("persists follow-up suggestions without requiring a restart", async () => {
+    const disabled = settingsPayload();
+    const enabled = {
+      ...disabled,
+      follow_up_suggestions: { enabled: true },
+      requires_restart: false,
+    };
+    requestMutationMock.mockResolvedValueOnce(enabled);
+
+    renderSettingsView({
+      initialSection: "models",
+      initialSettings: disabled,
+      showSidebar: true,
+    });
+
+    const primaryRow = await screen.findByTestId("model-call-order-row-primary");
+    fireEvent.click(within(primaryRow).getAllByRole("button")[0]);
+    const presetName = await screen.findByDisplayValue("Primary");
+    fireEvent.change(presetName, { target: { value: "Unsaved model draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+
+    const toggle = await screen.findByRole("switch", { name: "Follow-up suggestions" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/additional model request/i)).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.agent.update",
+        { follow_up_suggestions_enabled: true },
+        20_000,
+      ),
+    );
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      expect(toggle).toBeEnabled();
+    });
+    expect(screen.queryByText("Saved. Restart when ready.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    const preservedPrimaryRow = await screen.findByTestId("model-call-order-row-primary");
+    fireEvent.click(within(preservedPrimaryRow).getAllByRole("button")[0]);
+    expect(await screen.findByDisplayValue("Unsaved model draft")).toBeInTheDocument();
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {

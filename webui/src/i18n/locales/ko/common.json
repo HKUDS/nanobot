@@ -126,6 +126,10 @@
       "hostSafety": "앱 보안",
       "voiceInput": "음성 입력"
     },
+    "followUpSuggestions": {
+      "label": "후속 메시지 제안",
+      "description": "응답이 성공적으로 완료된 후 다음 메시지를 최대 3개 제안합니다. 최근 대화 컨텍스트로 추가 모델 요청을 보냅니다."
+    },
     "rows": {
       "theme": "테마",
       "language": "언어",
@@ -1067,6 +1071,14 @@
   },
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
+    "suggestions": {
+      "label": "추천 후속 메시지",
+      "dismiss": "후속 메시지 제안 닫기",
+      "dialogTitle": "이 제안을 사용할까요?",
+      "dialogDescription": "메시지에 이미 텍스트가 있습니다. 계속할 방법을 선택하세요.",
+      "appendAndSend": "추가 후 보내기",
+      "replaceAndSend": "바꾸고 보내기"
+    },
     "empty": {
       "greetings": {
         "workOn": "우리 무엇을 함께 해볼까요?",

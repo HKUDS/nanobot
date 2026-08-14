@@ -135,6 +135,10 @@ class FallbackProvider(LLMProvider):
     def generation(self) -> GenerationSettings:
         return self._primary.generation
 
+    @property
+    def primary_provider(self) -> LLMProvider:
+        return self._primary
+
     @generation.setter
     def generation(self, value: GenerationSettings) -> None:
         self._primary.generation = value

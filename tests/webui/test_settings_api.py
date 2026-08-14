@@ -955,6 +955,23 @@ def test_update_agent_settings_marks_timezone_as_manual(
     assert saved.agents.defaults.timezone_mode == "manual"
 
 
+def test_follow_up_suggestions_setting_defaults_disabled_and_persists_without_restart(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    assert settings_payload()["follow_up_suggestions"] == {"enabled": False}
+
+    payload = update_agent_settings({"followUpSuggestionsEnabled": ["true"]})
+
+    assert payload["follow_up_suggestions"] == {"enabled": True}
+    assert payload["requires_restart"] is False
+    assert load_config(config_path).follow_up_suggestions.enabled is True
+
+
 def test_update_model_configuration_preserves_custom_context_windows(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

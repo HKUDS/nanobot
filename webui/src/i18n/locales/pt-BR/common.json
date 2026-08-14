@@ -126,6 +126,10 @@
       "hostSafety": "Segurança do app",
       "voiceInput": "Entrada de voz"
     },
+    "followUpSuggestions": {
+      "label": "Sugestões de acompanhamento",
+      "description": "Sugere até três próximas mensagens após respostas concluídas com sucesso. Isso envia o contexto recente da conversa em uma solicitação adicional ao modelo."
+    },
     "models": {
       "selectModel": "Selecionar modelo",
       "addConfiguration": "Adicionar configuração",
@@ -1081,6 +1085,14 @@
   },
   "thread": {
     "loadingConversation": "Carregando conversa…",
+    "suggestions": {
+      "label": "Mensagens de acompanhamento sugeridas",
+      "dismiss": "Dispensar sugestões de acompanhamento",
+      "dialogTitle": "Usar esta sugestão?",
+      "dialogDescription": "Sua mensagem já contém texto. Escolha como continuar.",
+      "appendAndSend": "Adicionar e enviar",
+      "replaceAndSend": "Substituir e enviar"
+    },
     "empty": {
       "greetings": {
         "workOn": "Em que vamos trabalhar?",

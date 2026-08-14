@@ -2660,12 +2660,76 @@ describe("useNanobotStream", () => {
       fake.emit("chat-s", {
         event: "turn_end",
         chat_id: "chat-s",
+        turn_id: "turn-s",
       });
     });
 
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
+    expect(onTurnEnd).toHaveBeenCalledWith("turn-s", true);
+  });
+
+  it("marks a rejected correlated turn_end as unsuccessful", () => {
+    const fake = fakeClient();
+    const onTurnEnd = vi.fn();
+    renderHook(() => useNanobotStream("chat-failed", EMPTY_MESSAGES, false, onTurnEnd), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-failed", {
+        event: "error",
+        chat_id: "chat-failed",
+        turn_id: "turn-failed",
+        detail: "message_rejected",
+      });
+      fake.emit("chat-failed", {
+        event: "turn_end",
+        chat_id: "chat-failed",
+        turn_id: "turn-failed",
+      });
+    });
+
+    expect(onTurnEnd).toHaveBeenCalledWith("turn-failed", false);
+  });
+
+  it("uses the authoritative turn_end success status", () => {
+    const fake = fakeClient();
+    const onTurnEnd = vi.fn();
+    renderHook(() => useNanobotStream("chat-provider-error", EMPTY_MESSAGES, false, onTurnEnd), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-provider-error", {
+        event: "turn_end",
+        chat_id: "chat-provider-error",
+        turn_id: "turn-provider-error",
+        successful: false,
+      });
+    });
+
+    expect(onTurnEnd).toHaveBeenCalledWith("turn-provider-error", false);
+  });
+
+  it("treats malformed turn_end success values as unsuccessful", () => {
+    const fake = fakeClient();
+    const onTurnEnd = vi.fn();
+    renderHook(() => useNanobotStream("chat-malformed", EMPTY_MESSAGES, false, onTurnEnd), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-malformed", {
+        event: "turn_end",
+        chat_id: "chat-malformed",
+        turn_id: "turn-malformed",
+        successful: "false",
+      } as unknown as InboundEvent);
+    });
+
+    expect(onTurnEnd).toHaveBeenCalledWith("turn-malformed", false);
   });
 
   it("replaces streamed content with final stream_end text when provided", async () => {

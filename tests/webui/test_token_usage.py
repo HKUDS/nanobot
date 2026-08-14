@@ -130,6 +130,17 @@ def test_record_token_usage_skips_empty_usage(tmp_path, monkeypatch) -> None:
     assert payload["total_tokens_30d"] == 0
 
 
+def test_record_token_usage_can_count_request_without_usage(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    now = datetime(2026, 6, 3, tzinfo=timezone.utc)
+    record_token_usage(None, count_request=True, now=now)
+
+    payload = token_usage_payload(now=now)
+    assert payload["total_tokens_30d"] == 0
+    assert payload["requests_30d"] == 1
+
+
 def test_record_token_usage_keeps_estimated_split(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
 

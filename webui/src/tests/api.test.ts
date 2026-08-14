@@ -29,6 +29,7 @@ import {
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
   fetchWorkspaces,
+  generateFollowUpSuggestions,
   importMcpConfig,
   installMarketplaceSkill,
   listSessions,
@@ -410,6 +411,7 @@ describe("webui API helpers", () => {
       contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
       toolHintMaxLength: 120,
+      followUpSuggestionsEnabled: true,
     });
 
     expect(requestMutation).toHaveBeenCalledWith(
@@ -421,9 +423,56 @@ describe("webui API helpers", () => {
         context_window_tokens: 262144,
         timezone: "Asia/Shanghai",
         tool_hint_max_length: 120,
+        follow_up_suggestions_enabled: true,
       },
       20_000,
     );
+  });
+
+  it("requests follow-up suggestions through the correlated mutation transport", async () => {
+    requestMutation.mockResolvedValueOnce({ suggestions: [] });
+
+    await generateFollowUpSuggestions(mutationTransport, {
+      chat_id: "chat-1",
+      turn_id: "turn-1",
+      messages: [
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Answer" },
+      ],
+    });
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "follow_up_suggestions.generate",
+      {
+        chat_id: "chat-1",
+        turn_id: "turn-1",
+        messages: [
+          { role: "user", content: "Question" },
+          { role: "assistant", content: "Answer" },
+        ],
+      },
+      20_000,
+    );
+  });
+
+  it("rejects malformed follow-up suggestion responses", async () => {
+    requestMutation.mockResolvedValueOnce({ suggestions: ["Valid", 42] });
+
+    await expect(generateFollowUpSuggestions(mutationTransport, {
+      chat_id: "chat-1",
+      turn_id: "turn-1",
+      messages: [{ role: "user", content: "Question" }],
+    })).rejects.toThrow("Invalid follow-up suggestions response");
+  });
+
+  it("rejects command-shaped follow-up suggestions", async () => {
+    requestMutation.mockResolvedValueOnce({ suggestions: ["/restart"] });
+
+    await expect(generateFollowUpSuggestions(mutationTransport, {
+      chat_id: "chat-1",
+      turn_id: "turn-1",
+      messages: [{ role: "user", content: "Question" }],
+    })).rejects.toThrow("Invalid follow-up suggestions response");
   });
 
   it("fetches token usage through the lightweight settings endpoint", async () => {

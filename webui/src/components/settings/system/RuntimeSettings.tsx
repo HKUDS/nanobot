@@ -3,6 +3,7 @@ import { Eye, EyeOff, Loader2, PauseCircle, PlayCircle, RotateCcw } from "lucide
 import { useTranslation } from "react-i18next";
 
 import type { AgentSettingsDraft } from "@/components/settings/models/ModelsSettings";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   NumberInput,
   ReadOnlyRow,
@@ -32,7 +33,9 @@ export function RuntimeSettings({
   capabilitiesLoading,
   capabilityAction,
   capabilityError,
+  followUpSuggestionsSaving,
   onApiServiceAction,
+  onFollowUpSuggestionsChange,
   onInstallCapability,
 }: {
   form: AgentSettingsDraft;
@@ -48,10 +51,12 @@ export function RuntimeSettings({
   capabilitiesLoading: boolean;
   capabilityAction: string | null;
   capabilityError: string | null;
+  followUpSuggestionsSaving: boolean;
   onApiServiceAction: (
     action: "start" | "stop",
     values?: { host: string; port: number; timeout: number; apiKey?: string },
   ) => void;
+  onFollowUpSuggestionsChange: (enabled: boolean) => void;
   onInstallCapability: (name: string) => void;
 }) {
   const { t } = useTranslation();
@@ -365,6 +370,20 @@ export function RuntimeSettings({
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
         <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.followUpSuggestions.label", "Follow-up suggestions")}
+            description={tx(
+              "settings.followUpSuggestions.description",
+              "Suggest up to three next messages after successful replies. This sends recent conversation context in an additional model request.",
+            )}
+          >
+            <ToggleButton
+              checked={settings.follow_up_suggestions?.enabled ?? false}
+              disabled={followUpSuggestionsSaving}
+              onChange={onFollowUpSuggestionsChange}
+              label={tx("settings.followUpSuggestions.label", "Follow-up suggestions")}
+            />
+          </SettingsRow>
           {!isNativeHost ? (
             <ReadOnlyRow
               title={tx("settings.rows.gateway", "Gateway")}

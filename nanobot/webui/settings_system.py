@@ -28,6 +28,7 @@ from nanobot.webui.settings_contracts import (
     SettingsRequest,
     SettingsRouteResult,
     WebUISettingsError,
+    parse_bool,
     query_first,
     query_first_alias,
 )
@@ -61,8 +62,13 @@ class SystemSettingsOperations:
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
 
 
+class FollowUpSuggestionsSettingsPayload(TypedDict):
+    enabled: bool
+
+
 class SystemSettingsPayload(TypedDict):
     runtime: dict[str, Any]
+    follow_up_suggestions: FollowUpSuggestionsSettingsPayload
     usage: dict[str, Any]
     advanced: dict[str, Any]
     version: dict[str, Any]
@@ -121,6 +127,9 @@ def system_settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
+        "follow_up_suggestions": {
+            "enabled": config.follow_up_suggestions.enabled,
+        },
         "usage": token_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
@@ -146,6 +155,20 @@ def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bo
     defaults = config.agents.defaults
     changed = False
     restart_required = False
+
+    follow_up_suggestions_enabled = query_first_alias(
+        query,
+        "follow_up_suggestions_enabled",
+        "followUpSuggestionsEnabled",
+    )
+    if follow_up_suggestions_enabled is not None:
+        enabled = parse_bool(
+            follow_up_suggestions_enabled,
+            "follow_up_suggestions_enabled",
+        )
+        if config.follow_up_suggestions.enabled != enabled:
+            config.follow_up_suggestions.enabled = enabled
+            changed = True
 
     timezone = query_first(query, "timezone")
     if timezone is not None:

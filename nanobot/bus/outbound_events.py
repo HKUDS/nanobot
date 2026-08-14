@@ -58,6 +58,7 @@ class StreamedResponseEvent(OutboundEvent):
 class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
+    successful: bool | None = None
 
 
 @dataclass(frozen=True)

@@ -324,6 +324,7 @@ def _run_gateway(
         WebuiTurnCoordinator,
         WebuiTurnRoutePolicy,
         build_webui_fallback_model_observer,
+        create_webui_turn_result_hook,
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -435,7 +436,7 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
-        hook_factories=[create_file_edit_activity_hook],
+        hook_factories=[create_file_edit_activity_hook, create_webui_turn_result_hook],
         tool_registry=tools,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
