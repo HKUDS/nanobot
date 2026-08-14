@@ -18,8 +18,27 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
   };
 }
 
+function rect(top: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    width: 240,
+    height: 32,
+    top,
+    right: 240,
+    bottom: top + 32,
+    left: 0,
+    toJSON: () => ({}),
+  };
+}
+
 describe("ChatList", () => {
+  const originalAnimate = HTMLElement.prototype.animate;
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
   afterEach(() => {
+    HTMLElement.prototype.animate = originalAnimate;
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -834,14 +853,34 @@ describe("ChatList", () => {
     expect(onRequestRenameProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
   });
 
-  it("animates project disclosure with the same rotation used by tab groups", () => {
+  it("animates project disclosure and surrounding layout like tab groups", () => {
+    let collapsed = false;
+    const onToggleGroup = vi.fn();
+    const animate = vi.fn(() => ({
+      addEventListener: vi.fn(),
+      cancel: vi.fn(),
+    }) as unknown as Animation);
+    HTMLElement.prototype.animate = animate;
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const followsCollapsedProject = this.textContent?.includes("Beta") ?? false;
+      return rect(followsCollapsedProject ? (collapsed ? 64 : 160) : 0);
+    };
     const sessions = [
       session({
         chatId: "alpha",
         title: "Alpha task",
         workspaceScope: {
-          project_path: "/Users/me/nanobot",
-          project_name: "nanobot",
+          project_path: "/Users/me/alpha",
+          project_name: "Alpha project",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "beta",
+        title: "Beta task",
+        workspaceScope: {
+          project_path: "/Users/me/beta",
+          project_name: "Beta project",
           access_mode: "restricted",
         },
       }),
@@ -853,15 +892,22 @@ describe("ChatList", () => {
       onRequestDelete: vi.fn(),
       onTogglePin: vi.fn(),
       onRequestRename: vi.fn(),
+      onRequestRenameProject: vi.fn(),
       onToggleArchive: vi.fn(),
-      onToggleGroup: vi.fn(),
+      onToggleGroup,
     };
 
     const { rerender } = render(
-      <ChatList {...props} collapsedGroups={{ "project:/Users/me/nanobot": false }} />,
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": false }} />,
     );
 
-    const expandedIcon = screen.getByRole("button", { name: "nanobot" })
+    const projectButton = screen.getByRole("button", { name: "Alpha project" });
+    const disclosureButton = screen.getByRole("button", {
+      name: "Projects: Alpha project",
+    });
+    expect(projectButton).toHaveAttribute("aria-expanded", "true");
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "true");
+    const expandedIcon = disclosureButton
       .querySelector("[data-sidebar-project-disclosure-icon]");
     expect(expandedIcon).toHaveClass(
       "transition-transform",
@@ -870,14 +916,34 @@ describe("ChatList", () => {
       "motion-reduce:transition-none",
     );
     expect(expandedIcon).not.toHaveClass("rotate-90");
+    expect(screen.getByRole("button", { name: "Topic actions for Alpha project" })
+      .compareDocumentPosition(disclosureButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
 
+    fireEvent.click(disclosureButton);
+    expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/alpha");
+    collapsed = true;
     rerender(
-      <ChatList {...props} collapsedGroups={{ "project:/Users/me/nanobot": true }} />,
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": true }} />,
     );
 
-    expect(screen.getByRole("button", { name: "nanobot" })
+    expect(screen.getByRole("button", { name: "Projects: Alpha project" })
       .querySelector("[data-sidebar-project-disclosure-icon]"))
       .toHaveClass("rotate-90");
+    expect(projectButton).toHaveAttribute("aria-expanded", "false");
+    expect(animate).toHaveBeenCalledWith(
+      [
+        { transform: "translateY(96px)" },
+        { transform: "translateY(0)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    );
+    expect(screen.getByRole("button", { name: "Beta project" })
+      .closest("[data-sidebar-group-header]"))
+      .toHaveAttribute("data-sidebar-group-header", "project:/Users/me/beta");
   });
 
   it("hides the updated dot for the active chat", () => {

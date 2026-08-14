@@ -250,7 +250,7 @@ export const ChatList = memo(function ChatList({
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
-  const tabRowRefs = useRef(new Map<string, HTMLLIElement>());
+  const tabRowRefs = useRef(new Map<string, HTMLElement>());
   const pendingTabRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const tabLayoutAnimationsRef = useRef(new Map<string, Animation>());
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
@@ -420,6 +420,12 @@ export const ChatList = memo(function ChatList({
     });
   }, [captureTabLayout]);
 
+  const toggleProjectGroup = useCallback((key: string) => {
+    if (!onToggleGroup) return;
+    captureTabLayout();
+    onToggleGroup(key);
+  }, [captureTabLayout, onToggleGroup]);
+
   useLayoutEffect(() => {
     const previousRects = pendingTabRectsRef.current;
     if (!previousRects) return;
@@ -451,7 +457,7 @@ export const ChatList = memo(function ChatList({
         }
       }, { once: true });
     }
-  }, [collapsedPaneGroups, measureTabRows]);
+  }, [collapsedGroups, collapsedPaneGroups, measureTabRows]);
 
   useEffect(() => () => {
     for (const animation of tabLayoutAnimationsRef.current.values()) animation.cancel();
@@ -548,30 +554,39 @@ export const ChatList = memo(function ChatList({
                 </div>
               ) : null}
               <div>
-                {group.kind === "project" ? (
-                  <ProjectGroupHeader
-                    label={group.label}
-                    path={group.projectPath}
-                    actionMenuId={`project:${group.id}`}
-                    actionMenus={actionMenus}
-                    collapsed={projectCollapsed}
-                    onToggle={() => onToggleGroup?.(group.id)}
-                    onRequestRename={
-                      group.projectKey && onRequestRenameProject
-                        ? () => onRequestRenameProject(group.projectKey ?? "", group.label)
-                        : undefined
-                    }
-                    onNewChat={
-                      group.projectPath && onNewChatInProject
-                        ? () => onNewChatInProject(group.projectPath ?? "", group.label)
-                        : undefined
-                    }
-                    actionMenuPortalContainer={actionMenuPortalContainer}
-                    updatedAt={showTimestamps ? group.updatedAt : null}
-                  />
-                ) : (
-                  <ChatsGroupHeader label={group.label} />
-                )}
+                <div
+                  ref={(element) => {
+                    const key = `group:${group.id}`;
+                    if (element) tabRowRefs.current.set(key, element);
+                    else tabRowRefs.current.delete(key);
+                  }}
+                  data-sidebar-group-header={group.id}
+                >
+                  {group.kind === "project" ? (
+                    <ProjectGroupHeader
+                      label={group.label}
+                      path={group.projectPath}
+                      actionMenuId={`project:${group.id}`}
+                      actionMenus={actionMenus}
+                      collapsed={projectCollapsed}
+                      onToggle={() => toggleProjectGroup(group.id)}
+                      onRequestRename={
+                        group.projectKey && onRequestRenameProject
+                          ? () => onRequestRenameProject(group.projectKey ?? "", group.label)
+                          : undefined
+                      }
+                      onNewChat={
+                        group.projectPath && onNewChatInProject
+                          ? () => onNewChatInProject(group.projectPath ?? "", group.label)
+                          : undefined
+                      }
+                      actionMenuPortalContainer={actionMenuPortalContainer}
+                      updatedAt={showTimestamps ? group.updatedAt : null}
+                    />
+                  ) : (
+                    <ChatsGroupHeader label={group.label} />
+                  )}
+                </div>
                 {projectCollapsed ? null : (
                 <div
                   data-sidebar-project-surface={group.kind === "project" ? "true" : undefined}
@@ -1482,16 +1497,9 @@ function ProjectGroupHeader({
     >
       <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <ChevronDown
-        data-sidebar-project-disclosure-icon
-        aria-hidden
-        className={cn(
-          "h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
-          collapsed && "rotate-90",
-        )}
-      />
     </button>
   );
+  const disclosureLabel = `${t("chat.groups.projects")}: ${label}`;
 
   return (
       <div
@@ -1551,6 +1559,30 @@ function ProjectGroupHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        <SidebarItemTooltip label={disclosureLabel}>
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={disclosureLabel}
+            onClick={onToggle}
+            className={cn(
+              "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+              "text-muted-foreground/70 transition-[background-color,color,transform] duration-150 ease-out",
+              "hover:bg-sidebar-accent hover:text-sidebar-foreground active:scale-[0.96]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+              "motion-reduce:transition-none motion-reduce:active:scale-100",
+            )}
+          >
+            <ChevronDown
+              data-sidebar-project-disclosure-icon
+              aria-hidden
+              className={cn(
+                "h-3.5 w-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none",
+                collapsed && "rotate-90",
+              )}
+            />
+          </button>
+        </SidebarItemTooltip>
       </div>
   );
 }
