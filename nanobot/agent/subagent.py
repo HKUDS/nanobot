@@ -153,10 +153,10 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-        # Background tasks that still owe the parent session a completion message.
-        # Inline subagents are deliberately excluded because their result returns
-        # directly to the caller and no later announcement will arrive.
-        self._pending_announcements: set[str] = set()
+        # Background tasks that still owe the parent session a completion message,
+        # mapped to their originating user message. Inline subagents are deliberately
+        # excluded because their result returns directly to the caller.
+        self._pending_announcements: dict[str, str | None] = {}
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return the observable task statuses used by runtime-control snapshots."""
@@ -276,14 +276,14 @@ class SubagentManager:
             )
         )
         self._running_tasks[task_id] = bg_task
-        self._pending_announcements.add(task_id)
+        self._pending_announcements[task_id] = origin_message_id
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
         def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
-            self._pending_announcements.discard(task_id)
+            self._pending_announcements.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -484,8 +484,12 @@ class SubagentManager:
         # Retire this task before counting. There is no await before the count,
         # so concurrently completing tasks observe a stable 1 -> 0 progression
         # instead of both claiming that the other task is still pending.
-        self._pending_announcements.discard(task_id)
-        remaining_count = self._running_sibling_count(session_key, task_id)
+        self._pending_announcements.pop(task_id, None)
+        remaining_count = self._running_sibling_count(
+            session_key,
+            task_id,
+            origin_message_id,
+        )
         pending_notice = ""
         if remaining_count:
             noun = "task is" if remaining_count == 1 else "tasks are"
@@ -530,7 +534,12 @@ class SubagentManager:
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
-    def _running_sibling_count(self, session_key: str | None, task_id: str) -> int:
+    def _running_sibling_count(
+        self,
+        session_key: str | None,
+        task_id: str,
+        origin_message_id: str | None,
+    ) -> int:
         if not session_key:
             return 0
         return sum(
@@ -538,9 +547,14 @@ class SubagentManager:
             for sibling_id in self._session_tasks.get(session_key, set())
             if sibling_id != task_id
             and sibling_id in self._pending_announcements
+            and (
+                origin_message_id is None
+                or self._pending_announcements[sibling_id] == origin_message_id
+            )
             and sibling_id in self._running_tasks
             and not self._running_tasks[sibling_id].done()
         )
+
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader

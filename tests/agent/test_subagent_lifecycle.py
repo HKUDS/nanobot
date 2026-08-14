@@ -445,7 +445,7 @@ class TestAnnounceResult:
         sibling.done.return_value = False
         sm._session_tasks["s1"] = {"t1", "t2"}
         sm._running_tasks["t2"] = sibling
-        sm._pending_announcements.update({"t1", "t2"})
+        sm._pending_announcements.update({"t1": "message-1", "t2": "message-1"})
 
         await sm._announce_result(
             "t1",
@@ -454,6 +454,7 @@ class TestAnnounceResult:
             "result one",
             {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
             "ok",
+            "message-1",
         )
 
         msg = published[0]
@@ -471,7 +472,7 @@ class TestAnnounceResult:
         current.done.return_value = False
         sm._session_tasks["s1"] = {"t1"}
         sm._running_tasks["t1"] = current
-        sm._pending_announcements.add("t1")
+        sm._pending_announcements["t1"] = "message-1"
 
         await sm._announce_result(
             "t1",
@@ -480,6 +481,7 @@ class TestAnnounceResult:
             "last result",
             {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
             "ok",
+            "message-1",
         )
 
         msg = published[0]
@@ -497,7 +499,7 @@ class TestAnnounceResult:
         inline.done.return_value = False
         sm._session_tasks["s1"] = {"background", "inline"}
         sm._running_tasks.update({"background": background, "inline": inline})
-        sm._pending_announcements.add("background")
+        sm._pending_announcements["background"] = "message-1"
 
         await sm._announce_result(
             "background",
@@ -506,6 +508,7 @@ class TestAnnounceResult:
             "result",
             {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
             "ok",
+            "message-1",
         )
 
         assert published[0].metadata["subagent_remaining_count"] == 0
@@ -531,7 +534,7 @@ class TestAnnounceResult:
         second.done.return_value = False
         sm._session_tasks["s1"] = {"t1", "t2"}
         sm._running_tasks.update({"t1": first, "t2": second})
-        sm._pending_announcements.update({"t1", "t2"})
+        sm._pending_announcements.update({"t1": "message-1", "t2": "message-1"})
 
         first_announcement = asyncio.create_task(
             sm._announce_result(
@@ -541,6 +544,7 @@ class TestAnnounceResult:
                 "result one",
                 {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
                 "ok",
+                "message-1",
             )
         )
         await first_publish_started.wait()
@@ -552,6 +556,7 @@ class TestAnnounceResult:
                 "result two",
                 {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
                 "ok",
+                "message-1",
             )
         )
         await second_announcement
@@ -559,6 +564,36 @@ class TestAnnounceResult:
         await first_announcement
 
         assert [msg.metadata["subagent_remaining_count"] for msg in published] == [1, 0]
+
+    @pytest.mark.asyncio
+    async def test_result_does_not_count_background_tasks_from_another_turn(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        same_turn = MagicMock()
+        same_turn.done.return_value = False
+        prior_turn = MagicMock()
+        prior_turn.done.return_value = False
+        sm._session_tasks["s1"] = {"current", "same-turn", "prior-turn"}
+        sm._running_tasks.update({"same-turn": same_turn, "prior-turn": prior_turn})
+        sm._pending_announcements.update({
+            "current": "message-2",
+            "same-turn": "message-2",
+            "prior-turn": "message-1",
+        })
+
+        await sm._announce_result(
+            "current",
+            "current result",
+            "task",
+            "result",
+            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+            "ok",
+            "message-2",
+        )
+
+        assert published[0].metadata["subagent_remaining_count"] == 1
+        assert "1 other background task is still running" in published[0].content
 
     @pytest.mark.asyncio
     async def test_session_key_override_fallback(self, tmp_path):
